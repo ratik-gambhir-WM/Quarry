@@ -18,6 +18,7 @@ type IconName =
   | "help"
   | "home"
   | "image"
+  | "info"
   | "key"
   | "listAlt"
   | "mail"
@@ -31,7 +32,9 @@ type IconName =
   | "refresh"
   | "search"
   | "send"
+  | "sharepoint"
   | "sheet"
+  | "sidebar"
   | "shield"
   | "sparkles"
   | "settings"
@@ -103,6 +106,14 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
           <path className={iconClassName} d="M12 17h.01" />
         </svg>
       );
+    case "info":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <circle className={iconClassName} cx="12" cy="12" r="8.5" />
+          <path className={iconClassName} d="M12 10.75V17" />
+          <path className={iconClassName} d="M12 7h.01" />
+        </svg>
+      );
     case "home":
       return <HomeIcon className={className} />;
     case "dataset":
@@ -119,6 +130,13 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
           <rect className={iconClassName} height="7" rx="1.5" width="7" x="13" y="4" />
           <rect className={iconClassName} height="7" rx="1.5" width="7" x="4" y="13" />
           <rect className={iconClassName} height="7" rx="1.5" width="7" x="13" y="13" />
+        </svg>
+      );
+    case "sidebar":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <rect className={iconClassName} height="16" rx="2.5" width="18" x="3" y="4" />
+          <path className={iconClassName} d="M15 4v16M10.5 9 7.5 12l3 3" />
         </svg>
       );
     case "checkCircle":
@@ -232,6 +250,15 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M7 3.5h7l4 4V20H7z" />
           <path className={iconClassName} d="M14 3.5v4h4M9 12.5h6M9 16h6" />
+        </svg>
+      );
+    case "sharepoint":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <circle className={iconClassName} cx="15.5" cy="7.5" r="3.5" />
+          <circle className={iconClassName} cx="16.5" cy="16" r="3" />
+          <rect className={iconClassName} height="13" rx="2" width="10" x="3.5" y="5.5" />
+          <path className={iconClassName} d="M10.5 9H8a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H6.5" />
         </svg>
       );
     case "sheet":

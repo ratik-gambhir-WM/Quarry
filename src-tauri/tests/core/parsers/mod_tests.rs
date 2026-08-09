@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::*;
 
 struct TestFile {
@@ -76,7 +78,7 @@ async fn parse_passes_loaded_bytes_to_the_matching_parser() {
         path: PathBuf::from("ignored.pdf"),
     };
     assert!(pdf
-        .parse()
+        .parse_for_user("user-1")
         .await
         .unwrap_err()
         .starts_with("failed to extract text from PDF bytes:"));
@@ -86,8 +88,21 @@ async fn parse_passes_loaded_bytes_to_the_matching_parser() {
         path: PathBuf::from("ignored.docx"),
     };
     assert!(docx
-        .parse()
+        .parse_for_user("user-1")
         .await
         .unwrap_err()
         .contains("invalid Zip archive"));
+}
+
+#[tokio::test]
+async fn parsing_requires_an_explicit_user_scope() {
+    let pdf = QuarryFile::Pdf {
+        bytes: b"not a PDF".to_vec(),
+        path: PathBuf::from("ignored.pdf"),
+    };
+
+    assert_eq!(
+        pdf.parse_for_user("  ").await.unwrap_err(),
+        "user_id cannot be empty"
+    );
 }

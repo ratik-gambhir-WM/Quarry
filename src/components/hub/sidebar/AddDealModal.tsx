@@ -1,4 +1,3 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -10,6 +9,7 @@ import type {
 } from "../../../data/dealExtraction";
 import { TAURI_COMMANDS } from "../../../lib/constants";
 import { execute } from "../../../lib/tauri/command";
+import { productApi } from "../../../lib/product";
 import { Icon } from "../../ui/Icon";
 import { DealTypePicker } from "./DealTypePicker";
 import { ModalTextField } from "./ModalTextField";
@@ -103,12 +103,7 @@ export function AddDealModal({ onClose }: AddDealModalProps) {
     setSubmitError("");
 
     try {
-      const selection = await open({
-        directory: true,
-        fileAccessMode: "scoped",
-        multiple: false,
-        title: "Choose main data room folder",
-      });
+      const selection = await productApi.selectDealDataRoomFolder();
 
       if (typeof selection === "string") {
         updateField("dataRoomFolder", selection);
@@ -172,6 +167,10 @@ export function AddDealModal({ onClose }: AddDealModalProps) {
       setSubmitError("Submit the deal before choosing source files.");
       return;
     }
+    if (!selectedSourceFiles.sowFilePath) {
+      setSubmitError("Select a statement of work before extracting questions.");
+      return;
+    }
 
     setIsSubmitting(true);
 
@@ -215,7 +214,7 @@ export function AddDealModal({ onClose }: AddDealModalProps) {
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Active Deals</p>
             <h2 className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]">
-              {modalStep === "deal-details" ? "Add deal" : "Choose source files"}
+              {modalStep === "deal-details" ? "Add deal" : "Upload source files"}
             </h2>
           </div>
           <button
@@ -504,10 +503,10 @@ function getSourceFilesByMatch(files: DealExtractionSourceFile[], match: "Projec
 
 function getSubmitLabel(modalStep: ModalStep, isSubmitting: boolean) {
   if (modalStep === "source-files") {
-    return isSubmitting ? "Extracting" : "Extract questions";
+    return isSubmitting ? "Adding deal" : "Submit deal";
   }
 
-  return isSubmitting ? "Finding files" : "Submit deal";
+  return isSubmitting ? "Adding deal" : "Continue";
 }
 
 function optionalString(value: string): string | null {

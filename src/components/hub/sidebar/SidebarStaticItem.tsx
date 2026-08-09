@@ -10,17 +10,18 @@ type SidebarStaticItemProps = {
 export function SidebarStaticItem({ active = false, icon, label, onClick }: SidebarStaticItemProps) {
   return (
     <button
+      aria-label={label}
       className={[
-        "flex w-full items-center gap-3 rounded-[22px] px-5 py-4 text-left transition",
+        "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition",
         active
-          ? "border border-primary/20 bg-primary/8 text-primary shadow-[inset_0_0_0_1px_rgba(80,101,142,0.12)]"
-          : "text-text-main hover:bg-white/40",
+          ? "bg-sidebar-selected text-sidebar-active"
+          : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
       ].join(" ")}
       onClick={onClick}
       type="button"
     >
-      <Icon className={`h-6 w-6 ${active ? "text-current" : "text-muted"}`} name={icon} />
-      <span className={`text-[13px] ${active ? "font-semibold" : "font-medium"}`}>{label}</span>
+      <Icon className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`} name={icon} />
+      <span className="text-[13px] font-medium leading-5">{label}</span>
     </button>
   );
 }

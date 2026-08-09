@@ -1,31 +1,52 @@
-import { ReactNode } from "react";
-import { workspaceDeals, workspaceInitiatives, workspaceTools } from "../../data/workspace";
+import { createContext, useContext } from "react";
+import type { ReactNode } from "react";
+import {
+  workspaceInitiatives,
+  workspaceTools,
+  type WorkspaceDeal,
+} from "../../data/workspace";
+import { useWorkspaceDeals } from "../../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../../hooks/useWorkspaceSession";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 type WorkspaceHomeShellProps = {
-  activeHomeSection?: "account" | "hub" | "summarize" | "tauri-playground" | "vault";
+  activeHomeSection?: "account" | "hub" | "logs" | "summarize" | "tauri-playground" | "vault";
   children: ReactNode;
+  header?: ReactNode;
 };
 
-export function WorkspaceHomeShell({ activeHomeSection = "hub", children }: WorkspaceHomeShellProps) {
+const WorkspaceDealsContext = createContext<WorkspaceDeal[]>([]);
+
+export function useWorkspaceHomeDeals() {
+  return useContext(WorkspaceDealsContext);
+}
+
+export function WorkspaceHomeShell({
+  activeHomeSection = "hub",
+  children,
+  header,
+}: WorkspaceHomeShellProps) {
   const { email, navigationState } = useWorkspaceSession();
+  const { deals } = useWorkspaceDeals();
 
   return (
-    <WorkspaceLayout
-      sidebar={
-        <WorkspaceSidebar
-          activeHomeSection={activeHomeSection}
-          deals={workspaceDeals}
-          email={email}
-          initiatives={workspaceInitiatives}
-          navigationState={navigationState}
-          tools={workspaceTools}
-        />
-      }
-    >
-      {children}
-    </WorkspaceLayout>
+    <WorkspaceDealsContext.Provider value={deals}>
+      <WorkspaceLayout
+        header={header}
+        sidebar={
+          <WorkspaceSidebar
+            activeHomeSection={activeHomeSection}
+            deals={deals}
+            email={email}
+            initiatives={workspaceInitiatives}
+            navigationState={navigationState}
+            tools={workspaceTools}
+          />
+        }
+      >
+        {children}
+      </WorkspaceLayout>
+    </WorkspaceDealsContext.Provider>
   );
 }

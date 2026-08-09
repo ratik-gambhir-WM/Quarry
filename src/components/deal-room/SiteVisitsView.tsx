@@ -1,7 +1,7 @@
 import type { DealRoomData } from "../../data/workspace";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
-import { DealRoomHeader } from "./DealRoomHeader";
+import { DealRoomOverview } from "./DealRoomHeader";
 
 type SiteVisitsViewProps = {
   deal: DealRoomData;
@@ -34,13 +34,13 @@ export function SiteVisitsView({ deal }: SiteVisitsViewProps) {
 
   return (
     <>
-      <DealRoomHeader subtitle={`${deal.name} field diligence`} />
+      <DealRoomOverview subtitle={`${deal.name} field diligence`} />
 
       <WorkspaceCard className="p-8" radius="compact">
         <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Site Visits</p>
-            <h1 className="mt-3 text-[2.6rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]">
+            <h1 className="mt-3 type-display text-text-main">
               Field Diligence Plan
             </h1>
             <p className="mt-4 max-w-2xl text-[15px] leading-7 text-text-main/78">
@@ -64,7 +64,7 @@ export function SiteVisitsView({ deal }: SiteVisitsViewProps) {
               </div>
               <div className="min-w-0">
                 <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">{visit.date}</p>
-                <h2 className="mt-1 text-[1.35rem] font-bold text-text-main [font-family:var(--font-heading)]">{visit.location}</h2>
+                <h2 className="mt-1 type-h3 text-text-main">{visit.location}</h2>
                 <p className="mt-2 text-[14px] leading-6 text-text-main/78">{visit.summary}</p>
                 <p className="mt-3 text-[12px] font-semibold text-muted">Owner: {visit.owner}</p>
               </div>

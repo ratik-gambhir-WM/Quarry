@@ -59,5 +59,49 @@ fn migrations_add_case_insensitive_email_index_to_legacy_schema() {
             .any(|detail| detail.contains("idx_users_email_nocase")),
         "query plan did not use the NOCASE email index: {query_plan:?}"
     );
-    assert_eq!(user_version, 4);
+    assert_eq!(user_version, 5);
+}
+
+#[test]
+fn migration_preserves_legacy_investment_thesis_as_optional_metadata() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(
+            r#"
+            CREATE TABLE deal_metadata (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                deal_id INTEGER NOT NULL,
+                key_questions_json TEXT NOT NULL DEFAULT '[]',
+                investment_thesis TEXT NOT NULL DEFAULT '',
+                document_count INTEGER NOT NULL DEFAULT 0,
+                data_room_size_bytes INTEGER NOT NULL DEFAULT 0,
+                portco_summary TEXT,
+                buyer_summary TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO deal_metadata (deal_id, investment_thesis)
+            VALUES (7, 'Preserve this desktop briefing');
+            PRAGMA user_version = 4;
+            "#,
+        )
+        .unwrap();
+
+    run_migrations(&connection).unwrap();
+
+    let preserved = connection
+        .query_row(
+            "SELECT legacy_investment_thesis FROM deal_metadata WHERE deal_id = 7",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap();
+    assert_eq!(preserved.as_deref(), Some("Preserve this desktop briefing"));
+    assert!(column_exists(&connection, "deal_metadata", "investment_thesis").unwrap());
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
 }

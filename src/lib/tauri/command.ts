@@ -1,5 +1,6 @@
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import type { TauriCommandName } from "../constants";
+import { beginIpcRequest, finishIpcRequest } from "../activityLog";
 
 export class TauriCommandError extends Error {
   command: TauriCommandName;
@@ -14,13 +15,34 @@ export class TauriCommandError extends Error {
   }
 }
 
+export type DesktopError = {
+  code: "conflict" | "internal" | "not_found" | "permission" | "service_unavailable" | "validation";
+  message: string;
+  operationId?: string;
+  retryable?: boolean;
+};
+
 export async function execute<TResponse = unknown, TArgs extends InvokeArgs = InvokeArgs>(
   command: TauriCommandName,
   args?: TArgs,
 ): Promise<TResponse> {
+  const activityId = beginIpcRequest(command, args);
+  const startedAt = performance.now();
   try {
-    return await invoke<TResponse>(command, args);
+    const response = await invoke<TResponse>(command, args);
+    finishIpcRequest(activityId, {
+      details: response,
+      durationMs: performance.now() - startedAt,
+      status: "success",
+    });
+    return response;
   } catch (error) {
+    finishIpcRequest(activityId, {
+      details: error,
+      durationMs: performance.now() - startedAt,
+      message: getTauriErrorMessage(error),
+      status: "error",
+    });
     throw new TauriCommandError(command, error);
   }
 }

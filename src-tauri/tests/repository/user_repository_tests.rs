@@ -29,3 +29,22 @@ fn query_user_by_email_matches_email_case_insensitively() {
 
     assert_eq!(user.email, "SAM@gmail.com");
 }
+
+#[test]
+fn serialized_user_masks_the_api_key() {
+    let user = User {
+        id: 1,
+        first_name: "Ada".to_string(),
+        last_name: "Lovelace".to_string(),
+        email: "ada@example.com".to_string(),
+        api_key: "sk-live-super-secret-1234".to_string(),
+        role: "Analyst".to_string(),
+        created_at: "2026-08-09T00:00:00Z".to_string(),
+        updated_at: "2026-08-09T00:00:00Z".to_string(),
+    };
+
+    let serialized = serde_json::to_string(&user).expect("user should serialize");
+    assert!(!serialized.contains("super-secret"));
+    assert!(serialized.contains(r#""apiKey":"sk-...1234""#));
+    assert_eq!(user.api_key, "sk-live-super-secret-1234");
+}

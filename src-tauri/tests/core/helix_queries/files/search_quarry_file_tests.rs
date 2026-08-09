@@ -65,6 +65,26 @@ fn search_inputs_are_validated() {
         limit: 0,
     })
     .is_err());
+    assert_eq!(
+        search_chunks_by_keyword(ChunkKeywordSearch {
+            user_id: "user-1".to_string(),
+            query_text: "term".to_string(),
+            limit: 101,
+        })
+        .unwrap_err(),
+        "search limit cannot exceed 100"
+    );
+}
+
+#[test]
+fn document_lookup_is_user_scoped_and_requires_completed_ingestion() {
+    let request =
+        find_quarry_file_by_content_hash("user-1".to_string(), "content-hash".to_string()).unwrap();
+    let json = serde_json::to_string(&request).unwrap();
+
+    assert!(json.contains("user_id"));
+    assert!(json.contains("content_hash"));
+    assert!(json.contains("ingestion_complete"));
 }
 
 #[test]

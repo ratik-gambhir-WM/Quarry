@@ -7,7 +7,7 @@ type ChipBankHeaderProps = {
 
 export function ChipBankHeader({ onCollapse }: ChipBankHeaderProps) {
   return (
-    <div className="mb-5 flex items-center justify-between">
+    <div className="flex w-full items-center justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <button
           aria-label="Collapse document search"
@@ -19,7 +19,7 @@ export function ChipBankHeader({ onCollapse }: ChipBankHeaderProps) {
           <ArrowEndOnRectangleIcon className="h-7 w-7" direction="right" />
         </button>
         <div className="min-w-0">
-          <h3 className="truncate text-[1.55rem] font-bold leading-tight text-text-main [font-family:var(--font-heading)]">
+          <h3 className="truncate text-[1rem] font-bold leading-tight text-text-main [font-family:var(--font-heading)]">
             Document Search
           </h3>
           <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">

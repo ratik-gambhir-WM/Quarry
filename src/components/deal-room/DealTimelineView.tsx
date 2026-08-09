@@ -1,7 +1,8 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DealRoomData, DealTask, DealTimelineItem, DealTimelineTone } from "../../data/workspace";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
+import { ActivityTimelineCard } from "./ActivityTimelineCard";
 
 type DealTimelineViewProps = {
   deal: DealRoomData;
@@ -15,6 +16,7 @@ type TimelineFormState = {
   category: TimelineCategory;
   date: string;
   detail: string;
+  time: string;
   title: string;
 };
 
@@ -31,6 +33,7 @@ const initialFormState: TimelineFormState = {
   category: "Key Meeting / Call",
   date: "",
   detail: "",
+  time: "09:00",
   title: "",
 };
 
@@ -59,6 +62,7 @@ const calendarWeeks = createCalendarWeeks("2026-09-28", 5);
 
 export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineViewProps) {
   const [formState, setFormState] = useState<TimelineFormState>(initialFormState);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
@@ -70,8 +74,21 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
     }, {});
   }, [events]);
 
-  function openModal() {
-    setFormState(initialFormState);
+  function openNewActivity(date = "") {
+    setEditingEventId(null);
+    setFormState({ ...initialFormState, date });
+    setIsModalOpen(true);
+  }
+
+  function openEditActivity(item: DealTimelineItem) {
+    setEditingEventId(item.id);
+    setFormState({
+      category: normalizeCategory(item.category),
+      date: item.date,
+      detail: item.detail,
+      time: getEventTime(item),
+      title: item.title,
+    });
     setIsModalOpen(true);
   }
 
@@ -93,15 +110,21 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
       category: formState.category,
       date: formState.date,
       detail: detail || "No notes added yet.",
-      id: `timeline-${Date.now()}`,
-      timestamp: formatTimelineDate(formState.date),
+      id: editingEventId ?? `timeline-${Date.now()}`,
+      time: formState.time,
+      timestamp: formatTimelineTimestamp(formState.date, formState.time),
       title,
       tone: toneByCategory[formState.category],
     };
 
-    onEventsChange([...events, timelineItem]);
+    onEventsChange(
+      editingEventId
+        ? events.map((item) => (item.id === editingEventId ? timelineItem : item))
+        : [...events, timelineItem],
+    );
     setIsModalOpen(false);
-    setToastMessage("Deal activity updated successfully");
+    setToastMessage(editingEventId ? "Activity updated and moved successfully" : "Deal activity added successfully");
+    setEditingEventId(null);
     window.setTimeout(() => setToastMessage(""), 3200);
   }
 
@@ -118,7 +141,7 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
             <TimelineLegend />
             <button
               className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[12px] font-bold text-white shadow-[0_10px_26px_rgba(80,101,142,0.24)] transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-              onClick={openModal}
+              onClick={() => openNewActivity()}
               type="button"
             >
               <Icon className="h-4 w-4" name="plus" />
@@ -156,7 +179,14 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
                 ))}
 
                 {calendarWeeks.map((week, weekIndex) => (
-                  <CalendarWeekRow eventsByDate={eventsByDate} key={weekIndex} week={week} weekIndex={weekIndex} />
+                  <CalendarWeekRow
+                    eventsByDate={eventsByDate}
+                    key={weekIndex}
+                    onCreateEvent={openNewActivity}
+                    onEditEvent={openEditActivity}
+                    week={week}
+                    weekIndex={weekIndex}
+                  />
                 ))}
               </div>
             </div>
@@ -175,12 +205,15 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
             </div>
           </WorkspaceCard>
 
+          <ActivityTimelineCard className="col-span-12 flex min-h-[480px] flex-col p-6" items={events} />
+
           <TaskKanbanBoard tasks={deal.pendingTasks} />
         </div>
       </div>
 
       {isModalOpen ? (
         <NewActivityModal
+          editing={Boolean(editingEventId)}
           formState={formState}
           onChange={setFormState}
           onClose={closeModal}
@@ -216,11 +249,13 @@ function TimelineLegend() {
 
 type CalendarWeekRowProps = {
   eventsByDate: Record<string, DealTimelineItem[]>;
+  onCreateEvent: (date: string) => void;
+  onEditEvent: (event: DealTimelineItem) => void;
   week: CalendarDay[];
   weekIndex: number;
 };
 
-function CalendarWeekRow({ eventsByDate, week, weekIndex }: CalendarWeekRowProps) {
+function CalendarWeekRow({ eventsByDate, onCreateEvent, onEditEvent, week, weekIndex }: CalendarWeekRowProps) {
   return (
     <>
       <div className="flex min-h-[100px] items-center justify-center border-b border-r border-outline-variant px-1 text-center text-[11px] leading-4 text-text-main/78">
@@ -229,7 +264,13 @@ function CalendarWeekRow({ eventsByDate, week, weekIndex }: CalendarWeekRowProps
         {weekIndex}
       </div>
       {week.map((day) => (
-        <CalendarCell day={day} events={eventsByDate[day.dateKey] ?? []} key={day.dateKey} />
+        <CalendarCell
+          day={day}
+          events={eventsByDate[day.dateKey] ?? []}
+          key={day.dateKey}
+          onCreateEvent={onCreateEvent}
+          onEditEvent={onEditEvent}
+        />
       ))}
     </>
   );
@@ -238,39 +279,58 @@ function CalendarWeekRow({ eventsByDate, week, weekIndex }: CalendarWeekRowProps
 type CalendarCellProps = {
   day: CalendarDay;
   events: DealTimelineItem[];
+  onCreateEvent: (date: string) => void;
+  onEditEvent: (event: DealTimelineItem) => void;
 };
 
-function CalendarCell({ day, events }: CalendarCellProps) {
+function CalendarCell({ day, events, onCreateEvent, onEditEvent }: CalendarCellProps) {
   return (
-    <div className="min-h-[100px] border-b border-r border-outline-variant p-2 text-[10px] font-medium text-text-main/78">
-      <div>{day.dayLabel}</div>
-      <div className="mt-2 space-y-1">
+    <div className="group relative min-h-[100px] border-b border-r border-outline-variant p-2 text-[10px] font-medium text-text-main/78 transition hover:bg-primary/5">
+      <button
+        aria-label={`Add activity on ${formatAccessibleDate(day.date)}`}
+        className="absolute inset-0 z-0 cursor-cell focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+        onClick={() => onCreateEvent(day.dateKey)}
+        type="button"
+      />
+      <div className="pointer-events-none relative z-10">{day.dayLabel}</div>
+      <div className="relative z-20 mt-2 space-y-1">
         {events
           .slice()
-          .sort((first, second) => first.title.localeCompare(second.title))
+          .sort((first, second) => getEventTime(first).localeCompare(getEventTime(second)))
           .map((event) => (
-            <CalendarEventBar event={event} key={event.id} />
+            <CalendarEventBar event={event} key={event.id} onEdit={onEditEvent} />
           ))}
       </div>
+      <span className="pointer-events-none absolute bottom-2 right-2 z-10 flex items-center gap-1 text-[10px] font-bold text-primary opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+        <Icon className="h-3 w-3" name="plus" />
+        Add activity
+      </span>
     </div>
   );
 }
 
 type CalendarEventBarProps = {
   event: DealTimelineItem;
+  onEdit: (event: DealTimelineItem) => void;
 };
 
-function CalendarEventBar({ event }: CalendarEventBarProps) {
+function CalendarEventBar({ event, onEdit }: CalendarEventBarProps) {
   const category = normalizeCategory(event.category);
   const styles = categoryStyles[category];
+  const timeLabel = formatTimeLabel(getEventTime(event));
 
   return (
-    <div
-      className={`h-6 max-w-full truncate px-3 py-1 text-[10px] font-bold leading-4 [clip-path:polygon(5%_0%,95%_0%,100%_50%,95%_100%,5%_100%,0%_50%)] ${styles.bar}`}
-      title={`${event.title} - ${formatTimelineDate(event.date)}`}
+    <button
+      className={`block h-7 w-full max-w-full truncate px-3 py-1 text-left text-[10px] font-bold leading-5 transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed [clip-path:polygon(5%_0%,95%_0%,100%_50%,95%_100%,5%_100%,0%_50%)] ${styles.bar}`}
+      onClick={(clickEvent) => {
+        clickEvent.stopPropagation();
+        onEdit(event);
+      }}
+      title={`Edit ${event.title} — ${formatTimelineDate(event.date)} at ${timeLabel}`}
+      type="button"
     >
-      {event.title}
-    </div>
+      {timeLabel} · {event.title}
+    </button>
   );
 }
 
@@ -352,7 +412,7 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
           <WorkspaceCard className="flex min-h-[260px] flex-col p-5" key={column.id} radius="compact">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-[1.35rem] font-bold leading-tight text-text-main [font-family:var(--font-heading)]">{column.title}</h3>
+                <h3 className="type-h3 text-text-main">{column.title}</h3>
                 <p className="mt-1 text-[12px] text-text-main/62">{column.description}</p>
               </div>
               <span className="rounded-full border border-outline-variant bg-white/70 px-3 py-1 text-[11px] font-bold text-muted">
@@ -440,24 +500,41 @@ function ReminderCard({ status, task }: ReminderCardProps) {
 }
 
 type NewActivityModalProps = {
+  editing: boolean;
   formState: TimelineFormState;
   onChange: (formState: TimelineFormState) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
-function NewActivityModal({ formState, onChange, onClose, onSubmit }: NewActivityModalProps) {
+function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: NewActivityModalProps) {
   const canSubmit = Boolean(formState.title.trim() && formState.date);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    titleInputRef.current?.focus();
+  }, []);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/10 p-4 backdrop-blur-sm" role="presentation">
       <form
+        aria-labelledby="activity-dialog-title"
+        aria-modal="true"
         className="shrink-0 rounded-[19px] border border-white/80 bg-white/78 p-8 shadow-[0_28px_80px_rgba(7,1,84,0.18)] backdrop-blur-xl"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
         onSubmit={onSubmit}
+        role="dialog"
         style={{ width: "min(calc(100vw - 32px), 28rem)" }}
       >
         <div className="mb-7 flex items-center justify-between">
-          <h2 className="type-h1 text-text-main">New Activity</h2>
+          <h2 className="type-h1 text-text-main" id="activity-dialog-title">
+            {editing ? "Edit Activity" : "New Activity"}
+          </h2>
           <button
             aria-label="Close new activity"
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-text-main transition hover:bg-surface-container"
@@ -475,6 +552,7 @@ function NewActivityModal({ formState, onChange, onClose, onSubmit }: NewActivit
               className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
               onChange={(event) => onChange({ ...formState, title: event.target.value })}
               placeholder="e.g. Stakeholder Interview"
+              ref={titleInputRef}
               required
               type="text"
               value={formState.title}
@@ -508,6 +586,17 @@ function NewActivityModal({ formState, onChange, onClose, onSubmit }: NewActivit
           </div>
 
           <label className="block min-w-0">
+            <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Time</span>
+            <input
+              className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+              onChange={(event) => onChange({ ...formState, time: event.target.value })}
+              required
+              type="time"
+              value={formState.time}
+            />
+          </label>
+
+          <label className="block min-w-0">
             <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Notes</span>
             <textarea
               className="min-h-24 w-full resize-y rounded-xl border border-outline-variant bg-white/55 px-4 py-3 text-[15px] leading-6 text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
@@ -523,7 +612,7 @@ function NewActivityModal({ formState, onChange, onClose, onSubmit }: NewActivit
             disabled={!canSubmit}
             type="submit"
           >
-            Log Activity
+            {editing ? "Save Changes" : "Log Activity"}
           </button>
         </div>
       </form>
@@ -599,4 +688,27 @@ function formatTimelineDate(date: string) {
   const parsedDate = parseLocalDate(date);
 
   return new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short" }).format(parsedDate);
+}
+
+function formatTimelineTimestamp(date: string, time: string) {
+  return `${formatTimelineDate(date)}, ${formatTimeLabel(time)}`;
+}
+
+function getEventTime(event: DealTimelineItem) {
+  if (event.time) return event.time;
+  const match = event.timestamp.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return "09:00";
+  const [, hourValue, minute, meridiem] = match;
+  let hour = Number(hourValue) % 12;
+  if (meridiem.toUpperCase() === "PM") hour += 12;
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+}
+
+function formatTimeLabel(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, hour, minute));
+}
+
+function formatAccessibleDate(date: Date) {
+  return new Intl.DateTimeFormat("en-US", { day: "numeric", month: "long", weekday: "long", year: "numeric" }).format(date);
 }

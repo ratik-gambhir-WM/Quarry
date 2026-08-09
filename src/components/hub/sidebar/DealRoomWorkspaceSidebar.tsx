@@ -25,20 +25,24 @@ export function DealRoomWorkspaceSidebar({
   const activeDeal = deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
 
   return (
-    <SidebarFrame email={email} navigationState={navigationState} profileDeal={activeDeal}>
-      <nav className="space-y-2">
+    <SidebarFrame alignedHeader email={email} navigationState={navigationState} profileDeal={activeDeal}>
+      <nav className="space-y-1">
         {dealRoomSidebarLinks.map((link) => {
-          if (activeDeal && "key" in link && (link.key === "deal-room" || link.key === "data-room")) {
-            const destination = link.key === "deal-room" ? getDealRoomPath(activeDeal.room.id) : getDataRoomPath(activeDeal.room.id);
+          if (activeDeal && (link.key === "deal-room" || link.key === "data-room")) {
+            const destination =
+              link.key === "deal-room"
+                ? getDealRoomPath(activeDeal.room.id)
+                : getDataRoomPath(activeDeal.room.id);
 
             return (
               <NavLink
+                aria-label={link.label}
                 className={() =>
                   [
-                    "flex items-center gap-3 rounded-[22px] px-5 py-4 transition",
+                    "flex items-center gap-3 rounded-lg px-3 py-2 transition",
                     activeSection === link.key
-                      ? "border border-primary/20 bg-primary/8 text-primary shadow-[inset_0_0_0_1px_rgba(80,101,142,0.12)]"
-                      : "text-text-main hover:bg-white/40",
+                      ? "bg-sidebar-selected text-sidebar-active"
+                      : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
                   ].join(" ")
                 }
                 key={link.label}
@@ -50,18 +54,17 @@ export function DealRoomWorkspaceSidebar({
                 state={navigationState}
                 to={destination}
               >
-                <Icon className="h-6 w-6" name={link.icon} />
-                <span className="text-[13px] font-semibold">{link.label}</span>
+                <Icon className="h-5 w-5" name={link.icon} />
+                <span className="text-[13px] font-medium leading-5">{link.label}</span>
               </NavLink>
             );
           }
 
           if (
-            "key" in link &&
-            (link.key === "timeline" ||
-              link.key === "diligence-graph" ||
-              link.key === "site-visits" ||
-              link.key === "synthesis-canvas")
+            link.key === "timeline" ||
+            link.key === "diligence-graph" ||
+            link.key === "site-visits" ||
+            link.key === "synthesis-canvas"
           ) {
             return (
               <SidebarStaticItem

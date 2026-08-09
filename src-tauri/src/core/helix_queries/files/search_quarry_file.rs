@@ -1,19 +1,58 @@
 use helix_db::dsl::prelude::*;
+use serde::Deserialize;
 
-use super::insert_quarry_file::CHUNK_LABEL;
+use super::insert_quarry_file::{CHUNK_LABEL, INGESTION_COMPLETE_PROPERTY, QUARRY_FILE_LABEL};
 
-#[derive(Debug, Clone, PartialEq)]
+const DEFAULT_SEARCH_LIMIT: usize = 10;
+pub const MAX_SEARCH_LIMIT: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChunkVectorSearch {
     pub user_id: String,
     pub query_embedding: Vec<f32>,
+    #[serde(default = "default_search_limit")]
     pub limit: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChunkKeywordSearch {
     pub user_id: String,
     pub query_text: String,
+    #[serde(default = "default_search_limit")]
     pub limit: usize,
+}
+
+pub fn find_quarry_file_by_content_hash(
+    user_id: String,
+    content_hash: String,
+) -> Result<DynamicQueryRequest, String> {
+    validate_user_id(&user_id)?;
+    if content_hash.trim().is_empty() {
+        return Err("content_hash cannot be empty".to_string());
+    }
+
+    Ok(find_quarry_file_by_content_hash_route(
+        user_id,
+        content_hash,
+    ))
+}
+
+#[register]
+fn find_quarry_file_by_content_hash_route(user_id: String, content_hash: String) -> ReadBatch {
+    let _ = (&user_id, &content_hash);
+    read_batch()
+        .var_as(
+            "quarry_file",
+            g().n_with_label(QUARRY_FILE_LABEL)
+                .where_(Predicate::eq_param("user_id", "user_id"))
+                .where_(Predicate::eq_param("content_hash", "content_hash"))
+                .where_(Predicate::eq(INGESTION_COMPLETE_PROPERTY, true))
+                .limit(1)
+                .project(vec![PropertyProjection::new("document_id")]),
+        )
+        .returning(["quarry_file"])
 }
 
 /// Searches the current user's chunks by embedding distance.
@@ -137,8 +176,15 @@ fn search_limit_to_i64(limit: usize) -> Result<i64, String> {
     if limit == 0 {
         return Err("search limit must be greater than zero".to_string());
     }
+    if limit > MAX_SEARCH_LIMIT {
+        return Err(format!("search limit cannot exceed {MAX_SEARCH_LIMIT}"));
+    }
 
     i64::try_from(limit).map_err(|_| format!("search limit `{limit}` does not fit in i64"))
+}
+
+const fn default_search_limit() -> usize {
+    DEFAULT_SEARCH_LIMIT
 }
 
 #[cfg(test)]

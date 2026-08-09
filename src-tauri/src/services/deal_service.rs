@@ -91,9 +91,16 @@ struct MatchedDealFile {
 
 pub async fn save_deal_and_extract(
     state: &AppState,
-    input: SaveDealAndExtractInput,
+    mut input: SaveDealAndExtractInput,
 ) -> Result<SaveDealAndFindFilesResponse, String> {
     validate_deal_input(&input)?;
+    let canonical_root = Path::new(input.main_data_room_folder.trim())
+        .canonicalize()
+        .map_err(|_| "mainDataRoomFolder is unavailable".to_string())?;
+    if !canonical_root.is_dir() {
+        return Err("mainDataRoomFolder must be a folder".to_string());
+    }
+    input.main_data_room_folder = canonical_root.display().to_string();
     let deal = save_deal(state, &input)?;
     let matched_files = discover_sow_and_timeline_files(Path::new(&deal.main_data_room_folder))?;
     let files = matched_files
@@ -108,6 +115,13 @@ pub async fn extract_deal_questions_and_thesis_for_selected_files(
     state: &AppState,
     input: ExtractDealQuestionsAndThesisInput,
 ) -> Result<SaveDealAndExtractResponse, String> {
+    if input
+        .sow_file_path
+        .as_deref()
+        .is_none_or(|path| path.trim().is_empty())
+    {
+        return Err("sowFilePath is required".to_string());
+    }
     let deal = get_deal_by_id(state, input.deal_id)?
         .ok_or_else(|| format!("deal not found for id `{}`", input.deal_id))?;
     let matched_files = load_selected_deal_files(&deal, &input)?;
@@ -142,7 +156,8 @@ fn persist_deal_metadata(
         UpsertDealMetadataRecord {
             deal_id: deal.id,
             key_questions_json: &key_questions_json,
-            investment_thesis: &extraction.investment_thesis,
+            legacy_investment_thesis: (!extraction.investment_thesis.trim().is_empty())
+                .then_some(extraction.investment_thesis.as_str()),
             document_count,
             data_room_size_bytes,
         },
@@ -654,15 +669,51 @@ fn validate_deal_input(input: &SaveDealAndExtractInput) -> Result<(), String> {
         return Err("mainDataRoomFolder is required".to_string());
     }
 
-    if input.deal_type.trim().is_empty() {
+    let deal_type = input.deal_type.trim();
+    if deal_type.is_empty() {
         return Err("dealType is required".to_string());
+    }
+
+    if ![
+        "Buy-side",
+        "Sell-side",
+        "Carve-out",
+        "Add-on",
+        "Recapitalization",
+        "Growth equity",
+    ]
+    .contains(&deal_type)
+    {
+        return Err("dealType is not supported".to_string());
     }
 
     if input.pe_firm.trim().is_empty() {
         return Err("peFirm is required".to_string());
     }
 
-    Ok(())
+    let target_company = trim_optional(input.target_company.as_deref());
+    let buyer_or_platform_company = trim_optional(input.buyer_or_platform_company.as_deref());
+    let parent_or_seller_company = trim_optional(input.parent_or_seller_company.as_deref());
+    let carve_out_business = trim_optional(input.carve_out_business.as_deref());
+
+    match deal_type {
+        "Sell-side" | "Recapitalization" | "Growth equity" if target_company.is_none() => {
+            Err(format!("targetCompany is required for {deal_type} deals"))
+        }
+        "Buy-side" | "Add-on" if target_company.is_none() => {
+            Err(format!("targetCompany is required for {deal_type} deals"))
+        }
+        "Buy-side" | "Add-on" if buyer_or_platform_company.is_none() => Err(format!(
+            "buyerOrPlatformCompany is required for {deal_type} deals"
+        )),
+        "Carve-out" if parent_or_seller_company.is_none() => {
+            Err("parentOrSellerCompany is required for Carve-out deals".to_string())
+        }
+        "Carve-out" if carve_out_business.is_none() => {
+            Err("carveOutBusiness is required for Carve-out deals".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn trim_optional(value: Option<&str>) -> Option<&str> {

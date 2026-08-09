@@ -39,9 +39,9 @@ export function DocumentPreviewPanel({
 }: DocumentPreviewPanelProps) {
   return (
     <section className="glass-panel relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex min-h-[72px] min-w-0 shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-outline-variant bg-background px-5 py-3">
+      <header className="flex h-16 min-w-0 shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-outline-variant bg-background px-5">
         <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
             <Icon className="h-5 w-5" name={iconNameForNode(document.kind)} />
           </span>
           <div className="min-w-0 flex-1 overflow-hidden">
@@ -59,7 +59,7 @@ export function DocumentPreviewPanel({
         </div>
         <button
           aria-label="Close document preview"
-          className="flex h-10 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-4 text-[12px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
+          className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-4 text-[12px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
           onClick={onClose}
           type="button"
         >

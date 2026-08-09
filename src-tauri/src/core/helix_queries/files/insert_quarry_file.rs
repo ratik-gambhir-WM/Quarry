@@ -5,6 +5,7 @@ use crate::core::nodes::document_node::{ChunkNode, DocumentNode};
 pub const QUARRY_FILE_LABEL: &str = "QuarryFile";
 pub const CHUNK_LABEL: &str = "Chunk";
 pub const QUARRY_FILE_HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
+pub const INGESTION_COMPLETE_PROPERTY: &str = "ingestion_complete";
 
 /// Creates the QuarryFile node once before its chunks are processed.
 pub fn insert_quarry_file(document: DocumentNode) -> Result<DynamicQueryRequest, String> {
@@ -33,6 +34,7 @@ pub fn insert_quarry_file(document: DocumentNode) -> Result<DynamicQueryRequest,
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[register]
 fn insert_quarry_file_route(
     document_id: String,
@@ -59,6 +61,20 @@ fn insert_quarry_file_route(
 
     write_batch()
         .var_as(
+            "stale_chunks",
+            g().n_with_label(CHUNK_LABEL)
+                .where_(Predicate::eq_param("document_id", "document_id"))
+                .where_(Predicate::eq_param("user_id", "user_id"))
+                .drop(),
+        )
+        .var_as(
+            "stale_quarry_file",
+            g().n_with_label(QUARRY_FILE_LABEL)
+                .where_(Predicate::eq_param("document_id", "document_id"))
+                .where_(Predicate::eq_param("user_id", "user_id"))
+                .drop(),
+        )
+        .var_as(
             "quarry_file",
             g().add_n(
                 QUARRY_FILE_LABEL,
@@ -75,9 +91,42 @@ fn insert_quarry_file_route(
                         "rendered_pdf_path",
                         PropertyInput::param("rendered_pdf_path"),
                     ),
+                    (INGESTION_COMPLETE_PROPERTY, PropertyInput::from(false)),
                 ],
             )
             .project(quarry_file_projection()),
+        )
+        .returning(["quarry_file"])
+}
+
+pub fn mark_quarry_file_ingestion_complete(
+    document_id: String,
+    user_id: String,
+) -> Result<DynamicQueryRequest, String> {
+    if document_id.trim().is_empty() {
+        return Err("document_id cannot be empty".to_string());
+    }
+    if user_id.trim().is_empty() {
+        return Err("user_id cannot be empty".to_string());
+    }
+
+    Ok(mark_quarry_file_ingestion_complete_route(
+        document_id,
+        user_id,
+    ))
+}
+
+#[register]
+fn mark_quarry_file_ingestion_complete_route(document_id: String, user_id: String) -> WriteBatch {
+    let _ = (&document_id, &user_id);
+    write_batch()
+        .var_as(
+            "quarry_file",
+            g().n_with_label(QUARRY_FILE_LABEL)
+                .where_(Predicate::eq_param("document_id", "document_id"))
+                .where_(Predicate::eq_param("user_id", "user_id"))
+                .set_property(INGESTION_COMPLETE_PROPERTY, true)
+                .project(quarry_file_projection()),
         )
         .returning(["quarry_file"])
 }
@@ -122,6 +171,7 @@ pub fn insert_chunk_for_document(chunk: ChunkNode) -> Result<DynamicQueryRequest
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[register]
 fn insert_chunk_for_document_route(
     document_id: String,

@@ -46,6 +46,7 @@ pub fn add_deal(deal: DealNode, user_id: i64) -> Result<DynamicQueryRequest, Str
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[register]
 fn add_deal_mutation(
     id: i64,

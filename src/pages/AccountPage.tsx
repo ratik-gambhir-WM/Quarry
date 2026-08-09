@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { WorkspaceCard } from "../components/hub/WorkspaceCard";
+import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { Icon } from "../components/ui/Icon";
 import { WorkspaceLocationState } from "../data/workspace";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
@@ -18,17 +19,14 @@ export function AccountPage() {
   }
 
   return (
-    <WorkspaceHomeShell activeHomeSection="account">
+    <WorkspaceHomeShell activeHomeSection="account" header={<WorkspaceHeader title="Account Info" />}>
       <div className="mx-auto flex w-full max-w-[980px] flex-col gap-6 pb-10">
         <header className="space-y-3">
           <div className="inline-flex w-fit items-center gap-3 rounded-full border border-white/80 bg-white/70 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-primary shadow-[0_8px_20px_rgba(7,1,84,0.05)]">
             <Icon className="h-4 w-4" name="personSearch" />
             Account
           </div>
-          <div className="space-y-2">
-            <h1 className="type-display text-text-main">Account Info</h1>
-            <p className="type-subtle max-w-3xl text-muted">Workspace profile details stored locally in Quarry.</p>
-          </div>
+          <p className="type-subtle max-w-3xl text-muted">Workspace profile details stored locally in Quarry.</p>
         </header>
 
         <WorkspaceCard className="p-8">

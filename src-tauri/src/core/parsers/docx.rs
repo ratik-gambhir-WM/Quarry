@@ -46,14 +46,14 @@ pub fn parse_docx_from_bytes(bytes: Vec<u8>) -> Result<String, String> {
 
 pub fn parse_docx_from_path(path: &Path) -> Result<String, String> {
     println!("parse_docx_from_path");
-    let file = DocxFile::from_file(path).map_err(|err| err);
+    let file = DocxFile::from_file(path);
     match file {
         Ok(file) => {
             println!("parse_docx_from_path - ok");
             parse_docx_file(&file)
         }
         Err(err) => {
-            println!("parse_docx_from_path - error {}", err.to_string());
+            println!("parse_docx_from_path - error {err}");
             Err(err.to_string())
         }
     }
@@ -118,8 +118,7 @@ fn parse_docx_file_with_metadata(
     content_hash: String,
 ) -> DocxAssembly {
     let local_path = path.map(|path| path.to_string_lossy().into_owned());
-    let document_identity = local_path.as_deref().unwrap_or(&content_hash);
-    let document_id = content_hash_for_text(&format!("{user_id}\0docx\0{document_identity}"));
+    let document_id = content_hash_for_text(&format!("{user_id}\0{content_hash}"));
     let chunks = chunk_nodes_from_text(text, &document_id, user_id);
     let token_count = chunks
         .iter()

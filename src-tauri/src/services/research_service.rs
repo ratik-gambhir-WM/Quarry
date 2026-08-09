@@ -67,7 +67,7 @@ pub async fn summarize_dir(path: String) -> Result<String, String> {
         .iter()
         .map(|file| ResponsesFileInput::FileData {
             filename: file.filename.as_str(),
-            mime_type: &*file.mime_type,
+            mime_type: file.mime_type,
             data_base64: file.data_base64.as_str(),
         })
         .collect();
@@ -153,7 +153,7 @@ pub async fn summarize_paths(paths: Vec<String>) -> Result<String, String> {
         .iter()
         .map(|file| ResponsesFileInput::FileData {
             filename: file.filename.as_str(),
-            mime_type: &*file.mime_type,
+            mime_type: file.mime_type,
             data_base64: file.data_base64.as_str(),
         })
         .collect();
@@ -178,7 +178,7 @@ pub async fn summarize_paths(paths: Vec<String>) -> Result<String, String> {
 
 fn build_document_summary_prompt(
     root: &Path,
-    files: &Vec<CollectedFile>,
+    files: &[CollectedFile],
     skipped_files: &[String],
 ) -> String {
     format!(

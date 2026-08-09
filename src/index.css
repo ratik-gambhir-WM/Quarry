@@ -30,9 +30,15 @@
   --color-on-secondary-fixed: var(--theme-text-strong);
   --color-tertiary-fixed: var(--theme-translucent-surface);
   --color-background: var(--theme-canvas);
+  --color-sidebar-active: var(--theme-sidebar-active);
+  --color-sidebar-hover: var(--theme-sidebar-hover);
+  --color-sidebar-muted: var(--theme-sidebar-muted);
+  --color-sidebar-selected: var(--theme-sidebar-selected);
+  --color-sidebar-text: var(--theme-sidebar-text);
 
-  --font-heading: "Aptos", "Segoe UI", Arial, sans-serif;
-  --font-body: "Aptos", "Segoe UI", Arial, sans-serif;
+  --font-heading: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sidebar: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   --radius-sm: 0.25rem;
   --radius-default: 0.5rem;
@@ -85,6 +91,13 @@
     --theme-secondary-fixed: #ced7e6;
     --theme-tertiary: #e8eef8;
 
+    /* Sidebar */
+    --theme-sidebar-active: #242424;
+    --theme-sidebar-hover: #f0f0f0;
+    --theme-sidebar-muted: #737373;
+    --theme-sidebar-selected: #e7e7e7;
+    --theme-sidebar-text: #4b4b4b;
+
     /* Status */
     --theme-error: #ba1a1a;
     --theme-error-surface: #ffdad6;
@@ -136,6 +149,13 @@
     --theme-secondary-fixed: #25304d;
     --theme-tertiary: #c8d0de;
 
+    /* Sidebar */
+    --theme-sidebar-active: #f2f2f2;
+    --theme-sidebar-hover: #202020;
+    --theme-sidebar-muted: #929292;
+    --theme-sidebar-selected: #292929;
+    --theme-sidebar-text: #d4d4d4;
+
     /* Status */
     --theme-error: #ff6b6b;
     --theme-error-surface: #4c1118;
@@ -160,6 +180,7 @@
     background: var(--theme-canvas);
     color: var(--theme-text);
     font-family: var(--font-body);
+    font-weight: 400;
   }
 
   body,
@@ -178,7 +199,9 @@
   }
 
   button,
-  input {
+  input,
+  select,
+  textarea {
     font: inherit;
   }
 
@@ -190,24 +213,24 @@
 @layer components {
   .type-h1 {
     font-family: var(--font-heading);
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1.15;
-    letter-spacing: -0.02em;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
   }
 
   .type-h2 {
     font-family: var(--font-heading);
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1.25;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.3;
   }
 
   .type-h3 {
     font-family: var(--font-heading);
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.35;
   }
 
   .type-body-lg {
@@ -269,12 +292,17 @@
     transform: translateY(-2px);
   }
 
+  .log-list-item {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 92px;
+  }
+
   .type-display {
     font-family: var(--font-heading);
-    font-size: clamp(32px, 3vw, 40px);
-    font-weight: 700;
-    line-height: 1.08;
-    letter-spacing: -0.03em;
+    font-size: clamp(28px, 2.5vw, 32px);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.025em;
   }
 
   .type-subtle {
@@ -482,9 +510,6 @@
     color: var(--theme-on-interactive);
   }
 
-  html[data-theme="dark"] .workspace-ambient {
-    display: none;
-  }
 }
 
 @keyframes shimmer {

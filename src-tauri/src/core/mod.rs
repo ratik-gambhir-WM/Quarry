@@ -19,7 +19,7 @@ pub struct CollectedFile {
 
 pub fn build_summary_prompt(
     root: &Path,
-    files: &Vec<CollectedFile>,
+    files: &[CollectedFile],
     skipped_files: &[String],
 ) -> String {
     let manifest = files

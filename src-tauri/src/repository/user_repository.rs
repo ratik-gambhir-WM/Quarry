@@ -20,10 +20,32 @@ pub struct User {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    #[serde(serialize_with = "serialize_masked_api_key")]
     pub api_key: String,
     pub role: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn serialize_masked_api_key<S>(api_key: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let masked = if api_key.len() <= 8 {
+        "••••".to_string()
+    } else {
+        let prefix = api_key.chars().take(3).collect::<String>();
+        let suffix = api_key
+            .chars()
+            .rev()
+            .take(4)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+        format!("{prefix}...{suffix}")
+    };
+    serializer.serialize_str(&masked)
 }
 
 pub struct CreateUserRecord<'a> {

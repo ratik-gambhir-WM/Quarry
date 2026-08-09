@@ -1,14 +1,15 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { FormEvent, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WestMonroeMark } from "../components/brand/WestMonroeMark";
+import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { ChatPanel } from "../components/summarize/ChatPanel";
 import { PanelTab } from "../components/summarize/PanelTab";
 import { Icon } from "../components/ui/Icon";
 import { TAURI_COMMANDS } from "../lib/constants";
 import { execute } from "../lib/tauri/command";
+import { productApi } from "../lib/product";
 
 type ActivePanel = "chat" | "summary";
 type SelectedPathKind = "manual" | "file" | "folder";
@@ -46,12 +47,7 @@ export function SummarizePage() {
 
   async function handleBrowse(directory: boolean) {
     setError("");
-    const selection = await open({
-      directory,
-      fileAccessMode: "scoped",
-      multiple: false,
-      title: directory ? "Choose a folder to summarize" : "Choose a file to summarize",
-    });
+    const selection = await productApi.selectSummarySource(directory);
 
     if (typeof selection === "string") {
       setSelectedPath(selection);
@@ -147,25 +143,15 @@ export function SummarizePage() {
       return;
     }
 
-    const path = await save({
-      defaultPath: "summary.md",
-      filters: [{ extensions: ["md", "markdown"], name: "Markdown" }],
-      title: "Save markdown summary",
-    });
-
-    if (!path) {
-      return;
-    }
-
     try {
-      await execute(TAURI_COMMANDS.saveMarkdownSummary, { payload: { path, summary } });
+      await productApi.saveMarkdownSummary(summary);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   return (
-    <WorkspaceHomeShell activeHomeSection="summarize">
+    <WorkspaceHomeShell activeHomeSection="summarize" header={<WorkspaceHeader title="Summarize" />}>
       <div className="mx-auto flex w-full max-w-[1120px] flex-col pb-10">
         <form
           className="flex min-h-16 w-full items-center gap-3 rounded-full border border-white/85 bg-white/82 px-6 py-3 text-text-main shadow-[0_12px_34px_rgba(7,1,84,0.07)] backdrop-blur-md"

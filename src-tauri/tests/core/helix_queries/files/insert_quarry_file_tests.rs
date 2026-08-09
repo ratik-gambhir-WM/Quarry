@@ -85,6 +85,19 @@ fn file_query_accepts_and_decomposes_document_node() {
 }
 
 #[test]
+fn file_query_starts_incomplete_and_completion_is_explicit() {
+    let insert_json = serde_json::to_string(&insert_quarry_file(document()).unwrap()).unwrap();
+    assert!(insert_json.contains("ingestion_complete"));
+    assert!(insert_json.contains("false"));
+
+    let completion =
+        mark_quarry_file_ingestion_complete("doc-1".to_string(), "user-1".to_string()).unwrap();
+    let completion_json = serde_json::to_string(&completion).unwrap();
+    assert!(completion_json.contains("ingestion_complete"));
+    assert!(completion_json.contains("true"));
+}
+
+#[test]
 fn chunk_query_looks_up_existing_file_and_conditionally_creates_graph() {
     let request = insert_chunk_for_document(chunk()).unwrap();
     let parameters = request.parameters.as_ref().unwrap();

@@ -8,11 +8,14 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
+use crate::state::AppState;
+
 const ACTUAL_PDF_RELATIVE_PATH: &str = "4 Security and Compliance/4.1 Cybersecurity/4.1.2 Cybersecurity testing and remediation/BetaNXT Standard - Application Security Testing.pdf";
 
 #[test]
 fn ipc_accepts_frontend_argument_names_and_returns_pdf_shape() {
-    let Ok(data_room) = list_deal_data_room_in_service("project-alpha".to_string()) else {
+    let state = AppState::new_for_test().expect("test state should initialize");
+    let Ok(data_room) = list_deal_data_room_in_service(&state, "project-alpha".to_string()) else {
         return;
     };
     if !Path::new(&data_room.root_path)
@@ -23,6 +26,7 @@ fn ipc_accepts_frontend_argument_names_and_returns_pdf_shape() {
     }
 
     let app = mock_builder()
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             list_deal_data_room,
             preview_deal_document

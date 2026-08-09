@@ -1,35 +1,34 @@
 import type { DealRoomData } from "../../data/workspace";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
-import { DealRoomHeader } from "./DealRoomHeader";
+import { DealRoomOverview } from "./DealRoomHeader";
 
 type DiligenceGraphViewProps = {
   deal: DealRoomData;
 };
 
 export function DiligenceGraphView({ deal }: DiligenceGraphViewProps) {
-  const thesisLabel = deal.dealType === "Sell-side" ? "Equity Story" : "Investment Thesis";
   const graphNodes = [
     { label: deal.name, tone: "primary", x: "50%", y: "18%" },
     { label: "Financial Performance", tone: "accent", x: "20%", y: "48%" },
     { label: "Legal & Compliance", tone: "error", x: "50%", y: "54%" },
     { label: "Operations", tone: "muted", x: "80%", y: "48%" },
-    { label: thesisLabel, tone: "primary", x: "50%", y: "82%" },
+    { label: "Key Questions", tone: "primary", x: "50%", y: "82%" },
   ];
 
   return (
     <>
-      <DealRoomHeader subtitle={`${deal.name} relationship map`} />
+      <DealRoomOverview subtitle={`${deal.name} relationship map`} />
 
       <WorkspaceCard className="relative min-h-[680px] overflow-hidden p-8" radius="compact">
         <div className="flex items-start justify-between gap-6">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Diligence Graph</p>
-            <h1 className="mt-3 text-[2.6rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]">
+            <h1 className="mt-3 type-display text-text-main">
               {deal.name} Knowledge Map
             </h1>
             <p className="mt-4 max-w-2xl text-[15px] leading-7 text-text-main/78">
-              A working graph for connecting documents, findings, risks, and thesis support across the diligence process.
+              A working graph for connecting documents, findings, risks, and recommendations across the diligence process.
             </p>
           </div>
           <div className="hidden rounded-full border border-white/80 bg-white/72 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-muted md:block">

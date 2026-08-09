@@ -53,6 +53,7 @@ fn get_user_by_email_query(email: String) -> ReadBatch {
         .returning(["user"])
 }
 
+#[allow(clippy::too_many_arguments)]
 #[register]
 fn add_user_mutation(
     id: i64,

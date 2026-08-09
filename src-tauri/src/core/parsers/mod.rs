@@ -10,26 +10,8 @@ use crate::core::parsers::pdf::{parse_pdf_by_bytes, PdfDocumentAssembly};
 // use crate::core::parsers::image::parse_image_file;
 // use crate::core::parsers::powerpoint::parse_powerpoint_file;
 // use crate::core::parsers::spreadsheet::parse_spreadsheet;
-use crate::core::text_chunking::MAX_TOKEN_CHUNK;
-use crate::utils::get_token_count;
-use base64::Engine;
-
 use std::fs::{self, File, Metadata};
-use std::path::{Path, PathBuf};
-
-pub struct TextChunk {
-    chunk_index: i32,
-    content: String,
-}
-
-impl TextChunk {
-    pub fn new(chunk_index: i32, content: String) -> Self {
-        Self {
-            chunk_index,
-            content,
-        }
-    }
-}
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum QuarryFile {
@@ -77,7 +59,12 @@ impl QuarryFile {
         }
     }
 
-    pub async fn parse(self) -> Result<ParsedQuarryFile, String> {
+    pub async fn parse_for_user(self, user_id: &str) -> Result<ParsedQuarryFile, String> {
+        let user_id = user_id.trim();
+        if user_id.is_empty() {
+            return Err("user_id cannot be empty".to_string());
+        }
+
         match self {
             // Self::Powerpoint { path, .. } => parse_powerpoint_file(&path),
             // Self::Image { path, .. } => {
@@ -88,59 +75,10 @@ impl QuarryFile {
             //     parse_spreadsheet(&path).map_err(|err| err.to_string())
             // }
             Self::Pdf { bytes, path } => {
-                parse_pdf_by_bytes(bytes, Some(&path), "").map(ParsedQuarryFile::Pdf)
+                parse_pdf_by_bytes(bytes, Some(&path), user_id).map(ParsedQuarryFile::Pdf)
             }
-            Self::Docx { bytes, path } => {
-                parse_docx_chunks_from_bytes(bytes, Some(&path), "").map(ParsedQuarryFile::Docx)
-            }
-        }
-    }
-}
-
-fn build_text_chunk(content: &str, chunk_index: i32) -> TextChunk {
-    TextChunk::new(chunk_index, content.to_string())
-}
-
-pub(crate) fn chunk_text(text_content: &str) -> Vec<TextChunk> {
-    let token_count = get_token_count(text_content);
-    println!("Token count: {}", token_count);
-    println!("Max tokens: {}", MAX_TOKEN_CHUNK);
-    let chunk_limit = token_count.div_ceil(MAX_TOKEN_CHUNK);
-    println!("Chunk limit: {}", chunk_limit);
-    split_by_chunk_limit(text_content, chunk_limit.max(1))
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| build_text_chunk(&chunk, index as i32 + 1))
-        .collect()
-}
-
-fn split_by_chunk_limit(content: &str, chunk_limit: usize) -> Vec<String> {
-    let chars = content.chars().collect::<Vec<char>>();
-    let chunk_size = (chars.len() + chunk_limit - 1) / chunk_limit;
-    chars
-        .chunks(chunk_size.max(1))
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect::<Vec<String>>()
-}
-
-fn read_and_encode_file(path: Box<Path>) -> Result<String, String> {
-    let file_extension = path.extension().unwrap().to_str();
-    match file_extension {
-        Some("pdf") | Some("docx") | Some("xlsx") | Some("xls") => {
-            let bytes = std::fs::read(path).unwrap_or_else(|_e| return vec![]);
-            if bytes.is_empty() {
-                return Err(String::from("Could not read file"));
-            }
-            let encode_string = base64::engine::general_purpose::STANDARD.encode(bytes);
-            Ok(encode_string)
-        }
-        Some("txt") | Some("md") | Some("csv") => {
-            let file_str = std::fs::read_to_string(path).unwrap();
-            Ok(file_str)
-        }
-        _ => {
-            println!("Unsupported file type: {:?}", file_extension);
-            Err(String::from("Unsupported file type"))
+            Self::Docx { bytes, path } => parse_docx_chunks_from_bytes(bytes, Some(&path), user_id)
+                .map(ParsedQuarryFile::Docx),
         }
     }
 }

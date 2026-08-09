@@ -164,14 +164,6 @@ const eventPresets: EventPreset[] = [
       source: "tauri-playground",
     },
   },
-  {
-    description: "Starts document processing and listens for progress and completion.",
-    eventName: "files:process",
-    id: "file-processing",
-    label: "File processing",
-    listeners: ["files:processed", "files:batch-finished"],
-    payload: { paths: ["/absolute/path/to/document.pdf"], requestId: "playground-request-001" },
-  },
 ];
 
 const directionLabels: Record<LogDirection, string> = {

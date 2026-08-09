@@ -8,9 +8,9 @@ type SidebarSectionProps = {
 
 export function SidebarSection({ action, children, title }: SidebarSectionProps) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between px-5">
-        <h2 className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">{title}</h2>
+    <section className="mt-4 space-y-1.5">
+      <div className="flex items-center justify-between px-3">
+        <h2 className="text-[12px] font-medium leading-5 tracking-normal text-sidebar-muted">{title}</h2>
         {action}
       </div>
       <nav className="space-y-1">{children}</nav>

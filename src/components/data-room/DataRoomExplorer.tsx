@@ -14,6 +14,7 @@ type DataRoomExplorerProps = {
   navigationState?: DealExtractionLocationState;
   nodes: DataRoomTreeNode[];
   onCollapse: () => void;
+  onUploadNewFile: () => void;
   onSelectFile: (node: DataRoomTreeNode) => void;
   rootPath?: string;
   selectedFilePath?: string;
@@ -28,6 +29,7 @@ export function DataRoomExplorer({
   navigationState,
   nodes,
   onCollapse,
+  onUploadNewFile,
   onSelectFile,
   rootPath,
   selectedFilePath,
@@ -65,12 +67,8 @@ export function DataRoomExplorer({
         collapsed ? "w-0 border-r-0" : "w-72 border-r border-white/80"
       }`}
     >
-      <div
-        className={`flex h-full w-72 shrink-0 flex-col gap-3 p-4 ${
-          collapsed ? "pointer-events-none invisible" : "visible"
-        }`}
-      >
-        <div className="flex items-center justify-between">
+      <div className={`flex h-full w-72 shrink-0 flex-col ${collapsed ? "pointer-events-none invisible" : "visible"}`}>
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/70 px-4">
           <Link
             aria-label={`Back to ${dealName} deal room`}
             className="flex h-10 w-10 items-center justify-center rounded-full text-primary transition hover:bg-white/70"
@@ -79,6 +77,9 @@ export function DataRoomExplorer({
           >
             <Icon className="h-5 w-5" name="home" />
           </Link>
+          <span className="truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+            Data Room
+          </span>
           <button
             aria-label="Collapse data room sidebar"
             className="flex h-10 w-10 items-center justify-center rounded-full text-muted transition hover:bg-white/70 hover:text-text-main"
@@ -90,48 +91,50 @@ export function DataRoomExplorer({
           </button>
         </div>
 
-        <NewAnalysisMenu />
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+          <NewAnalysisMenu onUploadNewFile={onUploadNewFile} />
 
-        <div className="mb-2">
-          <DataRoomSidebarTabs activeTab="data-room" />
-        </div>
-
-        <div className="workspace-scrollbar-hidden min-h-0 flex-1 overflow-y-auto pr-1">
-          {rootPath ? (
-            <p
-              className="mb-3 truncate px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/80"
-              title={rootPath}
-            >
-              Local · {rootPath}
-            </p>
-          ) : null}
-          {treeLoading ? (
-            <ExplorerStatus detail="Reading the configured local folder…" title="Loading data room" />
-          ) : null}
-          {treeError ? <ExplorerStatus detail={treeError} title="Data room unavailable" /> : null}
-          <div className="space-y-1">
-            {nodes.map((node) => (
-              <ExplorerNodeItem
-                depth={0}
-                expandedNodeIds={expandedNodeIds}
-                key={node.id}
-                node={node}
-                onSelectFile={onSelectFile}
-                onToggle={toggleNode}
-                selectedFilePath={selectedFilePath}
-              />
-            ))}
+          <div className="mb-2">
+            <DataRoomSidebarTabs activeTab="data-room" />
           </div>
-        </div>
 
-        <div className="mt-auto border-t border-white/50 pt-4">
-          <div className="flex items-center gap-3 rounded-xl px-3 py-2 transition hover:bg-white/50">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary-fixed-dim text-sm font-semibold text-white">
-              A
+          <div className="workspace-scrollbar-hidden min-h-0 flex-1 overflow-y-auto pr-1">
+            {rootPath ? (
+              <p
+                className="mb-3 truncate px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/80"
+                title={rootPath}
+              >
+                Local · {rootPath}
+              </p>
+            ) : null}
+            {treeLoading ? (
+              <ExplorerStatus detail="Reading the configured local folder…" title="Loading data room" />
+            ) : null}
+            {treeError ? <ExplorerStatus detail={treeError} title="Data room unavailable" /> : null}
+            <div className="space-y-1">
+              {nodes.map((node) => (
+                <ExplorerNodeItem
+                  depth={0}
+                  expandedNodeIds={expandedNodeIds}
+                  key={node.id}
+                  node={node}
+                  onSelectFile={onSelectFile}
+                  onToggle={toggleNode}
+                  selectedFilePath={selectedFilePath}
+                />
+              ))}
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-text-main">Analyst Team</span>
-              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">{dealName}</span>
+          </div>
+
+          <div className="mt-auto border-t border-white/50 pt-4">
+            <div className="flex items-center gap-3 rounded-xl px-3 py-2 transition hover:bg-white/50">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary-fixed-dim text-sm font-semibold text-white">
+                A
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-text-main">Analyst Team</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">{dealName}</span>
+              </div>
             </div>
           </div>
         </div>

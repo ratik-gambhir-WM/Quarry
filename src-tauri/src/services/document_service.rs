@@ -1,95 +1,71 @@
-use std::{env, path::Path};
+use std::{env, fs, path::Path};
 
 use crate::core::parsers::pdf::parse_pdf_document as parse_pdf_document_from_parser;
 pub use crate::core::parsers::pdf::PdfDocumentAssembly;
 use crate::core::parsers::{ParsedQuarryFile, QuarryFile};
 use crate::core::{
-    clients::{helix::HelixClient, openai::OpenAiClient},
+    clients::openai::OpenAiClient,
     nodes::document_node::{ChunkNode, DocumentNode},
 };
-use crate::events::file::{
-    FileBatchFinishedEvent, FileProcessedEvent, ProcessFilesEvent, FILE_BATCH_FINISHED_EVENT,
-    FILE_PROCESSED_EVENT,
-};
 use crate::repository::document_repository::{
-    ensure_document_indexes, persist_chunks_for_document, persist_quarry_file,
+    ensure_document_indexes, find_existing_document_id_by_content_hash, persist_document_and_chunks,
 };
 use crate::state::AppState;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use crate::utils::{document_id_from_content, sha256_hex};
 
-pub async fn process_files<R: Runtime>(app: AppHandle<R>, request: ProcessFilesEvent) {
-    let total = request.paths.len();
-    let mut succeeded = 0;
-    let state = app.state::<AppState>();
-    let helix = state.gen_helix_db_client();
-    let pipeline = initialize_document_pipeline(helix).await;
-
-    for (index, path) in request.paths.into_iter().enumerate() {
-        let result = match &pipeline {
-            Ok(openai) => process_file(&path, openai, helix).await,
-            Err(error) => Err(error.clone()),
-        };
-        let (file_id, error) = match result {
-            Ok(file_id) => {
-                succeeded += 1;
-                (Some(file_id), None)
-            }
-            Err(error) => (None, Some(error)),
-        };
-
-        let response = FileProcessedEvent {
-            request_id: request.request_id.clone(),
-            path,
-            file_id,
-            completed: index + 1,
-            total,
-            success: error.is_none(),
-            error,
-        };
-
-        if let Err(error) = app.emit(FILE_PROCESSED_EVENT, response) {
-            eprintln!("failed to emit {FILE_PROCESSED_EVENT}: {error}");
-        }
-    }
-
-    let response = FileBatchFinishedEvent {
-        request_id: request.request_id,
-        total,
-        succeeded,
-        failed: total - succeeded,
-    };
-
-    if let Err(error) = app.emit(FILE_BATCH_FINISHED_EVENT, response) {
-        eprintln!("failed to emit {FILE_BATCH_FINISHED_EVENT}: {error}");
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessedLocalDocument {
+    pub document_id: String,
+    pub chunk_count: usize,
+    pub skipped: bool,
 }
 
-async fn initialize_document_pipeline(helix: &HelixClient) -> Result<OpenAiClient, String> {
-    let openai = OpenAiClient::new()?;
+pub async fn process_local_document(
+    state: &AppState,
+    path: &Path,
+    user_id: &str,
+) -> Result<ProcessedLocalDocument, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("failed to read selected document: {error}"))?;
+    if bytes.is_empty() {
+        return Err("selected document is empty".to_string());
+    }
+    let content_hash = sha256_hex(&bytes);
+    let document_id = document_id_from_content(user_id, &content_hash);
+    let _guard = state.document_jobs().lock_document(&document_id).await;
+    let helix = state.gen_helix_db_client();
+
     ensure_document_indexes(helix)
         .await
         .map_err(|error| format!("failed to initialize Helix document indexes: {error}"))?;
-    Ok(openai)
-}
+    if let Some(existing_document_id) =
+        find_existing_document_id_by_content_hash(helix, user_id, &content_hash).await?
+    {
+        return Ok(ProcessedLocalDocument {
+            document_id: existing_document_id,
+            chunk_count: 0,
+            skipped: true,
+        });
+    }
 
-async fn process_file(
-    path: &str,
-    openai: &OpenAiClient,
-    helix: &HelixClient,
-) -> Result<String, String> {
     let file = QuarryFile::from_local_path(path)?;
-    let parsed = file.parse().await?;
+    let parsed = file.parse_for_user(user_id).await?;
     let (document, mut chunks) = document_graph_parts(parsed);
-
-    embed_chunks(Path::new(path), &mut chunks, openai).await?;
-    persist_quarry_file(helix, document.clone())
+    if document.document_id != document_id {
+        return Err("document identity did not match the selected file content".to_string());
+    }
+    let chunk_count = chunks.len();
+    let openai = OpenAiClient::new()?;
+    embed_chunks(path, &mut chunks, &openai).await?;
+    persist_document_and_chunks(helix, document, chunks)
         .await
-        .map_err(|error| format!("failed to persist document `{path}` in Helix: {error}"))?;
-    persist_chunks_for_document(helix, &document, chunks)
-        .await
-        .map_err(|error| format!("failed to persist chunks for `{path}` in Helix: {error}"))?;
+        .map_err(|error| format!("failed to persist document graph: {error}"))?;
 
-    Ok(path.to_string())
+    Ok(ProcessedLocalDocument {
+        document_id,
+        chunk_count,
+        skipped: false,
+    })
 }
 
 fn document_graph_parts(parsed: ParsedQuarryFile) -> (DocumentNode, Vec<ChunkNode>) {
@@ -144,6 +120,7 @@ async fn embed_chunks(
     attach_embeddings_to_chunks(chunks, embeddings)
 }
 
+#[cfg(test)]
 fn attach_chunk_embeddings(
     assembly: &mut PdfDocumentAssembly,
     embeddings: Vec<Vec<f64>>,

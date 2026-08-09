@@ -47,7 +47,7 @@ export type SavedDealMetadata = {
   dealId: number;
   documentCount: number;
   id: number;
-  investmentThesis: string;
+  legacyInvestmentThesis?: string | null;
   keyQuestionsJson: string;
   updatedAt: string;
 };
@@ -75,33 +75,76 @@ export type DealExtractionLocationState = WorkspaceLocationState & {
 };
 
 export function buildWorkspaceDealFromExtractionResult(result: SaveDealAndExtractResponse): WorkspaceDeal {
-  const keyQuestions = result.extraction.keyQuestions;
-  const investmentThesis = result.extraction.investmentThesis.trim();
-  const insightCount = keyQuestions.length + (investmentThesis ? 1 : 0);
+  return buildWorkspaceDeal(
+    result.deal,
+    result.metadata,
+    result.extraction.keyQuestions,
+    result.extraction.investmentThesis,
+  );
+}
+
+export function buildWorkspaceDealFromPersisted(
+  deal: SavedDeal,
+  metadata: SavedDealMetadata | null,
+): WorkspaceDeal {
+  return buildWorkspaceDeal(
+    deal,
+    metadata,
+    parseQuestions(metadata?.keyQuestionsJson),
+    metadata?.legacyInvestmentThesis ?? "",
+  );
+}
+
+function buildWorkspaceDeal(
+  deal: SavedDeal,
+  metadata: SavedDealMetadata | null,
+  keyQuestions: string[],
+  thesis: string,
+): WorkspaceDeal {
+  const investmentThesis = thesis.trim();
+  const insightCount = keyQuestions.length;
 
   return {
     colorClassName: "bg-primary",
     complete: true,
     room: {
-      dealType: result.deal.dealType,
-      id: String(result.deal.id),
+      dealType: deal.dealType,
+      id: String(deal.id),
       keyQuestions,
       metrics: [
-        { label: "Files Analyzed", value: String(result.metadata.documentCount) },
+        { label: "Files Analyzed", value: String(metadata?.documentCount ?? 0) },
         { label: "Insights Extracted", value: String(insightCount) },
-        { label: "Data Room Size", value: formatCompactFileSize(result.metadata.dataRoomSizeBytes) },
+        {
+          label: "Data Room Size",
+          value: formatCompactFileSize(metadata?.dataRoomSizeBytes ?? 0),
+        },
       ],
-      name: result.deal.dealName,
-      overviewSubtitle: `${result.deal.dealName} Due Diligence Overview`,
+      name: deal.dealName,
+      overviewSubtitle: `${deal.dealName} Due Diligence Overview`,
       pendingTasks: [],
       phaseLabel: "Phase 1",
-      sectorLabel: result.deal.dealType,
+      sectorLabel: deal.dealType,
       stageLabel: "In Progress",
-      summary: buildDealSummary(result.deal),
+      summary: buildDealSummary(deal),
       thesis: investmentThesis || "No investment thesis has been extracted yet.",
       timeline: [],
     },
   };
+}
+
+function parseQuestions(value?: string) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function buildDealSummary(deal: SavedDeal) {

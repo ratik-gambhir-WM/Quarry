@@ -7,7 +7,7 @@ const newAnalysisOptions = [
   { icon: "graph", label: "Create Graph" },
 ] as const;
 
-export function NewAnalysisMenu() {
+export function NewAnalysisMenu({ onUploadNewFile }: { onUploadNewFile: () => void }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -58,7 +58,12 @@ export function NewAnalysisMenu() {
             <button
               className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-text-main transition hover:bg-surface-container-high"
               key={option.label}
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                if (option.label === "Upload New File") {
+                  onUploadNewFile();
+                }
+              }}
               role="menuitem"
               type="button"
             >

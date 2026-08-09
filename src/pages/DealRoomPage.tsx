@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
-import { ActivityTimelineCard } from "../components/deal-room/ActivityTimelineCard";
-import { DealRoomHeader } from "../components/deal-room/DealRoomHeader";
+import { DealRoomHeader, DealRoomOverview } from "../components/deal-room/DealRoomHeader";
 import { DealSummaryCard } from "../components/deal-room/DealSummaryCard";
 import { DealTimelineView } from "../components/deal-room/DealTimelineView";
 import { UnderConstructionView } from "../components/deal-room/UnderConstructionView";
@@ -10,8 +9,9 @@ import { WorkspaceLayout } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
-import { getDealById, workspaceDeals, workspaceInsights } from "../data/workspace";
+import { workspaceInsights } from "../data/workspace";
 import type { DealTimelineItem } from "../data/workspace";
+import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
 type ActiveDealView = "deal-room" | "diligence-graph" | "site-visits" | "synthesis-canvas" | "timeline";
@@ -19,19 +19,27 @@ type ActiveDealView = "deal-room" | "diligence-graph" | "site-visits" | "synthes
 export function DealRoomPage() {
   const { dealId } = useParams();
   const location = useLocation();
+  const { deals: persistedDeals, loaded } = useWorkspaceDeals();
   const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
   const extractedDeal =
     extractionResult && String(extractionResult.deal.id) === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
-  const deal = extractedDeal ?? (dealId ? getDealById(dealId) : undefined);
+  const deal =
+    extractedDeal ??
+    persistedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
   const { email, navigationState } = useWorkspaceSession();
   const [activeDealView, setActiveDealView] = useState<ActiveDealView>("deal-room");
   const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>([]);
   const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal?.room.name);
   const deals = extractedDeal
-    ? [extractedDeal, ...workspaceDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
-    : workspaceDeals;
+    ? [
+        extractedDeal,
+        ...persistedDeals.filter(
+          (workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id,
+        ),
+      ]
+    : persistedDeals;
   const dealNavigationState = extractionResult
     ? ({
         ...navigationState,
@@ -43,12 +51,21 @@ export function DealRoomPage() {
     setTimelineItems(deal?.room.timeline ?? []);
   }, [deal?.room.id, deal?.room.timeline]);
 
-  if (!deal) {
+  if (!deal && loaded) {
     return <Navigate replace to="/hub" />;
+  }
+
+  if (!deal) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-muted">
+        Loading deal…
+      </div>
+    );
   }
 
   return (
     <WorkspaceLayout
+      header={<DealRoomHeader />}
       sidebar={
         <WorkspaceSidebar
           activeDealId={deal.room.id}
@@ -84,7 +101,7 @@ export function DealRoomPage() {
           />
         ) : (
           <>
-            <DealRoomHeader subtitle={deal.room.overviewSubtitle} />
+            <DealRoomOverview description={deal.room.summary} subtitle={deal.room.overviewSubtitle} />
 
             <div className="grid grid-cols-12 gap-6">
               <DealSummaryCard deal={deal.room} />
@@ -93,7 +110,6 @@ export function DealRoomPage() {
                 contextLabel={deal.room.name}
                 items={dealInsights}
               />
-              <ActivityTimelineCard className="col-span-12 flex min-h-[540px] flex-col p-6" items={timelineItems} />
             </div>
           </>
         )}

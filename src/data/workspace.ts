@@ -32,6 +32,7 @@ export type DealTimelineItem = {
   detail: string;
   id: string;
   timestamp: string;
+  time?: string;
   title: string;
   tone: DealTimelineTone;
 };
@@ -354,7 +355,10 @@ export const workspaceInitiatives: WorkspaceSidebarTool[] = [
 ];
 
 export const workspaceTools: WorkspaceSidebarTool[] = [
-  { href: "/hub/tauri-playground", icon: "terminal", name: "Tauri Playground" },
+  { href: "/hub/logs", icon: "terminal", name: "Logs" },
+  ...(import.meta.env.DEV
+    ? [{ href: "/hub/tauri-playground", icon: "terminal" as const, name: "Tauri Playground" }]
+    : []),
 ];
 
 export function getDealById(dealId: string) {

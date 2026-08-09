@@ -1,4 +1,4 @@
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -10,7 +10,7 @@ use crate::{
     state::AppState,
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deal {
     pub id: i64,
@@ -27,17 +27,25 @@ pub struct Deal {
     pub updated_at: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealMetadata {
     pub id: i64,
     pub deal_id: i64,
     pub key_questions_json: String,
-    pub investment_thesis: String,
+    pub legacy_investment_thesis: Option<String>,
     pub document_count: i64,
     pub data_room_size_bytes: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DealWithMetadata {
+    #[serde(flatten)]
+    pub deal: Deal,
+    pub metadata: Option<DealMetadata>,
 }
 
 pub struct CreateDealRecord<'a> {
@@ -54,7 +62,7 @@ pub struct CreateDealRecord<'a> {
 pub struct UpsertDealMetadataRecord<'a> {
     pub deal_id: i64,
     pub key_questions_json: &'a str,
-    pub investment_thesis: &'a str,
+    pub legacy_investment_thesis: Option<&'a str>,
     pub document_count: i64,
     pub data_room_size_bytes: i64,
 }
@@ -117,14 +125,14 @@ pub fn upsert_deal_metadata(
             INSERT INTO deal_metadata (
                 deal_id,
                 key_questions_json,
-                investment_thesis,
+                legacy_investment_thesis,
                 document_count,
                 data_room_size_bytes
             )
             VALUES (?1, ?2, ?3, ?4, ?5)
             ON CONFLICT(deal_id) DO UPDATE SET
                 key_questions_json = excluded.key_questions_json,
-                investment_thesis = excluded.investment_thesis,
+                legacy_investment_thesis = excluded.legacy_investment_thesis,
                 document_count = excluded.document_count,
                 data_room_size_bytes = excluded.data_room_size_bytes,
                 updated_at = CURRENT_TIMESTAMP
@@ -132,7 +140,7 @@ pub fn upsert_deal_metadata(
             params![
                 record.deal_id,
                 record.key_questions_json,
-                record.investment_thesis,
+                record.legacy_investment_thesis,
                 record.document_count,
                 record.data_room_size_bytes
             ],
@@ -144,7 +152,7 @@ pub fn upsert_deal_metadata(
                 id,
                 deal_id,
                 key_questions_json,
-                investment_thesis,
+                legacy_investment_thesis,
                 document_count,
                 data_room_size_bytes,
                 created_at,
@@ -184,6 +192,91 @@ pub fn get_deal_by_id(state: &AppState, deal_id: i64) -> Result<Option<Deal>, St
     Ok(deals.into_iter().next())
 }
 
+pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
+    let deals = state.gen_sqlite_db_client().query_rows(
+        r#"
+        SELECT
+            id,
+            deal_name,
+            main_data_room_folder,
+            deal_type,
+            pe_firm,
+            status,
+            target_company,
+            buyer_or_platform_company,
+            parent_or_seller_company,
+            carve_out_business,
+            created_at,
+            updated_at
+        FROM deals
+        WHERE status = 'active'
+        ORDER BY updated_at DESC, id DESC
+        "#,
+        [],
+        deal_from_row,
+    )?;
+
+    deals
+        .into_iter()
+        .map(|deal| {
+            let metadata = get_deal_metadata_by_deal_id(state, deal.id)?;
+            Ok(DealWithMetadata { deal, metadata })
+        })
+        .collect()
+}
+
+pub fn get_deal_with_metadata(
+    state: &AppState,
+    deal_id: i64,
+) -> Result<Option<DealWithMetadata>, String> {
+    let Some(deal) = get_deal_by_id(state, deal_id)? else {
+        return Ok(None);
+    };
+    let metadata = get_deal_metadata_by_deal_id(state, deal_id)?;
+    Ok(Some(DealWithMetadata { deal, metadata }))
+}
+
+pub fn get_deal_metadata_by_deal_id(
+    state: &AppState,
+    deal_id: i64,
+) -> Result<Option<DealMetadata>, String> {
+    state.with_sqlite_db(|db| {
+        db.query_row(
+            r#"
+            SELECT
+                id,
+                deal_id,
+                key_questions_json,
+            legacy_investment_thesis,
+                document_count,
+                data_room_size_bytes,
+                created_at,
+                updated_at
+            FROM deal_metadata
+            WHERE deal_id = ?1
+            "#,
+            [deal_id],
+            deal_metadata_from_row,
+        )
+        .optional()
+    })
+}
+
+pub fn archive_deal(state: &AppState, deal_id: i64) -> Result<Option<Deal>, String> {
+    let updated = state.with_sqlite_db(|db| {
+        db.execute(
+            "UPDATE deals SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            [deal_id],
+        )
+    })?;
+
+    if updated == 0 {
+        return Ok(None);
+    }
+
+    get_deal_by_id(state, deal_id)
+}
+
 fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
     Ok(Deal {
         id: row.get("id")?,
@@ -206,10 +299,14 @@ fn deal_metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
         id: row.get("id")?,
         deal_id: row.get("deal_id")?,
         key_questions_json: row.get("key_questions_json")?,
-        investment_thesis: row.get("investment_thesis")?,
+        legacy_investment_thesis: row.get("legacy_investment_thesis")?,
         document_count: row.get("document_count")?,
         data_room_size_bytes: row.get("data_room_size_bytes")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
 }
+
+#[cfg(test)]
+#[path = "../../tests/repository/deal_repository_tests.rs"]
+mod tests;

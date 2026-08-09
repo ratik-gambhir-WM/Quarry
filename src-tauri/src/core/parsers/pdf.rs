@@ -150,8 +150,7 @@ fn parse_pdf_file_with_metadata(
     content_hash: String,
 ) -> PdfDocumentAssembly {
     let local_path = path.map(|path| path.to_string_lossy().into_owned());
-    let document_identity = local_path.as_deref().unwrap_or(&content_hash);
-    let document_id = deterministic_id(&format!("{user_id}\0pdf\0{document_identity}"));
+    let document_id = deterministic_id(&format!("{user_id}\0{content_hash}"));
     let file_name = path
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
@@ -274,10 +273,11 @@ fn overlapping_page_numbers(
     let mut page_numbers = Vec::new();
 
     for page in page_ranges {
-        if chunk_start_offset < page.end_offset && chunk_end_offset > page.start_offset {
-            if !page_numbers.contains(&page.page_number) {
-                page_numbers.push(page.page_number);
-            }
+        if chunk_start_offset < page.end_offset
+            && chunk_end_offset > page.start_offset
+            && !page_numbers.contains(&page.page_number)
+        {
+            page_numbers.push(page.page_number);
         }
     }
 
@@ -451,7 +451,7 @@ fn validate_pixel_len(
 }
 
 fn cmyk_to_rgb(cmyk: &[u8]) -> Result<Vec<u8>, String> {
-    if cmyk.len() % 4 != 0 {
+    if !cmyk.len().is_multiple_of(4) {
         return Err(format!(
             "invalid CMYK image data length {}; expected a multiple of 4",
             cmyk.len()

@@ -42,23 +42,24 @@ export function HomeWorkspaceSidebar({
 
   return (
     <>
-      <SidebarFrame email={email} navigationState={navigationState}>
+      <SidebarFrame alignedHeader email={email} navigationState={navigationState}>
         <nav className="space-y-1">
           <NavLink
+            aria-label="Deal Hub"
             className={({ isActive }) =>
               [
-                "flex items-center gap-3 rounded-[22px] px-5 py-4 transition",
+                "flex items-center gap-3 rounded-lg px-3 py-2 transition",
                 isActive && activeHomeSection === "hub"
-                  ? "border border-primary/20 bg-primary/8 text-primary shadow-[inset_0_0_0_1px_rgba(80,101,142,0.12)]"
-                  : "text-text-main hover:bg-white/40",
+                  ? "bg-sidebar-selected text-sidebar-active"
+                  : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
               ].join(" ")
             }
             end
             state={navigationState}
             to="/hub"
           >
-            <Icon className="h-7 w-7" name="home" />
-            <span className="text-[13px] font-semibold">Deal Hub</span>
+            <Icon className="h-5 w-5" name="home" />
+            <span className="text-[13px] font-medium leading-5">Deal Hub</span>
           </NavLink>
         </nav>
 
@@ -75,21 +76,24 @@ export function HomeWorkspaceSidebar({
         >
           {deals.map((deal) => (
             <NavLink
+              aria-label={deal.room.name}
               className={({ isActive }) =>
                 [
-                  "flex items-center justify-between rounded-2xl px-5 py-3 transition",
-                  isActive ? "bg-white/58 shadow-[0_12px_30px_rgba(7,1,84,0.06)]" : "hover:bg-white/40",
+                  "flex items-center justify-between rounded-lg px-3 py-2 text-sidebar-text transition",
+                  isActive
+                    ? "bg-sidebar-selected text-sidebar-active"
+                    : "hover:bg-sidebar-hover hover:text-sidebar-active",
                 ].join(" ")
               }
               key={deal.room.id}
               state={navigationState}
               to={getDealRoomPath(deal.room.id)}
             >
-              <div className="flex items-center gap-4">
-                <span className={`h-3.5 w-3.5 rounded-full ${deal.colorClassName}`} />
-                <span className="text-[13px] font-medium text-text-main">{deal.room.name}</span>
+              <div className="flex items-center gap-3">
+                <span className={`h-2.5 w-2.5 rounded-full ${deal.colorClassName}`} />
+                <span className="text-[13px] font-medium leading-5">{deal.room.name}</span>
               </div>
-              {deal.complete ? <Icon className="h-5 w-5 text-primary/85" name="checkCircle" /> : null}
+              {deal.complete ? <Icon className="h-4 w-4 text-sidebar-muted" name="checkCircle" /> : null}
             </NavLink>
           ))}
         </SidebarSection>
@@ -111,7 +115,7 @@ export function HomeWorkspaceSidebar({
           />
         </SidebarSection>
 
-        <div className="border-t border-white/40 pt-6">
+        <div className="mt-3 border-t border-outline-variant/70 pt-3">
           <nav className="space-y-1">
             {tools.map((item) => (
               <SidebarLink

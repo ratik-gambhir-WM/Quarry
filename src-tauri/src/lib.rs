@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod core;
+pub mod document_jobs;
 pub mod errors;
 pub mod prompts;
 pub mod repository;
@@ -17,17 +18,24 @@ use tauri::{
 use crate::{
     commands::{
         data_room::{list_deal_data_room, preview_deal_document},
-        deal::{database_status, extract_deal_questions_and_thesis, save_deal_and_extract},
+        deal::{
+            archive_deal, database_status, extract_deal_questions_and_thesis, get_deal, list_deals,
+            save_deal_and_extract, select_deal_data_room_folder,
+        },
+        documents::{
+            describe_document_files, get_document_job, search_document_chunks_keyword,
+            search_document_chunks_vector, select_document_files, start_document_jobs,
+        },
         research::{
-            list_summary_files, login_demo_command, save_markdown_summary, summarize,
-            summarize_selected,
+            export_activity_log, list_summary_files, login_demo_command, save_markdown_summary,
+            select_summary_source, summarize, summarize_selected,
         },
         users::{
             create_user, create_wm_user, get_user_by_email, get_wm_user_by_email, greet,
             user_exists_by_email,
         },
     },
-    events::{file::register_file_events, register_login_demo_events},
+    events::register_login_demo_events,
     state::AppState,
 };
 
@@ -91,15 +99,23 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|app| {
-            let menu = build_app_menu(&app.handle())?;
+            let menu = build_app_menu(app.handle())?;
             app.set_menu(menu)?;
-            app.manage(AppState::new(&app.handle())?);
-            register_login_demo_events(&app.handle());
-            register_file_events(&app.handle());
+            app.manage(AppState::new(app.handle())?);
+            register_login_demo_events(app.handle());
             Ok(())
         })
+        .on_webview_event(|webview, event| {
+            if webview.label() != "main" {
+                return;
+            }
+            if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                if let Err(error) = webview.state::<AppState>().grant_paths(paths.clone()) {
+                    eprintln!("failed to record native file-drop grants: {error}");
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             create_user,
@@ -108,6 +124,16 @@ pub fn run() {
             get_user_by_email,
             user_exists_by_email,
             database_status,
+            list_deals,
+            get_deal,
+            archive_deal,
+            select_deal_data_room_folder,
+            select_document_files,
+            describe_document_files,
+            start_document_jobs,
+            get_document_job,
+            search_document_chunks_keyword,
+            search_document_chunks_vector,
             list_deal_data_room,
             preview_deal_document,
             save_deal_and_extract,
@@ -116,7 +142,9 @@ pub fn run() {
             list_summary_files,
             summarize,
             summarize_selected,
-            save_markdown_summary
+            save_markdown_summary,
+            select_summary_source,
+            export_activity_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

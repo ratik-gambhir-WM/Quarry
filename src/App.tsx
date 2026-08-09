@@ -1,13 +1,20 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AccountPage } from "./pages/AccountPage";
-import { DataRoomPage } from "./pages/DataRoomPage";
-import { HubPage } from "./pages/HubPage";
-import { DealRoomPage } from "./pages/DealRoomPage";
-import { GlobalVaultPage } from "./pages/GlobalVaultPage";
-import { LoginPage } from "./pages/LoginPage";
-import { SummarizePage } from "./pages/SummarizePage";
-import { TauriPlaygroundPage } from "./pages/TauriPlaygroundPage";
 import { ThemeModeProvider } from "./hooks/useThemeMode";
+import { AccountPage } from "./pages/AccountPage";
+import { DealRoomPage } from "./pages/DealRoomPage";
+import { HubPage } from "./pages/HubPage";
+import { LoginPage } from "./pages/LoginPage";
+
+const DataRoomPage = lazy(() => import("./pages/DataRoomPage").then((module) => ({ default: module.DataRoomPage })));
+const GlobalVaultPage = lazy(() => import("./pages/GlobalVaultPage").then((module) => ({ default: module.GlobalVaultPage })));
+const SummarizePage = lazy(() => import("./pages/SummarizePage").then((module) => ({ default: module.SummarizePage })));
+const LogsPage = lazy(() => import("./pages/LogsPage").then((module) => ({ default: module.LogsPage })));
+const TauriPlaygroundPage = import.meta.env.DEV
+  ? lazy(() => import("./pages/TauriPlaygroundPage").then((module) => ({ default: module.TauriPlaygroundPage })))
+  : null;
+
+const routeFallback = <div className="min-h-screen bg-background" />;
 
 function App() {
   return (
@@ -17,11 +24,14 @@ function App() {
         <Route element={<LoginPage />} path="/login" />
         <Route element={<HubPage />} path="/hub" />
         <Route element={<AccountPage />} path="/hub/account" />
-        <Route element={<GlobalVaultPage />} path="/hub/vault" />
-        <Route element={<SummarizePage />} path="/hub/summarize" />
-        <Route element={<TauriPlaygroundPage />} path="/hub/tauri-playground" />
+        <Route element={<Suspense fallback={routeFallback}><GlobalVaultPage /></Suspense>} path="/hub/vault" />
+        <Route element={<Suspense fallback={routeFallback}><SummarizePage /></Suspense>} path="/hub/summarize" />
+        <Route element={<Suspense fallback={routeFallback}><LogsPage /></Suspense>} path="/hub/logs" />
+        {TauriPlaygroundPage ? (
+          <Route element={<Suspense fallback={routeFallback}><TauriPlaygroundPage /></Suspense>} path="/hub/tauri-playground" />
+        ) : null}
         <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
-        <Route element={<DataRoomPage />} path="/hub/deals/:dealId/data-room" />
+        <Route element={<Suspense fallback={routeFallback}><DataRoomPage /></Suspense>} path="/hub/deals/:dealId/data-room" />
         <Route element={<Navigate replace to="/login" />} path="*" />
       </Routes>
     </ThemeModeProvider>

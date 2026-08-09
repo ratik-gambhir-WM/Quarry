@@ -4,6 +4,18 @@ use std::{
 };
 
 use super::*;
+
+#[test]
+fn helix_user_responses_redact_nested_api_keys() {
+    let sanitized = redact_user_secrets(serde_json::json!({
+        "user": { "api_key": "sk-secret", "email": "analyst@example.com" },
+        "items": [{ "apiKey": "another-secret" }]
+    }));
+
+    assert_eq!(sanitized["user"]["api_key"], "[REDACTED]");
+    assert_eq!(sanitized["items"][0]["apiKey"], "[REDACTED]");
+    assert_eq!(sanitized["user"]["email"], "analyst@example.com");
+}
 use tauri::{
     test::{mock_builder, mock_context, noop_assets},
     Manager,

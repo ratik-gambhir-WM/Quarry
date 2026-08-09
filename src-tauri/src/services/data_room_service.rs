@@ -7,6 +7,7 @@ pub use crate::core::data_room_helpers::DataRoomTreeNode;
 use crate::core::data_room_helpers::{
     build_directory_node, convert_office_to_pdf, read_pdf, resolve_relative_file, MAX_PDF_BYTES,
 };
+use crate::{repository::deal_repository::get_deal_by_id, state::AppState};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,21 +27,18 @@ pub struct DocumentPreview {
     pub source_kind: String,
 }
 
-pub fn list_deal_data_room(deal_id: String) -> Result<DealDataRoom, String> {
-    let configured_root = deal_data_room_root(&deal_id)
+pub fn list_deal_data_room(state: &AppState, deal_id: String) -> Result<DealDataRoom, String> {
+    let configured_root = deal_data_room_root(state, &deal_id)?
         .ok_or_else(|| format!("no local data-room root is configured for deal \"{deal_id}\""))?;
-    let root = configured_root.canonicalize().map_err(|err| {
-        format!(
-            "the configured data-room root is unavailable ({}): {err}",
-            configured_root.display()
-        )
+    let root = configured_root.canonicalize().map_err(|_| {
+        "The deal folder is unavailable. Reconnect the drive or rebind the data room.".to_string()
     })?;
 
     if !root.is_dir() {
-        return Err(format!(
-            "the configured data-room root is not a directory: {}",
-            root.display()
-        ));
+        return Err(
+            "The deal folder is unavailable. Rebind the data room to an existing folder."
+                .to_string(),
+        );
     }
 
     let root_name = root
@@ -52,17 +50,18 @@ pub fn list_deal_data_room(deal_id: String) -> Result<DealDataRoom, String> {
 
     Ok(DealDataRoom {
         deal_id,
+        root_path: root_name.clone(),
         root_name,
-        root_path: root.display().to_string(),
         tree: vec![root_node],
     })
 }
 
 pub fn build_document_preview(
+    state: &AppState,
     deal_id: &str,
     relative_path: &str,
 ) -> Result<DocumentPreview, String> {
-    let root = canonical_deal_root(deal_id)?;
+    let root = canonical_deal_root(state, deal_id)?;
     let file_path = resolve_relative_file(&root, relative_path)?;
     let file_name = file_path
         .file_name()
@@ -109,7 +108,7 @@ pub fn build_document_preview(
     })
 }
 
-fn deal_data_room_root(deal_id: &str) -> Option<PathBuf> {
+fn fixture_data_room_root(deal_id: &str) -> Option<PathBuf> {
     let root = match deal_id {
         "project-alpha" => "/Users/rgambhir/BetaNXT/02 - Data Room (CIM, Target Docs)",
         "project-beta" => "/Users/rgambhir/OmegaHealthcare/02. Discovery",
@@ -120,21 +119,30 @@ fn deal_data_room_root(deal_id: &str) -> Option<PathBuf> {
     Some(PathBuf::from(root))
 }
 
-fn canonical_deal_root(deal_id: &str) -> Result<PathBuf, String> {
-    let configured_root = deal_data_room_root(deal_id)
+fn deal_data_room_root(state: &AppState, deal_id: &str) -> Result<Option<PathBuf>, String> {
+    if let Ok(numeric_id) = deal_id.parse::<i64>() {
+        if numeric_id <= 0 {
+            return Ok(None);
+        }
+        return get_deal_by_id(state, numeric_id)
+            .map(|deal| deal.map(|deal| PathBuf::from(deal.main_data_room_folder)));
+    }
+
+    Ok(fixture_data_room_root(deal_id))
+}
+
+fn canonical_deal_root(state: &AppState, deal_id: &str) -> Result<PathBuf, String> {
+    let configured_root = deal_data_room_root(state, deal_id)?
         .ok_or_else(|| format!("no local data-room root is configured for deal \"{deal_id}\""))?;
-    let root = configured_root.canonicalize().map_err(|err| {
-        format!(
-            "the configured data-room root is unavailable ({}): {err}",
-            configured_root.display()
-        )
+    let root = configured_root.canonicalize().map_err(|_| {
+        "The deal folder is unavailable. Reconnect the drive or rebind the data room.".to_string()
     })?;
 
     if !root.is_dir() {
-        return Err(format!(
-            "the configured data-room root is not a directory: {}",
-            root.display()
-        ));
+        return Err(
+            "The deal folder is unavailable. Rebind the data room to an existing folder."
+                .to_string(),
+        );
     }
 
     Ok(root)

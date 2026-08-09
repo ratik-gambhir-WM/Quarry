@@ -1,12 +1,60 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::core::{
     clients::helix::HelixClient,
-    helix_queries::files::insert_quarry_file::{
-        create_document_indexes, insert_chunk_for_document, insert_quarry_file,
+    helix_queries::files::{
+        insert_quarry_file::{
+            create_document_indexes, insert_chunk_for_document, insert_quarry_file,
+            mark_quarry_file_ingestion_complete as build_ingestion_complete_query,
+        },
+        search_quarry_file::{
+            find_quarry_file_by_content_hash, search_chunks_by_keyword, search_chunks_by_vector,
+            ChunkKeywordSearch, ChunkVectorSearch,
+        },
     },
     nodes::document_node::{ChunkNode, DocumentNode},
 };
+
+#[derive(Debug, Deserialize)]
+struct HelixProperties<T> {
+    properties: Vec<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuarryFileLookupResponse {
+    #[serde(alias = "quarryFile")]
+    quarry_file: HelixProperties<QuarryFileIdentity>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuarryFileIdentity {
+    #[serde(alias = "documentId")]
+    document_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentChunkSearchResult {
+    #[serde(alias = "document_id")]
+    pub document_id: String,
+    pub text: String,
+    #[serde(alias = "sequence_number")]
+    pub sequence_number: u32,
+    #[serde(default, alias = "page_numbers")]
+    pub page_numbers: Option<Vec<u32>>,
+    #[serde(default, alias = "section_title")]
+    pub section_title: Option<String>,
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub distance: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChunkSearchResponse {
+    chunks: HelixProperties<DocumentChunkSearchResult>,
+}
 
 #[derive(Debug)]
 pub struct PersistedDocumentGraph {
@@ -56,6 +104,15 @@ pub async fn persist_chunks_for_document(
     Ok(persisted)
 }
 
+pub async fn mark_quarry_file_ingestion_complete(
+    helix: &HelixClient,
+    document: &DocumentNode,
+) -> Result<Value, String> {
+    let query =
+        build_ingestion_complete_query(document.document_id.clone(), document.user_id.clone())?;
+    helix.execute_dynamic_query(move || query).await
+}
+
 /// Creates the QuarryFile once and then adds each chunk as it is processed.
 pub async fn persist_document_and_chunks(
     helix: &HelixClient,
@@ -68,11 +125,45 @@ pub async fn persist_document_and_chunks(
 
     let quarry_file = persist_quarry_file(helix, document.clone()).await?;
     let chunks = persist_chunks_for_document(helix, &document, chunks).await?;
+    mark_quarry_file_ingestion_complete(helix, &document).await?;
 
     Ok(PersistedDocumentGraph {
         quarry_file,
         chunks,
     })
+}
+
+pub async fn find_existing_document_id_by_content_hash(
+    helix: &HelixClient,
+    user_id: &str,
+    content_hash: &str,
+) -> Result<Option<String>, String> {
+    let query = find_quarry_file_by_content_hash(user_id.to_string(), content_hash.to_string())?;
+    let response: QuarryFileLookupResponse = helix.execute_dynamic_query(move || query).await?;
+    Ok(response
+        .quarry_file
+        .properties
+        .into_iter()
+        .next()
+        .map(|document| document.document_id))
+}
+
+pub async fn search_document_chunks_by_vector(
+    helix: &HelixClient,
+    search: ChunkVectorSearch,
+) -> Result<Vec<DocumentChunkSearchResult>, String> {
+    let query = search_chunks_by_vector(search)?;
+    let response: ChunkSearchResponse = helix.execute_dynamic_query(move || query).await?;
+    Ok(response.chunks.properties)
+}
+
+pub async fn search_document_chunks_by_keyword(
+    helix: &HelixClient,
+    search: ChunkKeywordSearch,
+) -> Result<Vec<DocumentChunkSearchResult>, String> {
+    let query = search_chunks_by_keyword(search)?;
+    let response: ChunkSearchResponse = helix.execute_dynamic_query(move || query).await?;
+    Ok(response.chunks.properties)
 }
 
 /// Compatibility wrapper for callers that currently persist the first chunk

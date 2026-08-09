@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
-import { DocumentPreviewPanel } from "../components/data-room/DocumentPreviewPanel";
 import type { PreviewState } from "../components/data-room/DocumentPreviewPanel";
 import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
@@ -11,13 +10,24 @@ import type { DataRoomTreeNode } from "../data/dataRoom";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
-import { getDealById, getDealRoomPath } from "../data/workspace";
-import { TAURI_COMMANDS } from "../lib/constants";
-import { execute } from "../lib/tauri/command";
+import { getDealRoomPath } from "../data/workspace";
+import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
+import { productApi } from "../lib/product";
+import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
+import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
+
+const DocumentPreviewPanel = lazy(() =>
+  import("../components/data-room/DocumentPreviewPanel").then((module) => ({
+    default: module.DocumentPreviewPanel,
+  })),
+);
 
 export function DataRoomPage() {
   const { dealId } = useParams();
   const location = useLocation();
+  const { deals, loaded } = useWorkspaceDeals();
+  const { email } = useWorkspaceSession();
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isChipBankOpen, setIsChipBankOpen] = useState(true);
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [localDataRoom, setLocalDataRoom] = useState<DealDataRoom | null>(null);
@@ -31,7 +41,8 @@ export function DataRoomPage() {
     extractionResult && String(extractionResult.deal.id) === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
-  const deal = extractedDeal ?? (dealId ? getDealById(dealId) : undefined);
+  const deal =
+    extractedDeal ?? deals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +59,8 @@ export function DataRoomPage() {
     setLocalDataRoom(null);
     setSelectedDocument(null);
     previewRequestId.current += 1;
-    execute<DealDataRoom>(TAURI_COMMANDS.listDealDataRoom, { dealId })
+    productApi
+      .listDealDataRoom(dealId)
       .then((response) => {
         if (!cancelled) {
           setLocalDataRoom(response);
@@ -80,10 +92,10 @@ export function DataRoomPage() {
       }
 
       try {
-        const response = await execute<unknown>(TAURI_COMMANDS.previewDealDocument, {
-          dealId: deal.room.id,
-          relativePath: document.relativePath,
-        });
+        const response = await productApi.previewDealDocument(
+          deal.room.id,
+          document.relativePath,
+        );
         if (!isDocumentPreviewResponse(response)) {
           throw new Error("The preview backend returned an invalid PDF response.");
         }
@@ -107,8 +119,16 @@ export function DataRoomPage() {
     setSelectedDocument(null);
   }, []);
 
-  if (!deal) {
+  if (!deal && loaded) {
     return <Navigate replace to="/hub" />;
+  }
+
+  if (!deal) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-muted">
+        Loading data room…
+      </div>
+    );
   }
 
   const dataRoomView = getDealDataRoomView(deal.room);
@@ -132,6 +152,7 @@ export function DataRoomPage() {
             nodes={localDataRoom?.tree ?? []}
             onCollapse={() => setIsExplorerOpen(false)}
             onSelectFile={handleSelectDocument}
+            onUploadNewFile={() => setIsUploadOpen(true)}
             rootPath={localDataRoom?.rootPath}
             selectedFilePath={selectedDocument?.relativePath}
             treeError={treeError}
@@ -148,11 +169,13 @@ export function DataRoomPage() {
           <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
             <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
               {selectedDocument ? (
-                <DocumentPreviewPanel
-                  document={selectedDocument}
-                  onClose={handleClosePreview}
-                  preview={preview}
-                />
+                <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
+                  <DocumentPreviewPanel
+                    document={selectedDocument}
+                    onClose={handleClosePreview}
+                    preview={preview}
+                  />
+                </Suspense>
               ) : (
                 <ReportEditorPanel
                   blocks={dataRoomView.editorBlocks}
@@ -172,6 +195,9 @@ export function DataRoomPage() {
           </main>
         </div>
       </div>
+      {isUploadOpen ? (
+        <UploadFilesModal onClose={() => setIsUploadOpen(false)} userId={email ?? ""} />
+      ) : null}
     </div>
   );
 }

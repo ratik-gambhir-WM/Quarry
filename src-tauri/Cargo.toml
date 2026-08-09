@@ -21,7 +21,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -29,18 +28,19 @@ base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2"
-tokio = { version = "1.52.2", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.52.2", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 docx-rust = "0.1.11"
-pdf-extract = "0.10.0"
-calamine = "0.35.0"
+pdf-extract = "0.12.0"
+calamine = "0.36.1"
 pptx-to-md = "0.4.0"
 chrono = "0.4"
 helix-db = "2.0"
 dotenvy = "0.15"
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 tiktoken-rs = "0.11.0"
 image = "0.24.9"
 sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

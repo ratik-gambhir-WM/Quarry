@@ -1,10 +1,13 @@
-export function WorkspaceHeader() {
+type WorkspaceHeaderProps = {
+  title: string;
+};
+
+export function WorkspaceHeader({ title }: WorkspaceHeaderProps) {
   return (
     <header>
-      <div className="space-y-2">
-        <h1 className="type-display text-text-main">The Hub</h1>
-        <p className="type-subtle text-muted">Portfolio Performance &amp; Strategic Initiatives</p>
-      </div>
+      <h1 className="text-[20px] font-semibold leading-6 tracking-[-0.015em] text-text-main [font-family:var(--font-heading)]">
+        {title}
+      </h1>
     </header>
   );
 }

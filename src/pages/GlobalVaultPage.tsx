@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { WorkspaceCard } from "../components/hub/WorkspaceCard";
+import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { Icon } from "../components/ui/Icon";
 
 const emptyMarkdown = "";
@@ -17,20 +18,17 @@ export function GlobalVaultPage() {
   const [directorySelection, setDirectorySelection] = useState<SelectionSummary>({ fileNames: [], totalCount: 0 });
 
   return (
-    <WorkspaceHomeShell activeHomeSection="vault">
+    <WorkspaceHomeShell activeHomeSection="vault" header={<WorkspaceHeader title="Global Vault" />}>
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 pb-10">
         <header className="space-y-3">
           <div className="inline-flex w-fit items-center gap-3 rounded-full border border-white/80 bg-white/70 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-primary shadow-[0_8px_20px_rgba(7,1,84,0.05)]">
             <Icon className="h-4 w-4" name="folderOpen" />
             Global Vault
           </div>
-          <div className="space-y-2">
-            <h1 className="type-display text-text-main">Global Vault</h1>
-            <p className="type-subtle max-w-3xl text-muted">
-              Upload files or entire folders from your local file system. When markdown summaries become available,
-              they will render below.
-            </p>
-          </div>
+          <p className="type-subtle max-w-3xl text-muted">
+            Upload files or entire folders from your local file system. When markdown summaries become available,
+            they will render below.
+          </p>
         </header>
 
         <WorkspaceCard className="p-8">

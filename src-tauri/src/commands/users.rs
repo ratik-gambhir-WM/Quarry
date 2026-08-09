@@ -18,32 +18,31 @@ pub fn greet(name: &str) -> String {
 
 #[tauri::command]
 pub fn create_user(state: State<'_, AppState>, input: AddUserInput) -> CommandResult<User> {
-    validate_user_input(&input)
-        .and_then(|_| add_user(&state, input))
-        .command_context("create_user")
+    validate_user_input(&input).validation_context("create_user")?;
+    add_user(&state, input).command_context("create_user")
 }
 
 #[tauri::command]
 pub fn user_exists_by_email(state: State<'_, AppState>, email: String) -> CommandResult<bool> {
-    validate_email(&email)
-        .and_then(|_| fetch_user_by_email(&state, &email))
+    validate_email(&email).validation_context("user_exists_by_email")?;
+    fetch_user_by_email(&state, &email)
         .map(|user| user.is_some())
         .command_context("user_exists_by_email")
 }
 
 #[tauri::command]
 pub fn get_user_by_email(state: State<'_, AppState>, email: String) -> CommandResult<Option<User>> {
-    validate_email(&email)
-        .and_then(|_| fetch_user_by_email(&state, &email))
-        .command_context("get_user_by_email")
+    validate_email(&email).validation_context("get_user_by_email")?;
+    fetch_user_by_email(&state, &email).command_context("get_user_by_email")
 }
 
 #[tauri::command]
 pub async fn create_wm_user(state: State<'_, AppState>, input: UserNode) -> CommandResult<Value> {
-    validate_wm_user_input(&input).command_context("create_wm_user")?;
+    validate_wm_user_input(&input).validation_context("create_wm_user")?;
 
     add_wm_user(&state, input)
         .await
+        .map(redact_user_secrets)
         .command_context("create_wm_user")
 }
 
@@ -52,11 +51,35 @@ pub async fn get_wm_user_by_email(
     state: State<'_, AppState>,
     email: String,
 ) -> CommandResult<Value> {
-    validate_email(&email).command_context("get_wm_user_by_email")?;
+    validate_email(&email).validation_context("get_wm_user_by_email")?;
 
     fetch_wm_user_by_email(&state, &email)
         .await
+        .map(redact_user_secrets)
         .command_context("get_wm_user_by_email")
+}
+
+fn redact_user_secrets(mut value: Value) -> Value {
+    fn visit(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                for (key, nested) in object {
+                    if matches!(
+                        key.as_str(),
+                        "api_key" | "apiKey" | "authorization" | "token"
+                    ) {
+                        *nested = Value::String("[REDACTED]".to_string());
+                    } else {
+                        visit(nested);
+                    }
+                }
+            }
+            Value::Array(values) => values.iter_mut().for_each(visit),
+            _ => {}
+        }
+    }
+    visit(&mut value);
+    value
 }
 
 fn validate_email(email: &str) -> Result<(), String> {

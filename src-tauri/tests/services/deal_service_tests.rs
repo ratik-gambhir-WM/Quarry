@@ -148,6 +148,38 @@ fn validate_deal_input_rejects_missing_required_fields() {
 }
 
 #[test]
+fn validate_deal_input_enforces_supported_types_and_type_specific_companies() {
+    let mut input = deal_input();
+    input.deal_type = "Unknown".to_string();
+    assert_eq!(
+        validate_deal_input(&input),
+        Err("dealType is not supported".to_string())
+    );
+
+    let mut input = deal_input();
+    input.target_company = None;
+    assert_eq!(
+        validate_deal_input(&input),
+        Err("targetCompany is required for Buy-side deals".to_string())
+    );
+
+    let mut input = deal_input();
+    input.buyer_or_platform_company = None;
+    assert_eq!(
+        validate_deal_input(&input),
+        Err("buyerOrPlatformCompany is required for Buy-side deals".to_string())
+    );
+
+    let mut input = deal_input();
+    input.deal_type = "Carve-out".to_string();
+    input.target_company = None;
+    input.buyer_or_platform_company = None;
+    input.parent_or_seller_company = Some("Parent Co".to_string());
+    input.carve_out_business = Some("Division".to_string());
+    assert!(validate_deal_input(&input).is_ok());
+}
+
+#[test]
 fn save_deal_with_repository_trims_input_and_uses_mock_repository() {
     let captured = RefCell::new(None);
     let deal = save_deal_with_repository(&deal_input(), |record| {

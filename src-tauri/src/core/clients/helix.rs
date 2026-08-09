@@ -61,6 +61,7 @@ impl HelixClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[register]
 pub fn add_file_chunk(
     chunk_id: String,

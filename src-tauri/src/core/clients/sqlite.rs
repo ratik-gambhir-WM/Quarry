@@ -204,7 +204,7 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 deal_id INTEGER NOT NULL,
                 key_questions_json TEXT NOT NULL DEFAULT '[]',
-                investment_thesis TEXT NOT NULL DEFAULT '',
+                legacy_investment_thesis TEXT,
                 document_count INTEGER NOT NULL DEFAULT 0 CHECK (document_count >= 0),
                 data_room_size_bytes INTEGER NOT NULL DEFAULT 0 CHECK (data_room_size_bytes >= 0),
                 portco_summary TEXT,
@@ -244,9 +244,26 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
         .execute_batch("CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);")
         .map_err(|err| format!("failed to initialize deal status index: {err}"))?;
 
-    if user_version < 4 {
+    if column_exists(connection, "deal_metadata", "investment_thesis")
+        .map_err(|err| format!("failed to inspect legacy deal metadata: {err}"))?
+        && !column_exists(connection, "deal_metadata", "legacy_investment_thesis")
+            .map_err(|err| format!("failed to inspect canonical deal metadata: {err}"))?
+    {
         connection
-            .pragma_update(None, "user_version", 4)
+            .execute_batch(
+                r#"
+                ALTER TABLE deal_metadata ADD COLUMN legacy_investment_thesis TEXT;
+                UPDATE deal_metadata
+                SET legacy_investment_thesis = investment_thesis
+                WHERE length(trim(investment_thesis)) > 0;
+                "#,
+            )
+            .map_err(|err| format!("failed to preserve legacy investment thesis data: {err}"))?;
+    }
+
+    if user_version < 5 {
+        connection
+            .pragma_update(None, "user_version", 5)
             .map_err(|err| format!("failed to set sqlite schema version: {err}"))?;
     }
 

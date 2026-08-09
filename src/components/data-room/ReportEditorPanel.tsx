@@ -14,7 +14,13 @@ type ReportEditorPanelProps = {
 export function ReportEditorPanel({ blocks, reportTitle, versionLabel }: ReportEditorPanelProps) {
   return (
     <section className="glass-panel relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
-      <DocumentViewMenu />
+      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-background px-5">
+        <div className="min-w-0">
+          <h1 className="truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room</h1>
+          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{versionLabel}</p>
+        </div>
+        <DocumentViewMenu />
+      </header>
 
       <div className="workspace-scrollbar-hidden flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-4xl py-8">
@@ -120,7 +126,7 @@ function DocumentViewMenu() {
   }, []);
 
   return (
-    <div className="absolute right-5 top-5 z-20" ref={menuRef}>
+    <div className="relative z-20" ref={menuRef}>
       <button
         aria-expanded={open}
         aria-haspopup="menu"
