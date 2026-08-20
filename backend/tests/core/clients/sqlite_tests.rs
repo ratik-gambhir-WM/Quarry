@@ -1,0 +1,198 @@
+use crate::core::sqlbuilder::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlValue};
+
+use super::*;
+
+fn test_client() -> SqliteClient {
+    let client = SqliteClient::open_in_memory().unwrap();
+    client
+        .with_connection(|connection| {
+            connection.execute_batch(
+                r#"
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    role TEXT,
+                    active INTEGER NOT NULL
+                );
+
+                CREATE TABLE profiles (
+                    user_id INTEGER PRIMARY KEY,
+                    bio TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                );
+                "#,
+            )
+        })
+        .unwrap();
+    client
+}
+
+#[test]
+fn writes_and_reads_dynamic_rows() {
+    let client = test_client();
+    let insert = SqlBuilder::insert_into("users")
+        .value("name", "Ada")
+        .value("role", "admin")
+        .value("active", true)
+        .build()
+        .unwrap();
+
+    let result = client.write(&insert).unwrap();
+    assert_eq!(result.rows_affected, 1);
+    assert_eq!(result.last_insert_row_id, 1);
+
+    let select = SqlBuilder::select("users")
+        .columns(["id", "name", "role", "active"])
+        .and_where(Condition::equal("active", true))
+        .order_by("id", SortDirection::Ascending)
+        .build()
+        .unwrap();
+    let rows = client.read(&select).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("id"), Some(&SqlValue::Integer(1)));
+    assert_eq!(
+        rows[0].get("name"),
+        Some(&SqlValue::Text("Ada".to_string()))
+    );
+}
+
+#[test]
+fn reads_rows_into_typed_values() {
+    let client = test_client();
+    let insert = SqlBuilder::insert_into("users")
+        .value("name", "Grace")
+        .value("role", Option::<String>::None)
+        .value("active", true)
+        .build()
+        .unwrap();
+    client.write(&insert).unwrap();
+
+    let select = SqlBuilder::select("users")
+        .columns(["id", "name"])
+        .and_where(Condition::equal("name", "Grace"))
+        .build()
+        .unwrap();
+    let user = client
+        .read_one_with(&select, |row| {
+            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("name")?))
+        })
+        .unwrap();
+
+    assert_eq!(user, Some((1, "Grace".to_string())));
+}
+
+#[tokio::test]
+async fn async_methods_run_crud_queries() {
+    let client = test_client();
+    let insert = SqlBuilder::insert_into("users")
+        .value("name", "Lin")
+        .value("role", "analyst")
+        .value("active", true)
+        .build()
+        .unwrap();
+    client.write_async(insert).await.unwrap();
+
+    let select = SqlBuilder::select("users")
+        .and_where(Condition::equal("name", "Lin"))
+        .build()
+        .unwrap();
+    let row = client.read_one_async(select).await.unwrap().unwrap();
+
+    assert_eq!(
+        row.get("role"),
+        Some(&SqlValue::Text("analyst".to_string()))
+    );
+}
+
+#[test]
+fn rejects_using_queries_for_the_wrong_operation() {
+    let client = test_client();
+    let select = SqlBuilder::select("users").build().unwrap();
+    assert!(matches!(
+        client.write(&select),
+        Err(SqliteClientError::InvalidOperation {
+            operation: "write",
+            ..
+        })
+    ));
+
+    let insert = SqlBuilder::insert_into("users")
+        .value("name", "Ada")
+        .value("role", "admin")
+        .value("active", true)
+        .build()
+        .unwrap();
+    assert!(matches!(
+        client.read(&insert),
+        Err(SqliteClientError::InvalidOperation {
+            operation: "read",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn executes_join_queries() {
+    let client = test_client();
+    let insert_user = SqlBuilder::insert_into("users")
+        .value("name", "Ada")
+        .value("role", "admin")
+        .value("active", true)
+        .build()
+        .unwrap();
+    let user_id = client.write(&insert_user).unwrap().last_insert_row_id;
+    let insert_profile = SqlBuilder::insert_into("profiles")
+        .value("user_id", user_id)
+        .value("bio", "Mathematician")
+        .build()
+        .unwrap();
+    client.write(&insert_profile).unwrap();
+
+    let select = SqlBuilder::select("users")
+        .columns(["users.name", "profiles.bio"])
+        .left_join("profiles", "users.id", "profiles.user_id")
+        .and_where(Condition::equal("users.id", user_id))
+        .build()
+        .unwrap();
+    let row = client.read_one(&select).unwrap().unwrap();
+
+    assert_eq!(row.get("name"), Some(&SqlValue::Text("Ada".to_string())));
+    assert_eq!(
+        row.get("bio"),
+        Some(&SqlValue::Text("Mathematician".to_string()))
+    );
+}
+
+#[test]
+fn executes_insert_on_conflict_updates_with_bound_parameters() {
+    let client = test_client();
+    let insert_user = SqlBuilder::insert_into("users")
+        .value("name", "Ada")
+        .value("role", "admin")
+        .value("active", true)
+        .build()
+        .unwrap();
+    let user_id = client.write(&insert_user).unwrap().last_insert_row_id;
+
+    for bio in ["Mathematician", "Programmer"] {
+        let upsert_profile = SqlBuilder::insert_into("profiles")
+            .value("user_id", user_id)
+            .value("bio", bio)
+            .on_conflict_update(ConflictUpdate::new(["user_id"]).set_excluded("bio"))
+            .build()
+            .unwrap();
+        client.write(&upsert_profile).unwrap();
+    }
+
+    let select = SqlBuilder::select("profiles")
+        .column("bio")
+        .and_where(Condition::equal("user_id", user_id))
+        .build()
+        .unwrap();
+    let profile = client.read_one(&select).unwrap().unwrap();
+    assert_eq!(
+        profile.get("bio"),
+        Some(&SqlValue::Text("Programmer".to_string()))
+    );
+}

@@ -1,4 +1,4 @@
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, params_from_iter, OptionalExtension, Row};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -9,6 +9,7 @@ use crate::{
             get_deal_by_id as build_get_deal_by_id_query,
         },
         nodes::deal_node::DealNode,
+        sqlbuilder::{ConflictUpdate, SqlBuilder},
     },
     state::AppState,
 };
@@ -194,27 +195,23 @@ pub fn upsert_deal_metadata(
     state: &AppState,
     record: UpsertDealMetadataRecord<'_>,
 ) -> Result<DealMetadata, String> {
+    let upsert = SqlBuilder::insert_into("deal_metadata")
+        .value("deal_id", record.deal_id)
+        .value("key_questions_json", record.key_questions_json)
+        .value("document_count", record.document_count)
+        .value("data_room_size_bytes", record.data_room_size_bytes)
+        .on_conflict_update(
+            ConflictUpdate::new(["deal_id"])
+                .set_excluded("key_questions_json")
+                .set_excluded("document_count")
+                .set_excluded("data_room_size_bytes")
+                .set_current_timestamp("updated_at"),
+        )
+        .build()
+        .map_err(|error| format!("failed to build deal metadata upsert: {error}"))?;
+
     state.with_db(|db| {
-        db.execute(
-            r#"
-            INSERT INTO deal_metadata (
-                deal_id, key_questions_json,
-                document_count, data_room_size_bytes
-            )
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(deal_id) DO UPDATE SET
-                key_questions_json = excluded.key_questions_json,
-                document_count = excluded.document_count,
-                data_room_size_bytes = excluded.data_room_size_bytes,
-                updated_at = CURRENT_TIMESTAMP
-            "#,
-            params![
-                record.deal_id,
-                record.key_questions_json,
-                record.document_count,
-                record.data_room_size_bytes
-            ],
-        )?;
+        db.execute(upsert.sql(), params_from_iter(upsert.parameters()))?;
 
         db.query_row(
             r#"

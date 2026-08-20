@@ -1,14 +1,15 @@
 use super::*;
+use std::time::Duration;
 
 impl AppState {
     pub(crate) fn in_memory() -> Result<Self, String> {
-        let connection = Connection::open_in_memory()
+        let db = SqliteClient::open_in_memory()
             .map_err(|err| format!("failed to open in-memory sqlite database: {err}"))?;
-        run_migrations(&connection)?;
+        db.with_connection(|connection| run_migrations(connection))
+            .map_err(|err| format!("failed to initialize in-memory sqlite database: {err}"))?;
 
         Ok(Self {
-            db: Arc::new(Mutex::new(connection)),
-            db_path: Arc::new(PathBuf::from(":memory:")),
+            db,
             document_jobs: Arc::new(RwLock::new(HashMap::new())),
             document_processing_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             helix: Arc::new(HelixClient::new()?),

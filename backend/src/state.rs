@@ -2,21 +2,22 @@ use std::{
     collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak},
-    time::Duration,
+    sync::{Arc, Weak},
 };
 
 use rusqlite::Connection;
 use tokio::sync::{watch, Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 
-use crate::{core::clients::helix::HelixClient, document_jobs::DocumentJobEvent};
+use crate::{
+    core::clients::{helix::HelixClient, sqlite::SqliteClient},
+    document_jobs::DocumentJobEvent,
+};
 
 const DATABASE_FILE_NAME: &str = "pathfinder.sqlite3";
 
 #[derive(Clone)]
 pub struct AppState {
-    db: Arc<Mutex<Connection>>,
-    db_path: Arc<PathBuf>,
+    db: SqliteClient,
     document_jobs: Arc<RwLock<HashMap<String, watch::Sender<DocumentJobEvent>>>>,
     document_processing_locks: Arc<AsyncMutex<HashMap<String, Weak<AsyncMutex<()>>>>>,
     helix: Arc<HelixClient>,
@@ -30,20 +31,13 @@ impl AppState {
                 .map_err(|err| format!("failed to create database directory: {err}"))?;
         }
 
-        let connection = Connection::open(&db_path)
+        let db = SqliteClient::open(&db_path)
             .map_err(|err| format!("failed to open sqlite database: {err}"))?;
-        connection
-            .busy_timeout(Duration::from_secs(5))
-            .map_err(|err| format!("failed to configure sqlite busy timeout: {err}"))?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .map_err(|err| format!("failed to configure sqlite journal mode: {err}"))?;
-
-        run_migrations(&connection)?;
+        db.with_connection(|connection| run_migrations(connection))
+            .map_err(|err| format!("failed to initialize sqlite database: {err}"))?;
 
         Ok(Self {
-            db: Arc::new(Mutex::new(connection)),
-            db_path: Arc::new(db_path),
+            db,
             document_jobs: Arc::new(RwLock::new(HashMap::new())),
             document_processing_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             helix: Arc::new(HelixClient::new()?),
@@ -51,7 +45,11 @@ impl AppState {
     }
 
     pub fn db_path(&self) -> &Path {
-        self.db_path.as_path()
+        self.db.path()
+    }
+
+    pub fn sqlite(&self) -> &SqliteClient {
+        &self.db
     }
 
     pub fn helix(&self) -> &HelixClient {
@@ -106,12 +104,9 @@ impl AppState {
         &self,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, String> {
-        let db = self
-            .db
-            .lock()
-            .map_err(|_| "sqlite connection lock was poisoned".to_string())?;
-
-        f(&db).map_err(|err| format!("sqlite error: {err}"))
+        self.db
+            .with_connection(|connection| f(connection))
+            .map_err(|err| format!("sqlite error: {err}"))
     }
 }
 
@@ -135,7 +130,7 @@ fn database_path() -> Result<PathBuf, String> {
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
-fn run_migrations(connection: &Connection) -> Result<(), String> {
+fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
     connection
         .execute_batch(
             r#"
@@ -249,42 +244,29 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 ON deal_metadata(updated_at);
 
             "#,
-        )
-        .map_err(|err| format!("failed to initialize sqlite database: {err}"))?;
+        )?;
 
-    let user_version = connection
-        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
-        .map_err(|err| format!("failed to read sqlite schema version: {err}"))?;
+    let user_version =
+        connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))?;
 
-    if !column_exists(connection, "deals", "status")
-        .map_err(|err| format!("failed to inspect deals schema: {err}"))?
-    {
+    if !column_exists(connection, "deals", "status")? {
         connection
             .execute_batch(
                 r#"
                 ALTER TABLE deals
                     ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived'));
                 "#,
-            )
-            .map_err(|err| format!("failed to add deal status column: {err}"))?;
+            )?;
     }
 
-    connection
-        .execute_batch("CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);")
-        .map_err(|err| format!("failed to initialize deal status index: {err}"))?;
+    connection.execute_batch("CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);")?;
 
-    if column_exists(connection, "deal_metadata", "investment_thesis")
-        .map_err(|err| format!("failed to inspect deal metadata schema: {err}"))?
-    {
-        connection
-            .execute_batch("ALTER TABLE deal_metadata DROP COLUMN investment_thesis;")
-            .map_err(|err| format!("failed to remove deal investment thesis column: {err}"))?;
+    if column_exists(connection, "deal_metadata", "investment_thesis")? {
+        connection.execute_batch("ALTER TABLE deal_metadata DROP COLUMN investment_thesis;")?;
     }
 
     if user_version < 4 {
-        connection
-            .pragma_update(None, "user_version", 4)
-            .map_err(|err| format!("failed to set sqlite schema version: {err}"))?;
+        connection.pragma_update(None, "user_version", 4)?;
     }
 
     Ok(())

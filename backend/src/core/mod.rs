@@ -4,6 +4,7 @@ pub mod helix_queries;
 pub mod models;
 pub mod nodes;
 pub mod parsers;
+pub mod sqlbuilder;
 pub mod text_chunking;
 
 use std::fs;
