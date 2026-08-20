@@ -280,13 +280,12 @@
     box-shadow: var(--theme-panel-shadow);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+    transition: box-shadow 0.3s ease, background-color 0.3s ease;
   }
 
   .workspace-card:hover {
     background: var(--theme-panel-hover);
     box-shadow: var(--theme-panel-shadow-hover);
-    transform: scale(1.005);
   }
 
   .chip-card {

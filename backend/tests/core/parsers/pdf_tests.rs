@@ -14,6 +14,18 @@ use pdf_extract::{
     EncryptionState, EncryptionVersion, Object, Permissions, StringFormat,
 };
 
+fn assemble_pdf_pages(path: &Path, user_id: &str, pages: &[PdfPage]) -> PdfDocumentAssembly {
+    let (document_text, _) = document_text_with_page_ranges(pages);
+
+    parse_pdf_file_with_metadata(
+        Some(path),
+        user_id,
+        pages,
+        u64::try_from(document_text.len()).unwrap(),
+        deterministic_id(&document_text),
+    )
+}
+
 fn pdf_bytes_with_text(text: &str) -> Vec<u8> {
     let mut document = Document::with_version("1.5");
     let pages_id = document.new_object_id();

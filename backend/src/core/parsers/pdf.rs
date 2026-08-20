@@ -209,19 +209,6 @@ fn parse_pdf_file_with_metadata(
     PdfDocumentAssembly { document, chunks }
 }
 
-#[cfg(test)]
-fn assemble_pdf_pages(path: &Path, user_id: &str, pages: &[PdfPage]) -> PdfDocumentAssembly {
-    let (document_text, _) = document_text_with_page_ranges(pages);
-
-    parse_pdf_file_with_metadata(
-        Some(path),
-        user_id,
-        pages,
-        u64::try_from(document_text.len()).unwrap(),
-        deterministic_id(&document_text),
-    )
-}
-
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path)
         .map_err(|err| format!("failed to open PDF for hashing {}: {err}", path.display()))?;

@@ -851,4 +851,4 @@ fn non_empty(value: String) -> Option<String> {
 
 #[cfg(test)]
 #[path = "../../../tests/core/parsers/docx_tests.rs"]
-mod chunk_tests;
+mod tests;

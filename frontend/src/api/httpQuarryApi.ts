@@ -44,6 +44,7 @@ function apiUrl(path: string) {
   if (import.meta.env.MODE === "desktop" && !import.meta.env.DEV && !API_BASE_URL) {
     throw new Error("VITE_API_BASE_URL is required for packaged desktop builds.");
   }
+
   return `${API_BASE_URL}${path}`;
 }
 

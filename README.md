@@ -20,6 +20,8 @@ Quarry-multiplatform/
 │   ├── src/platform/         build-selected web/desktop adapters
 │   └── src-tauri/            thin Tauri 2 shell
 ├── backend/                  hosted Axum API baseline
+│   ├── src/                  application source
+│   └── tests/                mirrors src/ with *_tests.rs unit-test files
 ├── docs/adr/                 architecture decisions
 └── plans/                    full deployment and migration plan
 ```
