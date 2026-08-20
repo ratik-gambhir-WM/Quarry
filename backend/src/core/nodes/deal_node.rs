@@ -4,16 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealNode {
-    pub id: i64,
+    pub deal_id: String,
     pub deal_name: String,
-    pub main_data_room_folder: String,
-    pub deal_type: String,
-    pub pe_firm: String,
     pub status: String,
-    pub target_company: Option<String>,
-    pub buyer_or_platform_company: Option<String>,
-    pub parent_or_seller_company: Option<String>,
-    pub carve_out_business: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub start_date: String,
+    pub close_date: String,
+    pub transaction_type: String,
+    pub target_company: String,
+    pub primary_buyer: String,
+    pub deal_sponsor: String,
 }

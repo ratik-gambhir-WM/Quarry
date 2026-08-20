@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
@@ -8,7 +8,12 @@ import type { PreviewState } from "../components/data-room/DocumentPreviewPanel"
 import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
-import { getDealDataRoomView } from "../data/dataRoom";
+import { Icon } from "../components/ui/Icon";
+import {
+  getDealDataRoomView,
+  hasDataRoomFiles,
+  isUnconfiguredDataRoomError,
+} from "../data/dataRoom";
 import type { DataRoomTreeNode } from "../data/dataRoom";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
@@ -39,10 +44,16 @@ export function DataRoomPage() {
   const previewRequestId = useRef(0);
   const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
   const extractedDeal =
-    extractionResult && String(extractionResult.deal.id) === dealId
+    extractionResult && extractionResult.deal.dealId === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
   const deal = extractedDeal ?? deals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
+  const dataRoomHasFiles = useMemo(
+    () => hasDataRoomFiles(localDataRoom?.tree ?? []),
+    [localDataRoom?.tree],
+  );
+  const isEmptyDataRoom =
+    localDataRoom !== null && !treeLoading && !treeError && !dataRoomHasFiles;
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +79,16 @@ export function DataRoomPage() {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
+          if (isUnconfiguredDataRoomError(error)) {
+            setLocalDataRoom({
+              dealId,
+              rootName: "Data Room",
+              rootPath: "",
+              tree: [],
+            });
+            setTreeLoading(false);
+            return;
+          }
           setTreeError(error instanceof Error ? error.message : String(error));
           setTreeLoading(false);
         }
@@ -151,31 +172,37 @@ export function DataRoomPage() {
             treeLoading={treeLoading}
           />
           <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
-            <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
-              {selectedDocument ? (
-                <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
-                  <DocumentPreviewPanel
-                    document={selectedDocument}
-                    onClose={handleClosePreview}
-                    preview={preview}
+            {isEmptyDataRoom ? (
+              <EmptyDataRoomState />
+            ) : (
+              <>
+                <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
+                  {selectedDocument ? (
+                    <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
+                      <DocumentPreviewPanel
+                        document={selectedDocument}
+                        onClose={handleClosePreview}
+                        preview={preview}
+                      />
+                    </Suspense>
+                  ) : (
+                    <ReportEditorPanel
+                      blocks={dataRoomView.editorBlocks}
+                      reportTitle={dataRoomView.reportTitle}
+                      versionLabel={dataRoomView.versionLabel}
+                    />
+                  )}
+                </div>
+                {isChipBankOpen ? <ChipBankPanel chips={dataRoomView.chips} onCollapse={() => setIsChipBankOpen(false)} /> : null}
+                {!isChipBankOpen ? (
+                  <EdgePanelOpenButton
+                    label="Open document search"
+                    onClick={() => setIsChipBankOpen(true)}
+                    side="right"
                   />
-                </Suspense>
-              ) : (
-                <ReportEditorPanel
-                  blocks={dataRoomView.editorBlocks}
-                  reportTitle={dataRoomView.reportTitle}
-                  versionLabel={dataRoomView.versionLabel}
-                />
-              )}
-            </div>
-            {isChipBankOpen ? <ChipBankPanel chips={dataRoomView.chips} onCollapse={() => setIsChipBankOpen(false)} /> : null}
-            {!isChipBankOpen ? (
-              <EdgePanelOpenButton
-                label="Open document search"
-                onClick={() => setIsChipBankOpen(true)}
-                side="right"
-              />
-            ) : null}
+                ) : null}
+              </>
+            )}
           </main>
         </div>
       </div>
@@ -186,6 +213,31 @@ export function DataRoomPage() {
         <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />
       ) : null}
     </div>
+  );
+}
+
+function EmptyDataRoomState() {
+  return (
+    <section className="glass-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+      <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          Data Room Vault
+        </h1>
+      </header>
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="w-full max-w-[32rem] text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Icon className="h-8 w-8" name="folderOpen" />
+          </div>
+          <h2 className="mt-6 text-2xl font-bold tracking-[-0.02em] text-text-main [font-family:var(--font-heading)]">
+            You don’t have any files in your data room
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Upload files or connect SharePoint from the New analysis menu when you’re ready.
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 

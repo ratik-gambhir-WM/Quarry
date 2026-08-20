@@ -8,7 +8,10 @@ use serde::Deserialize;
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::errors::{AppError, AppResult};
+use crate::{
+    errors::{AppError, AppResult},
+    security::verify_main_window_origin,
+};
 
 const MAX_EXPORT_BYTES: usize = 5 * 1024 * 1024;
 const MAX_TITLE_CHARS: usize = 80;
@@ -29,7 +32,7 @@ pub async fn save_text_file(
     window: WebviewWindow,
     input: SaveFileInput,
 ) -> AppResult<bool> {
-    verify_window_origin(&window)?;
+    verify_main_window_origin(&window)?;
     validate_input(&input)?;
 
     tauri::async_runtime::spawn_blocking(move || save_text_file_blocking(&app, input))
@@ -125,28 +128,6 @@ fn validate_input(input: &SaveFileInput) -> AppResult<()> {
         ));
     }
     Ok(())
-}
-
-fn verify_window_origin(window: &WebviewWindow) -> AppResult<()> {
-    if window.label() != "main" {
-        return Err(AppError::permission("This window cannot save files."));
-    }
-
-    let url = window.url().map_err(AppError::internal)?;
-    let production_origin = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
-        || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"));
-    #[cfg(debug_assertions)]
-    let development_origin = url.scheme() == "http"
-        && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
-        && url.port() == Some(1420);
-    #[cfg(not(debug_assertions))]
-    let development_origin = false;
-
-    if production_origin || development_origin {
-        Ok(())
-    } else {
-        Err(AppError::permission("This origin cannot save files."))
-    }
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {

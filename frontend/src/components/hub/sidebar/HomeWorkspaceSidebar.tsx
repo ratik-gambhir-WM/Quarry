@@ -129,7 +129,7 @@ export function HomeWorkspaceSidebar({
         </div>
       </SidebarFrame>
 
-      {addDealModalOpen ? <AddDealModal onClose={() => setAddDealModalOpen(false)} /> : null}
+      {addDealModalOpen ? <AddDealModal email={email} onClose={() => setAddDealModalOpen(false)} /> : null}
     </>
   );
 }

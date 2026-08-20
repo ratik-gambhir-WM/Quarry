@@ -1,6 +1,11 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DealRoomData, DealTask, DealTimelineItem, DealTimelineTone } from "../../data/workspace";
-import { WorkspaceCard } from "../hub/WorkspaceCard";
+import {
+  moveReminder,
+  ReminderStatus,
+  toWorkflowReminder,
+  WorkflowReminder,
+} from "../../data/reminderWorkflow";
 import { Icon } from "../ui/Icon";
 import { ActivityTimelineCard } from "./ActivityTimelineCard";
 
@@ -150,8 +155,8 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
           </div>
         </header>
 
-        <div className="grid grid-cols-12 gap-8">
-          <WorkspaceCard className="col-span-12 p-6" radius="compact">
+        <div className="divide-y divide-outline-variant border-y border-outline-variant">
+          <section className="py-10">
             <div className="mb-7 flex items-center justify-between">
               <h2 className="type-h1 text-text-main">Activity Calendar</h2>
               <button
@@ -203,9 +208,9 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
                 Download PDF
               </button>
             </div>
-          </WorkspaceCard>
+          </section>
 
-          <ActivityTimelineCard className="col-span-12 flex min-h-[480px] flex-col p-6" items={events} />
+          <ActivityTimelineCard className="flex min-h-[480px] flex-col py-10" items={events} />
 
           <TaskKanbanBoard tasks={deal.pendingTasks} />
         </div>
@@ -340,32 +345,52 @@ type TaskKanbanBoardProps = {
 
 type TaskKanbanColumn = {
   description: string;
-  id: "done" | "in-progress" | "to-do";
-  tasks: DealTask[];
+  id: ReminderStatus;
+  tasks: WorkflowReminder[];
   title: string;
 };
 
+const reminderStatusLabels: Record<ReminderStatus, string> = {
+  done: "Done",
+  "in-progress": "In progress",
+  "to-do": "To-do",
+};
+
+const reminderStatuses: ReminderStatus[] = ["to-do", "in-progress", "done"];
+
+function getReminderStatusAtPoint(clientX: number, clientY: number): ReminderStatus | null {
+  const status = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-reminder-status]")
+    ?.dataset.reminderStatus;
+  return reminderStatuses.includes(status as ReminderStatus) ? (status as ReminderStatus) : null;
+}
+
 function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
-  const [reminders, setReminders] = useState<DealTask[]>(tasks);
+  const [reminders, setReminders] = useState<WorkflowReminder[]>(() =>
+    tasks.map(toWorkflowReminder),
+  );
+  const [draggedReminderId, setDraggedReminderId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<ReminderStatus | null>(null);
   const [newReminderLabel, setNewReminderLabel] = useState("");
   const [showNewReminderForm, setShowNewReminderForm] = useState(false);
   const columns: TaskKanbanColumn[] = [
     {
       description: "Open diligence reminders",
       id: "to-do",
-      tasks: reminders.filter((task) => !task.done && !task.priority),
+      tasks: reminders.filter((task) => task.status === "to-do"),
       title: "To-do",
     },
     {
       description: "Needs active follow-up",
       id: "in-progress",
-      tasks: reminders.filter((task) => !task.done && task.priority),
+      tasks: reminders.filter((task) => task.status === "in-progress"),
       title: "In progress",
     },
     {
       description: "Closed out reminders",
       id: "done",
-      tasks: reminders.filter((task) => task.done),
+      tasks: reminders.filter((task) => task.status === "done"),
       title: "Done",
     },
   ];
@@ -383,15 +408,47 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
       {
         id: `reminder-${Date.now()}`,
         label,
+        status: "to-do",
       },
     ]);
     setNewReminderLabel("");
     setShowNewReminderForm(false);
   }
 
+  function updateReminderStatus(reminderId: string, status: ReminderStatus) {
+    setReminders((current) => moveReminder(current, reminderId, status));
+  }
+
+  function handlePointerStart(event: PointerEvent<HTMLElement>, reminderId: string) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggedReminderId(reminderId);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLElement>) {
+    const status = getReminderStatusAtPoint(event.clientX, event.clientY);
+    setDropTarget(status);
+  }
+
+  function handlePointerEnd(event: PointerEvent<HTMLElement>, reminderId: string) {
+    const status = getReminderStatusAtPoint(event.clientX, event.clientY);
+    if (status) updateReminderStatus(reminderId, status);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDraggedReminderId(null);
+    setDropTarget(null);
+  }
+
+  function handlePointerCancel() {
+    setDraggedReminderId(null);
+    setDropTarget(null);
+  }
+
   return (
-    <section className="col-span-12">
-      <div className="mb-5 flex items-center justify-between gap-4">
+    <section className="py-10">
+      <div className="mb-7 flex items-center justify-between gap-4">
         <div>
           <h2 className="type-h1 text-text-main">Pending Tasks</h2>
           <p className="mt-1 text-[13px] text-text-main/70">Track diligence reminders by workflow status.</p>
@@ -407,10 +464,16 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
         </button>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid divide-y divide-outline-variant border-y border-outline-variant lg:grid-cols-3 lg:divide-x lg:divide-y-0">
         {columns.map((column) => (
-          <WorkspaceCard className="flex min-h-[260px] flex-col p-5" key={column.id} radius="compact">
-            <div className="mb-5 flex items-start justify-between gap-4">
+          <section
+            className={`flex min-h-[260px] flex-col px-6 py-6 transition-colors ${
+              dropTarget === column.id ? "bg-primary/5" : ""
+            }`}
+            data-reminder-status={column.id}
+            key={column.id}
+          >
+            <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <h3 className="type-h3 text-text-main">{column.title}</h3>
                 <p className="mt-1 text-[12px] text-text-main/62">{column.description}</p>
@@ -420,10 +483,10 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
               </span>
             </div>
 
-            <div className="flex flex-1 flex-col gap-3">
+            <div className="flex flex-1 flex-col gap-5">
               {column.id === "to-do" && showNewReminderForm ? (
                 <form
-                  className="rounded-[15px] border border-primary/20 bg-white/74 p-4 shadow-[0_8px_20px_rgba(7,1,84,0.04)]"
+                  className="border-y border-primary/20 py-4"
                   onSubmit={handleAddReminder}
                 >
                   <label className="block">
@@ -459,42 +522,100 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
               ) : null}
 
               {column.tasks.length > 0 ? (
-                column.tasks.map((task) => <ReminderCard key={task.id} status={column.title} task={task} />)
+                <div className="divide-y divide-outline-variant border-y border-outline-variant">
+                  {column.tasks.map((task) => (
+                    <ReminderRow
+                      dragging={draggedReminderId === task.id}
+                      key={task.id}
+                      onMove={updateReminderStatus}
+                      onPointerCancel={handlePointerCancel}
+                      onPointerEnd={handlePointerEnd}
+                      onPointerMove={handlePointerMove}
+                      onPointerStart={handlePointerStart}
+                      task={task}
+                    />
+                  ))}
+                </div>
               ) : (
-                <div className="flex min-h-28 items-center justify-center rounded-[15px] border border-dashed border-outline-variant bg-white/34 px-4 text-center text-[13px] font-medium text-muted">
-                  No reminders here yet.
+                <div className="flex min-h-28 items-center justify-center border-y border-dashed border-outline-variant px-4 text-center text-[13px] font-medium text-muted">
+                  {draggedReminderId ? `Drop in ${column.title}` : "No reminders here yet."}
                 </div>
               )}
             </div>
-          </WorkspaceCard>
+          </section>
         ))}
       </div>
     </section>
   );
 }
 
-type ReminderCardProps = {
-  status: string;
-  task: DealTask;
+type ReminderRowProps = {
+  dragging: boolean;
+  onMove: (reminderId: string, status: ReminderStatus) => void;
+  onPointerCancel: () => void;
+  onPointerEnd: (event: PointerEvent<HTMLElement>, reminderId: string) => void;
+  onPointerMove: (event: PointerEvent<HTMLElement>) => void;
+  onPointerStart: (event: PointerEvent<HTMLElement>, reminderId: string) => void;
+  task: WorkflowReminder;
 };
 
-function ReminderCard({ status, task }: ReminderCardProps) {
+function ReminderRow({
+  dragging,
+  onMove,
+  onPointerCancel,
+  onPointerEnd,
+  onPointerMove,
+  onPointerStart,
+  task,
+}: ReminderRowProps) {
   return (
     <article
-      className={`rounded-[15px] border bg-white/70 p-4 shadow-[0_8px_20px_rgba(7,1,84,0.04)] ${
-        task.priority ? "border-error/20" : "border-white/80"
+      aria-label={`${task.label}, ${reminderStatusLabels[task.status]}`}
+      className={`flex items-start gap-3 py-4 transition ${
+        dragging ? "opacity-40" : "opacity-100"
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <span
+        aria-label={`Drag ${task.label} to another status`}
+        className="mt-1 flex h-7 w-5 shrink-0 touch-none cursor-grab select-none items-center justify-center text-muted active:cursor-grabbing"
+        onPointerCancel={onPointerCancel}
+        onPointerDown={(event) => onPointerStart(event, task.id)}
+        onPointerMove={onPointerMove}
+        onPointerUp={(event) => onPointerEnd(event, task.id)}
+        title="Drag to another status"
+      >
+        <Icon className="h-4 w-4 rotate-90" name="more" />
+      </span>
+      <div className="min-w-0 flex-1">
         <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${task.priority ? "text-error/70" : "text-muted/80"}`}>
-          {task.priority ? "High Priority" : status}
+          {task.priority ? "High Priority" : reminderStatusLabels[task.status]}
         </p>
-        <span className={`mt-0.5 h-2.5 w-2.5 rounded-full ${task.done ? "bg-primary" : task.priority ? "bg-error" : "bg-muted"}`} />
+        <h4 className={`mt-1 text-[15px] font-bold leading-6 text-text-main ${task.done ? "line-through opacity-60" : ""}`}>
+          {task.label}
+        </h4>
+        <p className={`mt-1 text-[12px] leading-5 ${task.priority ? "text-error" : "text-text-main/68"}`}>
+          {task.done
+            ? "Task completed."
+            : task.priority
+              ? "Needs immediate follow-up before the next review cycle."
+              : "Open reminder for the diligence team."}
+        </p>
       </div>
-      <h4 className={`mt-3 text-[15px] font-bold leading-6 text-text-main ${task.done ? "line-through opacity-60" : ""}`}>{task.label}</h4>
-      <p className={`mt-4 rounded-[13px] px-4 py-3 text-[13px] leading-6 ${task.priority ? "bg-error-container/20 text-error" : "bg-surface-container-high/70 text-text-main/72"}`}>
-        {task.done ? "Task completed." : task.priority ? "Needs immediate follow-up before the next review cycle." : "Open reminder for the diligence team."}
-      </p>
+      <label className="shrink-0">
+        <span className="sr-only">Move {task.label}</span>
+        <select
+          aria-label={`Move ${task.label}`}
+          className="h-9 rounded-lg border border-outline-variant bg-background px-2 text-[11px] font-semibold text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+          onChange={(event) => onMove(task.id, event.currentTarget.value as ReminderStatus)}
+          value={task.status}
+        >
+          {reminderStatuses.map((status) => (
+            <option key={status} value={status}>
+              {reminderStatusLabels[status]}
+            </option>
+          ))}
+        </select>
+      </label>
     </article>
   );
 }

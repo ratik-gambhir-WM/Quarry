@@ -1,4 +1,4 @@
-use rusqlite::{params, params_from_iter, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -9,7 +9,6 @@ use crate::{
             get_deal_by_id as build_get_deal_by_id_query,
         },
         nodes::deal_node::DealNode,
-        sqlbuilder::{ConflictUpdate, SqlBuilder},
     },
     state::AppState,
 };
@@ -17,30 +16,25 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deal {
-    pub id: i64,
+    pub deal_id: String,
     pub deal_name: String,
-    pub main_data_room_folder: String,
-    pub deal_type: String,
-    pub pe_firm: String,
     pub status: String,
-    pub target_company: Option<String>,
-    pub buyer_or_platform_company: Option<String>,
-    pub parent_or_seller_company: Option<String>,
-    pub carve_out_business: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub start_date: String,
+    pub close_date: String,
+    pub transaction_type: String,
+    pub target_company: String,
+    pub primary_buyer: String,
+    pub deal_sponsor: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealMetadata {
-    pub id: i64,
-    pub deal_id: i64,
+    pub deal_id: String,
+    pub user_id: i64,
     pub key_questions_json: String,
-    pub document_count: i64,
-    pub data_room_size_bytes: i64,
-    pub created_at: String,
-    pub updated_at: String,
+    pub local_path: Option<String>,
+    pub sharepoint_link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,50 +46,49 @@ pub struct DealWithMetadata {
 }
 
 pub struct CreateDealRecord<'a> {
+    pub deal_id: &'a str,
     pub deal_name: &'a str,
-    pub main_data_room_folder: &'a str,
-    pub deal_type: &'a str,
-    pub pe_firm: &'a str,
-    pub target_company: Option<&'a str>,
-    pub buyer_or_platform_company: Option<&'a str>,
-    pub parent_or_seller_company: Option<&'a str>,
-    pub carve_out_business: Option<&'a str>,
+    pub status: &'a str,
+    pub start_date: &'a str,
+    pub close_date: &'a str,
+    pub transaction_type: &'a str,
+    pub target_company: &'a str,
+    pub primary_buyer: &'a str,
+    pub deal_sponsor: &'a str,
 }
 
 pub struct UpsertDealMetadataRecord<'a> {
-    pub deal_id: i64,
+    pub deal_id: &'a str,
+    pub user_id: i64,
     pub key_questions_json: &'a str,
-    pub document_count: i64,
-    pub data_room_size_bytes: i64,
+    pub local_path: Option<&'a str>,
+    pub sharepoint_link: Option<&'a str>,
 }
 
 pub fn create_deal(state: &AppState, record: CreateDealRecord<'_>) -> Result<Deal, String> {
-    let deal_id = state.with_db(|db| {
+    state.with_db(|db| {
         db.execute(
             r#"
             INSERT INTO deals (
-                deal_name, main_data_room_folder, deal_type, pe_firm,
-                target_company, buyer_or_platform_company,
-                parent_or_seller_company, carve_out_business
+                deal_id, deal_name, status, start_date, close_date,
+                transaction_type, target_company, primary_buyer, deal_sponsor
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             "#,
             params![
+                record.deal_id,
                 record.deal_name,
-                record.main_data_room_folder,
-                record.deal_type,
-                record.pe_firm,
+                record.status,
+                record.start_date,
+                record.close_date,
+                record.transaction_type,
                 record.target_company,
-                record.buyer_or_platform_company,
-                record.parent_or_seller_company,
-                record.carve_out_business
+                record.primary_buyer,
+                record.deal_sponsor,
             ],
         )?;
-        Ok(db.last_insert_rowid())
-    })?;
-
-    get_deal_by_id(state, deal_id)?
-        .ok_or_else(|| format!("failed to fetch deal after insert for id `{deal_id}`"))
+        deal_by_id(db, record.deal_id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    })
 }
 
 /// Persists a complete deal row and its user relationship through Helix.
@@ -112,50 +105,36 @@ pub async fn upsert_helix_deal(
     state.helix().execute_dynamic_query(move || query).await
 }
 
-pub async fn get_helix_deal_by_id(state: &AppState, deal_id: i64) -> Result<Value, String> {
-    let query = build_get_deal_by_id_query(deal_id)?;
+pub async fn get_helix_deal_by_id(state: &AppState, deal_id: &str) -> Result<Value, String> {
+    let query = build_get_deal_by_id_query(deal_id.to_string())?;
     state.helix().execute_dynamic_query(move || query).await
 }
 
-pub fn get_deal_by_id(state: &AppState, deal_id: i64) -> Result<Option<Deal>, String> {
-    state.with_db(|db| {
-        db.query_row(
-            r#"
-            SELECT id, deal_name, main_data_room_folder, deal_type, pe_firm, status,
-                   target_company, buyer_or_platform_company, parent_or_seller_company,
-                   carve_out_business, created_at, updated_at
-            FROM deals
-            WHERE id = ?1
-            "#,
-            [deal_id],
-            deal_from_row,
-        )
-        .optional()
-    })
+pub fn get_deal_by_id(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
+    state.with_db(|db| deal_by_id(db, deal_id))
 }
 
 pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
     let deals = state.with_db(|db| {
         let mut statement = db.prepare(
             r#"
-            SELECT id, deal_name, main_data_room_folder, deal_type, pe_firm, status,
-                   target_company, buyer_or_platform_company, parent_or_seller_company,
-                   carve_out_business, created_at, updated_at
+            SELECT deal_id, deal_name, status, start_date, close_date,
+                   transaction_type, target_company, primary_buyer, deal_sponsor
             FROM deals
-            WHERE status = 'active'
-            ORDER BY updated_at DESC, id DESC
+            WHERE lower(status) <> 'archived'
+            ORDER BY close_date ASC, deal_id ASC
             "#,
         )?;
-        let rows = statement
+        let deals = statement
             .query_map([], deal_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        Ok(deals)
     })?;
 
     deals
         .into_iter()
         .map(|deal| {
-            let metadata = get_deal_metadata_by_deal_id(state, deal.id)?;
+            let metadata = get_deal_metadata_by_deal_id(state, &deal.deal_id)?;
             Ok(DealWithMetadata { deal, metadata })
         })
         .collect()
@@ -163,7 +142,7 @@ pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
 
 pub fn get_deal_with_metadata(
     state: &AppState,
-    deal_id: i64,
+    deal_id: &str,
 ) -> Result<Option<DealWithMetadata>, String> {
     let Some(deal) = get_deal_by_id(state, deal_id)? else {
         return Ok(None);
@@ -174,13 +153,12 @@ pub fn get_deal_with_metadata(
 
 pub fn get_deal_metadata_by_deal_id(
     state: &AppState,
-    deal_id: i64,
+    deal_id: &str,
 ) -> Result<Option<DealMetadata>, String> {
     state.with_db(|db| {
         db.query_row(
             r#"
-            SELECT id, deal_id, key_questions_json,
-                   document_count, data_room_size_bytes, created_at, updated_at
+            SELECT deal_id, user_id, key_questions_json, local_path, sharepoint_link
             FROM deal_metadata
             WHERE deal_id = ?1
             "#,
@@ -195,28 +173,30 @@ pub fn upsert_deal_metadata(
     state: &AppState,
     record: UpsertDealMetadataRecord<'_>,
 ) -> Result<DealMetadata, String> {
-    let upsert = SqlBuilder::insert_into("deal_metadata")
-        .value("deal_id", record.deal_id)
-        .value("key_questions_json", record.key_questions_json)
-        .value("document_count", record.document_count)
-        .value("data_room_size_bytes", record.data_room_size_bytes)
-        .on_conflict_update(
-            ConflictUpdate::new(["deal_id"])
-                .set_excluded("key_questions_json")
-                .set_excluded("document_count")
-                .set_excluded("data_room_size_bytes")
-                .set_current_timestamp("updated_at"),
-        )
-        .build()
-        .map_err(|error| format!("failed to build deal metadata upsert: {error}"))?;
-
     state.with_db(|db| {
-        db.execute(upsert.sql(), params_from_iter(upsert.parameters()))?;
-
+        db.execute(
+            r#"
+            INSERT INTO deal_metadata (
+                deal_id, user_id, key_questions_json, local_path, sharepoint_link
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(deal_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                key_questions_json = excluded.key_questions_json,
+                local_path = excluded.local_path,
+                sharepoint_link = excluded.sharepoint_link
+            "#,
+            params![
+                record.deal_id,
+                record.user_id,
+                record.key_questions_json,
+                record.local_path,
+                record.sharepoint_link,
+            ],
+        )?;
         db.query_row(
             r#"
-            SELECT id, deal_id, key_questions_json,
-                   document_count, data_room_size_bytes, created_at, updated_at
+            SELECT deal_id, user_id, key_questions_json, local_path, sharepoint_link
             FROM deal_metadata
             WHERE deal_id = ?1
             "#,
@@ -226,10 +206,10 @@ pub fn upsert_deal_metadata(
     })
 }
 
-pub fn archive_deal(state: &AppState, deal_id: i64) -> Result<Option<Deal>, String> {
+pub fn archive_deal(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
     let updated = state.with_db(|db| {
         db.execute(
-            "UPDATE deals SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            "UPDATE deals SET status = 'Archived' WHERE deal_id = ?1",
             [deal_id],
         )
     })?;
@@ -239,31 +219,40 @@ pub fn archive_deal(state: &AppState, deal_id: i64) -> Result<Option<Deal>, Stri
     get_deal_by_id(state, deal_id)
 }
 
+fn deal_by_id(db: &rusqlite::Connection, deal_id: &str) -> rusqlite::Result<Option<Deal>> {
+    db.query_row(
+        r#"
+        SELECT deal_id, deal_name, status, start_date, close_date,
+               transaction_type, target_company, primary_buyer, deal_sponsor
+        FROM deals
+        WHERE deal_id = ?1
+        "#,
+        [deal_id],
+        deal_from_row,
+    )
+    .optional()
+}
+
 fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
     Ok(Deal {
-        id: row.get("id")?,
+        deal_id: row.get("deal_id")?,
         deal_name: row.get("deal_name")?,
-        main_data_room_folder: row.get("main_data_room_folder")?,
-        deal_type: row.get("deal_type")?,
-        pe_firm: row.get("pe_firm")?,
         status: row.get("status")?,
+        start_date: row.get("start_date")?,
+        close_date: row.get("close_date")?,
+        transaction_type: row.get("transaction_type")?,
         target_company: row.get("target_company")?,
-        buyer_or_platform_company: row.get("buyer_or_platform_company")?,
-        parent_or_seller_company: row.get("parent_or_seller_company")?,
-        carve_out_business: row.get("carve_out_business")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
+        primary_buyer: row.get("primary_buyer")?,
+        deal_sponsor: row.get("deal_sponsor")?,
     })
 }
 
 fn deal_metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
     Ok(DealMetadata {
-        id: row.get("id")?,
         deal_id: row.get("deal_id")?,
+        user_id: row.get("user_id")?,
         key_questions_json: row.get("key_questions_json")?,
-        document_count: row.get("document_count")?,
-        data_room_size_bytes: row.get("data_room_size_bytes")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
+        local_path: row.get("local_path")?,
+        sharepoint_link: row.get("sharepoint_link")?,
     })
 }

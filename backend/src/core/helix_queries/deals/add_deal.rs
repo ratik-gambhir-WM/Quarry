@@ -6,108 +6,67 @@ pub const DEAL_LABEL: &str = "Deal";
 pub const USER_HAS_DEAL_LABEL: &str = "HAS_DEAL";
 
 pub fn add_deal(deal: DealNode, user_id: i64) -> Result<DynamicQueryRequest, String> {
-    let DealNode {
-        id,
-        deal_name,
-        main_data_room_folder,
-        deal_type,
-        pe_firm,
-        status,
-        target_company,
-        buyer_or_platform_company,
-        parent_or_seller_company,
-        carve_out_business,
-        created_at,
-        updated_at,
-    } = deal;
-
-    validate_deal_id(id)?;
+    validate_deal_id(&deal.deal_id)?;
     validate_user_id(user_id)?;
-
     Ok(add_deal_mutation(
-        id,
+        deal.deal_id,
         user_id,
-        deal_name,
-        main_data_room_folder,
-        deal_type,
-        pe_firm,
-        status,
-        optional_string_property(target_company),
-        optional_string_property(buyer_or_platform_company),
-        optional_string_property(parent_or_seller_company),
-        optional_string_property(carve_out_business),
-        created_at,
-        updated_at,
+        deal.deal_name,
+        deal.status,
+        deal.start_date,
+        deal.close_date,
+        deal.transaction_type,
+        deal.target_company,
+        deal.primary_buyer,
+        deal.deal_sponsor,
     ))
 }
 
 #[allow(clippy::too_many_arguments)]
 #[register]
 fn add_deal_mutation(
-    id: i64,
+    deal_id: String,
     user_id: i64,
     deal_name: String,
-    main_data_room_folder: String,
-    deal_type: String,
-    pe_firm: String,
     status: String,
-    target_company: PropertyValue,
-    buyer_or_platform_company: PropertyValue,
-    parent_or_seller_company: PropertyValue,
-    carve_out_business: PropertyValue,
-    created_at: String,
-    updated_at: String,
+    start_date: String,
+    close_date: String,
+    transaction_type: String,
+    target_company: String,
+    primary_buyer: String,
+    deal_sponsor: String,
 ) -> WriteBatch {
     let _ = (
-        &id,
+        &deal_id,
         &user_id,
         &deal_name,
-        &main_data_room_folder,
-        &deal_type,
-        &pe_firm,
         &status,
+        &start_date,
+        &close_date,
+        &transaction_type,
         &target_company,
-        &buyer_or_platform_company,
-        &parent_or_seller_company,
-        &carve_out_business,
-        &created_at,
-        &updated_at,
+        &primary_buyer,
+        &deal_sponsor,
     );
-
     write_batch()
         .var_as(
             "existing_deal",
             g().n_with_label(DEAL_LABEL)
-                .where_(Predicate::eq_param("id", "id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as_if(
             "updated_deal",
             BatchCondition::VarNotEmpty("existing_deal".to_string()),
             g().n(NodeRef::var("existing_deal"))
-                .set_property("id", PropertyInput::param("id"))
+                .set_property("deal_id", PropertyInput::param("deal_id"))
                 .set_property("deal_name", PropertyInput::param("deal_name"))
-                .set_property(
-                    "main_data_room_folder",
-                    PropertyInput::param("main_data_room_folder"),
-                )
-                .set_property("deal_type", PropertyInput::param("deal_type"))
-                .set_property("pe_firm", PropertyInput::param("pe_firm"))
                 .set_property("status", PropertyInput::param("status"))
+                .set_property("start_date", PropertyInput::param("start_date"))
+                .set_property("close_date", PropertyInput::param("close_date"))
+                .set_property("transaction_type", PropertyInput::param("transaction_type"))
                 .set_property("target_company", PropertyInput::param("target_company"))
-                .set_property(
-                    "buyer_or_platform_company",
-                    PropertyInput::param("buyer_or_platform_company"),
-                )
-                .set_property(
-                    "parent_or_seller_company",
-                    PropertyInput::param("parent_or_seller_company"),
-                )
-                .set_property(
-                    "carve_out_business",
-                    PropertyInput::param("carve_out_business"),
-                )
-                .set_property("created_at", PropertyInput::param("created_at"))
-                .set_property("updated_at", PropertyInput::param("updated_at"))
+                .set_property("primary_buyer", PropertyInput::param("primary_buyer"))
+                .set_property("deal_sponsor", PropertyInput::param("deal_sponsor"))
                 .project(deal_projection()),
         )
         .var_as_if(
@@ -116,30 +75,15 @@ fn add_deal_mutation(
             g().add_n(
                 DEAL_LABEL,
                 vec![
-                    ("id", PropertyInput::param("id")),
+                    ("deal_id", PropertyInput::param("deal_id")),
                     ("deal_name", PropertyInput::param("deal_name")),
-                    (
-                        "main_data_room_folder",
-                        PropertyInput::param("main_data_room_folder"),
-                    ),
-                    ("deal_type", PropertyInput::param("deal_type")),
-                    ("pe_firm", PropertyInput::param("pe_firm")),
                     ("status", PropertyInput::param("status")),
+                    ("start_date", PropertyInput::param("start_date")),
+                    ("close_date", PropertyInput::param("close_date")),
+                    ("transaction_type", PropertyInput::param("transaction_type")),
                     ("target_company", PropertyInput::param("target_company")),
-                    (
-                        "buyer_or_platform_company",
-                        PropertyInput::param("buyer_or_platform_company"),
-                    ),
-                    (
-                        "parent_or_seller_company",
-                        PropertyInput::param("parent_or_seller_company"),
-                    ),
-                    (
-                        "carve_out_business",
-                        PropertyInput::param("carve_out_business"),
-                    ),
-                    ("created_at", PropertyInput::param("created_at")),
-                    ("updated_at", PropertyInput::param("updated_at")),
+                    ("primary_buyer", PropertyInput::param("primary_buyer")),
+                    ("deal_sponsor", PropertyInput::param("deal_sponsor")),
                 ],
             )
             .project(deal_projection()),
@@ -147,7 +91,7 @@ fn add_deal_mutation(
         .var_as(
             "deal",
             g().n_with_label(DEAL_LABEL)
-                .where_(Predicate::eq_param("id", "id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as(
             "user",
@@ -158,7 +102,7 @@ fn add_deal_mutation(
             "existing_user_deal",
             g().e_with_label(USER_HAS_DEAL_LABEL)
                 .where_(Predicate::eq_param("user_id", "user_id"))
-                .where_(Predicate::eq_param("deal_id", "id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as_if(
             "user_has_deal",
@@ -168,7 +112,7 @@ fn add_deal_mutation(
                 NodeRef::var("deal"),
                 vec![
                     ("user_id", PropertyInput::param("user_id")),
-                    ("deal_id", PropertyInput::param("id")),
+                    ("deal_id", PropertyInput::param("deal_id")),
                 ],
             ),
         )
@@ -180,19 +124,19 @@ fn add_deal_mutation(
         ])
 }
 
-pub fn get_deal_by_id(deal_id: i64) -> Result<DynamicQueryRequest, String> {
-    validate_deal_id(deal_id)?;
+pub fn get_deal_by_id(deal_id: String) -> Result<DynamicQueryRequest, String> {
+    validate_deal_id(&deal_id)?;
     Ok(get_deal_by_id_query(deal_id))
 }
 
 #[register]
-fn get_deal_by_id_query(id: i64) -> ReadBatch {
-    let _ = &id;
+fn get_deal_by_id_query(deal_id: String) -> ReadBatch {
+    let _ = &deal_id;
     read_batch()
         .var_as(
             "deal",
             g().n_with_label(DEAL_LABEL)
-                .where_(Predicate::eq_param("id", "id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .limit(1)
                 .project(deal_projection()),
         )
@@ -204,19 +148,18 @@ pub fn create_deal_indexes() -> WriteBatch {
     write_batch()
         .var_as(
             "deal_id_unique",
-            g().create_index_if_not_exists(IndexSpec::node_unique_equality(DEAL_LABEL, "id")),
+            g().create_index_if_not_exists(IndexSpec::node_unique_equality(DEAL_LABEL, "deal_id")),
         )
         .var_as(
-            "deal_type",
-            g().create_index_if_not_exists(IndexSpec::node_equality(DEAL_LABEL, "deal_type")),
+            "deal_transaction_type",
+            g().create_index_if_not_exists(IndexSpec::node_equality(
+                DEAL_LABEL,
+                "transaction_type",
+            )),
         )
         .var_as(
-            "deal_pe_firm",
-            g().create_index_if_not_exists(IndexSpec::node_equality(DEAL_LABEL, "pe_firm")),
-        )
-        .var_as(
-            "deal_updated_at",
-            g().create_index_if_not_exists(IndexSpec::node_equality(DEAL_LABEL, "updated_at")),
+            "deal_close_date",
+            g().create_index_if_not_exists(IndexSpec::node_equality(DEAL_LABEL, "close_date")),
         )
         .var_as(
             "user_has_deal_user_id",
@@ -237,28 +180,21 @@ pub fn create_deal_indexes() -> WriteBatch {
 fn deal_projection() -> Vec<PropertyProjection> {
     vec![
         PropertyProjection::renamed("$id", "helix_id"),
-        PropertyProjection::new("id"),
+        PropertyProjection::new("deal_id"),
         PropertyProjection::new("deal_name"),
-        PropertyProjection::new("main_data_room_folder"),
-        PropertyProjection::new("deal_type"),
-        PropertyProjection::new("pe_firm"),
         PropertyProjection::new("status"),
+        PropertyProjection::new("start_date"),
+        PropertyProjection::new("close_date"),
+        PropertyProjection::new("transaction_type"),
         PropertyProjection::new("target_company"),
-        PropertyProjection::new("buyer_or_platform_company"),
-        PropertyProjection::new("parent_or_seller_company"),
-        PropertyProjection::new("carve_out_business"),
-        PropertyProjection::new("created_at"),
-        PropertyProjection::new("updated_at"),
+        PropertyProjection::new("primary_buyer"),
+        PropertyProjection::new("deal_sponsor"),
     ]
 }
 
-fn optional_string_property(value: Option<String>) -> PropertyValue {
-    value.map_or(PropertyValue::Null, PropertyValue::String)
-}
-
-fn validate_deal_id(id: i64) -> Result<(), String> {
-    if id <= 0 {
-        Err("deal id must be greater than zero".to_string())
+fn validate_deal_id(id: &str) -> Result<(), String> {
+    if !id.starts_with("DEAL-") {
+        Err("deal id must start with DEAL-".to_string())
     } else {
         Ok(())
     }

@@ -1,7 +1,6 @@
 import { Icon } from "../ui/Icon";
 
 type DealRoomOverviewProps = {
-  description?: string;
   subtitle: string;
 };
 
@@ -20,13 +19,10 @@ export function DealRoomHeader() {
   );
 }
 
-export function DealRoomOverview({ description, subtitle }: DealRoomOverviewProps) {
+export function DealRoomOverview({ subtitle }: DealRoomOverviewProps) {
   return (
     <header>
       <p className="type-subtle text-muted">{subtitle}</p>
-      {description ? (
-        <p className="mt-4 max-w-4xl text-[1.05rem] leading-8 text-text-main/90">{description}</p>
-      ) : null}
     </header>
   );
 }

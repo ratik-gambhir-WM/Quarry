@@ -31,12 +31,12 @@ pub(crate) async fn save_helix_deal_handler(
 
 pub(crate) async fn get_helix_deal_handler(
     State(state): State<AppState>,
-    Path(deal_id): Path<i64>,
+    Path(deal_id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    if deal_id <= 0 {
-        return Err(AppError::bad_request("dealId must be greater than zero"));
+    if !deal_id.starts_with("DEAL-") {
+        return Err(AppError::bad_request("dealId must start with DEAL-"));
     }
-    get_helix_deal(&state, deal_id)
+    get_helix_deal(&state, &deal_id)
         .await
         .map(Json)
         .map_err(AppError::internal)

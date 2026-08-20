@@ -22,7 +22,7 @@ export function DealRoomPage() {
   const { deals: persistedDeals, loaded } = useWorkspaceDeals();
   const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
   const extractedDeal =
-    extractionResult && String(extractionResult.deal.id) === dealId
+    extractionResult && extractionResult.deal.dealId === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
   const deal = extractedDeal ?? persistedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
@@ -90,7 +90,7 @@ export function DealRoomPage() {
           />
         ) : (
           <>
-            <DealRoomOverview description={deal.room.summary} subtitle={deal.room.overviewSubtitle} />
+            <DealRoomOverview subtitle={deal.room.overviewSubtitle} />
 
             <div className="grid grid-cols-12 gap-6">
               <DealSummaryCard deal={deal.room} />

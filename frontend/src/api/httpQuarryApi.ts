@@ -11,10 +11,9 @@ import type {
   SummarizableFile,
 } from "../contracts/quarryApi";
 import type {
-  ExtractDealQuestionsInput,
-  SaveDealAndExtractInput,
-  SaveDealAndExtractResponse,
-  SaveDealAndFindFilesResponse,
+  SaveDealInput,
+  SaveDealMetadataResponse,
+  SaveDealResponse,
   SavedDeal,
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
@@ -123,11 +122,11 @@ async function requestJson<TResponse>(path: string, init?: RequestInit, requestD
   }
 }
 
-async function getJson<TResponse>(path: string): Promise<TResponse> {
+async function get<TResponse>(path: string): Promise<TResponse> {
   return requestJson<TResponse>(path);
 }
 
-async function postJson<TResponse, TPayload>(
+async function post<TResponse, TPayload>(
   path: string,
   payload: TPayload,
 ): Promise<TResponse> {
@@ -145,41 +144,30 @@ async function postForm<TResponse>(path: string, formData: FormData): Promise<TR
   }, summarizeFormData(formData));
 }
 
-function createDeal(input: SaveDealAndExtractInput) {
-  return postJson<SaveDealAndFindFilesResponse, SaveDealAndExtractInput>("/api/v1/deals", input);
+function createDeal(input: SaveDealInput) {
+  return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
 }
 
-function createDealFromUpload(input: SaveDealAndExtractInput, files: File[]) {
+function saveDealMetadata(dealId: string, files: File[]) {
   const form = new FormData();
-  form.append("input", JSON.stringify(input));
   appendFiles(form, files);
-  return postForm<SaveDealAndFindFilesResponse>("/api/v1/deals/upload", form);
-}
-
-function extractDealQuestions(input: ExtractDealQuestionsInput) {
-  return postJson<SaveDealAndExtractResponse, ExtractDealQuestionsInput>(
-    `/api/v1/deals/${encodeURIComponent(String(input.dealId))}/extraction`,
-    input,
+  return postForm<SaveDealMetadataResponse>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/metadata`,
+    form,
   );
 }
 
-function extractDealQuestionsFromUpload(dealId: number, files: File[]) {
-  const form = new FormData();
-  appendFiles(form, files);
-  return postForm<SaveDealAndExtractResponse>(`/api/v1/deals/${dealId}/extraction/upload`, form);
-}
-
 function listDeals() {
-  return getJson<PersistedDeal[]>("/api/v1/deals");
+  return get<PersistedDeal[]>("/api/v1/deals");
 }
 
-function getDeal(dealId: string | number) {
-  return getJson<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(String(dealId))}`);
+function getDeal(dealId: string) {
+  return get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`);
 }
 
-function archiveDeal(dealId: string | number) {
-  return postJson<SavedDeal, Record<string, never>>(
-    `/api/v1/deals/${encodeURIComponent(String(dealId))}/archive`,
+function archiveDeal(dealId: string) {
+  return post<SavedDeal, Record<string, never>>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/archive`,
     {},
   );
 }
@@ -270,20 +258,20 @@ function subscribeToProcessFileJob(
 }
 
 function searchDocumentChunksByVector(search: ChunkVectorSearch) {
-  return postJson<unknown, ChunkVectorSearch>("/api/v1/documents/search/vector", search);
+  return post<unknown, ChunkVectorSearch>("/api/v1/documents/search/vector", search);
 }
 
 function searchDocumentChunksByKeyword(search: ChunkKeywordSearch) {
-  return postJson<unknown, ChunkKeywordSearch>("/api/v1/documents/search/keyword", search);
+  return post<unknown, ChunkKeywordSearch>("/api/v1/documents/search/keyword", search);
 }
 
 function createUser(input: AddUserInput) {
-  return postJson<WorkspaceAccountUser, AddUserInput>("/api/v1/users", input);
+  return post<WorkspaceAccountUser, AddUserInput>("/api/v1/users", input);
 }
 
 async function getUserByEmail(email: string) {
   try {
-    return await getJson<WorkspaceAccountUser>(
+    return await get<WorkspaceAccountUser>(
       `/api/v1/users/by-email?email=${encodeURIComponent(email.trim())}`,
     );
   } catch (error) {
@@ -299,11 +287,11 @@ async function userExistsByEmail(email: string) {
 }
 
 function listSummaryFiles(path: string) {
-  return postJson<SummarizableFile[], { path: string }>("/api/v1/summarize/files", { path });
+  return post<SummarizableFile[], { path: string }>("/api/v1/summarize/files", { path });
 }
 
 async function summarizeSelected(paths: string[]) {
-  const response = await postJson<{ summary: string }, { paths: string[] }>(
+  const response = await post<{ summary: string }, { paths: string[] }>(
     "/api/v1/summarize/selected",
     { paths },
   );
@@ -311,7 +299,7 @@ async function summarizeSelected(paths: string[]) {
 }
 
 async function summarizePath(path: string) {
-  const response = await postJson<{ summary: string }, { path: string }>("/api/v1/summarize", {
+  const response = await post<{ summary: string }, { path: string }>("/api/v1/summarize", {
     path,
   });
   return response.summary;
@@ -326,11 +314,11 @@ function summarizeUpload(files: File[]) {
 }
 
 function listDealDataRoom(dealId: string) {
-  return getJson<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`);
+  return get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`);
 }
 
 function previewDealDocument(dealId: string, relativePath: string) {
-  return postJson<DocumentPreviewResponse, { relativePath: string }>(
+  return post<DocumentPreviewResponse, { relativePath: string }>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/data-room/preview`,
     { relativePath },
   );
@@ -346,10 +334,7 @@ function appendFiles(form: FormData, files: File[]) {
 export const httpQuarryApi: QuarryApi = {
   archiveDeal,
   createDeal,
-  createDealFromUpload,
   createUser,
-  extractDealQuestions,
-  extractDealQuestionsFromUpload,
   getDeal,
   getUserByEmail,
   listDealDataRoom,
@@ -357,6 +342,7 @@ export const httpQuarryApi: QuarryApi = {
   listSummaryFiles,
   previewDealDocument,
   processDocuments,
+  saveDealMetadata,
   searchDocumentChunksByKeyword,
   searchDocumentChunksByVector,
   startProcessFile,

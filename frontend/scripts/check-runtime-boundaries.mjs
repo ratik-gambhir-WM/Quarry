@@ -15,6 +15,9 @@ for (const file of walk(sourceRoot)) {
   if (source.includes("@tauri-apps/") && projectPath !== allowedTauriFile) {
     violations.push(`${projectPath}: Tauri imports belong only in ${allowedTauriFile}`);
   }
+  if (projectPath === allowedTauriFile && source.includes("httpQuarryApi")) {
+    violations.push(`${projectPath}: desktop API access must cross the Tauri IPC boundary`);
+  }
   if ((source.includes("fetch(") || source.includes("new EventSource(")) && !projectPath.startsWith("src/api/")) {
     violations.push(`${projectPath}: raw HTTP transports belong under src/api`);
   }

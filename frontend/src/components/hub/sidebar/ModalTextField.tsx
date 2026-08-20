@@ -3,16 +3,19 @@ type ModalTextFieldProps = {
   label: string;
   onChange: (value: string) => void;
   placeholder: string;
+  required?: boolean;
+  type?: "date" | "text" | "url";
   value: string;
 };
 
-export function ModalTextField({ autoComplete, label, onChange, placeholder, value }: ModalTextFieldProps) {
+export function ModalTextField({ autoComplete, label, onChange, placeholder, required = true, type = "text", value }: ModalTextFieldProps) {
   const id = `add-deal-${label.toLowerCase().replace(/\s+/g, "-")}`;
 
   return (
     <div className="space-y-2">
-      <label className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted" htmlFor={id}>
-        {label}
+      <label className="flex items-center justify-between px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted" htmlFor={id}>
+        <span>{label}</span>
+        {!required ? <span className="font-semibold normal-case tracking-normal">Optional</span> : null}
       </label>
       <input
         autoComplete={autoComplete}
@@ -20,8 +23,8 @@ export function ModalTextField({ autoComplete, label, onChange, placeholder, val
         id={id}
         onChange={(event) => onChange(event.currentTarget.value)}
         placeholder={placeholder}
-        required
-        type="text"
+        required={required}
+        type={type}
         value={value}
       />
     </div>

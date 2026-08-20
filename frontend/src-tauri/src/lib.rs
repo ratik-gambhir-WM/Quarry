@@ -1,9 +1,19 @@
+mod deal_files;
 mod errors;
+mod quarry_api;
 mod save_file;
+mod security;
 
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 
-use crate::save_file::save_text_file;
+use crate::{
+    deal_files::{read_deal_source_files, select_deal_data_room, LocalDealRoots},
+    quarry_api::{
+        quarry_api_get, quarry_api_post, quarry_api_post_multipart, subscribe_document_job,
+        QuarryApiService,
+    },
+    save_file::save_text_file,
+};
 
 const APP_NAME: &str = "Quarry";
 
@@ -53,13 +63,25 @@ fn build_app_menu<R: tauri::Runtime>(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let quarry_api =
+        QuarryApiService::from_environment().expect("failed to initialize the Quarry API service");
     tauri::Builder::default()
+        .manage(LocalDealRoots::default())
+        .manage(quarry_api)
         .setup(|app| {
             app.set_menu(build_app_menu(app.handle())?)?;
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![save_text_file])
+        .invoke_handler(tauri::generate_handler![
+            read_deal_source_files,
+            quarry_api_get,
+            quarry_api_post,
+            quarry_api_post_multipart,
+            save_text_file,
+            select_deal_data_room,
+            subscribe_document_job
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");
 }

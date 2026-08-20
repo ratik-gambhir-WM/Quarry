@@ -31,12 +31,16 @@ impl AppError {
     }
 
     pub fn internal(source: impl std::fmt::Display) -> Self {
-        let error = Self::new(
-            ErrorCode::Internal,
-            "The file could not be saved.".to_string(),
-            false,
-        );
-        eprintln!("[{}] save_text_file failed: {}", error.operation_id, source);
+        Self::internal_operation("save-text-file", "The file could not be saved.", source)
+    }
+
+    pub fn internal_operation(
+        operation: &'static str,
+        public_message: &'static str,
+        source: impl std::fmt::Display,
+    ) -> Self {
+        let error = Self::new(ErrorCode::Internal, public_message.to_string(), false);
+        eprintln!("[{}] {operation} failed: {source}", error.operation_id);
         error
     }
 
@@ -45,7 +49,7 @@ impl AppError {
         Self {
             code,
             message,
-            operation_id: format!("save-text-file-{sequence}"),
+            operation_id: format!("operation-{sequence}"),
             retryable,
         }
     }

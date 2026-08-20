@@ -57,6 +57,24 @@ export type DealDataRoomView = {
   versionLabel: string;
 };
 
+export function hasDataRoomFiles(nodes: DataRoomTreeNode[]): boolean {
+  const pending = [...nodes];
+
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node) continue;
+    if (node.kind !== "folder") return true;
+    if (node.children) pending.push(...node.children);
+  }
+
+  return false;
+}
+
+export function isUnconfiguredDataRoomError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("no local data-room root is configured");
+}
+
 export function getDealDataRoomView(deal: DealRoomData): DealDataRoomView {
   return {
     chips: [

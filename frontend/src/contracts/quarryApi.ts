@@ -1,8 +1,10 @@
 import type {
-  ExtractDealQuestionsInput,
-  SaveDealAndExtractInput,
-  SaveDealAndExtractResponse,
-  SaveDealAndFindFilesResponse,
+  LocalDealDataRoom,
+  LocalDealFileContents,
+  ReadDealSourceFilesInput,
+  SaveDealInput,
+  SaveDealMetadataResponse,
+  SaveDealResponse,
   SavedDeal,
   SavedDealMetadata,
 } from "../data/dealExtraction";
@@ -79,19 +81,11 @@ export type ChunkKeywordSearch = {
 };
 
 export interface QuarryApi {
-  archiveDeal(dealId: string | number): Promise<SavedDeal>;
-  createDeal(input: SaveDealAndExtractInput): Promise<SaveDealAndFindFilesResponse>;
-  createDealFromUpload(
-    input: SaveDealAndExtractInput,
-    files: File[],
-  ): Promise<SaveDealAndFindFilesResponse>;
+  archiveDeal(dealId: string): Promise<SavedDeal>;
+  createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
-  extractDealQuestions(input: ExtractDealQuestionsInput): Promise<SaveDealAndExtractResponse>;
-  extractDealQuestionsFromUpload(
-    dealId: number,
-    files: File[],
-  ): Promise<SaveDealAndExtractResponse>;
-  getDeal(dealId: string | number): Promise<PersistedDeal>;
+  saveDealMetadata(dealId: string, files: File[]): Promise<SaveDealMetadataResponse>;
+  getDeal(dealId: string): Promise<PersistedDeal>;
   getUserByEmail(email: string): Promise<WorkspaceAccountUser | null>;
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
   listDeals(): Promise<PersistedDeal[]>;
@@ -123,7 +117,9 @@ export type SaveFileInput = {
 };
 
 export interface PlatformCapabilities {
+  readDealSourceFiles(input: ReadDealSourceFilesInput): Promise<LocalDealFileContents[]>;
   saveFile(input: SaveFileInput): Promise<boolean>;
+  selectDealDataRoom(): Promise<LocalDealDataRoom | null>;
 }
 
 export interface QuarryRuntime {

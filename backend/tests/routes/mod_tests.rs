@@ -141,6 +141,98 @@ async fn sqlite_user_lookup_returns_not_found_for_unknown_email() {
 }
 
 #[tokio::test]
+async fn deal_flow_saves_core_fields_then_optional_metadata() {
+    const BOUNDARY: &str = "quarry-empty-deal-metadata";
+    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let create_user = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/users")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{
+                        "firstName":"Avery","lastName":"Analyst",
+                        "email":"analyst@example.com","apiKey":"test-key","role":"Analyst"
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_user.status(), StatusCode::CREATED);
+
+    let create_deal = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{
+                        "dealId":"DEAL-000184",
+                        "dealName":"Acme acquisition of WidgetCo",
+                        "status":"Active",
+                        "startDate":"2026-02-14",
+                        "closeDate":"2026-05-01",
+                        "transactionType":"Acquisition",
+                        "targetCompany":"WidgetCo",
+                        "primaryBuyer":"CVS",
+                        "dealSponsor":"Thoma Bravo",
+                        "userEmail":"analyst@example.com",
+                        "localPath":null,
+                        "sharepointLink":null
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_deal.status(), StatusCode::CREATED);
+
+    let empty_data_room = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-000184/data-room")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(empty_data_room.status(), StatusCode::OK);
+    let empty_data_room: Value = serde_json::from_slice(
+        &to_bytes(empty_data_room.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(empty_data_room["dealId"], "DEAL-000184");
+    assert_eq!(empty_data_room["tree"], serde_json::json!([]));
+
+    let save_metadata = app
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-000184/metadata")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(format!("--{BOUNDARY}--\r\n")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_metadata.status(), StatusCode::OK);
+    let saved: Value = serde_json::from_slice(
+        &to_bytes(save_metadata.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["deal"]["dealId"], "DEAL-000184");
+    assert_eq!(saved["metadata"]["keyQuestionsJson"], "[]");
+    assert_eq!(saved["metadata"]["sharepointLink"], Value::Null);
+    assert_eq!(saved["files"], serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn redundant_user_exists_route_is_not_exposed() {
     let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
     let response = app

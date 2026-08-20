@@ -1,5 +1,4 @@
 import { DealTimelineItem } from "../../data/workspace";
-import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
 
 type ActivityTimelineCardProps = {
@@ -26,10 +25,10 @@ const toneMap: Record<DealTimelineItem["tone"], { detailClassName: string; dotCl
   },
 };
 
-export function ActivityTimelineCard({ className = "col-span-12 flex min-h-[540px] flex-col p-6 xl:col-span-4", items }: ActivityTimelineCardProps) {
+export function ActivityTimelineCard({ className = "flex min-h-[540px] flex-col py-10", items }: ActivityTimelineCardProps) {
   return (
-    <WorkspaceCard className={className} radius="compact">
-      <div className="mb-6 flex items-center justify-between">
+    <section className={className}>
+      <div className="mb-7 flex items-center justify-between">
         <h2 className="type-h2 text-text-main">Deal Activity</h2>
         <button className="inline-flex h-10 w-10 items-center justify-center rounded-full transition hover:bg-white/50">
           <Icon className="h-5 w-5 text-muted" name="more" />
@@ -65,6 +64,6 @@ export function ActivityTimelineCard({ className = "col-span-12 flex min-h-[540p
       <button className="mt-5 rounded-2xl border border-white/85 bg-white/55 px-4 py-3 text-[15px] font-semibold text-text-main transition hover:bg-white/75">
         View Full Log
       </button>
-    </WorkspaceCard>
+    </section>
   );
 }

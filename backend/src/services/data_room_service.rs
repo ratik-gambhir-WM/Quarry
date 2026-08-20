@@ -7,6 +7,7 @@ use crate::core::data_room_helpers::{
     build_directory_node, convert_office_to_pdf, read_pdf, resolve_relative_file, DataRoomTreeNode,
     MAX_PDF_BYTES,
 };
+use crate::{repository::deal_repository::get_deal_metadata_by_deal_id, state::AppState};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,8 +27,16 @@ pub struct DocumentPreview {
     pub source_kind: String,
 }
 
-pub fn list_deal_data_room(deal_id: String) -> Result<DealDataRoom, String> {
-    let root = canonical_deal_root(&deal_id)?;
+pub fn list_deal_data_room(state: &AppState, deal_id: String) -> Result<DealDataRoom, String> {
+    let Some(configured_root) = deal_data_room_root(state, &deal_id)? else {
+        return Ok(DealDataRoom {
+            deal_id,
+            root_name: "Data Room".to_string(),
+            root_path: String::new(),
+            tree: Vec::new(),
+        });
+    };
+    let root = canonicalize_data_room_root(configured_root)?;
     let root_name = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -43,10 +52,11 @@ pub fn list_deal_data_room(deal_id: String) -> Result<DealDataRoom, String> {
 }
 
 pub fn build_document_preview(
+    state: &AppState,
     deal_id: &str,
     relative_path: &str,
 ) -> Result<DocumentPreview, String> {
-    let root = canonical_deal_root(deal_id)?;
+    let root = canonical_deal_root(state, deal_id)?;
     let file_path = resolve_relative_file(&root, relative_path)?;
     let file_name = file_path
         .file_name()
@@ -86,7 +96,13 @@ pub fn build_document_preview(
     })
 }
 
-fn deal_data_room_root(deal_id: &str) -> Option<PathBuf> {
+fn deal_data_room_root(state: &AppState, deal_id: &str) -> Result<Option<PathBuf>, String> {
+    if let Some(metadata) = get_deal_metadata_by_deal_id(state, deal_id)? {
+        if let Some(local_path) = metadata.local_path {
+            return Ok(Some(PathBuf::from(local_path)));
+        }
+        return Ok(None);
+    }
     let env_key = format!(
         "QUARRY_DATA_ROOM_{}",
         deal_id
@@ -99,21 +115,25 @@ fn deal_data_room_root(deal_id: &str) -> Option<PathBuf> {
             .collect::<String>()
     );
     if let Some(configured) = std::env::var_os(env_key) {
-        return Some(PathBuf::from(configured));
+        return Ok(Some(PathBuf::from(configured)));
     }
 
     let root = match deal_id {
         "project-alpha" => "/Users/rgambhir/BetaNXT/02 - Data Room (CIM, Target Docs)",
         "project-beta" => "/Users/rgambhir/OmegaHealthcare/02. Discovery",
         "logistics-merger" => "/Users/rgambhir/Telluride-Discovery",
-        _ => return None,
+        _ => return Ok(None),
     };
-    Some(PathBuf::from(root))
+    Ok(Some(PathBuf::from(root)))
 }
 
-fn canonical_deal_root(deal_id: &str) -> Result<PathBuf, String> {
-    let configured_root = deal_data_room_root(deal_id)
+fn canonical_deal_root(state: &AppState, deal_id: &str) -> Result<PathBuf, String> {
+    let configured_root = deal_data_room_root(state, deal_id)?
         .ok_or_else(|| format!("no local data-room root is configured for deal \"{deal_id}\""))?;
+    canonicalize_data_room_root(configured_root)
+}
+
+fn canonicalize_data_room_root(configured_root: PathBuf) -> Result<PathBuf, String> {
     let root = configured_root.canonicalize().map_err(|err| {
         format!(
             "the configured data-room root is unavailable ({}): {err}",
