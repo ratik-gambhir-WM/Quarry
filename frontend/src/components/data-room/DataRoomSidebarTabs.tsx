@@ -4,7 +4,7 @@ export type DataRoomSidebarTabId = "data-room" | "diligence-graph" | "notebook" 
 
 type DataRoomSidebarTabsProps = {
   activeTab: DataRoomSidebarTabId;
-  onTabChange?: (tab: DataRoomSidebarTabId) => void;
+  compact?: boolean;
 };
 
 const sidebarTabs = [
@@ -14,32 +14,42 @@ const sidebarTabs = [
   { icon: "grid" as const, id: "synthesis-canvas" as const, label: "Synthesis Canvas" },
 ];
 
-export function DataRoomSidebarTabs({ activeTab, onTabChange }: DataRoomSidebarTabsProps) {
+export function DataRoomSidebarTabs({
+  activeTab,
+  compact = false,
+}: DataRoomSidebarTabsProps) {
+  const visibleTabs = compact ? sidebarTabs.filter((tab) => tab.id === activeTab) : sidebarTabs;
+
   return (
-    <nav aria-label="Data room views" className="grid grid-cols-2 gap-2">
-      {sidebarTabs.map((tab) => {
+    <div
+      aria-label="Data room views"
+      className={`flex bg-sidebar-hover ${compact ? "rounded-lg p-0" : "rounded-lg p-1"}`}
+      role="tablist"
+    >
+      {visibleTabs.map((tab) => {
         const active = tab.id === activeTab;
-        const enabled = active || Boolean(onTabChange);
 
         return (
           <button
-            aria-current={active ? "page" : undefined}
-            className={`flex min-h-12 min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-left transition ${
+            aria-label={tab.label}
+            aria-selected={active}
+            className={`flex h-9 min-w-0 items-center justify-center rounded-md transition ${
+              compact ? "w-full" : "flex-1"
+            } ${
               active
-                ? "border-primary/25 bg-primary/10 text-text-main shadow-sm"
-                : "border-outline-variant bg-surface-container-lowest text-muted"
-            } ${enabled ? "hover:border-primary/30 hover:text-text-main" : "cursor-default"}`}
-            disabled={!enabled}
+                ? "bg-background text-sidebar-active shadow-sm"
+                : "cursor-not-allowed text-sidebar-muted opacity-50"
+            }`}
+            disabled={!active}
             key={tab.id}
-            onClick={() => onTabChange?.(tab.id)}
             title={active ? tab.label : `${tab.label} (coming soon)`}
+            role="tab"
             type="button"
           >
-            <Icon className="h-4 w-4 shrink-0" name={tab.icon} />
-            <span className="min-w-0 text-[12px] font-semibold leading-4">{tab.label}</span>
+            <Icon className="h-5 w-5 shrink-0" name={tab.icon} />
           </button>
         );
       })}
-    </nav>
+    </div>
   );
 }

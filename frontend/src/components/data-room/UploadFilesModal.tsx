@@ -255,7 +255,7 @@ export function UploadFilesModal({ onClose, userId }: UploadFilesModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-text-main/30 px-4 py-6 backdrop-blur-sm"
+      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center px-4 py-6"
       role="presentation"
     >
       <button

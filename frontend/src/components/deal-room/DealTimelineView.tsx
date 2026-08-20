@@ -516,7 +516,7 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/10 p-4 backdrop-blur-sm" role="presentation">
+    <div className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
       <form
         aria-labelledby="activity-dialog-title"
         aria-modal="true"

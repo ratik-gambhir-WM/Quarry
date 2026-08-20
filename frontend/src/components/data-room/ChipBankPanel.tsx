@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { DataRoomChip } from "../../data/dataRoom";
+import type { DataRoomChip } from "../../data/dataRoom";
 import { ChipBankHeader } from "./chip-bank/ChipBankHeader";
 import { RepositorySearchControls } from "./chip-bank/RepositorySearchControls";
 import { RepositorySearchEmptyState } from "./chip-bank/RepositorySearchEmptyState";
@@ -10,7 +10,7 @@ import {
   buildRepositoryResults,
   filterRepositoryResults,
   getRepositoryCategories,
-  SearchMode,
+  type SearchMode,
 } from "./chip-bank/repositorySearch";
 
 type ChipBankPanelProps = {
@@ -32,11 +32,11 @@ export function ChipBankPanel({ chips, onCollapse }: ChipBankPanelProps) {
   );
 
   return (
-    <section className="glass-panel -ml-px flex w-[clamp(360px,30vw,440px)] min-w-[360px] max-w-[440px] flex-none flex-col rounded-none border-y-0">
-      <div className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+    <section className="-ml-px flex w-[clamp(360px,30vw,440px)] min-w-[360px] max-w-[440px] flex-none flex-col border-l border-outline-variant/70 bg-[#f7f7f7] text-sidebar-text [font-family:var(--font-sidebar)] [html[data-theme=dark]_&]:bg-[#141414]">
+      <div className="flex h-16 shrink-0 items-center border-b border-outline-variant/70 px-4">
         <ChipBankHeader onCollapse={onCollapse} />
       </div>
-      <div className="border-b border-outline-variant bg-background px-5 py-4">
+      <div className="border-b border-outline-variant/70 px-4 py-4">
         <RepositorySearchControls
           categories={categories}
           category={category}
@@ -50,12 +50,12 @@ export function ChipBankPanel({ chips, onCollapse }: ChipBankPanelProps) {
         />
       </div>
 
-      <div className="workspace-scrollbar-hidden min-h-0 flex-1 overflow-y-auto bg-background px-4 py-4">
+      <div className="workspace-scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-3 flex items-center justify-between px-1">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-muted">
             {filteredResults.length} {filteredResults.length === 1 ? "match" : "matches"}
           </p>
-          <p className="text-[12px] font-medium capitalize text-muted">{mode} search</p>
+          <p className="text-[12px] font-medium capitalize text-sidebar-muted">{mode} search</p>
         </div>
 
         {filteredResults.length > 0 ? (

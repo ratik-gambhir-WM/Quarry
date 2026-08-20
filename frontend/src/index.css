@@ -211,6 +211,16 @@
 }
 
 @layer components {
+  .modal-backdrop {
+    background: rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(10px) saturate(0.85);
+    -webkit-backdrop-filter: blur(10px) saturate(0.85);
+  }
+
+  html[data-theme="dark"] .modal-backdrop {
+    background: rgba(0, 0, 0, 0.32);
+  }
+
   .type-h1 {
     font-family: var(--font-heading);
     font-size: 24px;

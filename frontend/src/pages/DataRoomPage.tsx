@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
+import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
 import type { PreviewState } from "../components/data-room/DocumentPreviewPanel";
 import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
@@ -28,7 +29,7 @@ export function DataRoomPage() {
   const { deals, loaded } = useWorkspaceDeals();
   const { email } = useWorkspaceSession();
   const [isChipBankOpen, setIsChipBankOpen] = useState(true);
-  const [isExplorerOpen, setIsExplorerOpen] = useState(true);
+  const [isConnectSharePointModalOpen, setIsConnectSharePointModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [localDataRoom, setLocalDataRoom] = useState<DealDataRoom | null>(null);
   const [treeError, setTreeError] = useState("");
@@ -135,13 +136,13 @@ export function DataRoomPage() {
       <div className="relative z-10">
         <div className="relative flex h-screen">
           <DataRoomExplorer
-            collapsed={!isExplorerOpen}
             dealName={deal.room.name}
             dealRoomPath={getDealRoomPath(deal.room.id)}
+            email={email}
             key={deal.room.id}
             navigationState={location.state as DealExtractionLocationState | undefined}
             nodes={localDataRoom?.tree ?? []}
-            onCollapse={() => setIsExplorerOpen(false)}
+            onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
             onSelectFile={handleSelectDocument}
             onUploadNewFile={() => setIsUploadModalOpen(true)}
             rootPath={localDataRoom?.rootPath}
@@ -149,14 +150,6 @@ export function DataRoomPage() {
             treeError={treeError}
             treeLoading={treeLoading}
           />
-          {!isExplorerOpen ? (
-            <EdgePanelOpenButton
-              label="Open data room sidebar"
-              onClick={() => setIsExplorerOpen(true)}
-              side="left"
-            />
-          ) : null}
-
           <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
             <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
               {selectedDocument ? (
@@ -188,6 +181,9 @@ export function DataRoomPage() {
       </div>
       {isUploadModalOpen ? (
         <UploadFilesModal onClose={() => setIsUploadModalOpen(false)} userId={email ?? ""} />
+      ) : null}
+      {isConnectSharePointModalOpen ? (
+        <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />
       ) : null}
     </div>
   );

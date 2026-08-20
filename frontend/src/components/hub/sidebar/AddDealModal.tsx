@@ -182,7 +182,7 @@ export function AddDealModal({ onClose }: AddDealModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-text-main/26 px-6 backdrop-blur-sm">
+    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-6">
       <button
         aria-label="Close add deal dialog"
         className="absolute inset-0 cursor-default disabled:cursor-wait"

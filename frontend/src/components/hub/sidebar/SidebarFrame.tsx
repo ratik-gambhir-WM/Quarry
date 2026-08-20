@@ -8,7 +8,7 @@ import { ProfilePreferences } from "./ProfilePreferences";
 
 type SidebarFrameProps = {
   alignedHeader?: boolean;
-  children: ReactNode;
+  children: ReactNode | ((state: { collapsed: boolean }) => ReactNode);
   email?: string;
   navigationState?: WorkspaceLocationState;
   profileDeal?: WorkspaceDeal;
@@ -82,7 +82,7 @@ export function SidebarFrame({
               alignedHeader ? "pt-2" : "pt-6"
             } ${collapsed ? "[&_h2]:hidden [&_span]:hidden" : ""}`}
           >
-            {children}
+            {typeof children === "function" ? children({ collapsed }) : children}
           </div>
 
           <div className="shrink-0 border-t border-outline-variant/70 pt-2">
