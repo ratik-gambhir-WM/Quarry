@@ -1,0 +1,44 @@
+{
+  "name": "quarry-multiplatform-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev:web",
+    "dev:web": "vite --mode web",
+    "dev:desktop-ui": "vite --mode desktop",
+    "dev:desktop": "tauri dev",
+    "build": "npm run build:web",
+    "build:web": "tsc -p tsconfig.web.json && vite build --mode web",
+    "build:desktop-ui": "tsc -p tsconfig.desktop.json && vite build --mode desktop",
+    "build:desktop": "tauri build",
+    "typecheck": "npm run typecheck:web && npm run typecheck:desktop",
+    "typecheck:web": "tsc -p tsconfig.web.json",
+    "typecheck:desktop": "tsc -p tsconfig.desktop.json",
+    "check:boundaries": "node scripts/check-runtime-boundaries.mjs",
+    "check:web-bundle": "node scripts/check-runtime-boundaries.mjs --web-bundle",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "motion": "^12.43.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-pdf": "^10.4.1",
+    "react-router-dom": "^7.11.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.4",
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.2.4",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
+  }
+}

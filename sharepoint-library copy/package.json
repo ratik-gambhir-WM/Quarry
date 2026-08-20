@@ -1,0 +1,54 @@
+{
+  "name": "sharepoint-library",
+  "version": "1.0.0",
+  "description": "Generic Microsoft Graph / SharePoint client library (server + browser subpath exports)",
+  "type": "module",
+  "exports": {
+    "./server": {
+      "import": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser/index.d.ts",
+        "default": "./dist/browser/index.js"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "server": [
+        "./dist/server/index.d.ts"
+      ],
+      "browser": [
+        "./dist/browser/index.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/server/index.ts --format esm --outdir dist/server --external @azure/msal-browser && bun build src/browser/index.ts --format esm --outdir dist/browser --external @azure/msal-browser && bun run build:types && bun run build:copy-dts",
+    "build:types": "tsc --emitDeclarationOnly --outdir ./dist",
+    "build:copy-dts": "mkdir -p dist/server/types && cp src/server/types/index.d.ts dist/server/types/index.d.ts",
+    "type-check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "license": "ISC",
+  "peerDependencies": {
+    "@azure/msal-browser": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@azure/msal-browser": {
+      "optional": true
+    }
+  },
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^6.0.3"
+  }
+}

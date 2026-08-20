@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@quarry/router": ["./src/platform/Router.web.tsx"],
+      "@quarry/runtime": ["./src/platform/runtime.web.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": [
+    "src/platform/Router.desktop.tsx",
+    "src/platform/runtime.desktop.ts"
+  ]
+}

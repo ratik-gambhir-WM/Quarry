@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "es2025",
+    "module": "commonjs",
+    "declaration": true,
+    "lib": ["es2022", "dom"],
+    "strict": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": []
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "src/**/__tests__/**"]
+}
