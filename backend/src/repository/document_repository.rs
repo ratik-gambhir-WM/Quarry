@@ -107,6 +107,11 @@ pub async fn persist_document_and_chunks(
     for chunk in &chunks {
         validate_document_chunk_relationship(&document, chunk)?;
     }
+    // TODO: persist quarry file metadata with file_id
+
+    // TODO: Perist file blob in sql lite with resulting file_id
+
+    // Below, keep persistening quarry file in helix with same metadata and file_id found above!
 
     let quarry_file = persist_quarry_file(helix, document.clone()).await?;
     let chunks = persist_chunks_for_document(helix, &document, chunks).await?;

@@ -1,6 +1,4 @@
-import { Icon } from "../ui/Icon";
-
-export type DataRoomSidebarTabId = "data-room" | "diligence-graph" | "notebook" | "synthesis-canvas";
+export type DataRoomSidebarTabId = "data-room" | "diligence-graph" | "synthesis-canvas" | "notes";
 
 type DataRoomSidebarTabsProps = {
   activeTab: DataRoomSidebarTabId;
@@ -8,10 +6,10 @@ type DataRoomSidebarTabsProps = {
 };
 
 const sidebarTabs = [
-  { icon: "folderOpen" as const, id: "data-room" as const, label: "Data Room" },
-  { icon: "graph" as const, id: "diligence-graph" as const, label: "Diligence Graph" },
-  { icon: "doc" as const, id: "notebook" as const, label: "Notebook" },
-  { icon: "grid" as const, id: "synthesis-canvas" as const, label: "Synthesis Canvas" },
+  { id: "data-room" as const, label: "Data Room" },
+  { id: "diligence-graph" as const, label: "Diligence Graph" },
+  { id: "synthesis-canvas" as const, label: "Synthesis Canvas" },
+  { id: "notes" as const, label: "Notes" },
 ];
 
 export function DataRoomSidebarTabs({
@@ -46,7 +44,9 @@ export function DataRoomSidebarTabs({
             role="tab"
             type="button"
           >
-            <Icon className="h-5 w-5 shrink-0" name={tab.icon} />
+            <span className="whitespace-normal break-words px-0.5 text-center text-[10px] font-semibold leading-tight">
+              {tab.label}
+            </span>
           </button>
         );
       })}

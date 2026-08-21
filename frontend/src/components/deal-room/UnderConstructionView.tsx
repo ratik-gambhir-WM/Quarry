@@ -3,7 +3,7 @@ import { Icon } from "../ui/Icon";
 
 type UnderConstructionViewProps = {
   description: string;
-  icon: "graph" | "grid" | "person";
+  icon: "graph" | "grid" | "listAlt" | "person";
   title: string;
 };
 

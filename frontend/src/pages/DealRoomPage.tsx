@@ -14,7 +14,7 @@ import type { DealTimelineItem } from "../data/workspace";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
-type ActiveDealView = "deal-room" | "diligence-graph" | "site-visits" | "synthesis-canvas" | "timeline";
+type ActiveDealView = "deal-room" | "diligence-graph" | "site-visits" | "deliverables" | "synthesis-canvas" | "timeline";
 
 export function DealRoomPage() {
   const { dealId } = useParams();
@@ -81,6 +81,12 @@ export function DealRoomPage() {
             description="Planning templates and visit notes for diligence fieldwork."
             icon="person"
             title="Site Visits"
+          />
+        ) : activeDealView === "deliverables" ? (
+          <UnderConstructionView
+            description="Organize and track the materials prepared for this deal."
+            icon="listAlt"
+            title="Deliverables"
           />
         ) : activeDealView === "synthesis-canvas" ? (
           <UnderConstructionView
