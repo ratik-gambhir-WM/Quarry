@@ -1,14 +1,6 @@
 use std::{env, process};
 
-use quarry_backend::core::{
-    clients::{helix::HelixClient, openai::OpenAiClient},
-    helix_queries::user::persistence::{
-        create_user_indexes, get_user_by_email as build_get_user_by_email_query,
-        save_user as build_save_user_query,
-    },
-    models::user::UserNode,
-};
-use serde_json::Value;
+use quarry_backend::core::clients::openai::OpenAiClient;
 
 const APP_NAME: &str = "DataRoomCLI";
 
@@ -19,13 +11,6 @@ async fn main() {
         .with_env_filter("quarry_backend=info")
         .try_init();
     let args: Vec<String> = env::args().collect();
-    let helix_db = match HelixClient::new() {
-        Ok(client) => client,
-        Err(message) => {
-            eprintln!("error: {message}");
-            process::exit(1);
-        }
-    };
     let api_key = match env::var("OPENAI_API_KEY") {
         Ok(value) if !value.trim().is_empty() => value,
         _ => {
@@ -44,8 +29,6 @@ async fn main() {
             println!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Some("add-user") => add_user(&helix_db, &args).await,
-        Some("get-user") => get_user(&helix_db, args.get(2)).await,
         Some("embed") => match args.get(2) {
             Some(content) => match client.gen_embedding(content, None).await {
                 Ok(embedding) => match serde_json::to_string(&embedding) {
@@ -78,47 +61,6 @@ async fn main() {
     }
 }
 
-async fn add_user(client: &HelixClient, args: &[String]) -> Result<(), String> {
-    let required = |index: usize, name: &str| {
-        args.get(index)
-            .cloned()
-            .ok_or_else(|| format!("missing required argument: <{name}>"))
-    };
-    let user = UserNode {
-        id: required(2, "id")?
-            .parse()
-            .map_err(|err| format!("invalid id: {err}"))?,
-        first_name: required(3, "first_name")?,
-        last_name: required(4, "last_name")?,
-        email: required(5, "email")?,
-        api_key: required(6, "api_key")?,
-        role: required(7, "role")?,
-        created_at: required(8, "created_at")?,
-        updated_at: required(9, "updated_at")?,
-    };
-    let query = build_save_user_query(user)?;
-    let _: Value = client.execute_dynamic_query(create_user_indexes).await?;
-    let result: Value = client.execute_dynamic_query(move || query).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).map_err(|err| err.to_string())?
-    );
-    Ok(())
-}
-
-async fn get_user(client: &HelixClient, email: Option<&String>) -> Result<(), String> {
-    let email = email
-        .cloned()
-        .ok_or_else(|| "missing required argument: <email>".to_string())?;
-    let query = build_get_user_by_email_query(email)?;
-    let result: Value = client.execute_dynamic_query(move || query).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).map_err(|err| err.to_string())?
-    );
-    Ok(())
-}
-
 fn print_help() {
     println!(
         "{APP_NAME}
@@ -127,9 +69,6 @@ Usage:
   dataroomcli <command> [options]
 
 Commands:
-  add-user <id> <first_name> <last_name> <email> <api_key> <role> <created_at> <updated_at>
-                                      Upsert a complete Quarry user in Helix
-  get-user <email>                    Fetch a user from Helix by email
   embed <content>                      Generate an embedding and print it as JSON
   help            Show this help message
   version         Show the current version

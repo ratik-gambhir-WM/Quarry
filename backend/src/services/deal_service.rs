@@ -22,12 +22,8 @@ use crate::{
 
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 
-pub async fn save_helix_deal(
-    state: &AppState,
-    deal: DealNode,
-    user_id: i64,
-) -> Result<Value, String> {
-    upsert_helix_deal(state, deal, user_id).await
+pub async fn save_helix_deal(state: &AppState, deal: DealNode) -> Result<Value, String> {
+    upsert_helix_deal(state, deal).await
 }
 
 pub async fn get_helix_deal(state: &AppState, deal_id: &str) -> Result<Value, String> {

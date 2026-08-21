@@ -91,13 +91,9 @@ pub fn create_deal(state: &AppState, record: CreateDealRecord<'_>) -> Result<Dea
     })
 }
 
-/// Persists a complete deal row and its user relationship through Helix.
-pub async fn upsert_helix_deal(
-    state: &AppState,
-    deal: DealNode,
-    user_id: i64,
-) -> Result<Value, String> {
-    let query = build_add_deal_query(deal, user_id)?;
+/// Persists a complete deal row through Helix.
+pub async fn upsert_helix_deal(state: &AppState, deal: DealNode) -> Result<Value, String> {
+    let query = build_add_deal_query(deal)?;
     let _: Value = state
         .helix()
         .execute_dynamic_query(create_deal_indexes)

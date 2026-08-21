@@ -248,18 +248,35 @@ async fn redundant_user_exists_route_is_not_exposed() {
 }
 
 #[tokio::test]
-async fn helix_routes_use_explicit_helix_paths() {
+async fn helix_user_routes_are_not_exposed() {
     let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
-    let empty_email_response = app
+    let get_response = app
         .clone()
         .oneshot(
-            Request::get("/api/users/helix/by-email?email=")
+            Request::get("/api/users/helix/by-email?email=ada%40example.com")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    let invalid_deal_response = app
+    let create_response = app
+        .oneshot(
+            Request::post("/api/users/helix")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(create_response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn helix_deal_route_validates_the_deal_id() {
+    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let response = app
         .oneshot(
             Request::get("/api/deals/helix/0")
                 .body(Body::empty())
@@ -268,8 +285,7 @@ async fn helix_routes_use_explicit_helix_paths() {
         .await
         .unwrap();
 
-    assert_eq!(empty_email_response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(invalid_deal_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

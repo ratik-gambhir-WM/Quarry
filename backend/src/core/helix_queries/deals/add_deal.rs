@@ -1,16 +1,13 @@
 use helix_db::dsl::prelude::*;
 
-use crate::core::{helix_queries::user::persistence::USER_LABEL, nodes::deal_node::DealNode};
+use crate::core::nodes::deal_node::DealNode;
 
 pub const DEAL_LABEL: &str = "Deal";
-pub const USER_HAS_DEAL_LABEL: &str = "HAS_DEAL";
 
-pub fn add_deal(deal: DealNode, user_id: i64) -> Result<DynamicQueryRequest, String> {
+pub fn add_deal(deal: DealNode) -> Result<DynamicQueryRequest, String> {
     validate_deal_id(&deal.deal_id)?;
-    validate_user_id(user_id)?;
     Ok(add_deal_mutation(
         deal.deal_id,
-        user_id,
         deal.deal_name,
         deal.status,
         deal.start_date,
@@ -26,7 +23,6 @@ pub fn add_deal(deal: DealNode, user_id: i64) -> Result<DynamicQueryRequest, Str
 #[register]
 fn add_deal_mutation(
     deal_id: String,
-    user_id: i64,
     deal_name: String,
     status: String,
     start_date: String,
@@ -38,7 +34,6 @@ fn add_deal_mutation(
 ) -> WriteBatch {
     let _ = (
         &deal_id,
-        &user_id,
         &deal_name,
         &status,
         &start_date,
@@ -88,40 +83,7 @@ fn add_deal_mutation(
             )
             .project(deal_projection()),
         )
-        .var_as(
-            "deal",
-            g().n_with_label(DEAL_LABEL)
-                .where_(Predicate::eq_param("deal_id", "deal_id")),
-        )
-        .var_as(
-            "user",
-            g().n_with_label(USER_LABEL)
-                .where_(Predicate::eq_param("id", "user_id")),
-        )
-        .var_as(
-            "existing_user_deal",
-            g().e_with_label(USER_HAS_DEAL_LABEL)
-                .where_(Predicate::eq_param("user_id", "user_id"))
-                .where_(Predicate::eq_param("deal_id", "deal_id")),
-        )
-        .var_as_if(
-            "user_has_deal",
-            BatchCondition::VarEmpty("existing_user_deal".to_string()),
-            g().n(NodeRef::var("user")).add_e(
-                USER_HAS_DEAL_LABEL,
-                NodeRef::var("deal"),
-                vec![
-                    ("user_id", PropertyInput::param("user_id")),
-                    ("deal_id", PropertyInput::param("deal_id")),
-                ],
-            ),
-        )
-        .returning([
-            "updated_deal",
-            "created_deal",
-            "existing_user_deal",
-            "user_has_deal",
-        ])
+        .returning(["updated_deal", "created_deal"])
 }
 
 pub fn get_deal_by_id(deal_id: String) -> Result<DynamicQueryRequest, String> {
@@ -161,20 +123,6 @@ pub fn create_deal_indexes() -> WriteBatch {
             "deal_close_date",
             g().create_index_if_not_exists(IndexSpec::node_equality(DEAL_LABEL, "close_date")),
         )
-        .var_as(
-            "user_has_deal_user_id",
-            g().create_index_if_not_exists(IndexSpec::edge_equality(
-                USER_HAS_DEAL_LABEL,
-                "user_id",
-            )),
-        )
-        .var_as(
-            "user_has_deal_deal_id",
-            g().create_index_if_not_exists(IndexSpec::edge_equality(
-                USER_HAS_DEAL_LABEL,
-                "deal_id",
-            )),
-        )
 }
 
 fn deal_projection() -> Vec<PropertyProjection> {
@@ -195,14 +143,6 @@ fn deal_projection() -> Vec<PropertyProjection> {
 fn validate_deal_id(id: &str) -> Result<(), String> {
     if !id.starts_with("DEAL-") {
         Err("deal id must start with DEAL-".to_string())
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_user_id(id: i64) -> Result<(), String> {
-    if id <= 0 {
-        Err("user id must be greater than zero".to_string())
     } else {
         Ok(())
     }

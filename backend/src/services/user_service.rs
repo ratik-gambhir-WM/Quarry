@@ -1,17 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::{
-    core::{
-        helix_queries::user::persistence::{
-            create_user_indexes, get_user_by_email as build_get_user_by_email_query,
-            save_user as build_save_user_query,
-        },
-        models::user::UserNode,
-    },
-    state::AppState,
-};
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,25 +68,6 @@ pub fn get_sqlite_user_by_email(state: &AppState, email: &str) -> Result<Option<
     })
 }
 
-pub async fn save_helix_user(state: &AppState, input: UserNode) -> Result<Value, String> {
-    validate_helix_user_input(&input)?;
-    let query = build_save_user_query(input)?;
-    let _: Value = state
-        .helix()
-        .execute_dynamic_query(create_user_indexes)
-        .await?;
-    state.helix().execute_dynamic_query(move || query).await
-}
-
-pub async fn get_helix_user_by_email(state: &AppState, email: &str) -> Result<Value, String> {
-    let email = email.trim();
-    if email.is_empty() {
-        return Err("email is required".to_string());
-    }
-    let query = build_get_user_by_email_query(email.to_string())?;
-    state.helix().execute_dynamic_query(move || query).await
-}
-
 fn get_user_by_id(db: &Connection, id: i64) -> rusqlite::Result<User> {
     db.query_row(
         r#"
@@ -143,33 +114,5 @@ fn validate_user_input(input: &AddUserInput) -> Result<(), String> {
         return Err("role is required".to_string());
     }
 
-    Ok(())
-}
-
-fn validate_helix_user_input(input: &UserNode) -> Result<(), String> {
-    if input.id <= 0 {
-        return Err("id is required".to_string());
-    }
-    if input.first_name.trim().is_empty() {
-        return Err("first_name is required".to_string());
-    }
-    if input.last_name.trim().is_empty() {
-        return Err("last_name is required".to_string());
-    }
-    if input.email.trim().is_empty() {
-        return Err("email is required".to_string());
-    }
-    if input.api_key.trim().is_empty() {
-        return Err("api_key is required".to_string());
-    }
-    if input.role.trim().is_empty() {
-        return Err("role is required".to_string());
-    }
-    if input.created_at.trim().is_empty() {
-        return Err("created_at is required".to_string());
-    }
-    if input.updated_at.trim().is_empty() {
-        return Err("updated_at is required".to_string());
-    }
     Ok(())
 }
