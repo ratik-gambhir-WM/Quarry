@@ -42,7 +42,13 @@ export function HomeWorkspaceSidebar({
 
   return (
     <>
-      <SidebarFrame alignedHeader email={email} navigationState={navigationState}>
+      <SidebarFrame
+        alignedHeader
+        centeredLogo
+        email={email}
+        navigationState={navigationState}
+        showHeaderBackButton={false}
+      >
         <nav className="space-y-1">
           <NavLink
             aria-label="Deal Hub"

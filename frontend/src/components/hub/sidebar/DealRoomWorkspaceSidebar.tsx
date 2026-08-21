@@ -9,10 +9,8 @@ const dealRoomSidebarLinks = [
   { icon: "dashboard" as const, key: "deal-room" as const, label: "Deal Room" },
   { icon: "timeline" as const, key: "timeline" as const, label: "Deal Activity" },
   { icon: "person" as const, key: "site-visits" as const, label: "Site Visits" },
-  { icon: "graph" as const, key: "diligence-graph" as const, label: "Diligence Graph" },
   { icon: "folderOpen" as const, key: "data-room" as const, label: "Data Room Vault" },
   { icon: "listAlt" as const, key: "deliverables" as const, label: "Deliverables" },
-  { icon: "grid" as const, key: "synthesis-canvas" as const, label: "Synthesis Canvas" },
 ];
 
 export function DealRoomWorkspaceSidebar({
@@ -26,7 +24,15 @@ export function DealRoomWorkspaceSidebar({
   const activeDeal = deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
 
   return (
-    <SidebarFrame alignedHeader email={email} navigationState={navigationState} profileDeal={activeDeal}>
+    <SidebarFrame
+      alignedHeader
+      centeredLogo
+      email={email}
+      headerBackLabel="Back to main homepage"
+      headerBackTo="/hub"
+      navigationState={navigationState}
+      profileDeal={activeDeal}
+    >
       <nav className="space-y-1">
         {dealRoomSidebarLinks.map((link) => {
           if (activeDeal && "key" in link && (link.key === "deal-room" || link.key === "data-room")) {
@@ -60,11 +66,7 @@ export function DealRoomWorkspaceSidebar({
 
           if (
             "key" in link &&
-            (link.key === "timeline" ||
-              link.key === "diligence-graph" ||
-              link.key === "site-visits" ||
-              link.key === "deliverables" ||
-              link.key === "synthesis-canvas")
+            (link.key === "timeline" || link.key === "site-visits" || link.key === "deliverables")
           ) {
             return (
               <SidebarStaticItem

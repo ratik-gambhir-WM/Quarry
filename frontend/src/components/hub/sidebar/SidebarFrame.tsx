@@ -8,8 +8,12 @@ import { ProfilePreferences } from "./ProfilePreferences";
 
 type SidebarFrameProps = {
   alignedHeader?: boolean;
+  centeredLogo?: boolean;
   children: ReactNode | ((state: { collapsed: boolean }) => ReactNode);
   email?: string;
+  headerBackLabel?: string;
+  headerBackTo?: string;
+  showHeaderBackButton?: boolean;
   navigationState?: WorkspaceLocationState;
   profileDeal?: WorkspaceDeal;
   profileSubtitle?: string;
@@ -17,11 +21,15 @@ type SidebarFrameProps = {
 
 export function SidebarFrame({
   alignedHeader = false,
+  centeredLogo = false,
   children,
   email,
+  headerBackLabel = "Back to home page",
+  headerBackTo = "/hub",
   navigationState,
   profileDeal,
   profileSubtitle,
+  showHeaderBackButton = true,
 }: SidebarFrameProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -38,33 +46,60 @@ export function SidebarFrame({
         <div
           className={
             alignedHeader
-              ? `flex h-16 shrink-0 items-center justify-between gap-1 border-b border-outline-variant/70 ${
+              ? `relative flex h-16 shrink-0 items-center justify-between gap-1 border-b border-outline-variant/70 ${
                   collapsed ? "px-2" : "px-4"
                 }`
               : `flex shrink-0 items-center justify-between gap-1 pt-4 ${collapsed ? "px-2" : "px-4"}`
           }
         >
-          <NavLink
-            aria-label="Back to home page"
-            className={`flex min-w-0 items-center rounded-lg py-2 transition hover:bg-sidebar-hover ${
-              collapsed ? "gap-0 px-0" : alignedHeader ? "gap-3 px-0" : "gap-3 px-2"
-            }`}
-            state={navigationState}
-            to="/hub"
-          >
-            <WestMonroeMark className={collapsed ? "h-[1.4rem] w-[1.4rem]" : "h-8 w-8"} framed />
-            {collapsed ? null : (
-              <h1 className="text-[13px] font-semibold leading-5 text-sidebar-active">
-                Quarry
-              </h1>
-            )}
-          </NavLink>
+          {centeredLogo ? (
+            <>
+              {showHeaderBackButton ? (
+                <NavLink
+                  aria-label={headerBackLabel}
+                  className="group flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+                  state={navigationState}
+                  title={headerBackLabel}
+                  to={headerBackTo}
+                >
+                  <Icon
+                    className="h-4 w-4 rotate-180 transition-transform group-hover:-translate-x-0.5"
+                    name="arrowRight"
+                  />
+                </NavLink>
+              ) : (
+                <div aria-hidden="true" className="h-8 w-8" />
+              )}
+              <div
+                aria-label="Quarry"
+                className="absolute left-1/2 flex -translate-x-1/2 items-center justify-center"
+              >
+                <WestMonroeMark className={collapsed ? "h-[1.4rem] w-[1.4rem]" : "h-8 w-8"} framed />
+              </div>
+            </>
+          ) : (
+            <NavLink
+              aria-label={headerBackLabel}
+              className={`flex min-w-0 items-center rounded-lg py-2 transition hover:bg-sidebar-hover ${
+                collapsed ? "gap-0 px-0" : alignedHeader ? "gap-3 px-0" : "gap-3 px-2"
+              }`}
+              state={navigationState}
+              to={headerBackTo}
+            >
+              <WestMonroeMark className={collapsed ? "h-[1.4rem] w-[1.4rem]" : "h-8 w-8"} framed />
+              {collapsed ? null : (
+                <h1 className="text-[13px] font-semibold leading-5 text-sidebar-active">
+                  Quarry
+                </h1>
+              )}
+            </NavLink>
+          )}
 
           <button
             aria-controls="workspace-sidebar-navigation"
             aria-expanded={!collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+            className={`${centeredLogo ? "absolute right-2" : ""} flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed`}
             onClick={() => {
               setCollapsed((isCollapsed) => !isCollapsed);
               setProfileMenuOpen(false);
