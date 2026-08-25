@@ -45,6 +45,7 @@ describe("httpQuarryApi", () => {
       status: input.status,
       targetCompany: input.targetCompany,
       transactionType: input.transactionType,
+      userId: 1,
     };
     const metadata = {
       dealId: input.dealId,

@@ -1,5 +1,42 @@
 use super::*;
 
+#[tokio::test]
+async fn persists_file_bytes_under_the_user_scoped_content_id() {
+    let state = crate::state::AppState::in_memory().unwrap();
+    let file_bytes = b"binary\0file\xffbytes".to_vec();
+    let content_hash = sha256_hex(&file_bytes);
+    let file_id = document_id_from_content("user-1", &content_hash);
+    let document = DocumentNode {
+        document_id: file_id.clone(),
+        user_id: "user-1".to_string(),
+        file_name: "test.pdf".to_string(),
+        source_type: "pdf".to_string(),
+        local_path: None,
+        file_size_bytes: file_bytes.len() as u64,
+        token_count: 0,
+        content_hash,
+        rendered_pdf_path: None,
+    };
+
+    let persisted_file_id = persist_file_blob(state.sqlite(), &document, file_bytes.clone())
+        .await
+        .unwrap();
+    let query = SqlBuilder::select("quarry_file_blobs")
+        .column("file_bytes")
+        .and_where(crate::core::sqlbuilder::Condition::equal(
+            "file_id", &file_id,
+        ))
+        .build()
+        .unwrap();
+    let stored = state.sqlite().read_one(&query).unwrap().unwrap();
+
+    assert_eq!(persisted_file_id, file_id);
+    assert_eq!(
+        stored.get("file_bytes"),
+        Some(&crate::core::sqlbuilder::SqlValue::Blob(file_bytes))
+    );
+}
+
 #[test]
 fn deserializes_a_quarry_file_lookup() {
     let response: QuarryFileLookupResponse = serde_json::from_value(serde_json::json!({

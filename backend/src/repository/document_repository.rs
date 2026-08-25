@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::{
-    clients::helix::HelixClient,
+    clients::{helix::HelixClient, sqlite::SqliteClient},
     helix_queries::files::{
         insert_quarry_file::{
             create_document_indexes, insert_chunk_batches, insert_quarry_file,
@@ -13,7 +13,9 @@ use crate::core::{
         },
     },
     nodes::document_node::{ChunkNode, DocumentNode},
+    sqlbuilder::SqlBuilder,
 };
+use crate::utils::{document_id_from_content, sha256_hex};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct QuarryFileLookupResponse {
@@ -99,19 +101,57 @@ pub async fn persist_chunks_for_document(
     Ok(persisted)
 }
 
+pub async fn persist_file_blob(
+    sqlite: &SqliteClient,
+    document: &DocumentNode,
+    file_bytes: Vec<u8>,
+) -> Result<String, String> {
+    if file_bytes.is_empty() {
+        return Err("file bytes cannot be empty".to_string());
+    }
+
+    let content_hash = sha256_hex(&file_bytes);
+    if content_hash != document.content_hash {
+        return Err(format!(
+            "file bytes do not match content hash for document `{}`",
+            document.document_id
+        ));
+    }
+
+    let file_id = document_id_from_content(&document.user_id, &content_hash);
+    if file_id != document.document_id {
+        return Err(format!(
+            "file bytes do not match document id `{}`",
+            document.document_id
+        ));
+    }
+
+    let query = SqlBuilder::insert_into("quarry_file_blobs")
+        .value("file_id", &file_id)
+        .value("file_bytes", file_bytes)
+        .on_conflict_do_nothing(["file_id"])
+        .build()
+        .map_err(|error| format!("failed to build file blob insert: {error}"))?;
+
+    sqlite
+        .write_async(query)
+        .await
+        .map_err(|error| format!("failed to persist file blob: {error}"))?;
+
+    Ok(file_id)
+}
+
 pub async fn persist_document_and_chunks(
+    sqlite: &SqliteClient,
     helix: &HelixClient,
     document: DocumentNode,
     chunks: Vec<ChunkNode>,
+    file_bytes: Vec<u8>,
 ) -> Result<PersistedDocumentGraph, String> {
     for chunk in &chunks {
         validate_document_chunk_relationship(&document, chunk)?;
     }
-    // TODO: persist quarry file metadata with file_id
-
-    // TODO: Perist file blob in sql lite with resulting file_id
-
-    // Below, keep persistening quarry file in helix with same metadata and file_id found above!
+   // persist_file_blob(sqlite, &document, file_bytes).await?;
 
     let quarry_file = persist_quarry_file(helix, document.clone()).await?;
     let chunks = persist_chunks_for_document(helix, &document, chunks).await?;
@@ -126,6 +166,7 @@ pub async fn ensure_document_indexes(helix: &HelixClient) -> Result<Value, Strin
     helix.execute_dynamic_query(create_document_indexes).await
 }
 
+// Fix the function below to find doucment
 pub async fn find_existing_document_id_by_content_hash(
     helix: &HelixClient,
     user_id: &str,

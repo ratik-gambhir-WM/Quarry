@@ -160,6 +160,10 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
         .await
         .unwrap();
     assert_eq!(create_user.status(), StatusCode::CREATED);
+    let created_user: Value =
+        serde_json::from_slice(&to_bytes(create_user.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    let user_id = created_user["id"].as_i64().unwrap();
 
     let create_deal = app
         .clone()
@@ -187,6 +191,36 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
         .await
         .unwrap();
     assert_eq!(create_deal.status(), StatusCode::CREATED);
+    let created_deal: Value =
+        serde_json::from_slice(&to_bytes(create_deal.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    assert_eq!(created_deal["deal"]["userId"], user_id);
+    assert_eq!(created_deal["metadata"]["userId"], user_id);
+
+    let get_deal = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-000184")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_deal.status(), StatusCode::OK);
+    let fetched_deal: Value =
+        serde_json::from_slice(&to_bytes(get_deal.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(fetched_deal["userId"], user_id);
+
+    let list_deals = app
+        .clone()
+        .oneshot(Request::get("/api/v1/deals").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(list_deals.status(), StatusCode::OK);
+    let listed_deals: Value =
+        serde_json::from_slice(&to_bytes(list_deals.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    assert_eq!(listed_deals[0]["userId"], user_id);
 
     let empty_data_room = app
         .clone()
@@ -208,6 +242,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     assert_eq!(empty_data_room["tree"], serde_json::json!([]));
 
     let save_metadata = app
+        .clone()
         .oneshot(
             Request::post("/api/v1/deals/DEAL-000184/metadata")
                 .header(
@@ -227,9 +262,29 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     )
     .unwrap();
     assert_eq!(saved["deal"]["dealId"], "DEAL-000184");
+    assert_eq!(saved["deal"]["userId"], user_id);
+    assert_eq!(saved["metadata"]["userId"], user_id);
     assert_eq!(saved["metadata"]["keyQuestionsJson"], "[]");
     assert_eq!(saved["metadata"]["sharepointLink"], Value::Null);
     assert_eq!(saved["files"], serde_json::json!([]));
+
+    let archive_deal = app
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-000184/archive")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(archive_deal.status(), StatusCode::OK);
+    let archived_deal: Value = serde_json::from_slice(
+        &to_bytes(archive_deal.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(archived_deal["userId"], user_id);
 }
 
 #[tokio::test]
@@ -271,21 +326,6 @@ async fn helix_user_routes_are_not_exposed() {
 
     assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
     assert_eq!(create_response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn helix_deal_route_validates_the_deal_id() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
-    let response = app
-        .oneshot(
-            Request::get("/api/deals/helix/0")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

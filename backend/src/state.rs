@@ -33,7 +33,7 @@ impl AppState {
 
         let db = SqliteClient::open(&db_path)
             .map_err(|err| format!("failed to open sqlite database: {err}"))?;
-        db.with_connection(|connection| run_migrations(connection))
+        db.with_connection(initialize_schema)
             .map_err(|err| format!("failed to initialize sqlite database: {err}"))?;
 
         Ok(Self {
@@ -130,7 +130,7 @@ fn database_path() -> Result<PathBuf, String> {
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
-fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
+fn initialize_schema(connection: &mut Connection) -> rusqlite::Result<()> {
     connection.execute_batch(
         r#"
             PRAGMA foreign_keys = ON;
@@ -164,155 +164,56 @@ fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            "#,
-    )?;
+            CREATE TABLE IF NOT EXISTS quarry_file_blobs (
+                file_id TEXT PRIMARY KEY NOT NULL,
+                file_bytes BLOB NOT NULL,
+                CHECK (length(trim(file_id)) > 0)
+            );
 
-    if column_exists(connection, "deals", "id")? {
-        if !column_exists(connection, "deals", "status")? {
-            connection.execute_batch(
-                "ALTER TABLE deals ADD COLUMN status TEXT NOT NULL DEFAULT 'active';",
-            )?;
-        }
-        migrate_legacy_deals(connection)?;
-    }
+            CREATE TABLE IF NOT EXISTS deals (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                deal_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                close_date TEXT NOT NULL,
+                transaction_type TEXT NOT NULL,
+                target_company TEXT NOT NULL,
+                primary_buyer TEXT NOT NULL,
+                deal_sponsor TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (length(trim(deal_id)) > 0),
+                CHECK (length(trim(deal_name)) > 0),
+                CHECK (length(trim(status)) > 0),
+                CHECK (length(trim(start_date)) > 0),
+                CHECK (length(trim(close_date)) > 0),
+                CHECK (length(trim(transaction_type)) > 0),
+                CHECK (length(trim(target_company)) > 0),
+                CHECK (length(trim(primary_buyer)) > 0),
+                CHECK (length(trim(deal_sponsor)) > 0)
+            );
 
-    create_deal_tables(connection)?;
-    connection.pragma_update(None, "user_version", 5)?;
+            CREATE INDEX IF NOT EXISTS idx_deals_user_id ON deals(user_id);
+            CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
+            CREATE INDEX IF NOT EXISTS idx_deals_transaction_type ON deals(transaction_type);
+            CREATE INDEX IF NOT EXISTS idx_deals_close_date ON deals(close_date);
 
-    Ok(())
-}
+            CREATE TABLE IF NOT EXISTS deal_metadata (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
+                local_path TEXT,
+                sharepoint_link TEXT,
+                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
+                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
+                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
+            );
 
-fn create_deal_tables(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS deals (
-            deal_id TEXT PRIMARY KEY NOT NULL,
-            deal_name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            start_date TEXT NOT NULL,
-            close_date TEXT NOT NULL,
-            transaction_type TEXT NOT NULL,
-            target_company TEXT NOT NULL,
-            primary_buyer TEXT NOT NULL,
-            deal_sponsor TEXT NOT NULL,
-            CHECK (length(trim(deal_id)) > 0),
-            CHECK (length(trim(deal_name)) > 0),
-            CHECK (length(trim(status)) > 0),
-            CHECK (length(trim(start_date)) > 0),
-            CHECK (length(trim(close_date)) > 0),
-            CHECK (length(trim(transaction_type)) > 0),
-            CHECK (length(trim(target_company)) > 0),
-            CHECK (length(trim(primary_buyer)) > 0),
-            CHECK (length(trim(deal_sponsor)) > 0)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
-        CREATE INDEX IF NOT EXISTS idx_deals_transaction_type ON deals(transaction_type);
-        CREATE INDEX IF NOT EXISTS idx_deals_close_date ON deals(close_date);
-
-        CREATE TABLE IF NOT EXISTS deal_metadata (
-            deal_id TEXT PRIMARY KEY NOT NULL,
-            user_id INTEGER NOT NULL,
-            key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
-            local_path TEXT,
-            sharepoint_link TEXT,
-            FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
-            CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
-            CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
-            CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_deal_metadata_user_id ON deal_metadata(user_id);
+            CREATE INDEX IF NOT EXISTS idx_deal_metadata_user_id ON deal_metadata(user_id);
         "#,
     )
-}
-
-fn migrate_legacy_deals(connection: &Connection) -> rusqlite::Result<()> {
-    let has_legacy_metadata = table_exists(connection, "deal_metadata")?;
-    connection.execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")?;
-    let migration = (|| {
-        connection.execute_batch("ALTER TABLE deals RENAME TO deals_legacy_v4;")?;
-        if has_legacy_metadata {
-            connection
-                .execute_batch("ALTER TABLE deal_metadata RENAME TO deal_metadata_legacy_v4;")?;
-        }
-        create_deal_tables(connection)?;
-        connection.execute_batch(
-            r#"
-            INSERT INTO deals (
-                deal_id, deal_name, status, start_date, close_date,
-                transaction_type, target_company, primary_buyer, deal_sponsor
-            )
-            SELECT
-                printf('DEAL-%06d', id),
-                deal_name,
-                CASE WHEN lower(status) = 'archived' THEN 'Archived' ELSE 'Active' END,
-                substr(created_at, 1, 10),
-                substr(updated_at, 1, 10),
-                deal_type,
-                coalesce(target_company, carve_out_business, deal_name),
-                coalesce(buyer_or_platform_company, parent_or_seller_company, pe_firm),
-                pe_firm
-            FROM deals_legacy_v4;
-            "#,
-        )?;
-        if has_legacy_metadata {
-            connection.execute_batch(
-                r#"
-                INSERT INTO deal_metadata (
-                    deal_id, user_id, key_questions_json, local_path, sharepoint_link
-                )
-                SELECT
-                    printf('DEAL-%06d', metadata.deal_id),
-                    (SELECT id FROM users ORDER BY id LIMIT 1),
-                    metadata.key_questions_json,
-                    CASE
-                        WHEN deals.main_data_room_folder NOT LIKE 'browser-upload://%'
-                        THEN deals.main_data_room_folder
-                        ELSE NULL
-                    END,
-                    NULL
-                FROM deal_metadata_legacy_v4 metadata
-                JOIN deals_legacy_v4 deals ON deals.id = metadata.deal_id
-                WHERE EXISTS (SELECT 1 FROM users);
-                DROP TABLE deal_metadata_legacy_v4;
-                "#,
-            )?;
-        }
-        connection.execute_batch("DROP TABLE deals_legacy_v4; COMMIT;")
-    })();
-
-    if migration.is_err() {
-        let _ = connection.execute_batch("ROLLBACK;");
-    }
-    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-    migration
-}
-
-fn table_exists(connection: &Connection, table_name: &str) -> rusqlite::Result<bool> {
-    connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table_name],
-        |row| row.get(0),
-    )
-}
-
-fn column_exists(
-    connection: &Connection,
-    table_name: &str,
-    column_name: &str,
-) -> rusqlite::Result<bool> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
-    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    for column in columns {
-        if column? == column_name {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 #[cfg(test)]

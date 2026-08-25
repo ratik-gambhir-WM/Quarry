@@ -5,7 +5,7 @@ impl AppState {
     pub(crate) fn in_memory() -> Result<Self, String> {
         let db = SqliteClient::open_in_memory()
             .map_err(|err| format!("failed to open in-memory sqlite database: {err}"))?;
-        db.with_connection(|connection| run_migrations(connection))
+        db.with_connection(initialize_schema)
             .map_err(|err| format!("failed to initialize in-memory sqlite database: {err}"))?;
         Ok(Self {
             db,
@@ -17,90 +17,122 @@ impl AppState {
 }
 
 #[test]
-fn migrations_replace_the_legacy_deal_schema_and_preserve_records() {
-    let connection = Connection::open_in_memory().unwrap();
+fn schema_initialization_creates_user_owned_deals_and_is_idempotent() {
+    let mut connection = Connection::open_in_memory().unwrap();
+
+    initialize_schema(&mut connection).unwrap();
+    initialize_schema(&mut connection).unwrap();
     connection
         .execute_batch(
             r#"
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-            api_key TEXT NOT NULL, role TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO users (first_name, last_name, email, api_key, role)
-        VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
-        CREATE TABLE deals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            deal_name TEXT NOT NULL, main_data_room_folder TEXT NOT NULL,
-            deal_type TEXT NOT NULL, pe_firm TEXT NOT NULL,
-            target_company TEXT, buyer_or_platform_company TEXT,
-            parent_or_seller_company TEXT, carve_out_business TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO deals (
-            deal_name, main_data_room_folder, deal_type, pe_firm,
-            target_company, buyer_or_platform_company
-        ) VALUES ('Project Test', '/tmp/data-room', 'Buy-side', 'Test Capital', 'Target', 'Buyer');
-        CREATE TABLE deal_metadata (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, deal_id INTEGER NOT NULL,
-            key_questions_json TEXT NOT NULL DEFAULT '[]',
-            document_count INTEGER NOT NULL DEFAULT 0,
-            data_room_size_bytes INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO deal_metadata (deal_id, key_questions_json) VALUES (1, '["Why?"]');
-        PRAGMA user_version = 4;
-    "#,
+            INSERT INTO users (first_name, last_name, email, api_key, role)
+            VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
+            INSERT INTO deals (
+                deal_id, user_id, deal_name, status, start_date, close_date,
+                transaction_type, target_company, primary_buyer, deal_sponsor
+            ) VALUES (
+                'DEAL-000001', 1, 'Project Test', 'Active', '2026-01-01', '2026-02-01',
+                'Buy-side', 'Target', 'Buyer', 'Test Capital'
+            );
+            "#,
         )
         .unwrap();
 
-    run_migrations(&connection).unwrap();
+    let owner_id = connection
+        .query_row(
+            "SELECT user_id FROM deals WHERE deal_id = 'DEAL-000001'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
 
-    assert!(column_exists(&connection, "deals", "deal_id").unwrap());
-    assert!(!column_exists(&connection, "deals", "main_data_room_folder").unwrap());
-    assert!(column_exists(&connection, "deal_metadata", "user_id").unwrap());
-    assert!(column_exists(&connection, "deal_metadata", "local_path").unwrap());
-    assert!(column_exists(&connection, "deal_metadata", "sharepoint_link").unwrap());
-    let migrated: (String, String, String) = connection
-        .query_row(
-            "SELECT deal_id, transaction_type, primary_buyer FROM deals",
+    assert_eq!(owner_id, 1);
+    assert!(connection
+        .execute(
+            r#"
+            INSERT INTO deals (
+                deal_id, user_id, deal_name, status, start_date, close_date,
+                transaction_type, target_company, primary_buyer, deal_sponsor
+            ) VALUES (
+                'DEAL-INVALID', 999, 'Invalid', 'Active', '2026-01-01', '2026-02-01',
+                'Buy-side', 'Target', 'Buyer', 'Sponsor'
+            )
+            "#,
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .is_err());
+}
+
+#[test]
+fn schema_initialization_creates_file_blob_storage_and_preserves_binary_bytes() {
+    let mut connection = Connection::open_in_memory().unwrap();
+
+    initialize_schema(&mut connection).unwrap();
+
+    let file_bytes = vec![0, 1, 2, 127, 128, 254, 255];
+    connection
+        .execute(
+            "INSERT INTO quarry_file_blobs (file_id, file_bytes) VALUES (?1, ?2)",
+            rusqlite::params!["file-1", &file_bytes],
         )
         .unwrap();
-    assert_eq!(
-        migrated,
-        (
-            "DEAL-000001".to_string(),
-            "Buy-side".to_string(),
-            "Buyer".to_string()
-        )
-    );
-    let metadata: (i64, String, Option<String>) = connection
+
+    let stored_bytes: Vec<u8> = connection
         .query_row(
-            "SELECT user_id, key_questions_json, local_path FROM deal_metadata",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            "SELECT file_bytes FROM quarry_file_blobs WHERE file_id = ?1",
+            ["file-1"],
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(
-        metadata,
-        (
-            1,
-            "[\"Why?\"]".to_string(),
-            Some("/tmp/data-room".to_string())
-        )
-    );
-    assert_eq!(
-        connection
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        5
-    );
+
+    assert_eq!(stored_bytes, file_bytes);
+}
+
+#[test]
+fn disk_database_preserves_deal_ownership_across_reopen() {
+    let database_path = std::env::temp_dir().join(format!(
+        "quarry-persistence-test-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
+
+    {
+        let database = SqliteClient::open(&database_path).unwrap();
+        database.with_connection(initialize_schema).unwrap();
+        database
+            .with_connection(|connection| {
+                connection.execute_batch(
+                    r#"
+                    INSERT INTO users (first_name, last_name, email, api_key, role)
+                    VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
+                    INSERT INTO deals (
+                        deal_id, user_id, deal_name, status, start_date, close_date,
+                        transaction_type, target_company, primary_buyer, deal_sponsor
+                    ) VALUES (
+                        'DEAL-PERSISTED', 1, 'Persisted Deal', 'Active',
+                        '2026-01-01', '2026-02-01', 'Buy-side', 'Target', 'Buyer', 'Sponsor'
+                    );
+                    "#,
+                )
+            })
+            .unwrap();
+    }
+
+    {
+        let reopened = SqliteClient::open(&database_path).unwrap();
+        reopened.with_connection(initialize_schema).unwrap();
+        let owner_id = reopened
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT user_id FROM deals WHERE deal_id = 'DEAL-PERSISTED'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(owner_id, 1);
+    }
+
+    std::fs::remove_file(database_path).unwrap();
 }
 
 #[tokio::test]

@@ -1,22 +1,13 @@
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
-use serde_json::Value;
 
-use crate::{
-    core::{
-        helix_queries::deals::add_deal::{
-            add_deal as build_add_deal_query, create_deal_indexes,
-            get_deal_by_id as build_get_deal_by_id_query,
-        },
-        nodes::deal_node::DealNode,
-    },
-    state::AppState,
-};
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deal {
     pub deal_id: String,
+    pub user_id: i64,
     pub deal_name: String,
     pub status: String,
     pub start_date: String,
@@ -47,6 +38,7 @@ pub struct DealWithMetadata {
 
 pub struct CreateDealRecord<'a> {
     pub deal_id: &'a str,
+    pub user_id: i64,
     pub deal_name: &'a str,
     pub status: &'a str,
     pub start_date: &'a str,
@@ -70,13 +62,14 @@ pub fn create_deal(state: &AppState, record: CreateDealRecord<'_>) -> Result<Dea
         db.execute(
             r#"
             INSERT INTO deals (
-                deal_id, deal_name, status, start_date, close_date,
+                deal_id, user_id, deal_name, status, start_date, close_date,
                 transaction_type, target_company, primary_buyer, deal_sponsor
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
             params![
                 record.deal_id,
+                record.user_id,
                 record.deal_name,
                 record.status,
                 record.start_date,
@@ -91,21 +84,6 @@ pub fn create_deal(state: &AppState, record: CreateDealRecord<'_>) -> Result<Dea
     })
 }
 
-/// Persists a complete deal row through Helix.
-pub async fn upsert_helix_deal(state: &AppState, deal: DealNode) -> Result<Value, String> {
-    let query = build_add_deal_query(deal)?;
-    let _: Value = state
-        .helix()
-        .execute_dynamic_query(create_deal_indexes)
-        .await?;
-    state.helix().execute_dynamic_query(move || query).await
-}
-
-pub async fn get_helix_deal_by_id(state: &AppState, deal_id: &str) -> Result<Value, String> {
-    let query = build_get_deal_by_id_query(deal_id.to_string())?;
-    state.helix().execute_dynamic_query(move || query).await
-}
-
 pub fn get_deal_by_id(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
     state.with_db(|db| deal_by_id(db, deal_id))
 }
@@ -114,7 +92,7 @@ pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
     let deals = state.with_db(|db| {
         let mut statement = db.prepare(
             r#"
-            SELECT deal_id, deal_name, status, start_date, close_date,
+            SELECT deal_id, user_id, deal_name, status, start_date, close_date,
                    transaction_type, target_company, primary_buyer, deal_sponsor
             FROM deals
             WHERE lower(status) <> 'archived'
@@ -218,7 +196,7 @@ pub fn archive_deal(state: &AppState, deal_id: &str) -> Result<Option<Deal>, Str
 fn deal_by_id(db: &rusqlite::Connection, deal_id: &str) -> rusqlite::Result<Option<Deal>> {
     db.query_row(
         r#"
-        SELECT deal_id, deal_name, status, start_date, close_date,
+        SELECT deal_id, user_id, deal_name, status, start_date, close_date,
                transaction_type, target_company, primary_buyer, deal_sponsor
         FROM deals
         WHERE deal_id = ?1
@@ -232,6 +210,7 @@ fn deal_by_id(db: &rusqlite::Connection, deal_id: &str) -> rusqlite::Result<Opti
 fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
     Ok(Deal {
         deal_id: row.get("deal_id")?,
+        user_id: row.get("user_id")?,
         deal_name: row.get("deal_name")?,
         status: row.get("status")?,
         start_date: row.get("start_date")?,

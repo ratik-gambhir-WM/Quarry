@@ -31,6 +31,7 @@ pub struct UploadedDocument {
 struct ParsedDocumentGraph {
     document: DocumentNode,
     chunks: Vec<ChunkNode>,
+    file_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -210,20 +211,20 @@ pub async fn search_chunks_by_keyword(
 
 fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocumentGraph, String> {
     let filename = file.filename.clone();
+    let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
     let result = (|| {
         let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
-        Ok(match parsed {
-            ParsedQuarryFile::Pdf(assembly) => ParsedDocumentGraph {
-                document: assembly.document,
-                chunks: assembly.chunks,
-            },
-            ParsedQuarryFile::Docx(assembly) => ParsedDocumentGraph {
-                document: assembly.document,
-                chunks: assembly.chunks,
-            },
+        let (document, chunks) = match parsed {
+            ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
+            ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+        };
+        Ok(ParsedDocumentGraph {
+            document,
+            chunks,
+            file_bytes,
         })
     })();
 
@@ -262,9 +263,15 @@ async fn process_document(
         openai,
     )
     .await?;
-    persist_document_and_chunks(state.helix(), graph.document, graph.chunks)
-        .await
-        .map_err(|error| format!("failed to persist `{filename}` in Helix: {error}"))?;
+    persist_document_and_chunks(
+        state.sqlite(),
+        state.helix(),
+        graph.document,
+        graph.chunks,
+        graph.file_bytes,
+    )
+    .await
+    .map_err(|error| format!("failed to persist `{filename}`: {error}"))?;
 
     Ok((document_id, chunk_count))
 }

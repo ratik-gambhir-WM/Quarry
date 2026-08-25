@@ -67,6 +67,7 @@ fn saves_core_deal_and_empty_metadata_in_the_first_call() {
     let response = save_deal(&state, input()).unwrap();
 
     assert_eq!(response.deal.deal_id, "DEAL-000184");
+    assert_eq!(response.deal.user_id, user.id);
     assert_eq!(response.metadata.user_id, user.id);
     assert_eq!(response.metadata.key_questions_json, "[]");
     assert_eq!(

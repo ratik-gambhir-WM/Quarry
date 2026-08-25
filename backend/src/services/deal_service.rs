@@ -3,17 +3,12 @@ use std::env;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
-    core::{
-        clients::openai::{OpenAiClient, ResponsesFileInput},
-        nodes::deal_node::DealNode,
-    },
+    core::clients::openai::{OpenAiClient, ResponsesFileInput},
     repository::deal_repository::{
-        create_deal, get_deal_by_id, get_deal_metadata_by_deal_id, get_helix_deal_by_id,
-        upsert_deal_metadata, upsert_helix_deal, CreateDealRecord, Deal, DealMetadata,
-        UpsertDealMetadataRecord,
+        create_deal, get_deal_by_id, get_deal_metadata_by_deal_id, upsert_deal_metadata,
+        CreateDealRecord, Deal, DealMetadata, UpsertDealMetadataRecord,
     },
     services::user_service::get_sqlite_user_by_email,
     state::AppState,
@@ -21,14 +16,6 @@ use crate::{
 };
 
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
-
-pub async fn save_helix_deal(state: &AppState, deal: DealNode) -> Result<Value, String> {
-    upsert_helix_deal(state, deal).await
-}
-
-pub async fn get_helix_deal(state: &AppState, deal_id: &str) -> Result<Value, String> {
-    get_helix_deal_by_id(state, deal_id).await
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +87,7 @@ pub fn save_deal(state: &AppState, input: SaveDealInput) -> Result<SaveDealRespo
         state,
         CreateDealRecord {
             deal_id: input.deal_id.trim(),
+            user_id: user.id,
             deal_name: input.deal_name.trim(),
             status: input.status.trim(),
             start_date: input.start_date.trim(),
@@ -114,7 +102,7 @@ pub fn save_deal(state: &AppState, input: SaveDealInput) -> Result<SaveDealRespo
         state,
         UpsertDealMetadataRecord {
             deal_id: &deal.deal_id,
-            user_id: user.id,
+            user_id: deal.user_id,
             key_questions_json: "[]",
             local_path: trim_optional(input.local_path.as_deref()),
             sharepoint_link: trim_optional(input.sharepoint_link.as_deref()),
@@ -152,7 +140,7 @@ pub async fn save_deal_metadata(
         state,
         UpsertDealMetadataRecord {
             deal_id: &deal.deal_id,
-            user_id: existing_metadata.user_id,
+            user_id: deal.user_id,
             key_questions_json: &key_questions_json,
             local_path: existing_metadata.local_path.as_deref(),
             sharepoint_link: existing_metadata.sharepoint_link.as_deref(),
