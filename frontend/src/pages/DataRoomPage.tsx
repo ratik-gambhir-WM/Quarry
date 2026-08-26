@@ -11,7 +11,7 @@ import type {
 import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
-import { Icon } from "../components/ui/Icon";
+import { EmptyState } from "../components/empty-state/empty-state";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
   getDealDataRoomView,
@@ -46,6 +46,7 @@ export function DataRoomPage() {
   const [storedTreeError, setStoredTreeError] = useState("");
   const [localTreeLoading, setLocalTreeLoading] = useState(true);
   const [storedTreeLoading, setStoredTreeLoading] = useState(true);
+  const [dataRoomRefreshVersion, setDataRoomRefreshVersion] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<DataRoomTreeNode | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "loading" });
   const [rawText, setRawText] = useState<RawTextState>({ status: "idle" });
@@ -66,6 +67,7 @@ export function DataRoomPage() {
   const dataRoomHasFiles = useMemo(() => hasDataRoomFiles(explorerNodes), [explorerNodes]);
   const treeError = [storedTreeError, localTreeError].filter(Boolean).join(" ");
   const treeLoading = storedTreeLoading || localTreeLoading;
+  const isUnavailableDataRoom = !treeLoading && Boolean(treeError);
   const isEmptyDataRoom =
     localDataRoom !== null && !treeLoading && !treeError && !dataRoomHasFiles;
 
@@ -148,7 +150,7 @@ export function DataRoomPage() {
       cancelled = true;
       storedDocumentsRequestId.current += 1;
     };
-  }, [dealId, loadDealDocuments]);
+  }, [dataRoomRefreshVersion, dealId, loadDealDocuments]);
 
   const handleSelectDocument = useCallback(
     async (document: DataRoomTreeNode) => {
@@ -241,6 +243,10 @@ export function DataRoomPage() {
     void loadDealDocuments();
   }, [loadDealDocuments]);
 
+  const handleRetryDataRoom = useCallback(() => {
+    setDataRoomRefreshVersion((version) => version + 1);
+  }, []);
+
   if (!deal && loaded) {
     return <Navigate replace to="/hub" />;
   }
@@ -273,12 +279,19 @@ export function DataRoomPage() {
             onUploadNewFile={() => setIsUploadModalOpen(true)}
             rootPath={localDataRoom?.rootPath}
             selectedFilePath={selectedDocument?.relativePath}
-            treeError={treeError}
             treeLoading={treeLoading}
           />
           <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
-            {isEmptyDataRoom ? (
-              <EmptyDataRoomState />
+            {isUnavailableDataRoom ? (
+              <UnavailableDataRoomState
+                onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
+                onRetry={handleRetryDataRoom}
+              />
+            ) : isEmptyDataRoom ? (
+              <EmptyDataRoomState
+                onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
+                onUploadFiles={() => setIsUploadModalOpen(true)}
+              />
             ) : (
               <>
                 <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
@@ -328,7 +341,15 @@ export function DataRoomPage() {
   );
 }
 
-function EmptyDataRoomState() {
+type EmptyDataRoomStateProps = {
+  onConnectToSharePoint: () => void;
+  onUploadFiles: () => void;
+};
+
+function EmptyDataRoomState({
+  onConnectToSharePoint,
+  onUploadFiles,
+}: EmptyDataRoomStateProps) {
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
@@ -337,17 +358,56 @@ function EmptyDataRoomState() {
         </h1>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
-        <div className="w-full max-w-[32rem] text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Icon className="h-8 w-8" name="folderOpen" />
-          </div>
-          <h2 className="mt-6 text-2xl font-bold tracking-[-0.02em] text-text-main [font-family:var(--font-heading)]">
-            You don’t have any files in your data room
-          </h2>
-          <p className="mt-3 text-sm leading-6 text-muted">
-            Upload files or connect SharePoint from the New analysis menu when you’re ready.
-          </p>
-        </div>
+        <EmptyState
+          action={{ label: "Upload files", onClick: onUploadFiles }}
+          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+          description="Add deal documents from your device, or connect SharePoint to bring your data room into Quarry."
+          frame="dashed"
+          headingLevel={2}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
+          size="lg"
+          title="Upload your first file"
+          variant="first-use"
+        />
+      </div>
+    </section>
+  );
+}
+
+type UnavailableDataRoomStateProps = {
+  onConnectToSharePoint: () => void;
+  onRetry: () => void;
+};
+
+function UnavailableDataRoomState({
+  onConnectToSharePoint,
+  onRetry,
+}: UnavailableDataRoomStateProps) {
+  return (
+    <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+      <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          Data Room Vault
+        </h1>
+      </header>
+      <div className="flex flex-1 items-center justify-center p-8">
+        <EmptyState
+          action={{ label: "Try again", onClick: onRetry }}
+          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+          description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
+          frame="card"
+          headingLevel={2}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
+          size="lg"
+          title="Data room unavailable"
+          variant="error"
+        />
       </div>
     </section>
   );

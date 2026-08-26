@@ -17,7 +17,6 @@ type DataRoomExplorerProps = {
   onUploadNewFile: () => void;
   rootPath?: string;
   selectedFilePath?: string;
-  treeError?: string;
   treeLoading?: boolean;
 };
 
@@ -32,7 +31,6 @@ export function DataRoomExplorer({
   onUploadNewFile,
   rootPath,
   selectedFilePath,
-  treeError,
   treeLoading = false,
 }: DataRoomExplorerProps) {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(() => new Set());
@@ -96,7 +94,6 @@ export function DataRoomExplorer({
               {treeLoading ? (
                 <ExplorerStatus detail="Reading the configured local folder…" title="Loading data room" />
               ) : null}
-              {treeError ? <ExplorerStatus detail={treeError} title="Data room unavailable" /> : null}
               <div className="space-y-1">
                 {nodes.map((node) => (
                   <ExplorerNodeItem
