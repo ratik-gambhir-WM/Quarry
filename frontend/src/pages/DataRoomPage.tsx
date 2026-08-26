@@ -207,7 +207,11 @@ export function DataRoomPage() {
         </div>
       </div>
       {isUploadModalOpen ? (
-        <UploadFilesModal onClose={() => setIsUploadModalOpen(false)} userId={email ?? ""} />
+        <UploadFilesModal
+          dealId={dealId ?? ""}
+          onClose={() => setIsUploadModalOpen(false)}
+          userId={email ?? ""}
+        />
       ) : null}
       {isConnectSharePointModalOpen ? (
         <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />

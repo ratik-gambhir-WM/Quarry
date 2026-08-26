@@ -68,17 +68,38 @@ export type ProcessFileJobEventHandlers = {
   onEvent: (event: ProcessFileJobEvent) => void;
 };
 
-export type ChunkVectorSearch = {
-  limit?: number;
+export type FileChunkVectorSearch = {
+  limit: number;
   queryEmbedding: number[];
-  userId: string;
+  workspaceId: string;
 };
 
-export type ChunkKeywordSearch = {
-  limit?: number;
+export type FileChunkKeywordSearch = {
+  limit: number;
   queryText: string;
-  userId: string;
+  workspaceId: string;
 };
+
+export type FileChunkResult = {
+  char_end: number;
+  char_start: number;
+  chunk_id: string;
+  chunk_index: number;
+  chunk_sha256: string;
+  created_at: string;
+  file_id: string;
+  index_generation: string;
+  page_end: number | null;
+  page_start: number | null;
+  section_path: string;
+  text: string;
+  token_count: number;
+  version_id: string;
+  workspace_id: string;
+};
+
+export type VectorFileChunkHit = FileChunkResult & { distance: number };
+export type KeywordFileChunkHit = FileChunkResult & { score: number };
 
 export interface QuarryApi {
   archiveDeal(dealId: string): Promise<SavedDeal>;
@@ -94,10 +115,22 @@ export interface QuarryApi {
     dealId: string,
     relativePath: string,
   ): Promise<DocumentPreviewResponse>;
-  processDocuments(userId: string, files: File[]): Promise<ProcessDocumentsResponse>;
-  searchDocumentChunksByKeyword(search: ChunkKeywordSearch): Promise<unknown>;
-  searchDocumentChunksByVector(search: ChunkVectorSearch): Promise<unknown>;
-  startProcessFile(userId: string, file: File): Promise<ProcessFileJobResponse>;
+  processDocuments(
+    dealId: string,
+    userId: string,
+    files: File[],
+  ): Promise<ProcessDocumentsResponse>;
+  searchDocumentChunksByKeyword(
+    search: FileChunkKeywordSearch,
+  ): Promise<KeywordFileChunkHit[]>;
+  searchDocumentChunksByVector(
+    search: FileChunkVectorSearch,
+  ): Promise<VectorFileChunkHit[]>;
+  startProcessFile(
+    dealId: string,
+    userId: string,
+    file: File,
+  ): Promise<ProcessFileJobResponse>;
   subscribeToProcessFileJob(
     jobId: string,
     handlers: ProcessFileJobEventHandlers,

@@ -1,7 +1,8 @@
 import type {
   AddUserInput,
-  ChunkKeywordSearch,
-  ChunkVectorSearch,
+  FileChunkKeywordSearch,
+  FileChunkVectorSearch,
+  KeywordFileChunkHit,
   PersistedDeal,
   ProcessDocumentsResponse,
   ProcessFileJobEvent,
@@ -9,6 +10,7 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
   SaveDealInput,
@@ -79,9 +81,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/deals/${encodeURIComponent(dealId)}/data-room/preview`,
         { relativePath },
       ),
-    async processDocuments(userId, files) {
+    async processDocuments(dealId, userId, files) {
       return transport.postMultipart<ProcessDocumentsResponse>(
-        await multipartFiles("/api/v1/documents/process", files, [
+        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`, files, [
           { name: "userId", value: userId.trim() },
         ]),
       );
@@ -90,13 +92,13 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.postMultipart<SaveDealMetadataResponse>(
         await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/metadata`, files),
       ),
-    searchDocumentChunksByKeyword: (search: ChunkKeywordSearch) =>
-      transport.post("/api/v1/documents/search/keyword", search),
-    searchDocumentChunksByVector: (search: ChunkVectorSearch) =>
-      transport.post("/api/v1/documents/search/vector", search),
-    async startProcessFile(userId, file) {
+    searchDocumentChunksByKeyword: (search: FileChunkKeywordSearch) =>
+      transport.post<KeywordFileChunkHit[]>("/api/v1/documents/search/keyword", search),
+    searchDocumentChunksByVector: (search: FileChunkVectorSearch) =>
+      transport.post<VectorFileChunkHit[]>("/api/v1/documents/search/vector", search),
+    async startProcessFile(dealId, userId, file) {
       return transport.postMultipart<ProcessFileJobResponse>(
-        await multipartFiles("/api/v1/documents/process_file", [file], [
+        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`, [file], [
           { name: "userId", value: userId.trim() },
         ]),
       );

@@ -1,417 +1,551 @@
-use helix_db::dsl::prelude::*;
+use std::collections::HashSet;
 
-use crate::core::nodes::document_node::{ChunkNode, DocumentNode};
+use helix_db::dsl::prelude::*;
+use helix_db::OnNodes;
+
+use crate::core::nodes::document_node::{FileChunkNode, FileNode, FileVersionNode};
 
 pub const QUARRY_FILE_LABEL: &str = "QuarryFile";
-pub const CHUNK_LABEL: &str = "Chunk";
-pub const QUARRY_FILE_HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
-pub const INGESTION_COMPLETE_PROPERTY: &str = "ingestion_complete";
+pub const FILE_VERSION_LABEL: &str = "FileVersion";
+pub const FILE_CHUNK_LABEL: &str = "FileChunk";
+pub const HAS_VERSION_LABEL: &str = "HAS_VERSION";
+pub const CURRENT_VERSION_LABEL: &str = "CURRENT_VERSION";
+pub const HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
 
 // Helix's /v1/query route uses Axum's default buffered-body limit of 2 MiB.
 pub const HELIX_MAX_QUERY_BODY_BYTES: usize = 2_097_152;
 
-pub fn insert_quarry_file(document: DocumentNode) -> Result<DynamicQueryRequest, String> {
-    let DocumentNode {
-        document_id,
-        user_id,
-        file_name,
-        source_type,
-        local_path,
-        file_size_bytes,
-        token_count,
-        content_hash,
-        rendered_pdf_path,
-    } = document;
+pub fn insert_file_version_graph(
+    file: FileNode,
+    version: FileVersionNode,
+    chunks: Vec<FileChunkNode>,
+) -> Result<DynamicQueryRequest, String> {
+    validate_graph_identity(&file, &version, &chunks)?;
 
-    Ok(insert_quarry_file_route(
-        document_id,
-        user_id,
-        file_name,
-        source_type,
-        local_path.map_or(PropertyValue::Null, PropertyValue::String),
-        u64_to_i64(file_size_bytes, "file_size_bytes")?,
-        u64_to_i64(token_count, "token_count")?,
-        content_hash,
-        rendered_pdf_path.unwrap_or_default(),
-    ))
+    let chunk_params = chunks.iter().map(file_chunk_params).collect::<Vec<_>>();
+    let query = insert_file_version_graph_route(
+        file.workspace_id,
+        file.file_id,
+        file.display_name,
+        version.version_id,
+        version.mime_type,
+        version.content_sha256,
+        version.byte_size,
+        version.index_generation,
+        version.indexed_at,
+        chunk_params,
+    );
+    validate_query_payload_size(&query, HELIX_MAX_QUERY_BODY_BYTES)?;
+    Ok(query)
 }
 
 #[allow(clippy::too_many_arguments)]
 #[register]
-fn insert_quarry_file_route(
-    document_id: String,
-    user_id: String,
-    file_name: String,
-    source_type: String,
-    local_path: PropertyValue,
-    file_size_bytes: i64,
-    token_count: i64,
-    content_hash: String,
-    rendered_pdf_path: String,
+fn insert_file_version_graph_route(
+    workspace_id: String,
+    file_id: String,
+    display_name: String,
+    version_id: String,
+    mime_type: String,
+    content_sha256: String,
+    byte_size: i64,
+    index_generation: String,
+    indexed_at: String,
+    chunks: Vec<ParamObject>,
 ) -> WriteBatch {
     let _ = (
-        &document_id,
-        &user_id,
-        &file_name,
-        &source_type,
-        &local_path,
-        &file_size_bytes,
-        &token_count,
-        &content_hash,
-        &rendered_pdf_path,
+        &workspace_id,
+        &file_id,
+        &display_name,
+        &version_id,
+        &mime_type,
+        &content_sha256,
+        &byte_size,
+        &index_generation,
+        &indexed_at,
+        &chunks,
     );
 
     write_batch()
         .var_as(
-            "stale_chunks",
-            g().n_with_label(CHUNK_LABEL)
-                .where_(Predicate::eq_param("document_id", "document_id"))
-                .where_(Predicate::eq_param("user_id", "user_id"))
-                .drop(),
-        )
-        .var_as(
-            "stale_quarry_file",
+            "existing_file",
             g().n_with_label(QUARRY_FILE_LABEL)
-                .where_(Predicate::eq_param("document_id", "document_id"))
-                .where_(Predicate::eq_param("user_id", "user_id"))
-                .drop(),
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
         )
-        .var_as(
-            "quarry_file",
+        .var_as_if(
+            "created_file",
+            BatchCondition::VarEmpty("existing_file".to_string()),
             g().add_n(
                 QUARRY_FILE_LABEL,
                 vec![
-                    ("document_id", PropertyInput::param("document_id")),
-                    ("user_id", PropertyInput::param("user_id")),
-                    ("file_name", PropertyInput::param("file_name")),
-                    ("source_type", PropertyInput::param("source_type")),
-                    ("local_path", PropertyInput::param("local_path")),
-                    ("file_size_bytes", PropertyInput::param("file_size_bytes")),
-                    ("token_count", PropertyInput::param("token_count")),
-                    ("content_hash", PropertyInput::param("content_hash")),
-                    (
-                        "rendered_pdf_path",
-                        PropertyInput::param("rendered_pdf_path"),
-                    ),
-                    (INGESTION_COMPLETE_PROPERTY, PropertyInput::from(false)),
+                    ("workspace_id", PropertyInput::param("workspace_id")),
+                    ("file_id", PropertyInput::param("file_id")),
+                    ("display_name", PropertyInput::param("display_name")),
                 ],
-            )
-            .project(quarry_file_projection()),
+            ),
         )
-        .returning(["quarry_file"])
-}
-
-pub fn mark_quarry_file_ingestion_complete(
-    document_id: String,
-    user_id: String,
-) -> Result<DynamicQueryRequest, String> {
-    if document_id.trim().is_empty() {
-        return Err("document_id cannot be empty".to_string());
-    }
-    if user_id.trim().is_empty() {
-        return Err("user_id cannot be empty".to_string());
-    }
-
-    Ok(mark_quarry_file_ingestion_complete_route(
-        document_id,
-        user_id,
-    ))
-}
-
-#[register]
-fn mark_quarry_file_ingestion_complete_route(document_id: String, user_id: String) -> WriteBatch {
-    let _ = (&document_id, &user_id);
-    write_batch()
         .var_as(
-            "quarry_file",
+            "canonical_file",
             g().n_with_label(QUARRY_FILE_LABEL)
-                .where_(Predicate::eq_param("document_id", "document_id"))
-                .where_(Predicate::eq_param("user_id", "user_id"))
-                .set_property(INGESTION_COMPLETE_PROPERTY, true)
-                .project(quarry_file_projection()),
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
         )
-        .returning(["quarry_file"])
-}
-
-pub fn insert_chunk_batches(chunks: &[ChunkNode]) -> Result<Vec<DynamicQueryRequest>, String> {
-    insert_chunk_batches_with_limit(chunks, HELIX_MAX_QUERY_BODY_BYTES)
-}
-
-#[register]
-fn insert_chunks_for_document_route(chunks: Vec<ParamObject>) -> WriteBatch {
-    let _ = &chunks;
-    write_batch()
+        .var_as(
+            "file",
+            g().n(NodeRef::var("canonical_file"))
+                .set_property("display_name", PropertyInput::param("display_name"))
+                .project(file_projection()),
+        )
+        .var_as("existing_version", version_by_immutable_identity())
+        .var_as_if(
+            "created_version",
+            BatchCondition::VarEmpty("existing_version".to_string()),
+            g().add_n(
+                FILE_VERSION_LABEL,
+                vec![
+                    ("workspace_id", PropertyInput::param("workspace_id")),
+                    ("file_id", PropertyInput::param("file_id")),
+                    ("version_id", PropertyInput::param("version_id")),
+                    ("mime_type", PropertyInput::param("mime_type")),
+                    ("content_sha256", PropertyInput::param("content_sha256")),
+                    ("byte_size", PropertyInput::param("byte_size")),
+                    ("index_generation", PropertyInput::param("index_generation")),
+                    ("indexed_at", PropertyInput::param("indexed_at")),
+                ],
+            ),
+        )
+        .var_as("canonical_version", version_by_immutable_identity())
+        .var_as(
+            "version",
+            g().n(NodeRef::var("canonical_version"))
+                .set_property("index_generation", PropertyInput::param("index_generation"))
+                .set_property("indexed_at", PropertyInput::param("indexed_at"))
+                .project(file_version_projection()),
+        )
+        .var_as(
+            "removed_has_version",
+            g().n(NodeRef::var("canonical_file"))
+                .drop_edge_labeled(NodeRef::var("canonical_version"), HAS_VERSION_LABEL),
+        )
+        .var_as(
+            "added_has_version",
+            g().n(NodeRef::var("canonical_file")).add_e(
+                HAS_VERSION_LABEL,
+                NodeRef::var("canonical_version"),
+                Vec::<(&str, PropertyInput)>::new(),
+            ),
+        )
+        .var_as(
+            "old_current_versions",
+            g().n(NodeRef::var("canonical_file"))
+                .out(Some(CURRENT_VERSION_LABEL)),
+        )
+        .var_as(
+            "removed_current_version",
+            g().n(NodeRef::var("canonical_file"))
+                .drop_edge_labeled(NodeRef::var("old_current_versions"), CURRENT_VERSION_LABEL),
+        )
+        .var_as(
+            "added_current_version",
+            g().n(NodeRef::var("canonical_file")).add_e(
+                CURRENT_VERSION_LABEL,
+                NodeRef::var("canonical_version"),
+                Vec::<(&str, PropertyInput)>::new(),
+            ),
+        )
+        .var_as(
+            "removed_version_chunks",
+            g().n_with_label(FILE_CHUNK_LABEL)
+                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("version_id", "version_id"))
+                .drop(),
+        )
         .for_each_param(
             "chunks",
             write_batch()
                 .var_as(
-                    "quarry_file",
-                    g().n_with_label(QUARRY_FILE_LABEL)
-                        .where_(Predicate::eq_param("document_id", "document_id"))
-                        .where_(Predicate::eq_param("user_id", "user_id")),
+                    "chunk_version",
+                    g().n_with_label(FILE_VERSION_LABEL)
+                        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                        .where_(Predicate::eq_param("file_id", "file_id"))
+                        .where_(Predicate::eq_param("version_id", "version_id")),
                 )
                 .var_as_if(
                     "chunk",
-                    BatchCondition::VarNotEmpty("quarry_file".to_string()),
+                    BatchCondition::VarNotEmpty("chunk_version".to_string()),
                     g().add_n(
-                        CHUNK_LABEL,
+                        FILE_CHUNK_LABEL,
                         vec![
                             ("chunk_id", PropertyInput::param("chunk_id")),
-                            ("document_id", PropertyInput::param("document_id")),
-                            ("user_id", PropertyInput::param("user_id")),
+                            ("workspace_id", PropertyInput::param("workspace_id")),
+                            ("file_id", PropertyInput::param("file_id")),
+                            ("version_id", PropertyInput::param("version_id")),
+                            ("index_generation", PropertyInput::param("index_generation")),
+                            ("chunk_index", PropertyInput::param("chunk_index")),
                             ("text", PropertyInput::param("text")),
                             ("embedding", PropertyInput::param("embedding")),
-                            ("sequence_number", PropertyInput::param("sequence_number")),
-                            ("page_numbers", PropertyInput::param("page_numbers")),
-                            ("start_offset", PropertyInput::param("start_offset")),
-                            ("end_offset", PropertyInput::param("end_offset")),
+                            ("chunk_sha256", PropertyInput::param("chunk_sha256")),
                             ("token_count", PropertyInput::param("token_count")),
-                            ("content_hash", PropertyInput::param("content_hash")),
-                            ("section_title", PropertyInput::param("section_title")),
+                            ("page_start", PropertyInput::param("page_start")),
+                            ("page_end", PropertyInput::param("page_end")),
+                            ("char_start", PropertyInput::param("char_start")),
+                            ("char_end", PropertyInput::param("char_end")),
+                            ("section_path", PropertyInput::param("section_path")),
+                            ("created_at", PropertyInput::param("created_at")),
                         ],
                     ),
                 )
                 .var_as_if(
-                    "quarry_file_has_chunk",
+                    "file_chunk",
                     BatchCondition::VarNotEmpty("chunk".to_string()),
-                    g().n(NodeRef::var("quarry_file")).add_e(
-                        QUARRY_FILE_HAS_CHUNK_LABEL,
+                    g().n(NodeRef::var("chunk"))
+                        .project(file_chunk_projection()),
+                )
+                .var_as_if(
+                    "version_has_chunk",
+                    BatchCondition::VarNotEmpty("chunk".to_string()),
+                    g().n(NodeRef::var("chunk_version")).add_e(
+                        HAS_CHUNK_LABEL,
                         NodeRef::var("chunk"),
-                        vec![("user_id", PropertyInput::param("user_id"))],
+                        Vec::<(&str, PropertyInput)>::new(),
                     ),
                 ),
         )
-        .returning(["quarry_file", "chunk", "quarry_file_has_chunk"])
+        .returning([
+            "file",
+            "version",
+            "file_chunk",
+            "removed_has_version",
+            "added_has_version",
+            "removed_current_version",
+            "added_current_version",
+            "removed_version_chunks",
+            "version_has_chunk",
+        ])
 }
 
-fn insert_chunk_batches_with_limit(
-    chunks: &[ChunkNode],
-    max_payload_bytes: usize,
-) -> Result<Vec<DynamicQueryRequest>, String> {
-    let mut batches = Vec::new();
-    let mut remaining = chunks;
-
-    while !remaining.is_empty() {
-        let (chunk_count, query) = largest_chunk_batch_that_fits(remaining, max_payload_bytes)?;
-        batches.push(query);
-        remaining = &remaining[chunk_count..];
-    }
-
-    Ok(batches)
+fn version_by_immutable_identity() -> Traversal<OnNodes> {
+    g().n_with_label(FILE_VERSION_LABEL)
+        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+        .where_(Predicate::eq_param("file_id", "file_id"))
+        .where_(Predicate::eq_param("version_id", "version_id"))
+        .where_(Predicate::eq_param("mime_type", "mime_type"))
+        .where_(Predicate::eq_param("content_sha256", "content_sha256"))
+        .where_(Predicate::eq_param("byte_size", "byte_size"))
 }
 
-fn largest_chunk_batch_that_fits(
-    chunks: &[ChunkNode],
-    max_payload_bytes: usize,
-) -> Result<(usize, DynamicQueryRequest), String> {
-    let mut low = 1usize;
-    let mut high = chunks.len();
-    let mut best = None;
-    let mut smallest_payload_bytes = None;
-
-    while low <= high {
-        let chunk_count = low + (high - low) / 2;
-        let query = build_chunk_batch(&chunks[..chunk_count])?;
-        let payload_bytes = query
-            .to_json_bytes()
-            .map_err(|error| format!("failed to serialize Helix chunk batch: {error}"))?
-            .len();
-        if chunk_count == 1 {
-            smallest_payload_bytes = Some(payload_bytes);
-        }
-
-        if payload_bytes <= max_payload_bytes {
-            best = Some((chunk_count, query));
-            low = chunk_count + 1;
-        } else {
-            high = chunk_count - 1;
+fn validate_graph_identity(
+    file: &FileNode,
+    version: &FileVersionNode,
+    chunks: &[FileChunkNode],
+) -> Result<(), String> {
+    for (field, value) in [
+        ("workspace_id", file.workspace_id.as_str()),
+        ("file_id", file.file_id.as_str()),
+        ("display_name", file.display_name.as_str()),
+        ("version_id", version.version_id.as_str()),
+        ("mime_type", version.mime_type.as_str()),
+        ("content_sha256", version.content_sha256.as_str()),
+        ("index_generation", version.index_generation.as_str()),
+        ("indexed_at", version.indexed_at.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(format!("{field} cannot be empty"));
         }
     }
-
-    best.ok_or_else(|| {
-        let payload_bytes = smallest_payload_bytes.unwrap_or_else(|| {
-            build_chunk_batch(&chunks[..1])
-                .and_then(|query| {
-                    query
-                        .to_json_bytes()
-                        .map_err(|error| error.to_string())
-                })
-                .map(|payload| payload.len())
-                .unwrap_or_default()
-        });
-        format!(
-            "chunk `{}` requires a {payload_bytes}-byte Helix query payload, exceeding the {max_payload_bytes}-byte limit",
-            chunks[0].chunk_id
-        )
-    })
+    if version.byte_size < 0 {
+        return Err("byte_size cannot be negative".to_string());
+    }
+    if file.workspace_id != version.workspace_id || file.file_id != version.file_id {
+        return Err("file and version graph identities do not match".to_string());
+    }
+    let mut chunk_ids = HashSet::with_capacity(chunks.len());
+    let mut chunk_indices = HashSet::with_capacity(chunks.len());
+    let mut embedding_dimension = None;
+    for chunk in chunks {
+        if chunk.workspace_id != version.workspace_id
+            || chunk.file_id != version.file_id
+            || chunk.version_id != version.version_id
+            || chunk.index_generation != version.index_generation
+        {
+            return Err(format!(
+                "chunk `{}` graph identity does not match its file version",
+                chunk.chunk_id
+            ));
+        }
+        if chunk.chunk_id.trim().is_empty()
+            || chunk.chunk_sha256.trim().is_empty()
+            || chunk.created_at.trim().is_empty()
+        {
+            return Err("chunk identity and timestamp fields cannot be empty".to_string());
+        }
+        if !chunk_ids.insert(&chunk.chunk_id) || !chunk_indices.insert(chunk.chunk_index) {
+            return Err(format!(
+                "chunk `{}` duplicates a graph chunk identity or index",
+                chunk.chunk_id
+            ));
+        }
+        if chunk.chunk_index < 0
+            || chunk.token_count < 0
+            || chunk.char_start < 0
+            || chunk.char_end < chunk.char_start
+        {
+            return Err(format!(
+                "chunk `{}` has an invalid numeric range",
+                chunk.chunk_id
+            ));
+        }
+        if chunk.page_start.is_some() != chunk.page_end.is_some()
+            || chunk
+                .page_start
+                .zip(chunk.page_end)
+                .is_some_and(|(start, end)| start > end)
+        {
+            return Err(format!(
+                "chunk `{}` has an invalid page range",
+                chunk.chunk_id
+            ));
+        }
+        if chunk.embedding.is_empty() || chunk.embedding.iter().any(|value| !value.is_finite()) {
+            return Err(format!(
+                "chunk `{}` has an invalid embedding",
+                chunk.chunk_id
+            ));
+        }
+        match embedding_dimension {
+            Some(expected) if expected != chunk.embedding.len() => {
+                return Err(format!(
+                    "chunk `{}` embedding dimension does not match the version",
+                    chunk.chunk_id
+                ));
+            }
+            None => embedding_dimension = Some(chunk.embedding.len()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
-fn build_chunk_batch(chunks: &[ChunkNode]) -> Result<DynamicQueryRequest, String> {
-    let params = chunks
-        .iter()
-        .map(chunk_params)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(insert_chunks_for_document_route(params))
+fn validate_query_payload_size(
+    query: &DynamicQueryRequest,
+    max_payload_bytes: usize,
+) -> Result<(), String> {
+    let payload_bytes = query
+        .to_json_bytes()
+        .map_err(|error| format!("failed to serialize atomic Helix file graph query: {error}"))?
+        .len();
+    if payload_bytes > max_payload_bytes {
+        return Err(format!(
+            "atomic Helix file graph query is {payload_bytes} bytes, exceeding the configured {max_payload_bytes}-byte limit"
+        ));
+    }
+    Ok(())
 }
 
-fn chunk_params(chunk: &ChunkNode) -> Result<ParamObject, String> {
-    let embedding = chunk
-        .embedding
-        .clone()
-        .ok_or_else(|| format!("chunk `{}` does not contain an embedding", chunk.chunk_id))?;
-
-    Ok(ParamObject::from([
+fn file_chunk_params(chunk: &FileChunkNode) -> ParamObject {
+    ParamObject::from([
         (
             "chunk_id".to_string(),
             PropertyValue::String(chunk.chunk_id.clone()),
         ),
         (
-            "document_id".to_string(),
-            PropertyValue::String(chunk.document_id.clone()),
+            "workspace_id".to_string(),
+            PropertyValue::String(chunk.workspace_id.clone()),
         ),
         (
-            "user_id".to_string(),
-            PropertyValue::String(chunk.user_id.clone()),
+            "file_id".to_string(),
+            PropertyValue::String(chunk.file_id.clone()),
+        ),
+        (
+            "version_id".to_string(),
+            PropertyValue::String(chunk.version_id.clone()),
+        ),
+        (
+            "index_generation".to_string(),
+            PropertyValue::String(chunk.index_generation.clone()),
+        ),
+        (
+            "chunk_index".to_string(),
+            PropertyValue::I64(chunk.chunk_index),
         ),
         (
             "text".to_string(),
             PropertyValue::String(chunk.text.clone()),
         ),
-        ("embedding".to_string(), PropertyValue::F32Array(embedding)),
         (
-            "sequence_number".to_string(),
-            PropertyValue::I64(i64::from(chunk.sequence_number)),
+            "embedding".to_string(),
+            PropertyValue::F32Array(chunk.embedding.clone()),
         ),
         (
-            "page_numbers".to_string(),
-            chunk
-                .page_numbers
-                .as_ref()
-                .map_or(PropertyValue::Null, |values| {
-                    PropertyValue::I64Array(values.iter().copied().map(i64::from).collect())
-                }),
-        ),
-        (
-            "start_offset".to_string(),
-            PropertyValue::I64(usize_to_i64(chunk.start_offset, "start_offset")?),
-        ),
-        (
-            "end_offset".to_string(),
-            PropertyValue::I64(usize_to_i64(chunk.end_offset, "end_offset")?),
+            "chunk_sha256".to_string(),
+            PropertyValue::String(chunk.chunk_sha256.clone()),
         ),
         (
             "token_count".to_string(),
-            PropertyValue::I64(i64::from(chunk.token_count)),
+            PropertyValue::I64(chunk.token_count),
         ),
         (
-            "content_hash".to_string(),
-            PropertyValue::String(chunk.content_hash.clone()),
+            "page_start".to_string(),
+            chunk
+                .page_start
+                .map_or(PropertyValue::Null, PropertyValue::I64),
         ),
         (
-            "section_title".to_string(),
-            PropertyValue::String(chunk.section_title.clone().unwrap_or_default()),
+            "page_end".to_string(),
+            chunk
+                .page_end
+                .map_or(PropertyValue::Null, PropertyValue::I64),
         ),
-    ]))
+        (
+            "char_start".to_string(),
+            PropertyValue::I64(chunk.char_start),
+        ),
+        ("char_end".to_string(), PropertyValue::I64(chunk.char_end)),
+        (
+            "section_path".to_string(),
+            PropertyValue::String(chunk.section_path.clone()),
+        ),
+        (
+            "created_at".to_string(),
+            PropertyValue::String(chunk.created_at.clone()),
+        ),
+    ])
 }
 
 #[register]
 pub fn create_document_indexes() -> WriteBatch {
     write_batch()
         .var_as(
-            "document_id_unique",
+            "file_id_unique",
             g().create_index_if_not_exists(IndexSpec::node_unique_equality(
                 QUARRY_FILE_LABEL,
-                "document_id",
+                "file_id",
             )),
         )
         .var_as(
-            "document_user_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(QUARRY_FILE_LABEL, "user_id")),
-        )
-        .var_as(
-            "document_source_type",
+            "file_workspace_id",
             g().create_index_if_not_exists(IndexSpec::node_equality(
                 QUARRY_FILE_LABEL,
-                "source_type",
+                "workspace_id",
             )),
         )
         .var_as(
-            "document_local_path",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                QUARRY_FILE_LABEL,
-                "local_path",
-            )),
-        )
-        .var_as(
-            "document_content_hash",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                QUARRY_FILE_LABEL,
-                "content_hash",
-            )),
-        )
-        .var_as(
-            "document_file_name",
+            "file_display_name",
             g().create_index_if_not_exists(IndexSpec::node_text(
                 QUARRY_FILE_LABEL,
-                "file_name",
+                "display_name",
                 None::<&str>,
+            )),
+        )
+        .var_as(
+            "version_id_unique",
+            g().create_index_if_not_exists(IndexSpec::node_unique_equality(
+                FILE_VERSION_LABEL,
+                "version_id",
+            )),
+        )
+        .var_as(
+            "version_workspace_id",
+            g().create_index_if_not_exists(IndexSpec::node_equality(
+                FILE_VERSION_LABEL,
+                "workspace_id",
+            )),
+        )
+        .var_as(
+            "version_file_id",
+            g().create_index_if_not_exists(IndexSpec::node_equality(FILE_VERSION_LABEL, "file_id")),
+        )
+        .var_as(
+            "version_content_sha256",
+            g().create_index_if_not_exists(IndexSpec::node_equality(
+                FILE_VERSION_LABEL,
+                "content_sha256",
             )),
         )
         .var_as(
             "chunk_id_unique",
             g().create_index_if_not_exists(IndexSpec::node_unique_equality(
-                CHUNK_LABEL,
+                FILE_CHUNK_LABEL,
                 "chunk_id",
             )),
         )
         .var_as(
-            "chunk_document_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(CHUNK_LABEL, "document_id")),
+            "chunk_workspace_id",
+            g().create_index_if_not_exists(IndexSpec::node_equality(
+                FILE_CHUNK_LABEL,
+                "workspace_id",
+            )),
         )
         .var_as(
-            "chunk_user_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(CHUNK_LABEL, "user_id")),
+            "chunk_file_id",
+            g().create_index_if_not_exists(IndexSpec::node_equality(FILE_CHUNK_LABEL, "file_id")),
+        )
+        .var_as(
+            "chunk_version_id",
+            g().create_index_if_not_exists(IndexSpec::node_equality(
+                FILE_CHUNK_LABEL,
+                "version_id",
+            )),
         )
         .var_as(
             "chunk_embedding",
             g().create_index_if_not_exists(IndexSpec::node_vector(
-                CHUNK_LABEL,
+                FILE_CHUNK_LABEL,
                 "embedding",
-                Some("user_id"),
+                Some("workspace_id"),
             )),
         )
         .var_as(
             "chunk_text",
             g().create_index_if_not_exists(IndexSpec::node_text(
-                CHUNK_LABEL,
+                FILE_CHUNK_LABEL,
                 "text",
-                Some("user_id"),
+                Some("workspace_id"),
             )),
         )
 }
 
-fn quarry_file_projection() -> Vec<PropertyProjection> {
+pub(super) fn file_projection() -> Vec<PropertyProjection> {
     vec![
-        PropertyProjection::renamed("$id", "id"),
-        PropertyProjection::new("document_id"),
-        PropertyProjection::new("user_id"),
-        PropertyProjection::new("file_name"),
-        PropertyProjection::new("source_type"),
-        PropertyProjection::new("local_path"),
-        PropertyProjection::new("file_size_bytes"),
-        PropertyProjection::new("token_count"),
-        PropertyProjection::new("content_hash"),
-        PropertyProjection::new("rendered_pdf_path"),
-        PropertyProjection::new(INGESTION_COMPLETE_PROPERTY),
+        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("file_id"),
+        PropertyProjection::new("display_name"),
     ]
 }
 
-fn usize_to_i64(value: usize, field: &str) -> Result<i64, String> {
-    i64::try_from(value).map_err(|_| format!("{field} value `{value}` does not fit in i64"))
+pub(super) fn file_version_projection() -> Vec<PropertyProjection> {
+    vec![
+        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("file_id"),
+        PropertyProjection::new("version_id"),
+        PropertyProjection::new("mime_type"),
+        PropertyProjection::new("content_sha256"),
+        PropertyProjection::new("byte_size"),
+        PropertyProjection::new("index_generation"),
+        PropertyProjection::new("indexed_at"),
+    ]
 }
 
-fn u64_to_i64(value: u64, field: &str) -> Result<i64, String> {
-    i64::try_from(value).map_err(|_| format!("{field} value `{value}` does not fit in i64"))
+pub(super) fn file_chunk_projection() -> Vec<PropertyProjection> {
+    vec![
+        PropertyProjection::new("chunk_id"),
+        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("file_id"),
+        PropertyProjection::new("version_id"),
+        PropertyProjection::new("index_generation"),
+        PropertyProjection::new("chunk_index"),
+        PropertyProjection::new("text"),
+        PropertyProjection::new("chunk_sha256"),
+        PropertyProjection::new("token_count"),
+        PropertyProjection::new("page_start"),
+        PropertyProjection::new("page_end"),
+        PropertyProjection::new("char_start"),
+        PropertyProjection::new("char_end"),
+        PropertyProjection::new("section_path"),
+        PropertyProjection::new("created_at"),
+    ]
 }
 
 #[cfg(test)]

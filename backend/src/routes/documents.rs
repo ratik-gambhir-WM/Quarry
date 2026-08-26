@@ -19,12 +19,12 @@ const DOCUMENT_UPLOAD_BODY_BYTES: usize = MAX_TOTAL_REQUEST_FILE_BYTES + MULTIPA
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(
-            "/documents/process",
+            "/deals/{deal_id}/documents/process",
             post(process_documents_handler)
                 .layer(DefaultBodyLimit::max(DOCUMENT_UPLOAD_BODY_BYTES)),
         )
         .route(
-            "/documents/process_file",
+            "/deals/{deal_id}/documents/process_file",
             post(start_process_file_handler)
                 .layer(DefaultBodyLimit::max(DOCUMENT_UPLOAD_BODY_BYTES)),
         )

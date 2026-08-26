@@ -1,7 +1,8 @@
 import type {
   AddUserInput,
-  ChunkKeywordSearch,
-  ChunkVectorSearch,
+  FileChunkKeywordSearch,
+  FileChunkVectorSearch,
+  KeywordFileChunkHit,
   PersistedDeal,
   ProcessDocumentsResponse,
   ProcessFileJobEvent,
@@ -9,6 +10,7 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
   SaveDealInput,
@@ -172,14 +174,17 @@ function archiveDeal(dealId: string) {
   );
 }
 
-function processDocuments(userId: string, files: File[]) {
+function processDocuments(dealId: string, userId: string, files: File[]) {
   const form = new FormData();
   form.append("userId", userId.trim());
   appendFiles(form, files);
-  return postForm<ProcessDocumentsResponse>("/api/v1/documents/process", form);
+  return postForm<ProcessDocumentsResponse>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`,
+    form,
+  );
 }
 
-async function startProcessFile(userId: string, file: File) {
+async function startProcessFile(dealId: string, userId: string, file: File) {
   const bytes = await file.arrayBuffer();
   const byteFile = new File([bytes], file.name, {
     lastModified: file.lastModified,
@@ -188,7 +193,10 @@ async function startProcessFile(userId: string, file: File) {
   const form = new FormData();
   form.append("userId", userId.trim());
   form.append("files", byteFile, file.name);
-  return postForm<ProcessFileJobResponse>("/api/v1/documents/process_file", form);
+  return postForm<ProcessFileJobResponse>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
+    form,
+  );
 }
 
 function subscribeToProcessFileJob(
@@ -257,12 +265,18 @@ function subscribeToProcessFileJob(
   };
 }
 
-function searchDocumentChunksByVector(search: ChunkVectorSearch) {
-  return post<unknown, ChunkVectorSearch>("/api/v1/documents/search/vector", search);
+function searchDocumentChunksByVector(search: FileChunkVectorSearch) {
+  return post<VectorFileChunkHit[], FileChunkVectorSearch>(
+    "/api/v1/documents/search/vector",
+    search,
+  );
 }
 
-function searchDocumentChunksByKeyword(search: ChunkKeywordSearch) {
-  return post<unknown, ChunkKeywordSearch>("/api/v1/documents/search/keyword", search);
+function searchDocumentChunksByKeyword(search: FileChunkKeywordSearch) {
+  return post<KeywordFileChunkHit[], FileChunkKeywordSearch>(
+    "/api/v1/documents/search/keyword",
+    search,
+  );
 }
 
 function createUser(input: AddUserInput) {

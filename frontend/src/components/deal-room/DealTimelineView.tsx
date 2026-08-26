@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent, useMemo, useState } from "react";
 import { DealRoomData, DealTask, DealTimelineItem, DealTimelineTone } from "../../data/workspace";
 import {
   moveReminder,
@@ -630,11 +630,6 @@ type NewActivityModalProps = {
 
 function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: NewActivityModalProps) {
   const canSubmit = Boolean(formState.title.trim() && formState.date);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    titleInputRef.current?.focus();
-  }, []);
 
   return (
     <div className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
@@ -670,10 +665,10 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
           <label className="block min-w-0">
             <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Activity Title</span>
             <input
+              autoFocus
               className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
               onChange={(event) => onChange({ ...formState, title: event.target.value })}
               placeholder="e.g. Stakeholder Interview"
-              ref={titleInputRef}
               required
               type="text"
               value={formState.title}

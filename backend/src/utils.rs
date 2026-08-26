@@ -22,6 +22,10 @@ pub fn document_id_from_content(user_id: &str, content_hash: &str) -> String {
     sha256_hex(format!("{user_id}\0{content_hash}").as_bytes())
 }
 
+pub fn file_version_id(file_id: &str, content_hash: &str) -> String {
+    sha256_hex(format!("{file_id}\0{content_hash}").as_bytes())
+}
+
 #[cfg(test)]
 #[path = "../tests/utils_tests.rs"]
 mod tests;

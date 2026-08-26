@@ -5,15 +5,34 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
+use thiserror::Error;
 use tokio::sync::{watch, Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 
 use crate::{
-    core::clients::{helix::HelixClient, sqlite::SqliteClient},
+    core::clients::{
+        helix::HelixClient,
+        sqlite::{SqliteClient, SqliteClientError},
+    },
     document_jobs::DocumentJobEvent,
 };
 
 const DATABASE_FILE_NAME: &str = "pathfinder.sqlite3";
+const LATEST_SCHEMA_VERSION: i64 = 2;
+
+#[derive(Debug, Error)]
+enum MigrationError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Client(#[from] SqliteClientError),
+    #[error(
+        "cannot migrate {row_count} legacy quarry_file_blobs row(s) without ownership and version metadata"
+    )]
+    LegacyFileBlobsRequireRecovery { row_count: i64 },
+    #[error("database schema version {found} is newer than supported version {supported}")]
+    UnsupportedSchemaVersion { found: i64, supported: i64 },
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,7 +52,7 @@ impl AppState {
 
         let db = SqliteClient::open(&db_path)
             .map_err(|err| format!("failed to open sqlite database: {err}"))?;
-        db.with_connection(initialize_schema)
+        db.with_connection_result(run_migrations)
             .map_err(|err| format!("failed to initialize sqlite database: {err}"))?;
 
         Ok(Self {
@@ -130,11 +149,31 @@ fn database_path() -> Result<PathBuf, String> {
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
-fn initialize_schema(connection: &mut Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        r#"
-            PRAGMA foreign_keys = ON;
+fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    let mut version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version > LATEST_SCHEMA_VERSION {
+        return Err(MigrationError::UnsupportedSchemaVersion {
+            found: version,
+            supported: LATEST_SCHEMA_VERSION,
+        });
+    }
 
+    if version < 1 {
+        migrate_to_version_1(connection)?;
+        version = 1;
+    }
+    if version < 2 {
+        migrate_to_version_2(connection)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
             CREATE TABLE IF NOT EXISTS app_metadata (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
@@ -213,7 +252,89 @@ fn initialize_schema(connection: &mut Connection) -> rusqlite::Result<()> {
 
             CREATE INDEX IF NOT EXISTS idx_deal_metadata_user_id ON deal_metadata(user_id);
         "#,
-    )
+    )?;
+    transaction.pragma_update(None, "user_version", 1)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn migrate_to_version_2(connection: &mut Connection) -> Result<(), MigrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let legacy_blob_count =
+        transaction.query_row("SELECT COUNT(*) FROM quarry_file_blobs", [], |row| {
+            row.get::<_, i64>(0)
+        })?;
+    if legacy_blob_count > 0 {
+        return Err(MigrationError::LegacyFileBlobsRequireRecovery {
+            row_count: legacy_blob_count,
+        });
+    }
+
+    transaction.execute_batch(
+        r#"
+            DROP TABLE quarry_file_blobs;
+
+            CREATE TABLE quarry_files (
+                file_id       TEXT PRIMARY KEY NOT NULL,
+                deal_id       TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+                workspace_id  TEXT NOT NULL,
+                display_name  TEXT NOT NULL,
+                source_uri    TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                deleted_at    TEXT,
+                CHECK (length(trim(file_id)) > 0),
+                CHECK (length(trim(deal_id)) > 0),
+                CHECK (length(trim(workspace_id)) > 0),
+                CHECK (length(trim(display_name)) > 0),
+                CHECK (source_uri IS NULL OR length(trim(source_uri)) > 0)
+            );
+
+            CREATE TABLE quarry_file_versions (
+                version_id        TEXT PRIMARY KEY NOT NULL,
+                file_id           TEXT NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
+                version_number    INTEGER NOT NULL CHECK (version_number > 0),
+                original_filename TEXT NOT NULL,
+                mime_type         TEXT NOT NULL,
+                content_sha256    TEXT NOT NULL,
+                byte_size         INTEGER NOT NULL CHECK (byte_size >= 0),
+                is_current        INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1)),
+                created_at        TEXT NOT NULL,
+                UNIQUE (file_id, version_number),
+                UNIQUE (file_id, content_sha256),
+                CHECK (length(trim(version_id)) > 0),
+                CHECK (length(trim(original_filename)) > 0),
+                CHECK (length(trim(mime_type)) > 0),
+                CHECK (length(content_sha256) = 64)
+            );
+
+            CREATE UNIQUE INDEX uq_quarry_file_versions_current
+                ON quarry_file_versions(file_id)
+                WHERE is_current = 1;
+
+            CREATE INDEX idx_quarry_files_deal
+                ON quarry_files(deal_id, deleted_at);
+
+            CREATE INDEX idx_quarry_files_workspace_deal
+                ON quarry_files(workspace_id, deal_id, deleted_at);
+
+            CREATE INDEX idx_quarry_file_versions_file
+                ON quarry_file_versions(file_id, version_number DESC);
+
+            CREATE INDEX idx_quarry_file_versions_hash
+                ON quarry_file_versions(content_sha256);
+
+            CREATE TABLE quarry_file_blobs (
+                version_id  TEXT PRIMARY KEY NOT NULL
+                    REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
+                file_bytes  BLOB NOT NULL
+            );
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
+    transaction.commit()?;
+    Ok(())
 }
 
 #[cfg(test)]

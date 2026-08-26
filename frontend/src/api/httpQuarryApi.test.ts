@@ -76,4 +76,20 @@ describe("httpQuarryApi", () => {
       expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
     );
   });
+
+  it("uses the authoritative deal path for document uploads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ documents: [], failed: 0, skipped: 0, succeeded: 0, total: 0 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await httpQuarryApi.processDocuments("DEAL / 1", " analyst@example.com ", []);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/deals/DEAL%20%2F%201/documents/process",
+      expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
+    );
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((request.body as FormData).get("userId")).toBe("analyst@example.com");
+  });
 });

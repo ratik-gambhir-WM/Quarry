@@ -337,7 +337,7 @@ async fn document_search_validates_input_before_calling_helix() {
             Request::post("/api/documents/search/keyword")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"userId":"user-1","queryText":"","limit":10}"#,
+                    r#"{"workspaceId":"user-1","queryText":"","limit":10}"#,
                 ))
                 .unwrap(),
         )
@@ -371,7 +371,7 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
     let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
     let response = app
         .oneshot(
-            Request::post("/api/documents/process_file")
+            Request::post("/api/deals/DEAL-LARGE/documents/process_file")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -383,4 +383,28 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn process_file_rejects_a_competing_multipart_deal_id() {
+    const BOUNDARY: &str = "quarry-deal-id-boundary";
+    let multipart = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"dealId\"\r\n\r\nDEAL-OTHER\r\n--{BOUNDARY}--\r\n"
+    );
+    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+
+    let response = app
+        .oneshot(
+            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(multipart))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

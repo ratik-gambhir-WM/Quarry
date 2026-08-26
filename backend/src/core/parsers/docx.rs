@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use crate::core::{
-    nodes::document_node::{ChunkNode, DocumentNode},
-    text_chunking::token_bounded_ranges,
-};
+use crate::core::text_chunking::token_bounded_ranges;
+use crate::services::document_ingestion_service::{Document, DocumentChunk};
 use crate::utils::document_id_from_content;
 use docx_rust::{
     app::{App, AppNoApNamespace, AppWithApNamespace},
@@ -24,11 +22,12 @@ use std::{
     io::{Cursor, Read},
     path::{Path, PathBuf},
 };
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocxAssembly {
-    pub document: DocumentNode,
-    pub chunks: Vec<ChunkNode>,
+    pub document: Document,
+    pub chunks: Vec<DocumentChunk>,
 }
 
 /// Parses raw DOCX bytes into a DOCX package.
@@ -125,7 +124,8 @@ fn parse_docx_file_with_metadata(
         .iter()
         .map(|chunk| u64::from(chunk.token_count))
         .sum();
-    let document = DocumentNode {
+    let document = Document {
+        file_id: Uuid::new_v4().to_string(),
         document_id,
         user_id: user_id.to_string(),
         file_name: path
@@ -144,7 +144,7 @@ fn parse_docx_file_with_metadata(
     DocxAssembly { document, chunks }
 }
 
-fn chunk_nodes_from_text(text: &str, document_id: &str, user_id: &str) -> Vec<ChunkNode> {
+fn chunk_nodes_from_text(text: &str, document_id: &str, user_id: &str) -> Vec<DocumentChunk> {
     token_bounded_ranges(text)
         .into_iter()
         .enumerate()
@@ -159,7 +159,7 @@ fn chunk_nodes_from_text(text: &str, document_id: &str, user_id: &str) -> Vec<Ch
                 "{user_id}\0{document_id}\0{sequence_number}\0{content_hash}"
             ));
 
-            ChunkNode {
+            DocumentChunk {
                 chunk_id,
                 document_id: document_id.to_string(),
                 user_id: user_id.to_string(),

@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use rusqlite::{params_from_iter, types::ValueRef, Connection, OptionalExtension, Row};
+use rusqlite::{
+    params_from_iter, types::ValueRef, Connection, OptionalExtension, Row, Transaction,
+    TransactionBehavior,
+};
 use thiserror::Error;
 
 use crate::core::sqlbuilder::{QueryKind, SqlQuery, SqlValue};
@@ -25,6 +28,35 @@ pub enum SqliteClientError {
     },
     #[error("sqlite blocking worker failed: {0}")]
     BlockingWorker(String),
+    #[error("sqlite transaction was aborted: {0}")]
+    TransactionAborted(String),
+    #[error("{context}: {source}")]
+    Context {
+        context: String,
+        #[source]
+        source: Box<SqliteClientError>,
+    },
+    #[error(
+        "sqlite transaction failed and rollback also failed: {rollback}; original error: {source}"
+    )]
+    TransactionRollback {
+        #[source]
+        source: Box<SqliteClientError>,
+        rollback: rusqlite::Error,
+    },
+}
+
+impl SqliteClientError {
+    pub fn transaction_aborted(message: impl Into<String>) -> Self {
+        Self::TransactionAborted(message.into())
+    }
+
+    pub fn context(self, context: impl Into<String>) -> Self {
+        Self::Context {
+            context: context.into(),
+            source: Box::new(self),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +82,48 @@ impl SqlRow {
 pub struct WriteResult {
     pub rows_affected: usize,
     pub last_insert_row_id: i64,
+}
+
+/// Query access scoped to one SQLite transaction and one connection.
+///
+/// The raw rusqlite transaction stays inside the client layer. Callers can
+/// only execute validated `SqlQuery` values and cannot commit independently.
+pub struct SqliteTransaction<'connection> {
+    transaction: Transaction<'connection>,
+}
+
+impl SqliteTransaction<'_> {
+    pub fn read(&self, query: &SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
+        ensure_read_query(query)?;
+        let mut statement = self.transaction.prepare(query.sql())?;
+        let rows = statement
+            .query_map(params_from_iter(query.parameters()), sql_row_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn read_one(&self, query: &SqlQuery) -> Result<Option<SqlRow>, SqliteClientError> {
+        ensure_read_query(query)?;
+        Ok(self
+            .transaction
+            .query_row(
+                query.sql(),
+                params_from_iter(query.parameters()),
+                sql_row_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn write(&self, query: &SqlQuery) -> Result<WriteResult, SqliteClientError> {
+        ensure_write_query(query)?;
+        let rows_affected = self
+            .transaction
+            .execute(query.sql(), params_from_iter(query.parameters()))?;
+        Ok(WriteResult {
+            rows_affected,
+            last_insert_row_id: self.transaction.last_insert_rowid(),
+        })
+    }
 }
 
 /// Cloneable access to one SQLite connection.
@@ -102,6 +176,20 @@ impl SqliteClient {
             .map_err(|_| SqliteClientError::ConnectionLockPoisoned)?;
         let result = operation(&mut connection)?;
         Ok(result)
+    }
+
+    pub(crate) fn with_connection_result<T, E>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<SqliteClientError>,
+    {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| E::from(SqliteClientError::ConnectionLockPoisoned))?;
+        operation(&mut connection)
     }
 
     pub fn read(&self, query: &SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
@@ -160,6 +248,43 @@ impl SqliteClient {
         })
     }
 
+    /// Runs one `BEGIN IMMEDIATE` transaction while holding the connection
+    /// lock exactly once. The closure is synchronous so the transaction can
+    /// never be held across an `.await`.
+    pub fn transaction<T, F>(&self, operation: F) -> Result<T, SqliteClientError>
+    where
+        F: for<'connection> FnOnce(&SqliteTransaction<'connection>) -> Result<T, SqliteClientError>,
+    {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteClientError::ConnectionLockPoisoned)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(SqliteClientError::from)
+            .map_err(|error| error.context("failed to begin immediate sqlite transaction"))?;
+        let transaction = SqliteTransaction { transaction };
+        let result = operation(&transaction);
+
+        match result {
+            Ok(value) => {
+                transaction
+                    .transaction
+                    .commit()
+                    .map_err(SqliteClientError::from)
+                    .map_err(|error| error.context("failed to commit sqlite transaction"))?;
+                Ok(value)
+            }
+            Err(error) => match transaction.transaction.rollback() {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(SqliteClientError::TransactionRollback {
+                    source: Box::new(error),
+                    rollback,
+                }),
+            },
+        }
+    }
+
     pub async fn read_async(&self, query: SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
         let client = self.clone();
         run_blocking(move || client.read(&query)).await
@@ -202,6 +327,17 @@ impl SqliteClient {
     pub async fn write_async(&self, query: SqlQuery) -> Result<WriteResult, SqliteClientError> {
         let client = self.clone();
         run_blocking(move || client.write(&query)).await
+    }
+
+    pub async fn transaction_async<T, F>(&self, operation: F) -> Result<T, SqliteClientError>
+    where
+        T: Send + 'static,
+        F: for<'connection> FnOnce(&SqliteTransaction<'connection>) -> Result<T, SqliteClientError>
+            + Send
+            + 'static,
+    {
+        let client = self.clone();
+        run_blocking(move || client.transaction(operation)).await
     }
 }
 

@@ -33,10 +33,11 @@ pub(crate) struct ProcessFileJobResponse {
 
 pub(crate) async fn process_documents_handler(
     State(state): State<AppState>,
+    Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<Json<ProcessDocumentsResponse>> {
     let (user_id, files) = collect_document_upload(multipart).await?;
-    process_uploaded_documents(&state, &user_id, files)
+    process_uploaded_documents(&state, &deal_id, &user_id, files)
         .await
         .map(Json)
         .map_err(AppError::internal)
@@ -44,6 +45,7 @@ pub(crate) async fn process_documents_handler(
 
 pub(crate) async fn start_process_file_handler(
     State(state): State<AppState>,
+    Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<ProcessFileJobResponse>)> {
     let (user_id, mut files) = collect_document_upload(multipart).await?;
@@ -64,39 +66,43 @@ pub(crate) async fn start_process_file_handler(
         .await;
 
     let worker_state = state.clone();
+    let worker_deal_id = deal_id.clone();
     let worker_job_id = job_id.clone();
     let worker_filename = filename.clone();
     tokio::spawn(async move {
-        let event = match process_uploaded_documents(&worker_state, &user_id, vec![file]).await {
-            Ok(response) => match response.documents.into_iter().next() {
-                Some(document) if document.skipped => DocumentJobEvent::skipped(
-                    worker_job_id.clone(),
-                    worker_filename.clone(),
-                    document.document_id,
-                ),
-                Some(document) if document.success => DocumentJobEvent::completed(
-                    worker_job_id.clone(),
-                    worker_filename.clone(),
-                    document.document_id,
-                    document.chunk_count,
-                ),
-                Some(document) => DocumentJobEvent::failed(
-                    worker_job_id.clone(),
-                    worker_filename.clone(),
-                    document
-                        .error
-                        .unwrap_or_else(|| "document processing failed".to_string()),
-                ),
-                None => DocumentJobEvent::failed(
-                    worker_job_id.clone(),
-                    worker_filename.clone(),
-                    "document processing returned no result".to_string(),
-                ),
-            },
-            Err(error) => {
-                DocumentJobEvent::failed(worker_job_id.clone(), worker_filename.clone(), error)
-            }
-        };
+        let event =
+            match process_uploaded_documents(&worker_state, &worker_deal_id, &user_id, vec![file])
+                .await
+            {
+                Ok(response) => match response.documents.into_iter().next() {
+                    Some(document) if document.skipped => DocumentJobEvent::skipped(
+                        worker_job_id.clone(),
+                        worker_filename.clone(),
+                        document.document_id,
+                    ),
+                    Some(document) if document.success => DocumentJobEvent::completed(
+                        worker_job_id.clone(),
+                        worker_filename.clone(),
+                        document.document_id,
+                        document.chunk_count,
+                    ),
+                    Some(document) => DocumentJobEvent::failed(
+                        worker_job_id.clone(),
+                        worker_filename.clone(),
+                        document
+                            .error
+                            .unwrap_or_else(|| "document processing failed".to_string()),
+                    ),
+                    None => DocumentJobEvent::failed(
+                        worker_job_id.clone(),
+                        worker_filename.clone(),
+                        "document processing returned no result".to_string(),
+                    ),
+                },
+                Err(error) => {
+                    DocumentJobEvent::failed(worker_job_id.clone(), worker_filename.clone(), error)
+                }
+            };
 
         worker_state
             .update_document_job(&worker_job_id, event)
@@ -164,6 +170,11 @@ async fn collect_document_upload(
             })?;
             user_id = Some(value);
             continue;
+        }
+        if matches!(name.as_str(), "dealId" | "deal_id") {
+            return Err(AppError::bad_request(
+                "dealId must be supplied only by the request path",
+            ));
         }
         if name != "files" {
             continue;
