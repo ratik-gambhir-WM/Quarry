@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DealExtractionLocationState } from "../../data/dealExtraction";
 import { SidebarFrame } from "../hub/sidebar/SidebarFrame";
@@ -73,7 +72,6 @@ export function DataRoomExplorer({
       {({ collapsed }) =>
         collapsed ? (
           <div className="space-y-1">
-            <DealRoomBackLink compact navigationState={navigationState} to={dealRoomPath} />
             <DataRoomSidebarTabs activeTab="data-room" compact />
           </div>
         ) : (
@@ -83,7 +81,6 @@ export function DataRoomExplorer({
               onUploadNewFile={onUploadNewFile}
             />
             <div className="space-y-1">
-              <DealRoomBackLink navigationState={navigationState} to={dealRoomPath} />
               <DataRoomSidebarTabs activeTab="data-room" />
             </div>
 
@@ -118,31 +115,6 @@ export function DataRoomExplorer({
         )
       }
     </SidebarFrame>
-  );
-}
-
-function DealRoomBackLink({
-  compact = false,
-  navigationState,
-  to,
-}: {
-  compact?: boolean;
-  navigationState?: DealExtractionLocationState;
-  to: string;
-}) {
-  return (
-    <NavLink
-      aria-label="Deal Room"
-      className={`flex items-center rounded-lg py-2 text-sidebar-text transition hover:bg-sidebar-hover hover:text-sidebar-active ${
-        compact ? "justify-center px-0" : "gap-3 px-3"
-      }`}
-      state={navigationState}
-      title="Deal Room"
-      to={to}
-    >
-      <Icon className="h-5 w-5 shrink-0" name="dashboard" />
-      {compact ? null : <span className="text-[13px] font-medium leading-5">Deal Room</span>}
-    </NavLink>
   );
 }
 
@@ -235,7 +207,7 @@ function collectDefaultExpandedNodeIds(nodes: DataRoomTreeNode[], target: Set<st
 
 function ExplorerStatus({ detail, title }: { detail: string; title: string }) {
   return (
-    <div className="mx-1 mb-3 rounded-lg border border-outline-variant/70 bg-background p-3">
+    <div className="mx-1 mb-3 rounded-lg border border-outline-variant/70 bg-surface-container-lowest p-3">
       <p className="text-[12px] font-semibold text-sidebar-active">{title}</p>
       <p className="mt-1 break-words text-[11px] leading-5 text-sidebar-muted">{detail}</p>
     </div>

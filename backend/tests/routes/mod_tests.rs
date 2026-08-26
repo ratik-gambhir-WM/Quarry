@@ -2,7 +2,9 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use docx_rust::{document::Paragraph, Docx};
 use serde_json::Value;
+use std::io::Cursor;
 use tower::ServiceExt;
 
 use super::*;
@@ -407,4 +409,193 @@ async fn process_file_rejects_a_competing_multipart_deal_id() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
+    let mut docx = Docx::default();
+    docx.document
+        .push(Paragraph::default().push_text("Raw route text from DOCX."));
+    let docx_bytes = docx.write(Cursor::new(Vec::new())).unwrap().into_inner();
+    let state = AppState::in_memory().unwrap();
+    state
+        .with_db(|connection| {
+            connection.execute(
+                "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst')",
+                [],
+            )?;
+            let user_id = connection.last_insert_rowid();
+            for deal_id in ["DEAL-DOCUMENTS", "DEAL-OTHER"] {
+                connection.execute(
+                    r#"
+                    INSERT INTO deals (
+                        deal_id, user_id, deal_name, status, start_date, close_date,
+                        transaction_type, target_company, primary_buyer, deal_sponsor
+                    ) VALUES (?1, ?2, 'Project Test', 'Active', '2026-01-01', '2026-02-01',
+                              'Buy-side', 'Target', 'Buyer', 'Test Capital')
+                    "#,
+                    rusqlite::params![deal_id, user_id],
+                )?;
+            }
+            insert_stored_document(
+                connection,
+                "DEAL-DOCUMENTS",
+                "file-zulu",
+                "version-zulu",
+                "Zulu.pdf",
+                "application/pdf",
+                b"%PDF-1.4\nzulu",
+            )?;
+            insert_stored_document(
+                connection,
+                "DEAL-DOCUMENTS",
+                "file-alpha",
+                "version-alpha",
+                "Alpha.pdf",
+                "application/pdf",
+                b"%PDF-1.4\nalpha",
+            )?;
+            insert_stored_document(
+                connection,
+                "DEAL-DOCUMENTS",
+                "file-raw",
+                "version-raw",
+                "Raw.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &docx_bytes,
+            )?;
+            insert_stored_document(
+                connection,
+                "DEAL-OTHER",
+                "file-other",
+                "version-other",
+                "Other.pdf",
+                "application/pdf",
+                b"%PDF-1.4\nother",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let app = create_router(state, &AppConfig::default());
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let listed: Value = serde_json::from_slice(
+        &to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        listed,
+        serde_json::json!([
+            {"fileId": "file-alpha", "displayName": "Alpha.pdf"},
+            {"fileId": "file-raw", "displayName": "Raw.docx"},
+            {"fileId": "file-zulu", "displayName": "Zulu.pdf"}
+        ])
+    );
+
+    let pdf_response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-alpha/pdf")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pdf_response.status(), StatusCode::OK);
+    assert_eq!(
+        pdf_response.headers().get("content-type").unwrap(),
+        "application/pdf"
+    );
+    assert_eq!(
+        pdf_response.headers().get("content-disposition").unwrap(),
+        "inline"
+    );
+    assert_eq!(
+        to_bytes(pdf_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"%PDF-1.4\nalpha"
+    );
+
+    let text_response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-raw/text")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(text_response.status(), StatusCode::OK);
+    let raw_text: Value = serde_json::from_slice(
+        &to_bytes(text_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(raw_text["fileName"], "Raw.docx");
+    assert_eq!(raw_text["sourceKind"], "docx");
+    assert_eq!(raw_text["text"], "Raw route text from DOCX.");
+
+    let cross_deal_response = app
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-other/pdf")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cross_deal_response.status(), StatusCode::NOT_FOUND);
+}
+
+fn insert_stored_document(
+    connection: &rusqlite::Connection,
+    deal_id: &str,
+    file_id: &str,
+    version_id: &str,
+    display_name: &str,
+    mime_type: &str,
+    bytes: &[u8],
+) -> rusqlite::Result<()> {
+    connection.execute(
+        r#"
+        INSERT INTO quarry_files (
+            file_id, deal_id, workspace_id, display_name, metadata_json, created_at, updated_at
+        ) VALUES (?1, ?2, 'analyst@example.com', ?3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        "#,
+        rusqlite::params![file_id, deal_id, display_name],
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO quarry_file_versions (
+            version_id, file_id, version_number, original_filename, mime_type,
+            content_sha256, byte_size, is_current, created_at
+        ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, 1, '2026-01-01T00:00:00Z')
+        "#,
+        rusqlite::params![
+            version_id,
+            file_id,
+            display_name,
+            mime_type,
+            "a".repeat(64),
+            bytes.len() as i64
+        ],
+    )?;
+    connection.execute(
+        "INSERT INTO quarry_file_blobs (version_id, file_bytes) VALUES (?1, ?2)",
+        rusqlite::params![version_id, bytes],
+    )?;
+    Ok(())
 }

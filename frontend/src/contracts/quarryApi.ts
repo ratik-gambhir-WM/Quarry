@@ -68,6 +68,22 @@ export type ProcessFileJobEventHandlers = {
   onEvent: (event: ProcessFileJobEvent) => void;
 };
 
+export type DealDocumentSummary = {
+  displayName: string;
+  fileId: string;
+};
+
+export type DealDocumentPdf = {
+  bytes: Uint8Array;
+  mimeType: "application/pdf";
+};
+
+export type DealDocumentText = {
+  fileName: string;
+  sourceKind: "docx" | "pdf";
+  text: string;
+};
+
 export type FileChunkVectorSearch = {
   limit: number;
   queryEmbedding: number[];
@@ -107,8 +123,11 @@ export interface QuarryApi {
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
   saveDealMetadata(dealId: string, files: File[]): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
+  getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
+  getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
   getUserByEmail(email: string): Promise<WorkspaceAccountUser | null>;
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
+  listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
   listDeals(): Promise<PersistedDeal[]>;
   listSummaryFiles(path: string): Promise<SummarizableFile[]>;
   previewDealDocument(

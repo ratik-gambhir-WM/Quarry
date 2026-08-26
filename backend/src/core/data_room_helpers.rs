@@ -1,7 +1,10 @@
 use std::{
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
     path::{Component, Path, PathBuf},
     process::Command,
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -180,10 +183,25 @@ pub fn read_pdf(path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         )
     })?;
-    if !bytes.starts_with(b"%PDF-") {
-        return Err("the selected .pdf file does not contain a valid PDF header".to_string());
-    }
+    validate_pdf_bytes(&bytes, "the selected PDF")?;
     Ok(bytes)
+}
+
+pub fn validate_pdf_bytes(bytes: &[u8], subject: &str) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err(format!("{subject} is empty"));
+    }
+    if bytes.len() as u64 > MAX_PDF_BYTES {
+        return Err(format!(
+            "{subject} is too large to preview ({} MB; limit is {} MB).",
+            bytes.len() / (1024 * 1024),
+            MAX_PDF_BYTES / (1024 * 1024)
+        ));
+    }
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(format!("{subject} does not contain a valid PDF header"));
+    }
+    Ok(())
 }
 
 pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
@@ -238,30 +256,94 @@ pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
     result
 }
 
+pub fn convert_office_bytes_to_pdf(extension: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+    ) {
+        return Err(format!(
+            "Office preview conversion does not support .{extension} files"
+        ));
+    }
+    if bytes.is_empty() {
+        return Err("the stored document is empty".to_string());
+    }
+
+    let temp_root = unique_preview_temp_dir();
+    let source_path = temp_root.join(format!("document.{extension}"));
+    let result = (|| {
+        fs::create_dir_all(&temp_root)
+            .map_err(|err| format!("failed to create a temporary document directory: {err}"))?;
+        fs::write(&source_path, bytes)
+            .map_err(|err| format!("failed to stage the stored document for conversion: {err}"))?;
+        convert_office_to_pdf(&source_path)
+    })();
+    let _ = fs::remove_dir_all(&temp_root);
+    result
+}
+
 fn find_soffice() -> Option<PathBuf> {
+    static SOFFICE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    SOFFICE_PATH.get_or_init(discover_soffice).clone()
+}
+
+fn discover_soffice() -> Option<PathBuf> {
     if let Some(configured) = env::var_os("QUARRY_SOFFICE") {
         let path = PathBuf::from(configured);
         if path.is_file() {
             return Some(path);
         }
     }
-    if let Some(path) = env::var_os("PATH") {
-        for directory in env::split_paths(&path) {
-            let candidate = directory.join("soffice");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
+
+    if let Some(candidate) = find_office_executable_on_path(env::var_os("PATH").as_deref()) {
+        return Some(candidate);
     }
+
     [
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/Applications/LibreOfficeDev.app/Contents/MacOS/soffice",
         "/opt/homebrew/bin/soffice",
         "/usr/local/bin/soffice",
         "/usr/bin/soffice",
+        "/usr/bin/libreoffice",
     ]
     .into_iter()
     .map(PathBuf::from)
     .find(|path| path.is_file())
+    .or_else(find_office_executable_from_login_shell)
+}
+
+fn find_office_executable_on_path(path: Option<&OsStr>) -> Option<PathBuf> {
+    let path = path?;
+    env::split_paths(path)
+        .flat_map(|directory| [directory.join("soffice"), directory.join("libreoffice")])
+        .find(|candidate| candidate.is_file())
+}
+
+fn find_office_executable_from_login_shell() -> Option<PathBuf> {
+    let shell = env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("/bin/sh"));
+    let output = Command::new(shell)
+        .args([
+            "-lc",
+            "command -v soffice 2>/dev/null || command -v libreoffice 2>/dev/null",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|candidate| candidate.is_file())
 }
 
 fn unique_preview_temp_dir() -> PathBuf {
@@ -273,4 +355,36 @@ fn unique_preview_temp_dir() -> PathBuf {
         "quarry-web-document-preview-{}-{timestamp}",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn validates_pdf_bytes_in_one_shared_boundary() {
+        assert!(validate_pdf_bytes(b"%PDF-1.4\n", "the PDF").is_ok());
+        assert_eq!(
+            validate_pdf_bytes(b"not a PDF", "the PDF").unwrap_err(),
+            "the PDF does not contain a valid PDF header"
+        );
+        assert_eq!(
+            validate_pdf_bytes(&[], "the PDF").unwrap_err(),
+            "the PDF is empty"
+        );
+    }
+
+    #[test]
+    fn finds_both_supported_libreoffice_command_names_on_path() {
+        let temp_root = unique_preview_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let soffice = temp_root.join("soffice");
+        fs::write(&soffice, b"test executable placeholder").unwrap();
+        let path = OsString::from(temp_root.as_os_str());
+
+        assert_eq!(find_office_executable_on_path(Some(&path)), Some(soffice));
+
+        fs::remove_dir_all(temp_root).unwrap();
+    }
 }

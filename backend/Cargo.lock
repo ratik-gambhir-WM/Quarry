@@ -1890,6 +1890,7 @@ dependencies = [
  "futures-util",
  "helix-db",
  "image",
+ "lopdf",
  "pdf-extract",
  "pptx-to-md",
  "reqwest",

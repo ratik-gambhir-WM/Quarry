@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::Path};
 
 use chrono::{SecondsFormat, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::core::{
@@ -62,6 +62,100 @@ struct KeywordSearchResponse {
 pub struct PersistedDocumentGraph {
     pub persisted: PersistedFileIdentity,
     pub helix_transaction: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DealDocumentSummary {
+    pub file_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredDocumentBlob {
+    pub file_id: String,
+    pub display_name: String,
+    pub mime_type: String,
+    pub file_bytes: Vec<u8>,
+}
+
+pub async fn list_current_deal_documents(
+    sqlite: &SqliteClient,
+    deal_id: &str,
+) -> Result<Vec<DealDocumentSummary>, String> {
+    let query = SqlBuilder::select("quarry_files")
+        .columns(["quarry_files.file_id", "quarry_files.display_name"])
+        .inner_join(
+            "quarry_file_versions",
+            "quarry_files.file_id",
+            "quarry_file_versions.file_id",
+        )
+        .and_where(Condition::equal("quarry_files.deal_id", deal_id))
+        .and_where(Condition::is_null("quarry_files.deleted_at"))
+        .and_where(Condition::equal("quarry_file_versions.is_current", true))
+        .order_by("quarry_files.display_name", SortDirection::Ascending)
+        .order_by("quarry_files.file_id", SortDirection::Ascending)
+        .build()
+        .map_err(|error| format!("failed to build deal document list query: {error}"))?;
+    let rows = sqlite
+        .read_async(query)
+        .await
+        .map_err(|error| format!("failed to list deal documents: {error}"))?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(DealDocumentSummary {
+                file_id: required_text(&row, "file_id")?,
+                display_name: required_text(&row, "display_name")?,
+            })
+        })
+        .collect::<Result<Vec<_>, SqliteClientError>>()
+        .map_err(|error| format!("failed to decode deal document list: {error}"))
+}
+
+pub async fn get_current_deal_document_blob(
+    sqlite: &SqliteClient,
+    deal_id: &str,
+    file_id: &str,
+) -> Result<Option<StoredDocumentBlob>, String> {
+    let query = SqlBuilder::select("quarry_files")
+        .columns([
+            "quarry_files.file_id",
+            "quarry_files.display_name",
+            "quarry_file_versions.mime_type",
+            "quarry_file_blobs.file_bytes",
+        ])
+        .inner_join(
+            "quarry_file_versions",
+            "quarry_files.file_id",
+            "quarry_file_versions.file_id",
+        )
+        .inner_join(
+            "quarry_file_blobs",
+            "quarry_file_versions.version_id",
+            "quarry_file_blobs.version_id",
+        )
+        .and_where(Condition::equal("quarry_files.deal_id", deal_id))
+        .and_where(Condition::equal("quarry_files.file_id", file_id))
+        .and_where(Condition::is_null("quarry_files.deleted_at"))
+        .and_where(Condition::equal("quarry_file_versions.is_current", true))
+        .build()
+        .map_err(|error| format!("failed to build document blob query: {error}"))?;
+    let row = sqlite
+        .read_one_async(query)
+        .await
+        .map_err(|error| format!("failed to load document blob: {error}"))?;
+
+    row.map(|row| {
+        Ok(StoredDocumentBlob {
+            file_id: required_text(&row, "file_id")?,
+            display_name: required_text(&row, "display_name")?,
+            mime_type: required_text(&row, "mime_type")?,
+            file_bytes: required_blob(&row, "file_bytes")?,
+        })
+    })
+    .transpose()
+    .map_err(|error: SqliteClientError| format!("failed to decode document blob: {error}"))
 }
 
 pub async fn persist_document_and_chunks(

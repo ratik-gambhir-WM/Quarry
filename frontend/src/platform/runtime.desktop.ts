@@ -68,6 +68,7 @@ async function invokeWithActivity<TResult>(command: string, args?: Record<string
 
 const tauriQuarryApi = createTauriQuarryApi({
   get: <TResult>(path: string) => invokeWithActivity<TResult>("quarry_api_get", { path }),
+  getPdf: (path: string) => invokeWithActivity<ArrayBuffer>("quarry_api_get_pdf", { path }),
   post: <TResult>(path: string, body: unknown) =>
     invokeWithActivity<TResult>("quarry_api_post", { body, path }),
   postMultipart: <TResult>(request: TauriMultipartRequest) =>

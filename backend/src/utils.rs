@@ -26,6 +26,13 @@ pub fn file_version_id(file_id: &str, content_hash: &str) -> String {
     sha256_hex(format!("{file_id}\0{content_hash}").as_bytes())
 }
 
+pub fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{field} is required"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "../tests/utils_tests.rs"]
 mod tests;

@@ -1,6 +1,6 @@
 import { FormEvent } from "react";
 import { BrandLockup } from "../brand/BrandLockup";
-import { Button } from "../ui/Button";
+import { QuarryButton } from "../ui/QuarryButton";
 import { Icon } from "../ui/Icon";
 
 const WEST_MONROE_EMAIL_DOMAIN = "@westmonroe.com";
@@ -67,9 +67,9 @@ export function LoginCard({
           </p>
         ) : null}
 
-        <Button disabled={isChecking} icon={<Icon className="h-[18px] w-[18px]" name="arrowRight" />} type="submit">
+        <QuarryButton disabled={isChecking} icon={<Icon className="h-[18px] w-[18px]" name="arrowRight" />} type="submit">
           {isChecking ? "Checking..." : "Continue"}
-        </Button>
+        </QuarryButton>
       </form>
 
       <div className="mt-xl flex items-start gap-md border-t border-outline-variant/80 pt-lg">

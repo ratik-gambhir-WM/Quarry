@@ -8,6 +8,7 @@ use crate::{
     errors::AppResult,
     handlers::{AppError, AppState},
     services::document_ingestion_service::{search_chunks_by_keyword, search_chunks_by_vector},
+    utils::require_non_empty,
 };
 
 pub(crate) async fn vector_search_handler(
@@ -58,9 +59,7 @@ fn validate_keyword_search(search: &FileChunkKeywordSearch) -> AppResult<()> {
 }
 
 fn validate_common(workspace_id: &str, limit: usize) -> AppResult<()> {
-    if workspace_id.trim().is_empty() {
-        return Err(AppError::bad_request("workspaceId is required"));
-    }
+    require_non_empty(workspace_id, "workspaceId").map_err(AppError::bad_request)?;
     if limit == 0 {
         return Err(AppError::bad_request("limit must be greater than zero"));
     }

@@ -38,7 +38,7 @@ export function SidebarFrame({
 
   return (
     <aside
-      className={`hidden h-full shrink-0 overflow-hidden border-r border-outline-variant/70 bg-[#f7f7f7] text-sidebar-text backdrop-blur-md transition-[width] duration-300 ease-out lg:flex [font-family:var(--font-sidebar)] [html[data-theme=dark]_&]:bg-[#141414] ${
+      className={`hidden h-full shrink-0 overflow-hidden border-r border-outline-variant/70 bg-background text-sidebar-text backdrop-blur-md transition-[width] duration-300 ease-out lg:flex [font-family:var(--font-sidebar)] ${
         collapsed ? "w-20" : "w-72"
       }`}
     >

@@ -96,6 +96,18 @@ pub fn infer_supported_mime_type(path: &Path) -> Option<&'static str> {
     }
 }
 
+pub fn office_extension_for_mime_type(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "application/msword" => Some("doc"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
+        "application/vnd.ms-excel" => Some("xls"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some("xlsx"),
+        "application/vnd.ms-powerpoint" => Some("ppt"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
+        _ => None,
+    }
+}
+
 pub fn write_summary(summary: &str, output_path: impl AsRef<Path>) -> Result<(), String> {
     let mut output_path = PathBuf::from(output_path.as_ref());
 

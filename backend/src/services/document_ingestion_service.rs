@@ -16,7 +16,7 @@ use crate::{
         search_document_chunks_by_keyword, search_document_chunks_by_vector,
     },
     state::AppState,
-    utils::{document_id_from_content, openai_api_key, sha256_hex},
+    utils::{document_id_from_content, openai_api_key, require_non_empty, sha256_hex},
 };
 
 const MAX_CONCURRENT_DOCUMENTS: usize = 8;
@@ -92,13 +92,9 @@ pub async fn process_uploaded_documents(
     files: Vec<UploadedDocument>,
 ) -> Result<ProcessDocumentsResponse, String> {
     let deal_id = deal_id.trim();
-    if deal_id.is_empty() {
-        return Err("dealId is required".to_string());
-    }
+    require_non_empty(deal_id, "dealId")?;
     let user_id = user_id.trim();
-    if user_id.is_empty() {
-        return Err("userId is required".to_string());
-    }
+    require_non_empty(user_id, "userId")?;
     if files.is_empty() {
         return Err("at least one PDF or DOCX upload is required".to_string());
     }

@@ -92,4 +92,49 @@ describe("httpQuarryApi", () => {
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect((request.body as FormData).get("userId")).toBe("analyst@example.com");
   });
+
+  it("lists stored deal documents and reads PDF bytes and raw text", async () => {
+    const pdfBytes = new TextEncoder().encode("%PDF-1.4\npreview");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([{ displayName: "Report.pdf", fileId: "file / 1" }]),
+      )
+      .mockResolvedValueOnce(
+        new Response(pdfBytes, {
+          headers: { "content-type": "application/pdf" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          fileName: "Report.pdf",
+          sourceKind: "pdf",
+          text: "Raw report text",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const documents = await httpQuarryApi.listDealDocuments("DEAL / 1");
+    const pdf = await httpQuarryApi.getDealDocumentPdf("DEAL / 1", documents[0].fileId);
+    const rawText = await httpQuarryApi.getDealDocumentText("DEAL / 1", documents[0].fileId);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/deals/DEAL%20%2F%201/documents",
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/deals/DEAL%20%2F%201/documents/file%20%2F%201/pdf",
+    );
+    expect(pdf.mimeType).toBe("application/pdf");
+    expect(Array.from(pdf.bytes)).toEqual(Array.from(pdfBytes));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/deals/DEAL%20%2F%201/documents/file%20%2F%201/text",
+      undefined,
+    );
+    expect(rawText.text).toBe("Raw report text");
+  });
 });

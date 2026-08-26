@@ -605,7 +605,7 @@ function ReminderRow({
         <span className="sr-only">Move {task.label}</span>
         <select
           aria-label={`Move ${task.label}`}
-          className="h-9 rounded-lg border border-outline-variant bg-background px-2 text-[11px] font-semibold text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+          className="h-9 rounded-lg border border-outline-variant bg-surface-container-lowest px-2 text-[11px] font-semibold text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
           onChange={(event) => onMove(task.id, event.currentTarget.value as ReminderStatus)}
           value={task.status}
         >

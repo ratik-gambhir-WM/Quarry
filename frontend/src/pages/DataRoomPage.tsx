@@ -4,11 +4,15 @@ import { runtime } from "@quarry/runtime";
 import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
 import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
-import type { PreviewState } from "../components/data-room/DocumentPreviewPanel";
+import type {
+  PreviewState,
+  RawTextState,
+} from "../components/data-room/DocumentPreviewPanel";
 import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { Icon } from "../components/ui/Icon";
+import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
   getDealDataRoomView,
   hasDataRoomFiles,
@@ -33,48 +37,94 @@ export function DataRoomPage() {
   const location = useLocation();
   const { deals, loaded } = useWorkspaceDeals();
   const { email } = useWorkspaceSession();
-  const [isChipBankOpen, setIsChipBankOpen] = useState(true);
+  const [isChipBankOpen, setIsChipBankOpen] = useState(false);
   const [isConnectSharePointModalOpen, setIsConnectSharePointModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [localDataRoom, setLocalDataRoom] = useState<DealDataRoom | null>(null);
-  const [treeError, setTreeError] = useState("");
-  const [treeLoading, setTreeLoading] = useState(true);
+  const [dealDocuments, setDealDocuments] = useState<DealDocumentSummary[]>([]);
+  const [localTreeError, setLocalTreeError] = useState("");
+  const [storedTreeError, setStoredTreeError] = useState("");
+  const [localTreeLoading, setLocalTreeLoading] = useState(true);
+  const [storedTreeLoading, setStoredTreeLoading] = useState(true);
   const [selectedDocument, setSelectedDocument] = useState<DataRoomTreeNode | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "loading" });
+  const [rawText, setRawText] = useState<RawTextState>({ status: "idle" });
   const previewRequestId = useRef(0);
+  const rawTextRequestId = useRef(0);
+  const storedDocumentsDealId = useRef<string | undefined>(undefined);
+  const storedDocumentsRequestId = useRef(0);
   const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
   const extractedDeal =
     extractionResult && extractionResult.deal.dealId === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
   const deal = extractedDeal ?? deals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
-  const dataRoomHasFiles = useMemo(
-    () => hasDataRoomFiles(localDataRoom?.tree ?? []),
-    [localDataRoom?.tree],
+  const explorerNodes = useMemo(
+    () => [...buildStoredDocumentNodes(dealDocuments), ...(localDataRoom?.tree ?? [])],
+    [dealDocuments, localDataRoom?.tree],
   );
+  const dataRoomHasFiles = useMemo(() => hasDataRoomFiles(explorerNodes), [explorerNodes]);
+  const treeError = [storedTreeError, localTreeError].filter(Boolean).join(" ");
+  const treeLoading = storedTreeLoading || localTreeLoading;
   const isEmptyDataRoom =
     localDataRoom !== null && !treeLoading && !treeError && !dataRoomHasFiles;
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDealDocuments = useCallback(async () => {
+    const requestId = storedDocumentsRequestId.current + 1;
+    storedDocumentsRequestId.current = requestId;
 
     if (!dealId) {
-      setTreeLoading(false);
+      storedDocumentsDealId.current = undefined;
+      setDealDocuments([]);
+      setStoredTreeError("");
+      setStoredTreeLoading(false);
+      return;
+    }
+
+    if (storedDocumentsDealId.current !== dealId) {
+      storedDocumentsDealId.current = dealId;
+      setDealDocuments([]);
+    }
+    setStoredTreeLoading(true);
+    setStoredTreeError("");
+    try {
+      const response = await runtime.api.listDealDocuments(dealId);
+      if (storedDocumentsRequestId.current === requestId) {
+        setDealDocuments(response);
+        setStoredTreeLoading(false);
+      }
+    } catch (error) {
+      if (storedDocumentsRequestId.current === requestId) {
+        setDealDocuments([]);
+        setStoredTreeError(error instanceof Error ? error.message : String(error));
+        setStoredTreeLoading(false);
+      }
+    }
+  }, [dealId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadDealDocuments();
+
+    if (!dealId) {
+      setLocalTreeLoading(false);
       return () => {
         cancelled = true;
       };
     }
 
-    setTreeLoading(true);
-    setTreeError("");
+    setLocalTreeLoading(true);
+    setLocalTreeError("");
     setLocalDataRoom(null);
     setSelectedDocument(null);
     previewRequestId.current += 1;
+    rawTextRequestId.current += 1;
+    setRawText({ status: "idle" });
     runtime.api.listDealDataRoom(dealId)
       .then((response) => {
         if (!cancelled) {
           setLocalDataRoom(response);
-          setTreeLoading(false);
+          setLocalTreeLoading(false);
         }
       })
       .catch((error: unknown) => {
@@ -86,33 +136,53 @@ export function DataRoomPage() {
               rootPath: "",
               tree: [],
             });
-            setTreeLoading(false);
+            setLocalTreeLoading(false);
             return;
           }
-          setTreeError(error instanceof Error ? error.message : String(error));
-          setTreeLoading(false);
+          setLocalTreeError(error instanceof Error ? error.message : String(error));
+          setLocalTreeLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
+      storedDocumentsRequestId.current += 1;
     };
-  }, [dealId]);
+  }, [dealId, loadDealDocuments]);
 
   const handleSelectDocument = useCallback(
     async (document: DataRoomTreeNode) => {
       setSelectedDocument(document);
       setPreview({ status: "loading" });
+      setRawText({ status: "idle" });
+      rawTextRequestId.current += 1;
       const requestId = previewRequestId.current + 1;
       previewRequestId.current = requestId;
 
-      if (!deal?.room.id || !document.relativePath) {
+      if (!deal?.room.id || (!document.storedFileId && !document.relativePath)) {
         setPreview({ message: "This selection is not a previewable file.", status: "error" });
         return;
       }
 
       try {
-        const response = await runtime.api.previewDealDocument(deal.room.id, document.relativePath);
+        let response: DocumentPreviewResponse;
+        if (document.storedFileId) {
+          const pdf = await runtime.api.getDealDocumentPdf(
+            deal.room.id,
+            document.storedFileId,
+          );
+          response = {
+            fileName: document.name,
+            mimeType: pdf.mimeType,
+            pdfBytes: pdf.bytes,
+            sourceKind: "stored",
+          };
+        } else {
+          response = await runtime.api.previewDealDocument(
+            deal.room.id,
+            document.relativePath!,
+          );
+        }
         if (!isDocumentPreviewResponse(response)) {
           throw new Error("The preview backend returned an invalid PDF response.");
         }
@@ -131,10 +201,45 @@ export function DataRoomPage() {
     [deal?.room.id],
   );
 
+  const handleRequestRawText = useCallback(async () => {
+    const document = selectedDocument;
+    const selectedDealId = deal?.room.id;
+    if (!selectedDealId || !document?.storedFileId) {
+      setRawText({ message: "Raw text is unavailable for this file.", status: "error" });
+      return;
+    }
+
+    const requestId = rawTextRequestId.current + 1;
+    rawTextRequestId.current = requestId;
+    setRawText({ status: "loading" });
+    try {
+      const response = await runtime.api.getDealDocumentText(
+        selectedDealId,
+        document.storedFileId,
+      );
+      if (rawTextRequestId.current === requestId) {
+        setRawText({ response, status: "ready" });
+      }
+    } catch (error) {
+      if (rawTextRequestId.current === requestId) {
+        setRawText({
+          message: error instanceof Error ? error.message : String(error),
+          status: "error",
+        });
+      }
+    }
+  }, [deal?.room.id, selectedDocument]);
+
   const handleClosePreview = useCallback(() => {
     previewRequestId.current += 1;
+    rawTextRequestId.current += 1;
     setSelectedDocument(null);
   }, []);
+
+  const handleCloseUploadModal = useCallback(() => {
+    setIsUploadModalOpen(false);
+    void loadDealDocuments();
+  }, [loadDealDocuments]);
 
   if (!deal && loaded) {
     return <Navigate replace to="/hub" />;
@@ -162,7 +267,7 @@ export function DataRoomPage() {
             email={email}
             key={deal.room.id}
             navigationState={location.state as DealExtractionLocationState | undefined}
-            nodes={localDataRoom?.tree ?? []}
+            nodes={explorerNodes}
             onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
             onSelectFile={handleSelectDocument}
             onUploadNewFile={() => setIsUploadModalOpen(true)}
@@ -181,8 +286,11 @@ export function DataRoomPage() {
                     <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
                       <DocumentPreviewPanel
                         document={selectedDocument}
+                        key={selectedDocument.id}
                         onClose={handleClosePreview}
+                        onRequestRawText={handleRequestRawText}
                         preview={preview}
+                        rawText={rawText}
                       />
                     </Suspense>
                   ) : (
@@ -209,7 +317,7 @@ export function DataRoomPage() {
       {isUploadModalOpen ? (
         <UploadFilesModal
           dealId={dealId ?? ""}
-          onClose={() => setIsUploadModalOpen(false)}
+          onClose={handleCloseUploadModal}
           userId={email ?? ""}
         />
       ) : null}
@@ -222,7 +330,7 @@ export function DataRoomPage() {
 
 function EmptyDataRoomState() {
   return (
-    <section className="glass-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+    <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
         <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
           Data Room Vault
@@ -251,11 +359,46 @@ function isDocumentPreviewResponse(value: unknown): value is DocumentPreviewResp
   }
 
   const response = value as Partial<DocumentPreviewResponse>;
+  const hasPdfBytes = response.pdfBytes instanceof Uint8Array && response.pdfBytes.byteLength > 0;
+  const hasPdfBase64 =
+    typeof response.pdfBase64 === "string" && response.pdfBase64.length > 0;
   return (
     typeof response.fileName === "string" &&
     response.mimeType === "application/pdf" &&
-    typeof response.pdfBase64 === "string" &&
-    response.pdfBase64.length > 0 &&
+    (hasPdfBytes || hasPdfBase64) &&
     typeof response.sourceKind === "string"
   );
+}
+
+function buildStoredDocumentNodes(documents: DealDocumentSummary[]): DataRoomTreeNode[] {
+  if (documents.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      children: documents.map((document) => ({
+        id: `stored-document:${document.fileId}`,
+        kind: storedDocumentKind(document.displayName),
+        name: document.displayName,
+        relativePath: `stored-document:${document.fileId}`,
+        storedFileId: document.fileId,
+      })),
+      defaultExpanded: true,
+      id: "stored-documents",
+      kind: "folder",
+      name: "Saved documents",
+    },
+  ];
+}
+
+function storedDocumentKind(displayName: string): DataRoomTreeNode["kind"] {
+  const extension = displayName.split(".").pop()?.toLowerCase();
+  if (extension === "pdf") {
+    return "pdf";
+  }
+  if (extension === "xls" || extension === "xlsx") {
+    return "sheet";
+  }
+  return "doc";
 }

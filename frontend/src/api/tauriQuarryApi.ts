@@ -1,5 +1,8 @@
 import type {
   AddUserInput,
+  DealDocumentPdf,
+  DealDocumentSummary,
+  DealDocumentText,
   FileChunkKeywordSearch,
   FileChunkVectorSearch,
   KeywordFileChunkHit,
@@ -34,6 +37,7 @@ export type TauriMultipartRequest = {
 
 type TauriTransport = {
   get<T>(path: string): Promise<T>;
+  getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
   postMultipart<T>(request: TauriMultipartRequest): Promise<T>;
   subscribeJob(
@@ -61,6 +65,16 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.post<WorkspaceAccountUser>("/api/v1/users", input),
     getDeal: (dealId) =>
       transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
+    async getDealDocumentPdf(dealId, fileId): Promise<DealDocumentPdf> {
+      const bytes = await transport.getPdf(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/pdf`,
+      );
+      return { bytes: new Uint8Array(bytes), mimeType: "application/pdf" };
+    },
+    getDealDocumentText: (dealId, fileId) =>
+      transport.get<DealDocumentText>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
+      ),
     async getUserByEmail(email) {
       try {
         return await transport.get<WorkspaceAccountUser>(
@@ -73,6 +87,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     },
     listDealDataRoom: (dealId) =>
       transport.get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`),
+    listDealDocuments: (dealId) =>
+      transport.get<DealDocumentSummary[]>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
+      ),
     listDeals: () => transport.get<PersistedDeal[]>("/api/v1/deals"),
     listSummaryFiles: (path) =>
       transport.post<SummarizableFile[]>("/api/v1/summarize/files", { path }),

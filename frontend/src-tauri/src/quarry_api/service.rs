@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::StreamExt;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
 
@@ -10,6 +11,7 @@ use super::{
 
 const MAX_PROXY_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_PROXY_TOTAL_BYTES: usize = 50 * 1024 * 1024;
+const MAX_PROXY_PDF_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct QuarryApiService {
@@ -26,6 +28,28 @@ impl QuarryApiService {
     pub async fn get(&self, path: &str) -> Result<Value, String> {
         validate_api_path(path)?;
         self.client.get(path).await
+    }
+
+    pub async fn get_pdf(&self, path: &str) -> Result<Vec<u8>, String> {
+        validate_pdf_api_path(path)?;
+        let response = self.client.get_stream(path).await?;
+        let mime_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if mime_type != Some("application/pdf") {
+            return Err("Quarry API returned a non-PDF preview response".to_string());
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| format!("failed to read Quarry PDF response: {error}"))?;
+        if bytes.is_empty() || bytes.len() > MAX_PROXY_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+            return Err("Quarry API returned invalid or oversized PDF bytes".to_string());
+        }
+        Ok(bytes.to_vec())
     }
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
@@ -124,6 +148,21 @@ fn validate_api_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_pdf_api_path(path: &str) -> Result<(), String> {
+    validate_api_path(path)?;
+    let segments = path.split('/').collect::<Vec<_>>();
+    if segments.len() != 8
+        || segments[1..4] != ["api", "v1", "deals"]
+        || segments[4].is_empty()
+        || segments[5] != "documents"
+        || segments[6].is_empty()
+        || segments[7] != "pdf"
+    {
+        return Err("Quarry PDF API path is not allowed".to_string());
+    }
+    Ok(())
+}
+
 fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > 128
@@ -145,5 +184,13 @@ mod tests {
         assert!(validate_api_path("/api/v1/deals").is_ok());
         assert!(validate_api_path("https://example.com/api/v1/deals").is_err());
         assert!(validate_api_path("/api/v1/../secrets").is_err());
+    }
+
+    #[test]
+    fn restricts_pdf_proxy_to_deal_document_preview_routes() {
+        assert!(validate_pdf_api_path("/api/v1/deals/DEAL-1/documents/file-1/pdf").is_ok());
+        assert!(validate_pdf_api_path("/api/v1/deals").is_err());
+        assert!(validate_pdf_api_path("/api/v1/deals/DEAL-1/documents/file-1").is_err());
+        assert!(validate_pdf_api_path("/api/v1/users/example/pdf").is_err());
     }
 }

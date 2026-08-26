@@ -22,3 +22,12 @@ fn file_version_identity_changes_with_logical_file_or_content() {
     assert_ne!(original, file_version_id("file-1", &sha256_hex(b"changed")));
     assert_eq!(original.len(), 64);
 }
+
+#[test]
+fn required_values_reject_empty_and_whitespace_only_input() {
+    assert!(require_non_empty("DEAL-1", "dealId").is_ok());
+    assert_eq!(
+        require_non_empty("  ", "dealId").unwrap_err(),
+        "dealId is required"
+    );
+}
