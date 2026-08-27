@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 interface UsePdfPageTrackerArgs {
   containerRef: { current: HTMLElement | null };
   numPages: number;
   ready: boolean;
+  pageOffsets: readonly number[];
+  pageHeights: readonly number[];
+  contentPaddingTop: number;
   onPageChange: (page: number) => void;
 }
 
@@ -13,51 +16,67 @@ export interface UsePdfPageTrackerReturn {
   scrollToPage: (page: number, behavior?: ScrollBehavior) => void;
 }
 
+export function pageAtOffset(
+  pageOffsets: readonly number[],
+  pageHeights: readonly number[],
+  offset: number,
+): number {
+  if (pageOffsets.length === 0) return 1;
+  let low = 0;
+  let high = pageOffsets.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (pageOffsets[middle] <= offset) {
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  const index = Math.max(0, Math.min(pageOffsets.length - 1, high));
+  if (
+    index + 1 < pageOffsets.length &&
+    offset > pageOffsets[index] + (pageHeights[index] ?? 0)
+  ) {
+    return index + 2;
+  }
+  return index + 1;
+}
+
 /**
- * Tracks which page is "current" based on which page element is closest to
- * the top of the scroll container. Uses IntersectionObserver with a tight
- * top-band root margin so the active page = the topmost intersecting page.
+ * Tracks the current page from precomputed layout offsets. It does not query or
+ * scan page DOM nodes, so virtualized documents can mount only a small range.
  */
 export function usePdfPageTracker(
   args: UsePdfPageTrackerArgs,
 ): UsePdfPageTrackerReturn {
-  const { containerRef, numPages, ready, onPageChange } = args;
+  const {
+    containerRef,
+    numPages,
+    ready,
+    pageOffsets,
+    pageHeights,
+    contentPaddingTop,
+    onPageChange,
+  } = args;
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || numPages <= 0) return;
     const container = containerRef.current;
     if (!container) return;
-    if (numPages <= 0) return;
 
     let frame: number | null = null;
-
     const update = () => {
       frame = null;
-      const pageEls = container.querySelectorAll<HTMLElement>(
-        "[data-pdf-page]",
+      const probeOffset = Math.max(
+        0,
+        container.scrollTop + 80 - contentPaddingTop,
       );
-      if (pageEls.length === 0) return;
-      const containerTop = container.getBoundingClientRect().top;
-      const probeY = containerTop + 80;
-      let activePage = 1;
-      for (const el of Array.from(pageEls)) {
-        const rect = el.getBoundingClientRect();
-        if (rect.top <= probeY && rect.bottom > probeY) {
-          const n = Number(el.dataset.pdfPage);
-          if (Number.isFinite(n) && n > 0) {
-            activePage = n;
-            break;
-          }
-        }
-        if (rect.top > probeY) break;
-        const n = Number(el.dataset.pdfPage);
-        if (Number.isFinite(n) && n > 0) {
-          activePage = n;
-        }
-      }
-      onPageChange(activePage);
+      onPageChangeRef.current(
+        pageAtOffset(pageOffsets, pageHeights, probeOffset),
+      );
     };
-
     const onScroll = () => {
       if (frame != null) return;
       frame = requestAnimationFrame(update);
@@ -65,30 +84,31 @@ export function usePdfPageTracker(
 
     update();
     container.addEventListener("scroll", onScroll, { passive: true });
-    const ro = new ResizeObserver(onScroll);
-    ro.observe(container);
+    const observer = new ResizeObserver(onScroll);
+    observer.observe(container);
     return () => {
       container.removeEventListener("scroll", onScroll);
-      ro.disconnect();
+      observer.disconnect();
       if (frame != null) cancelAnimationFrame(frame);
     };
-  }, [containerRef, numPages, ready, onPageChange]);
+  }, [
+    containerRef,
+    numPages,
+    ready,
+    pageOffsets,
+    pageHeights,
+    contentPaddingTop,
+  ]);
 
   const scrollToPage = useCallback(
     (page: number, behavior: ScrollBehavior = "smooth") => {
       const container = containerRef.current;
-      if (!container) return;
-      const target = container.querySelector<HTMLElement>(
-        `[data-pdf-page="${page}"]`,
-      );
-      if (!target) return;
-      const containerRect = container.getBoundingClientRect();
-      const targetRect = target.getBoundingClientRect();
-      const top =
-        container.scrollTop + (targetRect.top - containerRect.top) - 8;
-      container.scrollTo({ top, behavior });
+      if (!container || pageOffsets.length === 0) return;
+      const clamped = Math.max(1, Math.min(numPages, Math.floor(page)));
+      const top = contentPaddingTop + (pageOffsets[clamped - 1] ?? 0) - 8;
+      container.scrollTo({ top: Math.max(0, top), behavior });
     },
-    [containerRef],
+    [containerRef, contentPaddingTop, numPages, pageOffsets],
   );
 
   return { scrollToPage };

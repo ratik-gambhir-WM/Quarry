@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { PdfRotation } from "../types";
+
+const MAX_PRINT_BYTES = 64 * 1024 * 1024;
+const MAX_PRINT_PAGES = 1_000;
+const PRINT_LOAD_TIMEOUT_MS = 15_000;
+const PRINT_CLEANUP_TIMEOUT_MS = 60_000;
 
 interface UsePdfPrintArgs {
   pdfDocument: PDFDocumentProxy | null;
-  rotation: PdfRotation;
-  /** Render scale for print. Higher = sharper output, more memory. Default: 2. */
-  printScale?: number;
 }
 
 export interface UsePdfPrintReturn {
@@ -17,105 +18,96 @@ export interface UsePdfPrintReturn {
 }
 
 /**
- * Print the loaded document by rendering each page to a high-DPI canvas,
- * embedding them in a hidden iframe as images, and triggering print() on
- * that iframe. Sharper output than printing the live viewer canvas.
+ * Prints the original PDF bytes in a temporary same-origin blob iframe.
+ * This preserves vector content and avoids retaining one high-DPI PNG for
+ * every page, which can exhaust renderer memory on large documents.
  */
 export function usePdfPrint(args: UsePdfPrintArgs): UsePdfPrintReturn {
-  const { pdfDocument, rotation, printScale = 2 } = args;
+  const { pdfDocument } = args;
   const [isPrinting, setIsPrinting] = useState(false);
+  const printingRef = useRef(false);
 
   const print = useCallback(async () => {
-    if (isPrinting) return;
-    if (!pdfDocument) return;
-    setIsPrinting(true);
+    if (printingRef.current || !pdfDocument) return;
+    if (pdfDocument.numPages > MAX_PRINT_PAGES) {
+      throw new Error(
+        `This PDF has ${pdfDocument.numPages} pages; printing is limited to ${MAX_PRINT_PAGES} pages.`,
+      );
+    }
 
-    const iframe = document.createElement("iframe");
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    iframe.style.opacity = "0";
-    iframe.style.pointerEvents = "none";
-    document.body.appendChild(iframe);
+    printingRef.current = true;
+    setIsPrinting(true);
+    let iframe: HTMLIFrameElement | null = null;
+    let objectUrl: string | null = null;
+    let cleanedUp = false;
 
     const cleanup = () => {
-      try {
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      } catch {
-        // ignore
-      }
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (iframe?.parentNode) iframe.parentNode.removeChild(iframe);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      printingRef.current = false;
       setIsPrinting(false);
     };
 
     try {
-      const doc = iframe.contentDocument;
+      const data = await pdfDocument.getData();
+      if (data.byteLength > MAX_PRINT_BYTES) {
+        throw new Error(
+          `This PDF is ${data.byteLength} bytes; printing is limited to ${MAX_PRINT_BYTES} bytes.`,
+        );
+      }
+
+      const blob = new Blob([new Uint8Array(data)], {
+        type: "application/pdf",
+      });
+      objectUrl = URL.createObjectURL(blob);
+      iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.style.opacity = "0";
+      iframe.style.pointerEvents = "none";
+
+      await new Promise<void>((resolve, reject) => {
+        if (!iframe || !objectUrl) {
+          reject(new Error("Unable to create the PDF print frame."));
+          return;
+        }
+        const timeout = window.setTimeout(() => {
+          reject(new Error("Timed out while preparing the PDF for printing."));
+        }, PRINT_LOAD_TIMEOUT_MS);
+        iframe.onload = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        iframe.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error("The browser could not load the PDF for printing."));
+        };
+        iframe.src = objectUrl;
+        document.body.appendChild(iframe);
+      });
+
       const win = iframe.contentWindow;
-      if (!doc || !win) {
-        cleanup();
-        return;
-      }
-
-      doc.open();
-      doc.write(
-        `<!DOCTYPE html><html><head><style>` +
-          `@page { margin: 0; size: auto; }` +
-          `html, body { margin: 0; padding: 0; background: #fff; }` +
-          `.pdf-print-page { page-break-after: always; display: flex; align-items: center; justify-content: center; }` +
-          `.pdf-print-page:last-child { page-break-after: auto; }` +
-          `img { display: block; max-width: 100%; max-height: 100vh; }` +
-          `</style></head><body></body></html>`,
-      );
-      doc.close();
-
-      const body = doc.body;
-      const numPages = pdfDocument.numPages;
-
-      for (let i = 1; i <= numPages; i++) {
-        const page = await pdfDocument.getPage(i);
-        const viewport = page.getViewport({ scale: printScale, rotation });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) continue;
-        await page.render({
-          canvas,
-          canvasContext: ctx,
-          viewport,
-        } as Parameters<typeof page.render>[0]).promise;
-
-        const dataUrl = canvas.toDataURL("image/png");
-        const wrapper = doc.createElement("div");
-        wrapper.className = "pdf-print-page";
-        const img = doc.createElement("img");
-        img.src = dataUrl;
-        wrapper.appendChild(img);
-        body.appendChild(wrapper);
-
-        canvas.width = 0;
-        canvas.height = 0;
-      }
-
+      if (!win) throw new Error("The PDF print frame is unavailable.");
       const onAfterPrint = () => {
         win.removeEventListener("afterprint", onAfterPrint);
         cleanup();
       };
       win.addEventListener("afterprint", onAfterPrint);
-
       win.focus();
       win.print();
-
-      // Safety net in case afterprint never fires.
-      setTimeout(cleanup, 60000);
-    } catch (err) {
+      window.setTimeout(cleanup, PRINT_CLEANUP_TIMEOUT_MS);
+    } catch (error) {
       cleanup();
-      throw err;
+      throw error;
     }
-  }, [pdfDocument, rotation, printScale, isPrinting]);
+  }, [pdfDocument]);
 
   return { print, isPrinting };
 }

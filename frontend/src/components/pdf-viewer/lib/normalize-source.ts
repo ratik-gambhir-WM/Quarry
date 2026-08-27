@@ -18,8 +18,10 @@ export function normalizeSource(
 ): NormalizedPdfSource | null {
   if (input == null) return null;
   if (typeof input === "string") return input;
-  if (input instanceof ArrayBuffer) return { data: input };
-  if (input instanceof Uint8Array) return { data: input };
+  // pdf.js transfers typed-array buffers to its worker. Always give it an
+  // owned copy so downloads, retries, and the caller's source remain usable.
+  if (input instanceof ArrayBuffer) return { data: input.slice(0) };
+  if (input instanceof Uint8Array) return { data: new Uint8Array(input) };
   if (input instanceof Blob) return input;
   return null;
 }

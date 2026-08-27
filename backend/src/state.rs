@@ -18,7 +18,7 @@ use crate::{
 };
 
 const DATABASE_FILE_NAME: &str = "pathfinder.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 2;
+const LATEST_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Error)]
 enum MigrationError {
@@ -26,10 +26,6 @@ enum MigrationError {
     Database(#[from] rusqlite::Error),
     #[error(transparent)]
     Client(#[from] SqliteClientError),
-    #[error(
-        "cannot migrate {row_count} legacy quarry_file_blobs row(s) without ownership and version metadata"
-    )]
-    LegacyFileBlobsRequireRecovery { row_count: i64 },
     #[error("database schema version {found} is newer than supported version {supported}")]
     UnsupportedSchemaVersion { found: i64, supported: i64 },
 }
@@ -151,7 +147,7 @@ fn database_path() -> Result<PathBuf, String> {
 
 fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
-    let mut version = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version > LATEST_SCHEMA_VERSION {
         return Err(MigrationError::UnsupportedSchemaVersion {
             found: version,
@@ -159,27 +155,34 @@ fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
         });
     }
 
-    if version < 1 {
-        migrate_to_version_1(connection)?;
-        version = 1;
-    }
-    if version < 2 {
-        migrate_to_version_2(connection)?;
+    if version < LATEST_SCHEMA_VERSION {
+        recreate_version_6_schema(connection)?;
     }
 
     Ok(())
 }
 
-fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationError> {
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    transaction.execute_batch(
-        r#"
-            CREATE TABLE IF NOT EXISTS app_metadata (
+fn recreate_version_6_schema(connection: &mut Connection) -> Result<(), MigrationError> {
+    connection.pragma_update(None, "foreign_keys", "OFF")?;
+    let migration = (|| -> Result<(), MigrationError> {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS quarry_file_blobs;
+            DROP TABLE IF EXISTS quarry_file_versions;
+            DROP TABLE IF EXISTS quarry_files;
+            DROP TABLE IF EXISTS deal_metadata;
+            DROP TABLE IF EXISTS deals;
+            DROP TABLE IF EXISTS reminders;
+            DROP TABLE IF EXISTS users;
+            DROP TABLE IF EXISTS app_metadata;
+
+            CREATE TABLE app_metadata (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS users (
+            CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
@@ -190,7 +193,7 @@ fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationErro
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS reminders (
+            CREATE TABLE reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 reminder TEXT NOT NULL,
                 notes TEXT NOT NULL,
@@ -203,13 +206,7 @@ fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationErro
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS quarry_file_blobs (
-                file_id TEXT PRIMARY KEY NOT NULL,
-                file_bytes BLOB NOT NULL,
-                CHECK (length(trim(file_id)) > 0)
-            );
-
-            CREATE TABLE IF NOT EXISTS deals (
+            CREATE TABLE deals (
                 deal_id TEXT PRIMARY KEY NOT NULL,
                 user_id INTEGER NOT NULL,
                 deal_name TEXT NOT NULL,
@@ -232,12 +229,12 @@ fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationErro
                 CHECK (length(trim(deal_sponsor)) > 0)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_deals_user_id ON deals(user_id);
-            CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
-            CREATE INDEX IF NOT EXISTS idx_deals_transaction_type ON deals(transaction_type);
-            CREATE INDEX IF NOT EXISTS idx_deals_close_date ON deals(close_date);
+            CREATE INDEX idx_deals_user_id ON deals(user_id);
+            CREATE INDEX idx_deals_status ON deals(status);
+            CREATE INDEX idx_deals_transaction_type ON deals(transaction_type);
+            CREATE INDEX idx_deals_close_date ON deals(close_date);
 
-            CREATE TABLE IF NOT EXISTS deal_metadata (
+            CREATE TABLE deal_metadata (
                 deal_id TEXT PRIMARY KEY NOT NULL,
                 user_id INTEGER NOT NULL,
                 key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
@@ -250,29 +247,7 @@ fn migrate_to_version_1(connection: &mut Connection) -> Result<(), MigrationErro
                 CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
             );
 
-            CREATE INDEX IF NOT EXISTS idx_deal_metadata_user_id ON deal_metadata(user_id);
-        "#,
-    )?;
-    transaction.pragma_update(None, "user_version", 1)?;
-    transaction.commit()?;
-    Ok(())
-}
-
-fn migrate_to_version_2(connection: &mut Connection) -> Result<(), MigrationError> {
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let legacy_blob_count =
-        transaction.query_row("SELECT COUNT(*) FROM quarry_file_blobs", [], |row| {
-            row.get::<_, i64>(0)
-        })?;
-    if legacy_blob_count > 0 {
-        return Err(MigrationError::LegacyFileBlobsRequireRecovery {
-            row_count: legacy_blob_count,
-        });
-    }
-
-    transaction.execute_batch(
-        r#"
-            DROP TABLE quarry_file_blobs;
+            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
 
             CREATE TABLE quarry_files (
                 file_id       TEXT PRIMARY KEY NOT NULL,
@@ -330,13 +305,17 @@ fn migrate_to_version_2(connection: &mut Connection) -> Result<(), MigrationErro
                     REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
                 file_bytes  BLOB NOT NULL
             );
-        "#,
-    )?;
-    transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
-    transaction.commit()?;
+            "#,
+        )?;
+        transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        Ok(())
+    })();
+    let restore_foreign_keys = connection.pragma_update(None, "foreign_keys", "ON");
+    migration?;
+    restore_foreign_keys?;
     Ok(())
 }
-
 #[cfg(test)]
 #[path = "../tests/state_tests.rs"]
 mod tests;

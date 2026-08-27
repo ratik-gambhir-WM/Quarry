@@ -1,24 +1,20 @@
-import { ArrowEndOnRectangleIcon } from "../ui/icons/ArrowEndOnRectangleIcon";
+import { Icon } from "../ui/Icon";
 
 type EdgePanelOpenButtonProps = {
   label: string;
   onClick: () => void;
-  side: "left" | "right";
 };
 
-export function EdgePanelOpenButton({ label, onClick, side }: EdgePanelOpenButtonProps) {
-  const sideClasses = side === "left" ? "left-1" : "right-1";
-  const direction = side === "left" ? "right" : "left";
-
+export function EdgePanelOpenButton({ label, onClick }: EdgePanelOpenButtonProps) {
   return (
     <button
       aria-label={label}
-      className={`absolute top-1/2 z-30 flex h-12 w-11 -translate-y-1/2 items-center justify-center bg-transparent text-primary transition hover:text-text-main ${sideClasses}`}
+      className="flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
       onClick={onClick}
       title={label}
       type="button"
     >
-      <ArrowEndOnRectangleIcon className="h-7 w-7" direction={direction} />
+      <Icon className="h-3.5 w-3.5" name="sidebar" />
     </button>
   );
 }

@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorBlock } from "../../data/dataRoom";
 import { Icon } from "../ui/Icon";
+import { EdgePanelOpenButton } from "./EdgePanelOpenButton";
 
 const documentViews = ["Document", "Summary", "Notes", "Findings"] as const;
 type DocumentView = (typeof documentViews)[number];
 
 type ReportEditorPanelProps = {
   blocks: EditorBlock[];
+  onOpenDocumentSearch?: () => void;
   reportTitle: string;
   versionLabel: string;
 };
 
-export function ReportEditorPanel({ blocks, reportTitle, versionLabel }: ReportEditorPanelProps) {
+export function ReportEditorPanel({
+  blocks,
+  onOpenDocumentSearch,
+  reportTitle,
+  versionLabel,
+}: ReportEditorPanelProps) {
   return (
     <section className="glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-background px-5">
@@ -19,7 +26,15 @@ export function ReportEditorPanel({ blocks, reportTitle, versionLabel }: ReportE
           <h1 className="truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room</h1>
           <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{versionLabel}</p>
         </div>
-        <DocumentViewMenu />
+        <div className="flex shrink-0 items-center gap-2">
+          <DocumentViewMenu />
+          {onOpenDocumentSearch ? (
+            <EdgePanelOpenButton
+              label="Open document search"
+              onClick={onOpenDocumentSearch}
+            />
+          ) : null}
+        </div>
       </header>
 
       <div className="workspace-scrollbar-hidden flex-1 overflow-y-auto p-6">

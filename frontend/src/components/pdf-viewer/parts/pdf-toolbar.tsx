@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -11,9 +12,15 @@ import { PdfZoomControls } from "./pdf-zoom-controls";
 
 interface PdfToolbarProps {
   className?: string;
+  onPrintAction?: () => void;
+  printActionLabel?: ReactNode;
 }
 
-export function PdfToolbar({ className }: PdfToolbarProps) {
+export function PdfToolbar({
+  className,
+  onPrintAction,
+  printActionLabel,
+}: PdfToolbarProps) {
   const { labels } = usePdfViewer();
 
   return (
@@ -32,7 +39,10 @@ export function PdfToolbar({ className }: PdfToolbarProps) {
         <PdfZoomControls />
         <Separator orientation="vertical" className="mx-1 h-5" />
         <div className="ml-auto flex items-center gap-0.5">
-          <PdfActionMenu />
+          <PdfActionMenu
+            onPrintAction={onPrintAction}
+            printActionLabel={printActionLabel}
+          />
         </div>
       </div>
     </TooltipProvider>

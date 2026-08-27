@@ -5,6 +5,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -53,6 +54,30 @@ import {
 } from "./types";
 
 const COMPACT_BREAKPOINT_PX = 480;
+const PDF_PAGE_GAP_PX = 12;
+const PDF_PAGE_CONTENT_PADDING_PX = 16;
+const DEFAULT_PDF_PAGE_SIZE = { width: 612, height: 792 };
+
+function buildPageLayout(
+  numPages: number,
+  pageSizes: ReadonlyArray<{ width: number; height: number } | null>,
+  scale: number,
+  rotation: PdfRotation,
+): { offsets: number[]; heights: number[]; totalHeight: number } {
+  const fallback = pageSizes[0] ?? DEFAULT_PDF_PAGE_SIZE;
+  const offsets = new Array<number>(numPages);
+  const heights = new Array<number>(numPages);
+  let offset = 0;
+  for (let index = 0; index < numPages; index += 1) {
+    const size = pageSizes[index] ?? fallback;
+    const height =
+      (rotation % 180 === 0 ? size.height : size.width) * scale;
+    offsets[index] = offset;
+    heights[index] = height;
+    offset += height + (index + 1 < numPages ? PDF_PAGE_GAP_PX : 0);
+  }
+  return { offsets, heights, totalHeight: offset };
+}
 
 function resolveLabels(
   override: PdfViewerLabels | undefined,
@@ -127,18 +152,18 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
       onSourceChange?.({ source: next, reason });
     };
 
-    const normalizedSource = useMemo(
-      () => normalizeSource(internalSource),
-      [internalSource],
-    );
-
     // Document loading lifecycle
     const documentState = usePdfDocument({
-      source: normalizedSource,
+      source: internalSource,
       password,
     });
+    const normalizedSource = useMemo(
+      () => normalizeSource(internalSource),
+      [internalSource, documentState.retryToken],
+    );
 
-    // Page sizes for virtualization placeholders + fit-scale.
+    // Load only the first page size eagerly for fit-scale. Remaining sizes are
+    // captured as virtualized pages enter the mounted range.
     const [pageSizes, setPageSizes] = useState<
       Array<{ width: number; height: number } | null>
     >([]);
@@ -149,34 +174,45 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
         return;
       }
       let cancelled = false;
-      const N = pdf.numPages;
-      const sizes: Array<{ width: number; height: number } | null> = new Array(
-        N,
-      ).fill(null);
-
-      (async () => {
-        const concurrency = 8;
-        for (let start = 0; start < N; start += concurrency) {
+      setPageSizes(new Array(pdf.numPages).fill(null));
+      void pdf
+        .getPage(1)
+        .then((firstPage) => {
           if (cancelled) return;
-          const batch: Promise<void>[] = [];
-          for (let i = start; i < Math.min(start + concurrency, N); i++) {
-            batch.push(
-              pdf.getPage(i + 1).then((page) => {
-                if (cancelled) return;
-                const vp = page.getViewport({ scale: 1, rotation: 0 });
-                sizes[i] = { width: vp.width, height: vp.height };
-              }),
-            );
-          }
-          await Promise.all(batch);
-          if (!cancelled) setPageSizes([...sizes]);
-        }
-      })();
+          const viewport = firstPage.getViewport({ scale: 1, rotation: 0 });
+          setPageSizes((current) => {
+            const next = [...current];
+            next[0] = { width: viewport.width, height: viewport.height };
+            return next;
+          });
+        })
+        .catch(() => {
+          // The visible Page component will report the size or load error.
+        });
 
       return () => {
         cancelled = true;
       };
     }, [documentState.pdfDocument]);
+    const recordPageSize = useCallback(
+      (pageNumber: number, size: { width: number; height: number }) => {
+        setPageSizes((current) => {
+          const index = pageNumber - 1;
+          const previous = current[index];
+          if (
+            index < 0 ||
+            index >= current.length ||
+            (previous?.width === size.width && previous.height === size.height)
+          ) {
+            return current;
+          }
+          const next = [...current];
+          next[index] = size;
+          return next;
+        });
+      },
+      [],
+    );
 
     // Refs
     const rootRef = useRef<HTMLElement>(null);
@@ -245,12 +281,25 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
       initialScale,
       onScaleChange,
     });
+    const pageLayout = useMemo(
+      () =>
+        buildPageLayout(
+          documentState.numPages,
+          pageSizes,
+          zoom.scale,
+          rotation,
+        ),
+      [documentState.numPages, pageSizes, zoom.scale, rotation],
+    );
 
     // Page tracker
     const pageTracker = usePdfPageTracker({
       containerRef: scrollContainerRef,
       numPages: documentState.numPages,
       ready: documentState.status === "ready",
+      pageOffsets: pageLayout.offsets,
+      pageHeights: pageLayout.heights,
+      contentPaddingTop: PDF_PAGE_CONTENT_PADDING_PX,
       onPageChange: (next) => {
         setPage((prev) => {
           if (prev !== next) {
@@ -264,7 +313,6 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     // Print
     const printer = usePdfPrint({
       pdfDocument: documentState.pdfDocument,
-      rotation,
     });
 
     // Selection
@@ -538,6 +586,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
             */}
             {normalizedSource ? (
               <Document
+                key={documentState.retryToken}
                 file={normalizedSource}
                 loading={null}
                 error={null}
@@ -554,27 +603,36 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
                         ? (text) => onSearchSelection({ text })
                         : undefined
                     }
-                    className="flex flex-col items-center gap-3 p-4"
+                    className="relative w-full p-4"
                   >
-                    {Array.from(
-                      { length: documentState.numPages },
-                      (_, i) => {
-                        const pageNumber = i + 1;
-                        const isVisible = visiblePages.has(pageNumber);
+                    <div
+                      className="relative w-full"
+                      style={{ height: pageLayout.totalHeight }}
+                    >
+                      {Array.from(visiblePages, (pageNumber) => {
+                        const index = pageNumber - 1;
                         return (
-                          <PdfPage
+                          <div
                             key={pageNumber}
-                            pdfDocument={documentState.pdfDocument!}
-                            pageNumber={pageNumber}
-                            scale={zoom.scale}
-                            rotation={rotation}
-                            basePageSize={pageSizes[i] ?? null}
-                            placeholder={!isVisible}
-                            className={pageClassName}
-                          />
+                            className="absolute inset-x-0"
+                            style={{
+                              top: pageLayout.offsets[index],
+                              height: pageLayout.heights[index],
+                            }}
+                          >
+                            <PdfPage
+                              pdfDocument={documentState.pdfDocument!}
+                              pageNumber={pageNumber}
+                              scale={zoom.scale}
+                              rotation={rotation}
+                              basePageSize={pageSizes[index] ?? null}
+                              onPageSize={recordPageSize}
+                              className={pageClassName}
+                            />
+                          </div>
                         );
-                      },
-                    )}
+                      })}
+                    </div>
                   </PdfContextMenu>
                 ) : null}
               </Document>

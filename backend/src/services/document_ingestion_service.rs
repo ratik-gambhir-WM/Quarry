@@ -12,8 +12,9 @@ use crate::{
         parsers::{ParsedQuarryFile, QuarryFile},
     },
     repository::document_repository::{
-        find_current_helix_document_by_content_hash, persist_document_and_chunks,
-        search_document_chunks_by_keyword, search_document_chunks_by_vector,
+        find_current_sqlite_file_by_content_hash, get_current_helix_document,
+        persist_document_and_chunks, search_document_chunks_by_keyword,
+        search_document_chunks_by_vector,
     },
     state::AppState,
     utils::{document_id_from_content, openai_api_key, require_non_empty, sha256_hex},
@@ -154,32 +155,62 @@ async fn process_uploaded_document(
         Err(error) => return Ok(failed_document(filename, error)),
     };
     let document_id = document_id_from_content(&user_id, &content_hash);
-    let _processing_guard = state.lock_document_processing(&document_id).await;
-    match find_current_helix_document_by_content_hash(state.helix(), &user_id, &content_hash).await
+    let attachment_lock_id = format!("{deal_id}\0{document_id}");
+    let _processing_guard = state.lock_document_processing(&attachment_lock_id).await;
+    let existing_attachment = match find_current_sqlite_file_by_content_hash(
+        state.sqlite(),
+        &deal_id,
+        &user_id,
+        &content_hash,
+    )
+    .await
     {
-        Ok(Some(_)) => {
-            return Ok(ProcessedDocument {
-                filename,
-                document_id: Some(document_id),
-                chunk_count: 0,
-                success: true,
-                skipped: true,
-                error: None,
-            });
-        }
-        Ok(None) => {}
+        Ok(attachment) => attachment,
         Err(error) => {
             return Ok(failed_document(
                 filename,
-                format!("failed to check for an existing document: {error}"),
+                format!("failed to check for an existing deal attachment: {error}"),
             ));
+        }
+    };
+    if let Some(existing) = &existing_attachment {
+        match get_current_helix_document(state.helix(), &user_id, &existing.file_id).await {
+            Ok(Some(indexed))
+                if indexed.version.version_id == existing.version_id
+                    && indexed.version.content_sha256 == content_hash =>
+            {
+                return Ok(ProcessedDocument {
+                    filename,
+                    document_id: Some(document_id),
+                    chunk_count: 0,
+                    success: true,
+                    skipped: true,
+                    error: None,
+                });
+            }
+            Ok(Some(_)) | Ok(None) => {}
+            Err(error) => {
+                return Ok(failed_document(
+                    filename,
+                    format!("failed to check the existing deal attachment index: {error}"),
+                ));
+            }
         }
     }
 
     let api_key = openai_api_key()?;
     let openai = OpenAiClient::new(&api_key);
     Ok(
-        match process_document(&state, file, deal_id, user_id, &openai).await {
+        match process_document(
+            &state,
+            file,
+            deal_id,
+            user_id,
+            existing_attachment.as_ref(),
+            &openai,
+        )
+        .await
+        {
             Ok((document_id, chunk_count)) => ProcessedDocument {
                 filename,
                 document_id: Some(document_id),
@@ -276,10 +307,14 @@ async fn process_document(
     file: UploadedDocument,
     deal_id: String,
     user_id: String,
+    existing_attachment: Option<&crate::core::models::file_persistence::PersistedFileIdentity>,
     openai: &OpenAiClient<'_>,
 ) -> Result<(String, usize), String> {
     let filename = file.filename.clone();
     let mut graph = parse_document(file, user_id)?;
+    if let Some(existing) = existing_attachment {
+        graph.document.file_id.clone_from(&existing.file_id);
+    }
     let document_id = graph.document.document_id.clone();
     let chunk_count = graph.chunks.len();
     embed_chunks(

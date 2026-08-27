@@ -1,7 +1,7 @@
 "use client";
 
 import { Page } from "react-pdf";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { cn } from "@/lib/utils";
 import type { PdfRotation } from "../types";
 
@@ -10,10 +10,9 @@ interface PdfPageProps {
   pageNumber: number;
   scale: number;
   rotation: PdfRotation;
-  /** Known intrinsic page size at scale=1, used for the placeholder when not visible. */
+  /** Known intrinsic page size at scale=1, used while the page is loading. */
   basePageSize: { width: number; height: number } | null;
-  /** When true, render only a placeholder div with the right height (virtualized away). */
-  placeholder: boolean;
+  onPageSize?: (pageNumber: number, size: { width: number; height: number }) => void;
   className?: string;
 }
 
@@ -23,31 +22,9 @@ export function PdfPage({
   scale,
   rotation,
   basePageSize,
-  placeholder,
+  onPageSize,
   className,
 }: PdfPageProps) {
-  if (placeholder) {
-    const rotated = rotation % 180 === 0;
-    const w = basePageSize
-      ? (rotated ? basePageSize.width : basePageSize.height) * scale
-      : 600;
-    const h = basePageSize
-      ? (rotated ? basePageSize.height : basePageSize.width) * scale
-      : 800;
-    return (
-      <div
-        data-pdf-page={pageNumber}
-        data-pdf-page-placeholder
-        className={cn(
-          "relative mx-auto rounded-md border border-dashed border-border bg-surface-container",
-          className,
-        )}
-        style={{ width: w, height: h }}
-        aria-hidden="true"
-      />
-    );
-  }
-
   return (
     <div
       data-pdf-page={pageNumber}
@@ -60,6 +37,13 @@ export function PdfPage({
         rotate={rotation}
         renderTextLayer={true}
         renderAnnotationLayer={true}
+        onLoadSuccess={(loadedPage: PDFPageProxy) => {
+          const viewport = loadedPage.getViewport({ scale: 1, rotation: 0 });
+          onPageSize?.(pageNumber, {
+            width: viewport.width,
+            height: viewport.height,
+          });
+        }}
         loading={
           <div
             className="rounded-md border border-border bg-surface-container"

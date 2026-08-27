@@ -4,12 +4,14 @@ import previewLoadingMark from "../../assets/quarry-preview-mark.svg";
 import type { DealDocumentText } from "../../contracts/quarryApi";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DocumentPreviewResponse } from "../../data/dataRoomPreview";
-import { PdfViewer as ShadcnPdfViewer } from "../pdf-viewer";
+import { PdfToolbar, PdfViewer as ShadcnPdfViewer } from "../pdf-viewer";
 import { Icon } from "../ui/Icon";
+import { EdgePanelOpenButton } from "./EdgePanelOpenButton";
 
 type DocumentPreviewPanelProps = {
   document: DataRoomTreeNode;
   onClose: () => void;
+  onOpenDocumentSearch?: () => void;
   onRequestRawText: () => void;
   preview: PreviewState;
   rawText: RawTextState;
@@ -29,6 +31,7 @@ export type RawTextState =
 export function DocumentPreviewPanel({
   document,
   onClose,
+  onOpenDocumentSearch,
   onRequestRawText,
   preview,
   rawText,
@@ -66,39 +69,14 @@ export function DocumentPreviewPanel({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {canShowRawText ? (
-            <div
-              aria-label="Document view"
-              className="flex rounded-full border border-outline-variant bg-surface-container-lowest p-1"
-              role="tablist"
+          {viewMode === "raw-text" ? (
+            <button
+              className="rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-2 text-[12px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
+              onClick={() => setViewMode("preview")}
+              type="button"
             >
-              <button
-                aria-selected={viewMode === "preview"}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
-                  viewMode === "preview"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-muted hover:text-text-main"
-                }`}
-                onClick={() => setViewMode("preview")}
-                role="tab"
-                type="button"
-              >
-                Preview
-              </button>
-              <button
-                aria-selected={viewMode === "raw-text"}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
-                  viewMode === "raw-text"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-muted hover:text-text-main"
-                }`}
-                onClick={showRawText}
-                role="tab"
-                type="button"
-              >
-                Show raw text
-              </button>
-            </div>
+              Back to preview
+            </button>
           ) : null}
           <button
             aria-label="Close document preview"
@@ -111,6 +89,12 @@ export function DocumentPreviewPanel({
             </span>
             Close
           </button>
+          {onOpenDocumentSearch ? (
+            <EdgePanelOpenButton
+              label="Open document search"
+              onClick={onOpenDocumentSearch}
+            />
+          ) : null}
         </div>
       </header>
 
@@ -138,7 +122,12 @@ export function DocumentPreviewPanel({
             />
           ) : null}
 
-          {preview.status === "ready" ? <PdfViewer response={preview.response} /> : null}
+          {preview.status === "ready" ? (
+            <PdfViewer
+              onShowRawText={canShowRawText ? showRawText : undefined}
+              response={preview.response}
+            />
+          ) : null}
         </>
       )}
     </section>
@@ -172,7 +161,13 @@ function RawTextViewer({ rawText }: { rawText: RawTextState }) {
   );
 }
 
-function PdfViewer({ response }: { response: DocumentPreviewResponse }) {
+function PdfViewer({
+  onShowRawText,
+  response,
+}: {
+  onShowRawText?: () => void;
+  response: DocumentPreviewResponse;
+}) {
   const decodedPdf = useMemo(() => buildPdfSource(response), [response]);
 
   if ("message" in decodedPdf) {
@@ -182,10 +177,17 @@ function PdfViewer({ response }: { response: DocumentPreviewResponse }) {
   return (
     <div className="min-h-0 min-w-0 flex-1 bg-surface-container [html[data-theme=dark]_&]:bg-black">
       <ShadcnPdfViewer
+        allowPrint={false}
         ariaLabel={`PDF document viewer: ${response.fileName}`}
         className="h-full min-h-0 rounded-none border-0"
         downloadFilename={response.fileName}
         enableDragDrop={false}
+        renderToolbar={() => (
+          <PdfToolbar
+            onPrintAction={onShowRawText}
+            printActionLabel="Show raw text"
+          />
+        )}
         scrollContainerClassName="workspace-scrollbar-hidden"
         source={decodedPdf.source}
         workerSrc={PdfWorkerUrl}

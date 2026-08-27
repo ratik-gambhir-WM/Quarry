@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface UsePdfSelectionArgs {
   rootRef: { current: HTMLElement | null };
@@ -14,22 +14,26 @@ interface UsePdfSelectionArgs {
 export function usePdfSelection(args: UsePdfSelectionArgs): string {
   const { rootRef, onSelection } = args;
   const [selectedText, setSelectedText] = useState("");
+  const selectedTextRef = useRef("");
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
     let timeout: ReturnType<typeof setTimeout> | null = null;
+    const updateSelectedText = (text: string) => {
+      if (selectedTextRef.current === text) return;
+      selectedTextRef.current = text;
+      setSelectedText(text);
+      onSelection?.({ text });
+    };
 
     const onSelectionChange = () => {
       if (timeout != null) clearTimeout(timeout);
       timeout = setTimeout(() => {
         const sel = typeof window !== "undefined" ? window.getSelection() : null;
         if (!sel || sel.rangeCount === 0) {
-          if (selectedText !== "") {
-            setSelectedText("");
-            onSelection?.({ text: "" });
-          }
+          updateSelectedText("");
           return;
         }
         const range = sel.getRangeAt(0);
@@ -37,10 +41,12 @@ export function usePdfSelection(args: UsePdfSelectionArgs): string {
           root === range.commonAncestorContainer ||
           (range.commonAncestorContainer instanceof Node &&
             root.contains(range.commonAncestorContainer));
-        if (!inViewer) return;
+        if (!inViewer) {
+          updateSelectedText("");
+          return;
+        }
         const text = sel.toString();
-        setSelectedText(text);
-        onSelection?.({ text });
+        updateSelectedText(text);
       }, 150);
     };
 
@@ -49,7 +55,6 @@ export function usePdfSelection(args: UsePdfSelectionArgs): string {
       document.removeEventListener("selectionchange", onSelectionChange);
       if (timeout != null) clearTimeout(timeout);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootRef, onSelection]);
 
   return selectedText;

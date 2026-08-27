@@ -277,45 +277,176 @@ fn file_and_version_deletes_cascade_to_their_children() {
     );
 }
 
+fn create_actual_version_5_database(connection: &Connection) {
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE app_metadata (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                first_name TEXT NOT NULL,
+                last_name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                api_key TEXT NOT NULL,
+                role TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reminder TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                date TEXT NOT NULL,
+                link TEXT NOT NULL,
+                time TEXT,
+                deal TEXT,
+                tag TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE deals (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                deal_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                close_date TEXT NOT NULL,
+                transaction_type TEXT NOT NULL,
+                target_company TEXT NOT NULL,
+                primary_buyer TEXT NOT NULL,
+                deal_sponsor TEXT NOT NULL,
+                CHECK (length(trim(deal_id)) > 0),
+                CHECK (length(trim(deal_name)) > 0),
+                CHECK (length(trim(status)) > 0),
+                CHECK (length(trim(start_date)) > 0),
+                CHECK (length(trim(close_date)) > 0),
+                CHECK (length(trim(transaction_type)) > 0),
+                CHECK (length(trim(target_company)) > 0),
+                CHECK (length(trim(primary_buyer)) > 0),
+                CHECK (length(trim(deal_sponsor)) > 0)
+            );
+
+            CREATE INDEX idx_deals_status ON deals(status);
+            CREATE INDEX idx_deals_transaction_type ON deals(transaction_type);
+            CREATE INDEX idx_deals_close_date ON deals(close_date);
+
+            CREATE TABLE deal_metadata (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
+                local_path TEXT,
+                sharepoint_link TEXT,
+                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
+                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
+                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
+            );
+
+            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
+            PRAGMA user_version = 5;
+            "#,
+        )
+        .unwrap();
+}
+
 #[test]
-fn migration_rebuilds_an_empty_preceding_blob_schema() {
+fn migration_recreates_the_complete_version_6_schema_from_an_actual_version_5_database() {
     let mut connection = Connection::open_in_memory().unwrap();
-    migrate_to_version_1(&mut connection).unwrap();
-    assert_eq!(
-        table_columns(&connection, "quarry_file_blobs"),
-        ["file_id", "file_bytes"]
-    );
+    create_actual_version_5_database(&connection);
+    connection
+        .execute_batch(
+            r#"
+            INSERT INTO users (first_name, last_name, email, api_key, role)
+            VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
+            INSERT INTO deals (
+                deal_id, deal_name, status, start_date, close_date,
+                transaction_type, target_company, primary_buyer, deal_sponsor
+            ) VALUES (
+                'DEAL-V5', 'Project V5', 'Active', '2026-01-01', '2026-02-01',
+                'Buy-side', 'Target', 'Buyer', 'Test Capital'
+            );
+            INSERT INTO deal_metadata (
+                deal_id, user_id, key_questions_json, local_path, sharepoint_link
+            ) VALUES ('DEAL-V5', 1, '["Why?"]', '/tmp/data-room', NULL);
+            "#,
+        )
+        .unwrap();
 
     run_migrations(&mut connection).unwrap();
 
     assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        table_columns(&connection, "deals"),
+        [
+            "deal_id",
+            "user_id",
+            "deal_name",
+            "status",
+            "start_date",
+            "close_date",
+            "transaction_type",
+            "target_company",
+            "primary_buyer",
+            "deal_sponsor",
+        ]
+    );
+    assert_eq!(table_count(&connection, "users"), 0);
+    assert_eq!(table_count(&connection, "deals"), 0);
+    assert_eq!(table_count(&connection, "deal_metadata"), 0);
+    let tables = connection
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        tables,
+        [
+            "app_metadata",
+            "deal_metadata",
+            "deals",
+            "quarry_file_blobs",
+            "quarry_file_versions",
+            "quarry_files",
+            "reminders",
+            "users",
+        ]
+    );
+    assert_eq!(
         table_columns(&connection, "quarry_file_blobs"),
         ["version_id", "file_bytes"]
     );
-}
-
-#[test]
-fn migration_refuses_to_discard_nonempty_legacy_blob_storage() {
-    let mut connection = Connection::open_in_memory().unwrap();
-    migrate_to_version_1(&mut connection).unwrap();
     connection
-        .execute(
-            "INSERT INTO quarry_file_blobs (file_id, file_bytes) VALUES ('legacy', X'0102')",
-            [],
+        .execute_batch(
+            r#"
+            INSERT INTO users (first_name, last_name, email, api_key, role)
+            VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
+            INSERT INTO deals (
+                deal_id, user_id, deal_name, status, start_date, close_date,
+                transaction_type, target_company, primary_buyer, deal_sponsor
+            ) VALUES (
+                'DEAL-V6', 1, 'Project V6', 'Active', '2026-01-01', '2026-02-01',
+                'Buy-side', 'Target', 'Buyer', 'Test Capital'
+            )
+            "#,
         )
         .unwrap();
-
-    let error = run_migrations(&mut connection).unwrap_err();
-
-    assert!(matches!(
-        error,
-        MigrationError::LegacyFileBlobsRequireRecovery { row_count: 1 }
-    ));
-    assert_eq!(table_count(&connection, "quarry_file_blobs"), 1);
-    let version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, 1);
 }
 
 #[test]

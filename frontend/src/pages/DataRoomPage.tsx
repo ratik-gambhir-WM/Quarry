@@ -8,7 +8,6 @@ import type {
   PreviewState,
   RawTextState,
 } from "../components/data-room/DocumentPreviewPanel";
-import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { EmptyState } from "../components/empty-state/empty-state";
@@ -301,6 +300,9 @@ export function DataRoomPage() {
                         document={selectedDocument}
                         key={selectedDocument.id}
                         onClose={handleClosePreview}
+                        onOpenDocumentSearch={
+                          isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
+                        }
                         onRequestRawText={handleRequestRawText}
                         preview={preview}
                         rawText={rawText}
@@ -309,19 +311,15 @@ export function DataRoomPage() {
                   ) : (
                     <ReportEditorPanel
                       blocks={dataRoomView.editorBlocks}
+                      onOpenDocumentSearch={
+                        isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
+                      }
                       reportTitle={dataRoomView.reportTitle}
                       versionLabel={dataRoomView.versionLabel}
                     />
                   )}
                 </div>
                 {isChipBankOpen ? <ChipBankPanel chips={dataRoomView.chips} onCollapse={() => setIsChipBankOpen(false)} /> : null}
-                {!isChipBankOpen ? (
-                  <EdgePanelOpenButton
-                    label="Open document search"
-                    onClick={() => setIsChipBankOpen(true)}
-                    side="right"
-                  />
-                ) : null}
               </>
             )}
           </main>

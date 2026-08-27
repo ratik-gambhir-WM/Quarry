@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { NormalizedPdfSource } from "../lib/normalize-source";
+import type { PdfSource } from "../types";
 
 export type PdfDocumentStatus =
   | "idle"
@@ -12,7 +12,7 @@ export type PdfDocumentStatus =
   | "error";
 
 export interface UsePdfDocumentArgs {
-  source: NormalizedPdfSource | null;
+  source: PdfSource | null;
   password?: string;
 }
 
@@ -33,6 +33,7 @@ export interface UsePdfDocumentReturn {
   submitPassword: (password: string) => void;
   cancelPassword: () => void;
   retry: () => void;
+  retryToken: number;
 }
 
 /**
@@ -58,7 +59,7 @@ export function usePdfDocument(args: UsePdfDocumentArgs): UsePdfDocumentReturn {
   // setState during render is the recommended way to derive state from props.
   // See https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const [trackedKey, setTrackedKey] = useState<{
-    source: NormalizedPdfSource | null;
+    source: PdfSource | null;
     retryToken: number;
   }>({ source, retryToken });
   if (trackedKey.source !== source || trackedKey.retryToken !== retryToken) {
@@ -145,5 +146,6 @@ export function usePdfDocument(args: UsePdfDocumentArgs): UsePdfDocumentReturn {
     submitPassword,
     cancelPassword,
     retry,
+    retryToken,
   };
 }

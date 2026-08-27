@@ -1,3 +1,8 @@
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::LazyLock,
+};
+
 use crate::{
     core::{
         data_room_helpers::{convert_office_bytes_to_pdf, validate_pdf_bytes, MAX_PDF_BYTES},
@@ -16,9 +21,59 @@ use lopdf::{
     dictionary, Document as PdfDocument, Object, Stream,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use tokio::sync::{Mutex, Semaphore};
 
 const PDF_LINES_PER_PAGE: usize = 46;
 const PDF_MAX_LINE_CHARACTERS: usize = 88;
+const MAX_CONCURRENT_OFFICE_PREVIEWS: usize = 2;
+const OFFICE_PREVIEW_CACHE_ENTRIES: usize = 16;
+const OFFICE_PREVIEW_CACHE_BYTES: usize = 128 * 1024 * 1024;
+
+static OFFICE_PREVIEW_SEMAPHORE: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_OFFICE_PREVIEWS));
+static OFFICE_PREVIEW_CACHE: LazyLock<Mutex<OfficePreviewCache>> =
+    LazyLock::new(|| Mutex::new(OfficePreviewCache::default()));
+
+#[derive(Default)]
+struct OfficePreviewCache {
+    entries: HashMap<String, Vec<u8>>,
+    order: VecDeque<String>,
+    total_bytes: usize,
+}
+
+impl OfficePreviewCache {
+    fn get(&mut self, key: &str) -> Option<Vec<u8>> {
+        let value = self.entries.get(key)?.clone();
+        self.order.retain(|candidate| candidate != key);
+        self.order.push_back(key.to_string());
+        Some(value)
+    }
+
+    fn insert(&mut self, key: String, pdf_bytes: Vec<u8>) {
+        if pdf_bytes.len() > OFFICE_PREVIEW_CACHE_BYTES {
+            return;
+        }
+        if let Some(replaced) = self.entries.remove(&key) {
+            self.total_bytes = self.total_bytes.saturating_sub(replaced.len());
+        }
+        self.order.retain(|candidate| candidate != &key);
+        self.total_bytes = self.total_bytes.saturating_add(pdf_bytes.len());
+        self.entries.insert(key.clone(), pdf_bytes);
+        self.order.push_back(key);
+
+        while self.entries.len() > OFFICE_PREVIEW_CACHE_ENTRIES
+            || self.total_bytes > OFFICE_PREVIEW_CACHE_BYTES
+        {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = self.entries.remove(&oldest) {
+                self.total_bytes = self.total_bytes.saturating_sub(removed.len());
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,9 +121,28 @@ pub async fn render_stored_document_as_pdf(
                 document.display_name, document.mime_type
             )
         })?;
+        let cache_key = office_preview_cache_key(
+            &document.mime_type,
+            &document.display_name,
+            &document.file_bytes,
+        );
+        if let Some(cached) = OFFICE_PREVIEW_CACHE.lock().await.get(&cache_key) {
+            validate_pdf_bytes(&cached, "the cached PDF preview")?;
+            return Ok(cached);
+        }
+
+        let _permit = OFFICE_PREVIEW_SEMAPHORE
+            .acquire()
+            .await
+            .map_err(|_| "Office preview conversion is shutting down".to_string())?;
+        if let Some(cached) = OFFICE_PREVIEW_CACHE.lock().await.get(&cache_key) {
+            validate_pdf_bytes(&cached, "the cached PDF preview")?;
+            return Ok(cached);
+        }
+
         let display_name = document.display_name;
         let bytes = document.file_bytes;
-        tokio::task::spawn_blocking(move || {
+        let converted = tokio::task::spawn_blocking(move || {
             render_office_bytes_as_pdf(
                 extension,
                 &display_name,
@@ -77,11 +151,27 @@ pub async fn render_stored_document_as_pdf(
             )
         })
         .await
-        .map_err(|error| format!("document preview worker failed: {error}"))??
+        .map_err(|error| format!("document preview worker failed: {error}"))??;
+        validate_pdf_bytes(&converted, "the converted PDF preview")?;
+        OFFICE_PREVIEW_CACHE
+            .lock()
+            .await
+            .insert(cache_key, converted.clone());
+        converted
     };
 
     validate_pdf_bytes(&pdf_bytes, "the PDF preview")?;
     Ok(pdf_bytes)
+}
+
+fn office_preview_cache_key(mime_type: &str, display_name: &str, bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(mime_type.as_bytes());
+    hasher.update([0]);
+    hasher.update(display_name.as_bytes());
+    hasher.update([0]);
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 pub async fn render_stored_document_as_text(
@@ -347,5 +437,19 @@ mod tests {
             sanitize_pdf_text("Smart “quotes” — bullets •"),
             "Smart \"quotes\" - bullets *"
         );
+    }
+
+    #[test]
+    fn office_preview_cache_is_bounded_and_evicts_the_oldest_entry() {
+        let mut cache = OfficePreviewCache::default();
+        for index in 0..=OFFICE_PREVIEW_CACHE_ENTRIES {
+            cache.insert(format!("key-{index}"), vec![index as u8]);
+        }
+
+        assert_eq!(cache.entries.len(), OFFICE_PREVIEW_CACHE_ENTRIES);
+        assert!(!cache.entries.contains_key("key-0"));
+        assert!(cache
+            .entries
+            .contains_key(&format!("key-{OFFICE_PREVIEW_CACHE_ENTRIES}")));
     }
 }

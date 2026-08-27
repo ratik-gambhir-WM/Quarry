@@ -141,6 +141,57 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
 }
 
 #[tokio::test]
+async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
+    let state = crate::state::AppState::in_memory().unwrap();
+    seed_user_and_deals(
+        &state,
+        OWNER,
+        &[("DEAL-FIRST", "Active"), ("DEAL-SECOND", "Active")],
+    );
+    let bytes = b"identical attachment bytes".to_vec();
+    let first = document("file-first", OWNER, "report.pdf", &bytes);
+    let second = document("file-second", OWNER, "copy.pdf", &bytes);
+    persist_file_blob(state.sqlite(), "DEAL-FIRST", &first, bytes.clone())
+        .await
+        .unwrap();
+    persist_file_blob(state.sqlite(), "DEAL-SECOND", &second, bytes)
+        .await
+        .unwrap();
+
+    let first_match = find_current_sqlite_file_by_content_hash(
+        state.sqlite(),
+        "DEAL-FIRST",
+        OWNER,
+        &first.content_hash,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let second_match = find_current_sqlite_file_by_content_hash(
+        state.sqlite(),
+        "DEAL-SECOND",
+        OWNER,
+        &first.content_hash,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(first_match.file_id, "file-first");
+    assert_eq!(second_match.file_id, "file-second");
+    assert_ne!(first_match.version_id, second_match.version_id);
+    assert!(find_current_sqlite_file_by_content_hash(
+        state.sqlite(),
+        "DEAL-MISSING",
+        OWNER,
+        &first.content_hash,
+    )
+    .await
+    .unwrap()
+    .is_none());
+}
+
+#[tokio::test]
 async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
     let state = test_state();
     let bytes = b"valid bytes".to_vec();
@@ -679,7 +730,7 @@ fn rejects_a_chunk_for_another_document_before_persisting() {
         content_hash: "hash".to_string(),
         rendered_pdf_path: None,
     };
-    
+
     let chunk = DocumentChunk {
         chunk_id: "chunk-1".to_string(),
         document_id: "doc-2".to_string(),

@@ -158,6 +158,63 @@ pub async fn get_current_deal_document_blob(
     .map_err(|error: SqliteClientError| format!("failed to decode document blob: {error}"))
 }
 
+pub async fn find_current_sqlite_file_by_content_hash(
+    sqlite: &SqliteClient,
+    deal_id: &str,
+    workspace_id: &str,
+    content_sha256: &str,
+) -> Result<Option<PersistedFileIdentity>, String> {
+    let query = SqlBuilder::select("quarry_files")
+        .columns([
+            "quarry_files.file_id",
+            "quarry_files.workspace_id",
+            "quarry_files.display_name",
+            "quarry_file_versions.version_id",
+        ])
+        .inner_join(
+            "quarry_file_versions",
+            "quarry_files.file_id",
+            "quarry_file_versions.file_id",
+        )
+        .inner_join(
+            "quarry_file_blobs",
+            "quarry_file_versions.version_id",
+            "quarry_file_blobs.version_id",
+        )
+        .and_where(Condition::equal("quarry_files.deal_id", deal_id))
+        .and_where(Condition::equal("quarry_files.workspace_id", workspace_id))
+        .and_where(Condition::is_null("quarry_files.deleted_at"))
+        .and_where(Condition::equal("quarry_file_versions.is_current", true))
+        .and_where(Condition::equal(
+            "quarry_file_versions.content_sha256",
+            content_sha256,
+        ))
+        .build()
+        .map_err(|error| format!("failed to build deal attachment lookup: {error}"))?;
+    let rows = sqlite
+        .read_async(query)
+        .await
+        .map_err(|error| format!("failed to find deal attachment: {error}"))?;
+    if rows.len() > 1 {
+        return Err(format!(
+            "deal `{deal_id}` contains multiple current attachments for content hash `{content_sha256}`"
+        ));
+    }
+
+    rows.into_iter()
+        .next()
+        .map(|row| {
+            Ok(PersistedFileIdentity {
+                file_id: required_text(&row, "file_id")?,
+                workspace_id: required_text(&row, "workspace_id")?,
+                display_name: required_text(&row, "display_name")?,
+                version_id: required_text(&row, "version_id")?,
+            })
+        })
+        .transpose()
+        .map_err(|error: SqliteClientError| format!("failed to decode deal attachment: {error}"))
+}
+
 pub async fn persist_document_and_chunks(
     sqlite: &SqliteClient,
     helix: &HelixClient,
@@ -179,7 +236,13 @@ pub async fn persist_document_and_chunks(
             file_size_bytes,
             move || query,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            format!(
+                "Helix indexing failed after SQLite committed file_id `{}` and version_id `{}`: {error}",
+                persisted.file_id, persisted.version_id
+            )
+        })?;
     Ok(PersistedDocumentGraph {
         persisted,
         helix_transaction,
