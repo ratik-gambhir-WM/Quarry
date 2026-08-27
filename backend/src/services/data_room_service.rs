@@ -4,8 +4,8 @@ use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
 
 use crate::core::data_room_helpers::{
-    build_directory_node, convert_office_to_pdf, read_pdf, resolve_relative_file, DataRoomTreeNode,
-    MAX_PDF_BYTES,
+    build_directory_node, convert_office_to_pdf, read_pdf, resolve_relative_file,
+    validate_pdf_bytes, DataRoomTreeNode,
 };
 use crate::{repository::deal_repository::get_deal_metadata_by_deal_id, state::AppState};
 
@@ -81,13 +81,7 @@ pub fn build_document_preview(
             )
         }
     };
-    if pdf_bytes.len() as u64 > MAX_PDF_BYTES {
-        return Err(format!(
-            "The generated PDF is too large to preview ({} MB; limit is {} MB).",
-            pdf_bytes.len() / (1024 * 1024),
-            MAX_PDF_BYTES / (1024 * 1024)
-        ));
-    }
+    validate_pdf_bytes(&pdf_bytes, "the generated PDF")?;
     Ok(DocumentPreview {
         file_name,
         mime_type: "application/pdf".to_string(),

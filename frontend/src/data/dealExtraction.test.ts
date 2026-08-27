@@ -11,6 +11,7 @@ const savedDeal: SavedDeal = {
   status: "Active",
   targetCompany: "Target",
   transactionType: "Acquisition",
+  userId: 1,
 };
 
 describe("buildWorkspaceDealFromPersisted", () => {

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import { LoginCard } from "../components/login/LoginCard";
 import { AppShell } from "../components/layout/AppShell";
-import { Button } from "../components/ui/Button";
+import { QuarryButton } from "../components/ui/QuarryButton";
 import { FormField } from "../components/ui/FormField";
 import { Icon } from "../components/ui/Icon";
 import { persistWorkspaceEmail } from "../hooks/useWorkspaceSession";
@@ -228,9 +228,9 @@ function NewUserSetupCard({
           >
             Back
           </button>
-          <Button disabled={isCreating} icon={<Icon className="h-[18px] w-[18px]" name="arrowRight" />} type="submit">
+          <QuarryButton disabled={isCreating} icon={<Icon className="h-[18px] w-[18px]" name="arrowRight" />} type="submit">
             {isCreating ? "Creating..." : "Create Profile"}
-          </Button>
+          </QuarryButton>
         </div>
       </form>
     </section>

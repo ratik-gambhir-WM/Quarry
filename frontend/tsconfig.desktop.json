@@ -2,6 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "paths": {
+      "@/*": ["./src/*"],
       "@quarry/router": ["./src/platform/Router.desktop.tsx"],
       "@quarry/runtime": ["./src/platform/runtime.desktop.ts"]
     }

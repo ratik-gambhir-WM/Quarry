@@ -1,5 +1,5 @@
 use serde_json::Value;
-use tauri::{Emitter, State, WebviewWindow};
+use tauri::{ipc::Response, Emitter, State, WebviewWindow};
 
 use crate::{
     errors::{AppError, AppResult},
@@ -16,6 +16,20 @@ pub async fn quarry_api_get(
 ) -> AppResult<Value> {
     verify_main_window_origin(&window)?;
     service.get(&path).await.map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn quarry_api_get_pdf(
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    path: String,
+) -> AppResult<Response> {
+    verify_main_window_origin(&window)?;
+    service
+        .get_pdf(&path)
+        .await
+        .map(Response::new)
+        .map_err(api_error)
 }
 
 #[tauri::command]

@@ -1,7 +1,11 @@
 import type {
   AddUserInput,
-  ChunkKeywordSearch,
-  ChunkVectorSearch,
+  DealDocumentPdf,
+  DealDocumentSummary,
+  DealDocumentText,
+  FileChunkKeywordSearch,
+  FileChunkVectorSearch,
+  KeywordFileChunkHit,
   PersistedDeal,
   ProcessDocumentsResponse,
   ProcessFileJobEvent,
@@ -9,6 +13,7 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
   SaveDealInput,
@@ -32,6 +37,7 @@ export type TauriMultipartRequest = {
 
 type TauriTransport = {
   get<T>(path: string): Promise<T>;
+  getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
   postMultipart<T>(request: TauriMultipartRequest): Promise<T>;
   subscribeJob(
@@ -59,6 +65,16 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.post<WorkspaceAccountUser>("/api/v1/users", input),
     getDeal: (dealId) =>
       transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
+    async getDealDocumentPdf(dealId, fileId): Promise<DealDocumentPdf> {
+      const bytes = await transport.getPdf(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/pdf`,
+      );
+      return { bytes: new Uint8Array(bytes), mimeType: "application/pdf" };
+    },
+    getDealDocumentText: (dealId, fileId) =>
+      transport.get<DealDocumentText>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
+      ),
     async getUserByEmail(email) {
       try {
         return await transport.get<WorkspaceAccountUser>(
@@ -71,6 +87,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     },
     listDealDataRoom: (dealId) =>
       transport.get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`),
+    listDealDocuments: (dealId) =>
+      transport.get<DealDocumentSummary[]>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
+      ),
     listDeals: () => transport.get<PersistedDeal[]>("/api/v1/deals"),
     listSummaryFiles: (path) =>
       transport.post<SummarizableFile[]>("/api/v1/summarize/files", { path }),
@@ -79,9 +99,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/deals/${encodeURIComponent(dealId)}/data-room/preview`,
         { relativePath },
       ),
-    async processDocuments(userId, files) {
+    async processDocuments(dealId, userId, files) {
       return transport.postMultipart<ProcessDocumentsResponse>(
-        await multipartFiles("/api/v1/documents/process", files, [
+        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`, files, [
           { name: "userId", value: userId.trim() },
         ]),
       );
@@ -90,13 +110,13 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.postMultipart<SaveDealMetadataResponse>(
         await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/metadata`, files),
       ),
-    searchDocumentChunksByKeyword: (search: ChunkKeywordSearch) =>
-      transport.post("/api/v1/documents/search/keyword", search),
-    searchDocumentChunksByVector: (search: ChunkVectorSearch) =>
-      transport.post("/api/v1/documents/search/vector", search),
-    async startProcessFile(userId, file) {
+    searchDocumentChunksByKeyword: (search: FileChunkKeywordSearch) =>
+      transport.post<KeywordFileChunkHit[]>("/api/v1/documents/search/keyword", search),
+    searchDocumentChunksByVector: (search: FileChunkVectorSearch) =>
+      transport.post<VectorFileChunkHit[]>("/api/v1/documents/search/vector", search),
+    async startProcessFile(dealId, userId, file) {
       return transport.postMultipart<ProcessFileJobResponse>(
-        await multipartFiles("/api/v1/documents/process_file", [file], [
+        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`, [file], [
           { name: "userId", value: userId.trim() },
         ]),
       );

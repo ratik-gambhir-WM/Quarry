@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:where(html[data-theme="dark"], html[data-theme="dark"] *));
 
 @theme inline {
   /* Tailwind compatibility aliases; app themes are defined once in @layer base. */
@@ -55,6 +59,36 @@
   --spacing-xl: 32px;
   --spacing-gutter: 20px;
   --spacing-margin: 40px;
+  --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {
@@ -62,7 +96,7 @@
     color-scheme: light;
 
     /* Canvas and surfaces */
-    --theme-canvas: #ffffff;
+    --theme-canvas: #f7f7f7;
     --theme-surface-base: #ffffff;
     --theme-surface-raised: #ffffff;
     --theme-surface-subtle: #f6f8fc;
@@ -271,6 +305,10 @@
     box-shadow: var(--theme-panel-shadow);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  .workspace-pane {
+    background: var(--theme-canvas);
   }
 
   .workspace-card {
@@ -575,4 +613,39 @@
   50% {
     background: var(--theme-surface-strong);
   }
+}
+
+:root {
+  --background: var(--theme-canvas);
+  --foreground: var(--theme-text);
+  --card: var(--theme-surface-raised);
+  --card-foreground: var(--theme-text);
+  --popover: var(--theme-surface-raised);
+  --popover-foreground: var(--theme-text);
+  --primary: var(--theme-interactive);
+  --primary-foreground: var(--theme-on-interactive);
+  --secondary: var(--theme-secondary-surface);
+  --secondary-foreground: var(--theme-text-strong);
+  --muted: var(--theme-surface-muted);
+  --muted-foreground: var(--theme-text-muted);
+  --accent: var(--theme-interactive-soft);
+  --accent-foreground: var(--theme-text-strong);
+  --destructive: var(--theme-error);
+  --border: var(--theme-border);
+  --input: var(--theme-border);
+  --ring: var(--theme-interactive);
+  --chart-1: var(--theme-interactive);
+  --chart-2: var(--theme-secondary);
+  --chart-3: var(--theme-tertiary);
+  --chart-4: var(--theme-text-subtle);
+  --chart-5: var(--theme-text-strong);
+  --radius: 0.625rem;
+  --sidebar: var(--theme-surface-raised);
+  --sidebar-foreground: var(--theme-sidebar-text);
+  --sidebar-primary: var(--theme-interactive);
+  --sidebar-primary-foreground: var(--theme-on-interactive);
+  --sidebar-accent: var(--theme-sidebar-hover);
+  --sidebar-accent-foreground: var(--theme-text-strong);
+  --sidebar-border: var(--theme-border);
+  --sidebar-ring: var(--theme-interactive);
 }

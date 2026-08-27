@@ -6,8 +6,9 @@ use axum::{
 
 use crate::{
     handlers::documents::{
-        keyword_search_handler, process_document_job_events_handler, process_documents_handler,
-        start_process_file_handler, vector_search_handler,
+        get_deal_document_pdf_handler, get_deal_document_text_handler, keyword_search_handler,
+        list_deal_documents_handler, process_document_job_events_handler,
+        process_documents_handler, start_process_file_handler, vector_search_handler,
     },
     services::document_service::MAX_TOTAL_REQUEST_FILE_BYTES,
     state::AppState,
@@ -19,12 +20,24 @@ const DOCUMENT_UPLOAD_BODY_BYTES: usize = MAX_TOTAL_REQUEST_FILE_BYTES + MULTIPA
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(
-            "/documents/process",
+            "/deals/{deal_id}/documents",
+            get(list_deal_documents_handler),
+        )
+        .route(
+            "/deals/{deal_id}/documents/{file_id}/pdf",
+            get(get_deal_document_pdf_handler),
+        )
+        .route(
+            "/deals/{deal_id}/documents/{file_id}/text",
+            get(get_deal_document_text_handler),
+        )
+        .route(
+            "/deals/{deal_id}/documents/process",
             post(process_documents_handler)
                 .layer(DefaultBodyLimit::max(DOCUMENT_UPLOAD_BODY_BYTES)),
         )
         .route(
-            "/documents/process_file",
+            "/deals/{deal_id}/documents/process_file",
             post(start_process_file_handler)
                 .layer(DefaultBodyLimit::max(DOCUMENT_UPLOAD_BODY_BYTES)),
         )

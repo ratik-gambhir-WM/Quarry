@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { DealRoomHeader, DealRoomOverview } from "../components/deal-room/DealRoomHeader";
 import { DealSummaryCard } from "../components/deal-room/DealSummaryCard";
@@ -10,7 +10,7 @@ import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
 import { workspaceInsights } from "../data/workspace";
-import type { DealTimelineItem } from "../data/workspace";
+import type { DealTimelineItem, WorkspaceDeal, WorkspaceLocationState } from "../data/workspace";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
@@ -27,9 +27,6 @@ export function DealRoomPage() {
       : undefined;
   const deal = extractedDeal ?? persistedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
   const { email, navigationState } = useWorkspaceSession();
-  const [activeDealView, setActiveDealView] = useState<ActiveDealView>("deal-room");
-  const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>([]);
-  const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal?.room.name);
   const deals = extractedDeal
     ? [extractedDeal, ...persistedDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
     : persistedDeals;
@@ -40,10 +37,6 @@ export function DealRoomPage() {
       } satisfies DealExtractionLocationState)
     : navigationState;
 
-  useEffect(() => {
-    setTimelineItems(deal?.room.timeline ?? []);
-  }, [deal?.room.id, deal?.room.timeline]);
-
   if (!deal && loaded) {
     return <Navigate replace to="/hub" />;
   }
@@ -51,6 +44,29 @@ export function DealRoomPage() {
   if (!deal) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-muted">Loading deal…</div>;
   }
+
+  return (
+    <DealRoomWorkspace
+      deal={deal}
+      deals={deals}
+      email={email}
+      key={deal.room.id}
+      navigationState={dealNavigationState}
+    />
+  );
+}
+
+type DealRoomWorkspaceProps = {
+  deal: WorkspaceDeal;
+  deals: WorkspaceDeal[];
+  email?: string;
+  navigationState?: WorkspaceLocationState;
+};
+
+function DealRoomWorkspace({ deal, deals, email, navigationState }: DealRoomWorkspaceProps) {
+  const [activeDealView, setActiveDealView] = useState<ActiveDealView>("deal-room");
+  const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(() => deal.room.timeline);
+  const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal.room.name);
 
   return (
     <WorkspaceLayout
@@ -62,7 +78,7 @@ export function DealRoomPage() {
           deals={deals}
           email={email}
           mode="deal-room"
-          navigationState={dealNavigationState}
+          navigationState={navigationState}
           onDealRoomSectionChange={setActiveDealView}
         />
       }

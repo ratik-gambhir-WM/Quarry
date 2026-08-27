@@ -12,7 +12,7 @@ export function RepositorySearchResultCard({ mode, query, result }: RepositorySe
   const score = mode === "semantic" ? result.semanticScore : result.keywordScore;
 
   return (
-    <article className="rounded-lg border border-outline-variant/70 bg-background p-3 transition hover:border-outline">
+    <article className="rounded-lg border border-outline-variant/70 bg-surface-container-lowest p-3 transition hover:border-outline">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-sidebar-hover text-sidebar-muted">
           <Icon className="h-4.5 w-4.5" name={fileTypeIcon(result.fileName)} />

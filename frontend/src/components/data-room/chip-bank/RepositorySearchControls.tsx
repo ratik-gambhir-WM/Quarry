@@ -33,9 +33,11 @@ export function RepositorySearchControls({
         <span className="sr-only">Search repository</span>
         <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sidebar-muted" name="search" />
         <input
-          className="h-9 w-full rounded-lg border border-outline-variant/70 bg-background px-3 pl-9 text-[13px] text-sidebar-active outline-none transition placeholder:text-sidebar-muted focus:border-outline focus:ring-2 focus:ring-primary-fixed"
+          className="h-9 w-full rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-3 pl-9 text-[13px] text-sidebar-active outline-none transition placeholder:text-sidebar-muted focus:border-outline focus:ring-2 focus:ring-primary-fixed"
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search files and excerpts..."
+          autoComplete="off"
+          name="repository-search"
+          placeholder="Search files and excerpts…"
           type="search"
           value={query}
         />
@@ -47,7 +49,7 @@ export function RepositorySearchControls({
             aria-pressed={mode === option}
             className={`h-8 rounded-md text-[12px] font-medium capitalize transition ${
               mode === option
-                ? "bg-background text-sidebar-active shadow-sm"
+                ? "bg-surface-container-lowest text-sidebar-active shadow-sm"
                 : "text-sidebar-muted hover:text-sidebar-active"
             }`}
             key={option}
@@ -84,7 +86,7 @@ export function RepositoryFilterSelect({ label, onChange, options, value }: Repo
     <label className="relative">
       <span className="sr-only">{label}</span>
       <select
-        className="h-9 w-full appearance-none rounded-lg border border-outline-variant/70 bg-background px-3 pr-8 text-[12px] font-medium text-sidebar-active outline-none transition focus:border-outline focus:ring-2 focus:ring-primary-fixed"
+        className="h-9 w-full appearance-none rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-3 pr-8 text-[12px] font-medium text-sidebar-active outline-none transition focus:border-outline focus:ring-2 focus:ring-primary-fixed"
         onChange={(event) => onChange(event.target.value)}
         value={value}
       >

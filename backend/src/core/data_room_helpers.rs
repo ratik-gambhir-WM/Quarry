@@ -1,13 +1,30 @@
 use std::{
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs::{self, File},
+    io::{self, Read},
     path::{Component, Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Command, ExitStatus, Stdio},
+    sync::OnceLock,
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
 
 pub const MAX_PDF_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_CONVERTER_LOG_BYTES: usize = 64 * 1024;
+const OFFICE_CONVERSION_TIMEOUT: Duration = Duration::from_secs(45);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+#[derive(Debug)]
+struct BoundedCommandOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -180,10 +197,25 @@ pub fn read_pdf(path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         )
     })?;
-    if !bytes.starts_with(b"%PDF-") {
-        return Err("the selected .pdf file does not contain a valid PDF header".to_string());
-    }
+    validate_pdf_bytes(&bytes, "the selected PDF")?;
     Ok(bytes)
+}
+
+pub fn validate_pdf_bytes(bytes: &[u8], subject: &str) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err(format!("{subject} is empty"));
+    }
+    if bytes.len() as u64 > MAX_PDF_BYTES {
+        return Err(format!(
+            "{subject} is too large to preview ({} MB; limit is {} MB).",
+            bytes.len() / (1024 * 1024),
+            MAX_PDF_BYTES / (1024 * 1024)
+        ));
+    }
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(format!("{subject} does not contain a valid PDF header"));
+    }
+    Ok(())
 }
 
 pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
@@ -197,7 +229,8 @@ pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
         .and_then(|_| fs::create_dir_all(&profile_dir))
         .map_err(|err| format!("failed to create a temporary conversion directory: {err}"))?;
     let profile_url = format!("file://{}", profile_dir.display());
-    let output = Command::new(&converter)
+    let mut command = Command::new(&converter);
+    command
         .arg(format!("-env:UserInstallation={profile_url}"))
         .arg("--headless")
         .arg("--convert-to")
@@ -205,8 +238,8 @@ pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
         .arg("--outdir")
         .arg(&output_dir)
         .arg(path)
-        .env("XDG_CACHE_HOME", &profile_dir)
-        .output();
+        .env("XDG_CACHE_HOME", &profile_dir);
+    let output = run_command_with_timeout(&mut command, OFFICE_CONVERSION_TIMEOUT);
     let result = match output {
         Ok(output) if output.status.success() => (|| {
             let generated_pdf = fs::read_dir(&output_dir)
@@ -220,17 +253,18 @@ pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
                         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
                 })
                 .ok_or_else(|| "LibreOffice completed without producing a PDF".to_string())?;
-            fs::read(&generated_pdf)
-                .map_err(|err| format!("failed to read the converted PDF: {err}"))
+            read_file_with_limit(&generated_pdf, MAX_PDF_BYTES).map_err(|err| {
+                format!("failed to read the converted PDF within the preview limit: {err}")
+            })
         })(),
         Ok(output) => Err(format!(
             "LibreOffice could not convert this document (exit {}). {} {}",
             output.status,
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
+            display_bounded_output(&output.stdout, output.stdout_truncated),
+            display_bounded_output(&output.stderr, output.stderr_truncated)
         )),
         Err(err) => Err(format!(
-            "failed to start Office preview converter ({}): {err}",
+            "Office preview converter ({}) failed: {err}",
             converter.display()
         )),
     };
@@ -238,30 +272,223 @@ pub fn convert_office_to_pdf(path: &Path) -> Result<Vec<u8>, String> {
     result
 }
 
+fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<BoundedCommandOutput, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture converter stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture converter stderr".to_string())?;
+    let stdout_reader = thread::spawn(move || drain_bounded(stdout, MAX_CONVERTER_LOG_BYTES));
+    let stderr_reader = thread::spawn(move || drain_bounded(stderr, MAX_CONVERTER_LOG_BYTES));
+    let started_at = Instant::now();
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started_at.elapsed() < timeout => thread::sleep(PROCESS_POLL_INTERVAL),
+            Ok(None) => {
+                terminate_process_tree(&mut child);
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!(
+                    "Office preview conversion timed out after {} seconds and was terminated",
+                    timeout.as_secs()
+                ));
+            }
+            Err(error) => {
+                terminate_process_tree(&mut child);
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!(
+                    "failed while waiting for Office preview converter: {error}"
+                ));
+            }
+        }
+    };
+    let (stdout, stdout_truncated) = join_bounded_reader(stdout_reader, "stdout")?;
+    let (stderr, stderr_truncated) = join_bounded_reader(stderr_reader, "stderr")?;
+    Ok(BoundedCommandOutput {
+        status,
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+    })
+}
+
+fn terminate_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: the child starts in a process group whose ID is its PID. A
+        // negative PID targets only that group, including converter children.
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+}
+
+fn drain_bounded(mut reader: impl Read, limit: usize) -> io::Result<(Vec<u8>, bool)> {
+    let mut retained = Vec::with_capacity(limit.min(8 * 1024));
+    let mut buffer = [0_u8; 8 * 1024];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(retained.len());
+        let keep = remaining.min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    Ok((retained, truncated))
+}
+
+fn join_bounded_reader(
+    reader: thread::JoinHandle<io::Result<(Vec<u8>, bool)>>,
+    stream_name: &str,
+) -> Result<(Vec<u8>, bool), String> {
+    reader
+        .join()
+        .map_err(|_| format!("Office preview converter {stream_name} reader panicked"))?
+        .map_err(|error| format!("failed to read Office preview converter {stream_name}: {error}"))
+}
+
+fn display_bounded_output(bytes: &[u8], truncated: bool) -> String {
+    let suffix = if truncated { " [output truncated]" } else { "" };
+    format!("{}{suffix}", String::from_utf8_lossy(bytes).trim())
+}
+
+fn read_file_with_limit(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let metadata = path
+        .metadata()
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if metadata.len() > limit {
+        return Err(format!(
+            "converted output is {} bytes; limit is {limit} bytes",
+            metadata.len()
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    File::open(path)
+        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > limit {
+        return Err(format!("converted output exceeds the {limit} byte limit"));
+    }
+    Ok(bytes)
+}
+
+pub fn convert_office_bytes_to_pdf(extension: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+    ) {
+        return Err(format!(
+            "Office preview conversion does not support .{extension} files"
+        ));
+    }
+    if bytes.is_empty() {
+        return Err("the stored document is empty".to_string());
+    }
+
+    let temp_root = unique_preview_temp_dir();
+    let source_path = temp_root.join(format!("document.{extension}"));
+    let result = (|| {
+        fs::create_dir_all(&temp_root)
+            .map_err(|err| format!("failed to create a temporary document directory: {err}"))?;
+        fs::write(&source_path, bytes)
+            .map_err(|err| format!("failed to stage the stored document for conversion: {err}"))?;
+        convert_office_to_pdf(&source_path)
+    })();
+    let _ = fs::remove_dir_all(&temp_root);
+    result
+}
+
 fn find_soffice() -> Option<PathBuf> {
+    static SOFFICE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    SOFFICE_PATH.get_or_init(discover_soffice).clone()
+}
+
+fn discover_soffice() -> Option<PathBuf> {
     if let Some(configured) = env::var_os("QUARRY_SOFFICE") {
         let path = PathBuf::from(configured);
         if path.is_file() {
             return Some(path);
         }
     }
-    if let Some(path) = env::var_os("PATH") {
-        for directory in env::split_paths(&path) {
-            let candidate = directory.join("soffice");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
+
+    if let Some(candidate) = find_office_executable_on_path(env::var_os("PATH").as_deref()) {
+        return Some(candidate);
     }
+
     [
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/Applications/LibreOfficeDev.app/Contents/MacOS/soffice",
         "/opt/homebrew/bin/soffice",
         "/usr/local/bin/soffice",
         "/usr/bin/soffice",
+        "/usr/bin/libreoffice",
     ]
     .into_iter()
     .map(PathBuf::from)
     .find(|path| path.is_file())
+    .or_else(find_office_executable_from_login_shell)
+}
+
+fn find_office_executable_on_path(path: Option<&OsStr>) -> Option<PathBuf> {
+    let path = path?;
+    env::split_paths(path)
+        .flat_map(|directory| [directory.join("soffice"), directory.join("libreoffice")])
+        .find(|candidate| candidate.is_file())
+}
+
+fn find_office_executable_from_login_shell() -> Option<PathBuf> {
+    let shell = env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("/bin/sh"));
+    let output = Command::new(shell)
+        .args([
+            "-lc",
+            "command -v soffice 2>/dev/null || command -v libreoffice 2>/dev/null",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|candidate| candidate.is_file())
 }
 
 fn unique_preview_temp_dir() -> PathBuf {
@@ -273,4 +500,56 @@ fn unique_preview_temp_dir() -> PathBuf {
         "quarry-web-document-preview-{}-{timestamp}",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{ffi::OsString, io::Cursor};
+
+    #[test]
+    fn validates_pdf_bytes_in_one_shared_boundary() {
+        assert!(validate_pdf_bytes(b"%PDF-1.4\n", "the PDF").is_ok());
+        assert_eq!(
+            validate_pdf_bytes(b"not a PDF", "the PDF").unwrap_err(),
+            "the PDF does not contain a valid PDF header"
+        );
+        assert_eq!(
+            validate_pdf_bytes(&[], "the PDF").unwrap_err(),
+            "the PDF is empty"
+        );
+    }
+
+    #[test]
+    fn converter_logs_are_drained_but_retained_only_up_to_the_limit() {
+        let (retained, truncated) = drain_bounded(Cursor::new(b"0123456789"), 4).unwrap();
+
+        assert_eq!(retained, b"0123");
+        assert!(truncated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn converter_process_is_terminated_at_the_hard_timeout() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 2"]);
+
+        let error = run_command_with_timeout(&mut command, Duration::from_millis(50)).unwrap_err();
+
+        assert!(error.contains("timed out"));
+        assert!(error.contains("terminated"));
+    }
+
+    #[test]
+    fn finds_both_supported_libreoffice_command_names_on_path() {
+        let temp_root = unique_preview_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let soffice = temp_root.join("soffice");
+        fs::write(&soffice, b"test executable placeholder").unwrap();
+        let path = OsString::from(temp_root.as_os_str());
+
+        assert_eq!(find_office_executable_on_path(Some(&path)), Some(soffice));
+
+        fs::remove_dir_all(temp_root).unwrap();
+    }
 }

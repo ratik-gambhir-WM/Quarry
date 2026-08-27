@@ -1,26 +1,57 @@
 use std::{env, path::Path, time::Instant};
 
 use futures_util::{stream, StreamExt};
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
         clients::openai::OpenAiClient,
-        helix_queries::files::search_quarry_file::{ChunkKeywordSearch, ChunkVectorSearch},
-        nodes::document_node::{ChunkNode, DocumentNode},
+        helix_queries::files::search_quarry_file::{
+            FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
+        },
         parsers::{ParsedQuarryFile, QuarryFile},
     },
     repository::document_repository::{
-        find_existing_document_id_by_content_hash, persist_document_and_chunks,
-        search_document_chunks_by_keyword, search_document_chunks_by_vector,
+        find_current_sqlite_file_by_content_hash, get_current_helix_document,
+        persist_document_and_chunks, search_document_chunks_by_keyword,
+        search_document_chunks_by_vector,
     },
     state::AppState,
-    utils::{document_id_from_content, openai_api_key, sha256_hex},
+    utils::{document_id_from_content, openai_api_key, require_non_empty, sha256_hex},
 };
 
 const MAX_CONCURRENT_DOCUMENTS: usize = 8;
 const DOCUMENT_PARSE_API: &str = "document.parse";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Document {
+    pub file_id: String,
+    pub document_id: String,
+    pub user_id: String,
+    pub file_name: String,
+    pub source_type: String,
+    pub local_path: Option<String>,
+    pub file_size_bytes: u64,
+    pub token_count: u64,
+    pub content_hash: String,
+    pub rendered_pdf_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentChunk {
+    pub chunk_id: String,
+    pub document_id: String,
+    pub user_id: String,
+    pub text: String,
+    pub embedding: Option<Vec<f32>>,
+    pub sequence_number: u32,
+    pub page_numbers: Option<Vec<u32>>,
+    pub start_offset: usize,
+    pub end_offset: usize,
+    pub token_count: u32,
+    pub content_hash: String,
+    pub section_title: Option<String>,
+}
 
 #[derive(Debug)]
 pub struct UploadedDocument {
@@ -29,8 +60,9 @@ pub struct UploadedDocument {
 }
 
 struct ParsedDocumentGraph {
-    document: DocumentNode,
-    chunks: Vec<ChunkNode>,
+    document: Document,
+    chunks: Vec<DocumentChunk>,
+    file_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,28 +88,31 @@ pub struct ProcessDocumentsResponse {
 
 pub async fn process_uploaded_documents(
     state: &AppState,
+    deal_id: &str,
     user_id: &str,
     files: Vec<UploadedDocument>,
 ) -> Result<ProcessDocumentsResponse, String> {
+    let deal_id = deal_id.trim();
+    require_non_empty(deal_id, "dealId")?;
     let user_id = user_id.trim();
-    if user_id.is_empty() {
-        return Err("userId is required".to_string());
-    }
+    require_non_empty(user_id, "userId")?;
     if files.is_empty() {
         return Err("at least one PDF or DOCX upload is required".to_string());
     }
 
     let total = files.len();
     let worker_state = state.clone();
+    let worker_deal_id = deal_id.to_string();
     let worker_user_id = user_id.to_string();
     let mut indexed_documents = stream::iter(files.into_iter().enumerate())
         .map(|(index, file)| {
             let state = worker_state.clone();
+            let deal_id = worker_deal_id.clone();
             let user_id = worker_user_id.clone();
             let filename = file.filename.clone();
 
             async move {
-                let worker = tokio::spawn(process_uploaded_document(state, file, user_id));
+                let worker = tokio::spawn(process_uploaded_document(state, file, deal_id, user_id));
                 let document = match worker.await {
                     Ok(document) => document,
                     Err(error) => Ok(failed_document(
@@ -111,49 +146,71 @@ pub async fn process_uploaded_documents(
 async fn process_uploaded_document(
     state: AppState,
     file: UploadedDocument,
+    deal_id: String,
     user_id: String,
 ) -> Result<ProcessedDocument, String> {
     let filename = file.filename.clone();
-    let file_size_bytes = u64::try_from(file.bytes.len())
-        .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let content_hash = match uploaded_document_content_hash(&file) {
         Ok(content_hash) => content_hash,
         Err(error) => return Ok(failed_document(filename, error)),
     };
     let document_id = document_id_from_content(&user_id, &content_hash);
-    let _processing_guard = state.lock_document_processing(&document_id).await;
-    match find_existing_document_id_by_content_hash(
-        state.helix(),
+    let attachment_lock_id = format!("{deal_id}\0{document_id}");
+    let _processing_guard = state.lock_document_processing(&attachment_lock_id).await;
+    let existing_attachment = match find_current_sqlite_file_by_content_hash(
+        state.sqlite(),
+        &deal_id,
         &user_id,
         &content_hash,
-        &filename,
-        file_size_bytes,
     )
     .await
     {
-        Ok(Some(document_id)) => {
-            return Ok(ProcessedDocument {
-                filename,
-                document_id: Some(document_id),
-                chunk_count: 0,
-                success: true,
-                skipped: true,
-                error: None,
-            });
-        }
-        Ok(None) => {}
+        Ok(attachment) => attachment,
         Err(error) => {
             return Ok(failed_document(
                 filename,
-                format!("failed to check for an existing document: {error}"),
+                format!("failed to check for an existing deal attachment: {error}"),
             ));
+        }
+    };
+    if let Some(existing) = &existing_attachment {
+        match get_current_helix_document(state.helix(), &user_id, &existing.file_id).await {
+            Ok(Some(indexed))
+                if indexed.version.version_id == existing.version_id
+                    && indexed.version.content_sha256 == content_hash =>
+            {
+                return Ok(ProcessedDocument {
+                    filename,
+                    document_id: Some(document_id),
+                    chunk_count: 0,
+                    success: true,
+                    skipped: true,
+                    error: None,
+                });
+            }
+            Ok(Some(_)) | Ok(None) => {}
+            Err(error) => {
+                return Ok(failed_document(
+                    filename,
+                    format!("failed to check the existing deal attachment index: {error}"),
+                ));
+            }
         }
     }
 
     let api_key = openai_api_key()?;
     let openai = OpenAiClient::new(&api_key);
     Ok(
-        match process_document(&state, file, user_id, &openai).await {
+        match process_document(
+            &state,
+            file,
+            deal_id,
+            user_id,
+            existing_attachment.as_ref(),
+            &openai,
+        )
+        .await
+        {
             Ok((document_id, chunk_count)) => ProcessedDocument {
                 filename,
                 document_id: Some(document_id),
@@ -196,34 +253,34 @@ fn failed_document(filename: String, error: String) -> ProcessedDocument {
 
 pub async fn search_chunks_by_vector(
     state: &AppState,
-    search: ChunkVectorSearch,
-) -> Result<Value, String> {
+    search: FileChunkVectorSearch,
+) -> Result<Vec<VectorFileChunkHit>, String> {
     search_document_chunks_by_vector(state.helix(), search).await
 }
 
 pub async fn search_chunks_by_keyword(
     state: &AppState,
-    search: ChunkKeywordSearch,
-) -> Result<Value, String> {
+    search: FileChunkKeywordSearch,
+) -> Result<Vec<KeywordFileChunkHit>, String> {
     search_document_chunks_by_keyword(state.helix(), search).await
 }
 
 fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocumentGraph, String> {
     let filename = file.filename.clone();
+    let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
     let result = (|| {
         let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
-        Ok(match parsed {
-            ParsedQuarryFile::Pdf(assembly) => ParsedDocumentGraph {
-                document: assembly.document,
-                chunks: assembly.chunks,
-            },
-            ParsedQuarryFile::Docx(assembly) => ParsedDocumentGraph {
-                document: assembly.document,
-                chunks: assembly.chunks,
-            },
+        let (document, chunks) = match parsed {
+            ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
+            ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+        };
+        Ok(ParsedDocumentGraph {
+            document,
+            chunks,
+            file_bytes,
         })
     })();
 
@@ -248,11 +305,16 @@ fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocum
 async fn process_document(
     state: &AppState,
     file: UploadedDocument,
+    deal_id: String,
     user_id: String,
+    existing_attachment: Option<&crate::core::models::file_persistence::PersistedFileIdentity>,
     openai: &OpenAiClient<'_>,
 ) -> Result<(String, usize), String> {
     let filename = file.filename.clone();
     let mut graph = parse_document(file, user_id)?;
+    if let Some(existing) = existing_attachment {
+        graph.document.file_id.clone_from(&existing.file_id);
+    }
     let document_id = graph.document.document_id.clone();
     let chunk_count = graph.chunks.len();
     embed_chunks(
@@ -262,9 +324,16 @@ async fn process_document(
         openai,
     )
     .await?;
-    persist_document_and_chunks(state.helix(), graph.document, graph.chunks)
-        .await
-        .map_err(|error| format!("failed to persist `{filename}` in Helix: {error}"))?;
+    persist_document_and_chunks(
+        state.sqlite(),
+        state.helix(),
+        &deal_id,
+        graph.document,
+        graph.chunks,
+        graph.file_bytes,
+    )
+    .await
+    .map_err(|error| format!("failed to persist `{filename}`: {error}"))?;
 
     Ok((document_id, chunk_count))
 }
@@ -272,7 +341,7 @@ async fn process_document(
 async fn embed_chunks(
     filename: &str,
     file_size_bytes: u64,
-    chunks: &mut [ChunkNode],
+    chunks: &mut [DocumentChunk],
     openai: &OpenAiClient<'_>,
 ) -> Result<(), String> {
     if chunks.is_empty() {

@@ -4,11 +4,14 @@ import { runtime } from "@quarry/runtime";
 import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
 import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
-import type { PreviewState } from "../components/data-room/DocumentPreviewPanel";
-import { EdgePanelOpenButton } from "../components/data-room/EdgePanelOpenButton";
+import type {
+  PreviewState,
+  RawTextState,
+} from "../components/data-room/DocumentPreviewPanel";
 import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
-import { Icon } from "../components/ui/Icon";
+import { EmptyState } from "../components/empty-state/empty-state";
+import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
   getDealDataRoomView,
   hasDataRoomFiles,
@@ -33,48 +36,96 @@ export function DataRoomPage() {
   const location = useLocation();
   const { deals, loaded } = useWorkspaceDeals();
   const { email } = useWorkspaceSession();
-  const [isChipBankOpen, setIsChipBankOpen] = useState(true);
+  const [isChipBankOpen, setIsChipBankOpen] = useState(false);
   const [isConnectSharePointModalOpen, setIsConnectSharePointModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [localDataRoom, setLocalDataRoom] = useState<DealDataRoom | null>(null);
-  const [treeError, setTreeError] = useState("");
-  const [treeLoading, setTreeLoading] = useState(true);
+  const [dealDocuments, setDealDocuments] = useState<DealDocumentSummary[]>([]);
+  const [localTreeError, setLocalTreeError] = useState("");
+  const [storedTreeError, setStoredTreeError] = useState("");
+  const [localTreeLoading, setLocalTreeLoading] = useState(true);
+  const [storedTreeLoading, setStoredTreeLoading] = useState(true);
+  const [dataRoomRefreshVersion, setDataRoomRefreshVersion] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<DataRoomTreeNode | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "loading" });
+  const [rawText, setRawText] = useState<RawTextState>({ status: "idle" });
   const previewRequestId = useRef(0);
+  const rawTextRequestId = useRef(0);
+  const storedDocumentsDealId = useRef<string | undefined>(undefined);
+  const storedDocumentsRequestId = useRef(0);
   const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
   const extractedDeal =
     extractionResult && extractionResult.deal.dealId === dealId
       ? buildWorkspaceDealFromExtractionResult(extractionResult)
       : undefined;
   const deal = extractedDeal ?? deals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
-  const dataRoomHasFiles = useMemo(
-    () => hasDataRoomFiles(localDataRoom?.tree ?? []),
-    [localDataRoom?.tree],
+  const explorerNodes = useMemo(
+    () => [...buildStoredDocumentNodes(dealDocuments), ...(localDataRoom?.tree ?? [])],
+    [dealDocuments, localDataRoom?.tree],
   );
+  const dataRoomHasFiles = useMemo(() => hasDataRoomFiles(explorerNodes), [explorerNodes]);
+  const treeError = [storedTreeError, localTreeError].filter(Boolean).join(" ");
+  const treeLoading = storedTreeLoading || localTreeLoading;
+  const isUnavailableDataRoom = !treeLoading && Boolean(treeError);
   const isEmptyDataRoom =
     localDataRoom !== null && !treeLoading && !treeError && !dataRoomHasFiles;
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDealDocuments = useCallback(async () => {
+    const requestId = storedDocumentsRequestId.current + 1;
+    storedDocumentsRequestId.current = requestId;
 
     if (!dealId) {
-      setTreeLoading(false);
+      storedDocumentsDealId.current = undefined;
+      setDealDocuments([]);
+      setStoredTreeError("");
+      setStoredTreeLoading(false);
+      return;
+    }
+
+    if (storedDocumentsDealId.current !== dealId) {
+      storedDocumentsDealId.current = dealId;
+      setDealDocuments([]);
+    }
+    setStoredTreeLoading(true);
+    setStoredTreeError("");
+    try {
+      const response = await runtime.api.listDealDocuments(dealId);
+      if (storedDocumentsRequestId.current === requestId) {
+        setDealDocuments(response);
+        setStoredTreeLoading(false);
+      }
+    } catch (error) {
+      if (storedDocumentsRequestId.current === requestId) {
+        setDealDocuments([]);
+        setStoredTreeError(error instanceof Error ? error.message : String(error));
+        setStoredTreeLoading(false);
+      }
+    }
+  }, [dealId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadDealDocuments();
+
+    if (!dealId) {
+      setLocalTreeLoading(false);
       return () => {
         cancelled = true;
       };
     }
 
-    setTreeLoading(true);
-    setTreeError("");
+    setLocalTreeLoading(true);
+    setLocalTreeError("");
     setLocalDataRoom(null);
     setSelectedDocument(null);
     previewRequestId.current += 1;
+    rawTextRequestId.current += 1;
+    setRawText({ status: "idle" });
     runtime.api.listDealDataRoom(dealId)
       .then((response) => {
         if (!cancelled) {
           setLocalDataRoom(response);
-          setTreeLoading(false);
+          setLocalTreeLoading(false);
         }
       })
       .catch((error: unknown) => {
@@ -86,33 +137,53 @@ export function DataRoomPage() {
               rootPath: "",
               tree: [],
             });
-            setTreeLoading(false);
+            setLocalTreeLoading(false);
             return;
           }
-          setTreeError(error instanceof Error ? error.message : String(error));
-          setTreeLoading(false);
+          setLocalTreeError(error instanceof Error ? error.message : String(error));
+          setLocalTreeLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
+      storedDocumentsRequestId.current += 1;
     };
-  }, [dealId]);
+  }, [dataRoomRefreshVersion, dealId, loadDealDocuments]);
 
   const handleSelectDocument = useCallback(
     async (document: DataRoomTreeNode) => {
       setSelectedDocument(document);
       setPreview({ status: "loading" });
+      setRawText({ status: "idle" });
+      rawTextRequestId.current += 1;
       const requestId = previewRequestId.current + 1;
       previewRequestId.current = requestId;
 
-      if (!deal?.room.id || !document.relativePath) {
+      if (!deal?.room.id || (!document.storedFileId && !document.relativePath)) {
         setPreview({ message: "This selection is not a previewable file.", status: "error" });
         return;
       }
 
       try {
-        const response = await runtime.api.previewDealDocument(deal.room.id, document.relativePath);
+        let response: DocumentPreviewResponse;
+        if (document.storedFileId) {
+          const pdf = await runtime.api.getDealDocumentPdf(
+            deal.room.id,
+            document.storedFileId,
+          );
+          response = {
+            fileName: document.name,
+            mimeType: pdf.mimeType,
+            pdfBytes: pdf.bytes,
+            sourceKind: "stored",
+          };
+        } else {
+          response = await runtime.api.previewDealDocument(
+            deal.room.id,
+            document.relativePath!,
+          );
+        }
         if (!isDocumentPreviewResponse(response)) {
           throw new Error("The preview backend returned an invalid PDF response.");
         }
@@ -131,9 +202,48 @@ export function DataRoomPage() {
     [deal?.room.id],
   );
 
+  const handleRequestRawText = useCallback(async () => {
+    const document = selectedDocument;
+    const selectedDealId = deal?.room.id;
+    if (!selectedDealId || !document?.storedFileId) {
+      setRawText({ message: "Raw text is unavailable for this file.", status: "error" });
+      return;
+    }
+
+    const requestId = rawTextRequestId.current + 1;
+    rawTextRequestId.current = requestId;
+    setRawText({ status: "loading" });
+    try {
+      const response = await runtime.api.getDealDocumentText(
+        selectedDealId,
+        document.storedFileId,
+      );
+      if (rawTextRequestId.current === requestId) {
+        setRawText({ response, status: "ready" });
+      }
+    } catch (error) {
+      if (rawTextRequestId.current === requestId) {
+        setRawText({
+          message: error instanceof Error ? error.message : String(error),
+          status: "error",
+        });
+      }
+    }
+  }, [deal?.room.id, selectedDocument]);
+
   const handleClosePreview = useCallback(() => {
     previewRequestId.current += 1;
+    rawTextRequestId.current += 1;
     setSelectedDocument(null);
+  }, []);
+
+  const handleCloseUploadModal = useCallback(() => {
+    setIsUploadModalOpen(false);
+    void loadDealDocuments();
+  }, [loadDealDocuments]);
+
+  const handleRetryDataRoom = useCallback(() => {
+    setDataRoomRefreshVersion((version) => version + 1);
   }, []);
 
   if (!deal && loaded) {
@@ -162,18 +272,25 @@ export function DataRoomPage() {
             email={email}
             key={deal.room.id}
             navigationState={location.state as DealExtractionLocationState | undefined}
-            nodes={localDataRoom?.tree ?? []}
+            nodes={explorerNodes}
             onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
             onSelectFile={handleSelectDocument}
             onUploadNewFile={() => setIsUploadModalOpen(true)}
             rootPath={localDataRoom?.rootPath}
             selectedFilePath={selectedDocument?.relativePath}
-            treeError={treeError}
             treeLoading={treeLoading}
           />
           <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
-            {isEmptyDataRoom ? (
-              <EmptyDataRoomState />
+            {isUnavailableDataRoom ? (
+              <UnavailableDataRoomState
+                onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
+                onRetry={handleRetryDataRoom}
+              />
+            ) : isEmptyDataRoom ? (
+              <EmptyDataRoomState
+                onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
+                onUploadFiles={() => setIsUploadModalOpen(true)}
+              />
             ) : (
               <>
                 <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
@@ -181,33 +298,39 @@ export function DataRoomPage() {
                     <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
                       <DocumentPreviewPanel
                         document={selectedDocument}
+                        key={selectedDocument.id}
                         onClose={handleClosePreview}
+                        onOpenDocumentSearch={
+                          isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
+                        }
+                        onRequestRawText={handleRequestRawText}
                         preview={preview}
+                        rawText={rawText}
                       />
                     </Suspense>
                   ) : (
                     <ReportEditorPanel
                       blocks={dataRoomView.editorBlocks}
+                      onOpenDocumentSearch={
+                        isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
+                      }
                       reportTitle={dataRoomView.reportTitle}
                       versionLabel={dataRoomView.versionLabel}
                     />
                   )}
                 </div>
                 {isChipBankOpen ? <ChipBankPanel chips={dataRoomView.chips} onCollapse={() => setIsChipBankOpen(false)} /> : null}
-                {!isChipBankOpen ? (
-                  <EdgePanelOpenButton
-                    label="Open document search"
-                    onClick={() => setIsChipBankOpen(true)}
-                    side="right"
-                  />
-                ) : null}
               </>
             )}
           </main>
         </div>
       </div>
       {isUploadModalOpen ? (
-        <UploadFilesModal onClose={() => setIsUploadModalOpen(false)} userId={email ?? ""} />
+        <UploadFilesModal
+          dealId={dealId ?? ""}
+          onClose={handleCloseUploadModal}
+          userId={email ?? ""}
+        />
       ) : null}
       {isConnectSharePointModalOpen ? (
         <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />
@@ -216,26 +339,73 @@ export function DataRoomPage() {
   );
 }
 
-function EmptyDataRoomState() {
+type EmptyDataRoomStateProps = {
+  onConnectToSharePoint: () => void;
+  onUploadFiles: () => void;
+};
+
+function EmptyDataRoomState({
+  onConnectToSharePoint,
+  onUploadFiles,
+}: EmptyDataRoomStateProps) {
   return (
-    <section className="glass-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+    <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
         <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
           Data Room Vault
         </h1>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
-        <div className="w-full max-w-[32rem] text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Icon className="h-8 w-8" name="folderOpen" />
-          </div>
-          <h2 className="mt-6 text-2xl font-bold tracking-[-0.02em] text-text-main [font-family:var(--font-heading)]">
-            You don’t have any files in your data room
-          </h2>
-          <p className="mt-3 text-sm leading-6 text-muted">
-            Upload files or connect SharePoint from the New analysis menu when you’re ready.
-          </p>
-        </div>
+        <EmptyState
+          action={{ label: "Upload files", onClick: onUploadFiles }}
+          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+          description="Add deal documents from your device, or connect SharePoint to bring your data room into Quarry."
+          frame="dashed"
+          headingLevel={2}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
+          size="lg"
+          title="Upload your first file"
+          variant="first-use"
+        />
+      </div>
+    </section>
+  );
+}
+
+type UnavailableDataRoomStateProps = {
+  onConnectToSharePoint: () => void;
+  onRetry: () => void;
+};
+
+function UnavailableDataRoomState({
+  onConnectToSharePoint,
+  onRetry,
+}: UnavailableDataRoomStateProps) {
+  return (
+    <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+      <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          Data Room Vault
+        </h1>
+      </header>
+      <div className="flex flex-1 items-center justify-center p-8">
+        <EmptyState
+          action={{ label: "Try again", onClick: onRetry }}
+          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+          description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
+          frame="card"
+          headingLevel={2}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
+          size="lg"
+          title="Data room unavailable"
+          variant="error"
+        />
       </div>
     </section>
   );
@@ -247,11 +417,46 @@ function isDocumentPreviewResponse(value: unknown): value is DocumentPreviewResp
   }
 
   const response = value as Partial<DocumentPreviewResponse>;
+  const hasPdfBytes = response.pdfBytes instanceof Uint8Array && response.pdfBytes.byteLength > 0;
+  const hasPdfBase64 =
+    typeof response.pdfBase64 === "string" && response.pdfBase64.length > 0;
   return (
     typeof response.fileName === "string" &&
     response.mimeType === "application/pdf" &&
-    typeof response.pdfBase64 === "string" &&
-    response.pdfBase64.length > 0 &&
+    (hasPdfBytes || hasPdfBase64) &&
     typeof response.sourceKind === "string"
   );
+}
+
+function buildStoredDocumentNodes(documents: DealDocumentSummary[]): DataRoomTreeNode[] {
+  if (documents.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      children: documents.map((document) => ({
+        id: `stored-document:${document.fileId}`,
+        kind: storedDocumentKind(document.displayName),
+        name: document.displayName,
+        relativePath: `stored-document:${document.fileId}`,
+        storedFileId: document.fileId,
+      })),
+      defaultExpanded: true,
+      id: "stored-documents",
+      kind: "folder",
+      name: "Saved documents",
+    },
+  ];
+}
+
+function storedDocumentKind(displayName: string): DataRoomTreeNode["kind"] {
+  const extension = displayName.split(".").pop()?.toLowerCase();
+  if (extension === "pdf") {
+    return "pdf";
+  }
+  if (extension === "xls" || extension === "xlsx") {
+    return "sheet";
+  }
+  return "doc";
 }

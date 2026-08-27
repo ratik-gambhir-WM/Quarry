@@ -7,9 +7,14 @@ export type DealDataRoom = {
   tree: DataRoomTreeNode[];
 };
 
-export type DocumentPreviewResponse = {
+type DocumentPreviewMetadata = {
   fileName: string;
   mimeType: "application/pdf";
-  pdfBase64: string;
-  sourceKind: "native" | `converted-from-${"docx" | "xlsx" | "pptx"}`;
+  sourceKind: "native" | "stored" | `converted-from-${"docx" | "xlsx" | "pptx"}`;
 };
+
+export type DocumentPreviewResponse = DocumentPreviewMetadata &
+  (
+    | { pdfBase64: string; pdfBytes?: never }
+    | { pdfBase64?: never; pdfBytes: Uint8Array }
+  );

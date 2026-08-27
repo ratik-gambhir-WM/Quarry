@@ -1,25 +1,40 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorBlock } from "../../data/dataRoom";
 import { Icon } from "../ui/Icon";
+import { EdgePanelOpenButton } from "./EdgePanelOpenButton";
 
 const documentViews = ["Document", "Summary", "Notes", "Findings"] as const;
 type DocumentView = (typeof documentViews)[number];
 
 type ReportEditorPanelProps = {
   blocks: EditorBlock[];
+  onOpenDocumentSearch?: () => void;
   reportTitle: string;
   versionLabel: string;
 };
 
-export function ReportEditorPanel({ blocks, reportTitle, versionLabel }: ReportEditorPanelProps) {
+export function ReportEditorPanel({
+  blocks,
+  onOpenDocumentSearch,
+  reportTitle,
+  versionLabel,
+}: ReportEditorPanelProps) {
   return (
-    <section className="glass-panel relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+    <section className="glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-background px-5">
         <div className="min-w-0">
           <h1 className="truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room</h1>
           <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{versionLabel}</p>
         </div>
-        <DocumentViewMenu />
+        <div className="flex shrink-0 items-center gap-2">
+          <DocumentViewMenu />
+          {onOpenDocumentSearch ? (
+            <EdgePanelOpenButton
+              label="Open document search"
+              onClick={onOpenDocumentSearch}
+            />
+          ) : null}
+        </div>
       </header>
 
       <div className="workspace-scrollbar-hidden flex-1 overflow-y-auto p-6">
@@ -80,8 +95,8 @@ export function ReportEditorPanel({ blocks, reportTitle, versionLabel }: ReportE
         </div>
       </div>
 
-      <div className="sticky bottom-0 flex justify-center bg-gradient-to-t from-white/80 to-transparent px-6 pb-6 pt-2 [html[data-theme=dark]_&]:bg-[linear-gradient(to_top,var(--theme-canvas),rgba(7,10,27,0))]">
-        <div className="flex items-center gap-2 rounded-full border border-white bg-white/90 px-6 py-2 shadow-2xl backdrop-blur-xl [html[data-theme=dark]_&]:border-[rgba(184,192,207,0.2)] [html[data-theme=dark]_&]:bg-surface-container-lowest [html[data-theme=dark]_&]:shadow-[0_18px_44px_rgba(0,0,0,0.42)]">
+      <div className="sticky bottom-0 flex justify-center bg-gradient-to-t from-background to-transparent px-6 pb-6 pt-2">
+        <div className="flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-6 py-2 shadow-2xl">
           <ToolbarButton label="B" />
           <ToolbarButton label="I" />
           <ToolbarButton label="•" />
@@ -180,7 +195,7 @@ type ToolbarButtonProps = {
 function ToolbarButton({ className = "", label }: ToolbarButtonProps) {
   return (
     <button
-      className={`flex h-10 w-10 items-center justify-center rounded-lg text-[1.1rem] font-semibold text-text-main transition hover:bg-background ${className}`}
+      className={`flex h-10 w-10 items-center justify-center rounded-lg text-[1.1rem] font-semibold text-text-main transition hover:bg-surface-container ${className}`}
       type="button"
     >
       {label}
@@ -196,7 +211,7 @@ function EditorCallouts({ columns }: EditorCalloutsProps) {
   return (
     <div className="my-10 grid gap-6 md:grid-cols-2">
       {columns.map((column) => (
-        <div className="rounded-[16px] border border-white/80 bg-white/40 p-6 shadow-sm backdrop-blur-sm" key={column.title}>
+        <div className="rounded-[16px] border border-outline-variant bg-surface-container-lowest p-6 shadow-sm" key={column.title}>
           <h4
             className={`mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-[0.16em] ${
               column.tone === "error" ? "text-[#d9534f]" : "text-primary"

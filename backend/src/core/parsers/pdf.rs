@@ -5,16 +5,16 @@ use std::{
 };
 
 use crate::core::{
-    clients::openai::OpenAiClient,
-    nodes::document_node::{ChunkNode, DocumentNode},
-    parsers::image::describe_image,
+    clients::openai::OpenAiClient, parsers::image::describe_image,
     text_chunking::token_bounded_ranges,
 };
+use crate::services::document_ingestion_service::{Document as IngestionDocument, DocumentChunk};
 use crate::utils::document_id_from_content;
 use image::{codecs::png::PngEncoder, ColorType, ImageEncoder};
 use pdf_extract::{xobject::PdfImage, Document, Error as PdfError, Stream};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 const PDF_IMAGE_DESCRIPTION_MIME_TYPE: &str = "image/png";
 const JPEG_IMAGE_DESCRIPTION_MIME_TYPE: &str = "image/jpeg";
@@ -27,8 +27,8 @@ pub struct PdfPage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfDocumentAssembly {
-    pub document: DocumentNode,
-    pub chunks: Vec<ChunkNode>,
+    pub document: IngestionDocument,
+    pub chunks: Vec<DocumentChunk>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -158,7 +158,7 @@ fn parse_pdf_file_with_metadata(
         .unwrap_or("Document.pdf")
         .to_string();
     let (document_text, page_ranges) = document_text_with_page_ranges(pages);
-    let chunks: Vec<ChunkNode> = token_bounded_ranges(&document_text)
+    let chunks: Vec<DocumentChunk> = token_bounded_ranges(&document_text)
         .into_iter()
         .enumerate()
         .map(|(sequence_index, range)| {
@@ -173,7 +173,7 @@ fn parse_pdf_file_with_metadata(
             ));
             let page_numbers = overlapping_page_numbers(start_offset, end_offset, &page_ranges);
 
-            ChunkNode {
+            DocumentChunk {
                 chunk_id,
                 document_id: document_id.clone(),
                 user_id: user_id.to_string(),
@@ -194,7 +194,8 @@ fn parse_pdf_file_with_metadata(
         .iter()
         .map(|chunk| u64::from(chunk.token_count))
         .sum();
-    let document = DocumentNode {
+    let document = IngestionDocument {
+        file_id: Uuid::new_v4().to_string(),
         document_id: document_id.clone(),
         user_id: user_id.to_string(),
         file_name,

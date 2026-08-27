@@ -1,92 +1,65 @@
 use super::*;
 use helix_db::dsl::BatchQuery;
 
-fn document() -> DocumentNode {
-    DocumentNode {
-        document_id: "doc-1".to_string(),
-        user_id: "user-1".to_string(),
-        file_name: "test.pdf".to_string(),
-        source_type: "pdf".to_string(),
-        local_path: None,
-        file_size_bytes: 4,
-        token_count: 2,
-        content_hash: "document-hash".to_string(),
-        rendered_pdf_path: None,
+fn file() -> FileNode {
+    FileNode {
+        workspace_id: "workspace-1".to_string(),
+        file_id: "file-1".to_string(),
+        display_name: "report.pdf".to_string(),
     }
 }
 
-fn chunk(index: u32) -> ChunkNode {
-    ChunkNode {
+fn version() -> FileVersionNode {
+    FileVersionNode {
+        workspace_id: "workspace-1".to_string(),
+        file_id: "file-1".to_string(),
+        version_id: "version-1".to_string(),
+        mime_type: "application/pdf".to_string(),
+        content_sha256: "document-hash".to_string(),
+        byte_size: 4,
+        index_generation: "version-1".to_string(),
+        indexed_at: "2026-08-26T00:00:00.000Z".to_string(),
+    }
+}
+
+fn chunk(index: i64) -> FileChunkNode {
+    FileChunkNode {
         chunk_id: format!("chunk-{index}"),
-        document_id: "doc-1".to_string(),
-        user_id: "user-1".to_string(),
+        workspace_id: "workspace-1".to_string(),
+        file_id: "file-1".to_string(),
+        version_id: "version-1".to_string(),
+        index_generation: "version-1".to_string(),
+        chunk_index: index,
         text: format!("text-{index}"),
-        embedding: Some(vec![index as f32, 1.0]),
-        sequence_number: index,
-        page_numbers: Some(vec![index]),
-        start_offset: 0,
-        end_offset: 6,
+        embedding: vec![index as f32, 1.0],
+        chunk_sha256: format!("hash-{index}"),
         token_count: 1,
-        content_hash: format!("hash-{index}"),
-        section_title: None,
+        page_start: Some(index),
+        page_end: Some(index),
+        char_start: 0,
+        char_end: 6,
+        section_path: String::new(),
+        created_at: "2026-08-26T00:00:00.000Z".to_string(),
     }
 }
 
 #[test]
-fn replaces_an_incomplete_document_before_inserting() {
-    let query = insert_quarry_file(document()).unwrap();
+fn builds_one_atomic_version_graph_write() {
+    let query = insert_file_version_graph(file(), version(), vec![chunk(1), chunk(2)]).unwrap();
     let BatchQuery::Write(batch) = &query.query else {
         panic!("expected a write batch");
     };
 
-    assert_eq!(batch.queries.len(), 3);
-    assert_eq!(batch.returns, vec!["quarry_file"]);
-    let json = query.to_json_string().unwrap();
-    assert!(json.contains(QUARRY_FILE_LABEL));
-    assert!(json.contains(INGESTION_COMPLETE_PROPERTY));
-}
-
-#[test]
-fn uses_the_helix_v1_buffered_body_limit() {
-    assert_eq!(HELIX_MAX_QUERY_BODY_BYTES, 2_097_152);
-}
-
-#[test]
-fn marks_document_ingestion_complete() {
-    let query =
-        mark_quarry_file_ingestion_complete("doc-1".to_string(), "user-1".to_string()).unwrap();
-    let json = query.to_json_string().unwrap();
-
-    assert!(json.contains(INGESTION_COMPLETE_PROPERTY));
-    assert!(json.contains("true"));
-}
-
-#[test]
-fn builds_one_chunk_and_edge_write_for_each_batched_chunk() {
-    let mut chunks = vec![chunk(1), chunk(2)];
-    for chunk in &mut chunks {
-        chunk.embedding = Some(vec![0.25; 1_536]);
-    }
-    let queries = insert_chunk_batches(&chunks).unwrap();
-    assert_eq!(queries.len(), 1);
-    let query = &queries[0];
-    let BatchQuery::Write(batch) = &query.query else {
-        panic!("expected a write batch");
-    };
-
-    assert_eq!(batch.queries.len(), 1);
-    assert!(matches!(
-        &batch.queries[0],
-        BatchEntry::ForEach { param, body } if param == "chunks" && body.len() == 3
-    ));
     assert_eq!(
-        batch.returns,
-        vec!["quarry_file", "chunk", "quarry_file_has_chunk"]
+        batch
+            .queries
+            .iter()
+            .filter(|entry| matches!(entry, BatchEntry::ForEach { param, .. } if param == "chunks"))
+            .count(),
+        1
     );
-    let json = query.to_json_string().unwrap();
-    assert!(json.contains(CHUNK_LABEL));
-    assert!(json.contains(QUARRY_FILE_HAS_CHUNK_LABEL));
-    assert!(json.len() <= HELIX_MAX_QUERY_BODY_BYTES);
+    assert_eq!(query.request_type, DynamicQueryRequestType::Write);
+    assert!(query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES);
     assert!(matches!(
         query
             .parameters
@@ -94,45 +67,70 @@ fn builds_one_chunk_and_edge_write_for_each_batched_chunk() {
             .and_then(|parameters| parameters.get("chunks")),
         Some(DynamicQueryValue::Array(values)) if values.len() == 2
     ));
+
+    let json = query.to_json_string().unwrap();
+    for value in [
+        QUARRY_FILE_LABEL,
+        FILE_VERSION_LABEL,
+        FILE_CHUNK_LABEL,
+        HAS_VERSION_LABEL,
+        CURRENT_VERSION_LABEL,
+        HAS_CHUNK_LABEL,
+    ] {
+        assert!(json.contains(value));
+    }
+    assert!(!json.contains("\"Chunk\""));
+    assert!(!json.contains("document_id"));
+    assert!(!json.contains("ingestion_complete"));
 }
 
 #[test]
-fn splits_chunk_batches_at_the_serialized_payload_limit() {
-    let chunks = vec![chunk(1), chunk(2), chunk(3)];
-    let two_chunk_payload_bytes = build_chunk_batch(&chunks[..2])
+fn cleanup_is_scoped_to_the_indexed_version() {
+    let json = insert_file_version_graph(file(), version(), vec![chunk(1)])
         .unwrap()
-        .to_json_bytes()
-        .unwrap()
-        .len();
+        .to_json_string()
+        .unwrap();
 
-    let queries = insert_chunk_batches_with_limit(&chunks, two_chunk_payload_bytes).unwrap();
-
-    assert_eq!(queries.len(), 2);
-    assert!(queries
-        .iter()
-        .all(|query| { query.to_json_bytes().unwrap().len() <= two_chunk_payload_bytes }));
+    assert!(json.contains("removed_version_chunks"));
+    assert!(json.contains("version_id"));
+    assert!(!json.contains("stale_quarry_file"));
+    assert!(!json.contains("drop\":{\"input\":{\"n\":{\"ids\":{\"var\":\"canonical_version"));
 }
 
 #[test]
-fn rejects_a_chunk_without_an_embedding() {
-    let mut invalid_chunk = chunk(1);
-    invalid_chunk.embedding = None;
+fn rejects_mismatched_graph_identity() {
+    let mut invalid = chunk(1);
+    invalid.version_id = "another-version".to_string();
 
-    let error = insert_chunk_batches(&[invalid_chunk]).unwrap_err();
-    assert!(error.contains("does not contain an embedding"));
+    let error = insert_file_version_graph(file(), version(), vec![invalid]).unwrap_err();
+    assert!(error.contains("does not match"));
 }
 
 #[test]
-fn rejects_a_single_chunk_larger_than_the_payload_limit() {
-    let chunk = chunk(1);
-    let payload_bytes = build_chunk_batch(std::slice::from_ref(&chunk))
-        .unwrap()
-        .to_json_bytes()
-        .unwrap()
-        .len();
+fn rejects_an_oversized_atomic_request_without_splitting() {
+    let mut oversized = chunk(1);
+    oversized.text = "x".repeat(HELIX_MAX_QUERY_BODY_BYTES);
 
-    let error = insert_chunk_batches_with_limit(&[chunk], payload_bytes - 1).unwrap_err();
+    let error = insert_file_version_graph(file(), version(), vec![oversized]).unwrap_err();
+    assert!(error.contains("atomic Helix file graph query"));
+    assert!(error.contains(&HELIX_MAX_QUERY_BODY_BYTES.to_string()));
+}
 
-    assert!(error.contains("exceeding"));
-    assert!(error.contains(&(payload_bytes - 1).to_string()));
+#[test]
+fn indexes_versioned_file_graph_properties() {
+    let json = create_document_indexes().to_json_string().unwrap();
+
+    assert!(json.contains("file_id"));
+    assert!(json.contains("version_id"));
+    assert!(json.contains("chunk_id"));
+    assert!(json.contains("content_sha256"));
+    assert!(json.contains("embedding"));
+    assert!(json.contains("workspace_id"));
+    assert!(json.contains(FILE_CHUNK_LABEL));
+    assert!(!json.contains("document_id"));
+}
+
+#[test]
+fn uses_the_helix_v1_buffered_body_limit() {
+    assert_eq!(HELIX_MAX_QUERY_BODY_BYTES, 2_097_152);
 }

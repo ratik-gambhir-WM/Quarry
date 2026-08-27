@@ -5,15 +5,30 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
+use thiserror::Error;
 use tokio::sync::{watch, Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 
 use crate::{
-    core::clients::{helix::HelixClient, sqlite::SqliteClient},
+    core::clients::{
+        helix::HelixClient,
+        sqlite::{SqliteClient, SqliteClientError},
+    },
     document_jobs::DocumentJobEvent,
 };
 
 const DATABASE_FILE_NAME: &str = "pathfinder.sqlite3";
+const LATEST_SCHEMA_VERSION: i64 = 6;
+
+#[derive(Debug, Error)]
+enum MigrationError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Client(#[from] SqliteClientError),
+    #[error("database schema version {found} is newer than supported version {supported}")]
+    UnsupportedSchemaVersion { found: i64, supported: i64 },
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,7 +48,7 @@ impl AppState {
 
         let db = SqliteClient::open(&db_path)
             .map_err(|err| format!("failed to open sqlite database: {err}"))?;
-        db.with_connection(|connection| run_migrations(connection))
+        db.with_connection_result(run_migrations)
             .map_err(|err| format!("failed to initialize sqlite database: {err}"))?;
 
         Ok(Self {
@@ -130,17 +145,44 @@ fn database_path() -> Result<PathBuf, String> {
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
-fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        r#"
-            PRAGMA foreign_keys = ON;
+fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version > LATEST_SCHEMA_VERSION {
+        return Err(MigrationError::UnsupportedSchemaVersion {
+            found: version,
+            supported: LATEST_SCHEMA_VERSION,
+        });
+    }
 
-            CREATE TABLE IF NOT EXISTS app_metadata (
+    if version < LATEST_SCHEMA_VERSION {
+        recreate_version_6_schema(connection)?;
+    }
+
+    Ok(())
+}
+
+fn recreate_version_6_schema(connection: &mut Connection) -> Result<(), MigrationError> {
+    connection.pragma_update(None, "foreign_keys", "OFF")?;
+    let migration = (|| -> Result<(), MigrationError> {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS quarry_file_blobs;
+            DROP TABLE IF EXISTS quarry_file_versions;
+            DROP TABLE IF EXISTS quarry_files;
+            DROP TABLE IF EXISTS deal_metadata;
+            DROP TABLE IF EXISTS deals;
+            DROP TABLE IF EXISTS reminders;
+            DROP TABLE IF EXISTS users;
+            DROP TABLE IF EXISTS app_metadata;
+
+            CREATE TABLE app_metadata (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS users (
+            CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
@@ -151,7 +193,7 @@ fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS reminders (
+            CREATE TABLE reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 reminder TEXT NOT NULL,
                 notes TEXT NOT NULL,
@@ -164,157 +206,116 @@ fn run_migrations(connection: &Connection) -> rusqlite::Result<()> {
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            "#,
-    )?;
+            CREATE TABLE deals (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                deal_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                close_date TEXT NOT NULL,
+                transaction_type TEXT NOT NULL,
+                target_company TEXT NOT NULL,
+                primary_buyer TEXT NOT NULL,
+                deal_sponsor TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (length(trim(deal_id)) > 0),
+                CHECK (length(trim(deal_name)) > 0),
+                CHECK (length(trim(status)) > 0),
+                CHECK (length(trim(start_date)) > 0),
+                CHECK (length(trim(close_date)) > 0),
+                CHECK (length(trim(transaction_type)) > 0),
+                CHECK (length(trim(target_company)) > 0),
+                CHECK (length(trim(primary_buyer)) > 0),
+                CHECK (length(trim(deal_sponsor)) > 0)
+            );
 
-    if column_exists(connection, "deals", "id")? {
-        if !column_exists(connection, "deals", "status")? {
-            connection.execute_batch(
-                "ALTER TABLE deals ADD COLUMN status TEXT NOT NULL DEFAULT 'active';",
-            )?;
-        }
-        migrate_legacy_deals(connection)?;
-    }
+            CREATE INDEX idx_deals_user_id ON deals(user_id);
+            CREATE INDEX idx_deals_status ON deals(status);
+            CREATE INDEX idx_deals_transaction_type ON deals(transaction_type);
+            CREATE INDEX idx_deals_close_date ON deals(close_date);
 
-    create_deal_tables(connection)?;
-    connection.pragma_update(None, "user_version", 5)?;
+            CREATE TABLE deal_metadata (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
+                local_path TEXT,
+                sharepoint_link TEXT,
+                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
+                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
+                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
+            );
 
-    Ok(())
-}
+            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
 
-fn create_deal_tables(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS deals (
-            deal_id TEXT PRIMARY KEY NOT NULL,
-            deal_name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            start_date TEXT NOT NULL,
-            close_date TEXT NOT NULL,
-            transaction_type TEXT NOT NULL,
-            target_company TEXT NOT NULL,
-            primary_buyer TEXT NOT NULL,
-            deal_sponsor TEXT NOT NULL,
-            CHECK (length(trim(deal_id)) > 0),
-            CHECK (length(trim(deal_name)) > 0),
-            CHECK (length(trim(status)) > 0),
-            CHECK (length(trim(start_date)) > 0),
-            CHECK (length(trim(close_date)) > 0),
-            CHECK (length(trim(transaction_type)) > 0),
-            CHECK (length(trim(target_company)) > 0),
-            CHECK (length(trim(primary_buyer)) > 0),
-            CHECK (length(trim(deal_sponsor)) > 0)
-        );
+            CREATE TABLE quarry_files (
+                file_id       TEXT PRIMARY KEY NOT NULL,
+                deal_id       TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+                workspace_id  TEXT NOT NULL,
+                display_name  TEXT NOT NULL,
+                source_uri    TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                deleted_at    TEXT,
+                CHECK (length(trim(file_id)) > 0),
+                CHECK (length(trim(deal_id)) > 0),
+                CHECK (length(trim(workspace_id)) > 0),
+                CHECK (length(trim(display_name)) > 0),
+                CHECK (source_uri IS NULL OR length(trim(source_uri)) > 0)
+            );
 
-        CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
-        CREATE INDEX IF NOT EXISTS idx_deals_transaction_type ON deals(transaction_type);
-        CREATE INDEX IF NOT EXISTS idx_deals_close_date ON deals(close_date);
+            CREATE TABLE quarry_file_versions (
+                version_id        TEXT PRIMARY KEY NOT NULL,
+                file_id           TEXT NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
+                version_number    INTEGER NOT NULL CHECK (version_number > 0),
+                original_filename TEXT NOT NULL,
+                mime_type         TEXT NOT NULL,
+                content_sha256    TEXT NOT NULL,
+                byte_size         INTEGER NOT NULL CHECK (byte_size >= 0),
+                is_current        INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1)),
+                created_at        TEXT NOT NULL,
+                UNIQUE (file_id, version_number),
+                UNIQUE (file_id, content_sha256),
+                CHECK (length(trim(version_id)) > 0),
+                CHECK (length(trim(original_filename)) > 0),
+                CHECK (length(trim(mime_type)) > 0),
+                CHECK (length(content_sha256) = 64)
+            );
 
-        CREATE TABLE IF NOT EXISTS deal_metadata (
-            deal_id TEXT PRIMARY KEY NOT NULL,
-            user_id INTEGER NOT NULL,
-            key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
-            local_path TEXT,
-            sharepoint_link TEXT,
-            FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
-            CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
-            CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
-            CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
-        );
+            CREATE UNIQUE INDEX uq_quarry_file_versions_current
+                ON quarry_file_versions(file_id)
+                WHERE is_current = 1;
 
-        CREATE INDEX IF NOT EXISTS idx_deal_metadata_user_id ON deal_metadata(user_id);
-        "#,
-    )
-}
+            CREATE INDEX idx_quarry_files_deal
+                ON quarry_files(deal_id, deleted_at);
 
-fn migrate_legacy_deals(connection: &Connection) -> rusqlite::Result<()> {
-    let has_legacy_metadata = table_exists(connection, "deal_metadata")?;
-    connection.execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")?;
-    let migration = (|| {
-        connection.execute_batch("ALTER TABLE deals RENAME TO deals_legacy_v4;")?;
-        if has_legacy_metadata {
-            connection
-                .execute_batch("ALTER TABLE deal_metadata RENAME TO deal_metadata_legacy_v4;")?;
-        }
-        create_deal_tables(connection)?;
-        connection.execute_batch(
-            r#"
-            INSERT INTO deals (
-                deal_id, deal_name, status, start_date, close_date,
-                transaction_type, target_company, primary_buyer, deal_sponsor
-            )
-            SELECT
-                printf('DEAL-%06d', id),
-                deal_name,
-                CASE WHEN lower(status) = 'archived' THEN 'Archived' ELSE 'Active' END,
-                substr(created_at, 1, 10),
-                substr(updated_at, 1, 10),
-                deal_type,
-                coalesce(target_company, carve_out_business, deal_name),
-                coalesce(buyer_or_platform_company, parent_or_seller_company, pe_firm),
-                pe_firm
-            FROM deals_legacy_v4;
+            CREATE INDEX idx_quarry_files_workspace_deal
+                ON quarry_files(workspace_id, deal_id, deleted_at);
+
+            CREATE INDEX idx_quarry_file_versions_file
+                ON quarry_file_versions(file_id, version_number DESC);
+
+            CREATE INDEX idx_quarry_file_versions_hash
+                ON quarry_file_versions(content_sha256);
+
+            CREATE TABLE quarry_file_blobs (
+                version_id  TEXT PRIMARY KEY NOT NULL
+                    REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
+                file_bytes  BLOB NOT NULL
+            );
             "#,
         )?;
-        if has_legacy_metadata {
-            connection.execute_batch(
-                r#"
-                INSERT INTO deal_metadata (
-                    deal_id, user_id, key_questions_json, local_path, sharepoint_link
-                )
-                SELECT
-                    printf('DEAL-%06d', metadata.deal_id),
-                    (SELECT id FROM users ORDER BY id LIMIT 1),
-                    metadata.key_questions_json,
-                    CASE
-                        WHEN deals.main_data_room_folder NOT LIKE 'browser-upload://%'
-                        THEN deals.main_data_room_folder
-                        ELSE NULL
-                    END,
-                    NULL
-                FROM deal_metadata_legacy_v4 metadata
-                JOIN deals_legacy_v4 deals ON deals.id = metadata.deal_id
-                WHERE EXISTS (SELECT 1 FROM users);
-                DROP TABLE deal_metadata_legacy_v4;
-                "#,
-            )?;
-        }
-        connection.execute_batch("DROP TABLE deals_legacy_v4; COMMIT;")
+        transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        Ok(())
     })();
-
-    if migration.is_err() {
-        let _ = connection.execute_batch("ROLLBACK;");
-    }
-    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-    migration
+    let restore_foreign_keys = connection.pragma_update(None, "foreign_keys", "ON");
+    migration?;
+    restore_foreign_keys?;
+    Ok(())
 }
-
-fn table_exists(connection: &Connection, table_name: &str) -> rusqlite::Result<bool> {
-    connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table_name],
-        |row| row.get(0),
-    )
-}
-
-fn column_exists(
-    connection: &Connection,
-    table_name: &str,
-    column_name: &str,
-) -> rusqlite::Result<bool> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
-    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    for column in columns {
-        if column? == column_name {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
 #[cfg(test)]
 #[path = "../tests/state_tests.rs"]
 mod tests;

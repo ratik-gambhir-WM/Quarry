@@ -1,7 +1,11 @@
 import type {
   AddUserInput,
-  ChunkKeywordSearch,
-  ChunkVectorSearch,
+  DealDocumentPdf,
+  DealDocumentSummary,
+  DealDocumentText,
+  FileChunkKeywordSearch,
+  FileChunkVectorSearch,
+  KeywordFileChunkHit,
   PersistedDeal,
   ProcessDocumentsResponse,
   ProcessFileJobEvent,
@@ -9,6 +13,7 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
   SaveDealInput,
@@ -122,6 +127,59 @@ async function requestJson<TResponse>(path: string, init?: RequestInit, requestD
   }
 }
 
+async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
+  const url = apiUrl(path);
+  const requestId = beginApiRequest({ method: "GET", url });
+  const startedAt = performance.now();
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const bodyText = await response.text();
+      let body: { error?: string; message?: string } | undefined;
+      try {
+        body = JSON.parse(bodyText) as { error?: string; message?: string };
+      } catch {
+        body = undefined;
+      }
+      const message =
+        body?.error || body?.message || bodyText || response.statusText ||
+        `Request failed with status ${response.status}`;
+      finishApiRequest(requestId, {
+        details: body ?? bodyText,
+        durationMs: performance.now() - startedAt,
+        httpStatus: response.status,
+        message,
+        status: "error",
+      });
+      throw new BackendApiError(message, response.status);
+    }
+
+    const mimeType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+    if (mimeType !== "application/pdf") {
+      throw new Error(`The preview backend returned ${mimeType || "an unknown content type"}.`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    finishApiRequest(requestId, {
+      details: { byteLength: bytes.byteLength, mimeType },
+      durationMs: performance.now() - startedAt,
+      httpStatus: response.status,
+      status: "success",
+    });
+    return { bytes, mimeType };
+  } catch (error) {
+    if (!(error instanceof BackendApiError)) {
+      finishApiRequest(requestId, {
+        details: error,
+        durationMs: performance.now() - startedAt,
+        message: error instanceof Error ? error.message : "Network request failed",
+        status: "error",
+      });
+    }
+    throw error;
+  }
+}
+
 async function get<TResponse>(path: string): Promise<TResponse> {
   return requestJson<TResponse>(path);
 }
@@ -165,6 +223,24 @@ function getDeal(dealId: string) {
   return get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`);
 }
 
+function listDealDocuments(dealId: string) {
+  return get<DealDocumentSummary[]>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
+  );
+}
+
+function getDealDocumentPdf(dealId: string, fileId: string) {
+  return requestPdfBytes(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/pdf`,
+  );
+}
+
+function getDealDocumentText(dealId: string, fileId: string) {
+  return get<DealDocumentText>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
+  );
+}
+
 function archiveDeal(dealId: string) {
   return post<SavedDeal, Record<string, never>>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/archive`,
@@ -172,14 +248,17 @@ function archiveDeal(dealId: string) {
   );
 }
 
-function processDocuments(userId: string, files: File[]) {
+function processDocuments(dealId: string, userId: string, files: File[]) {
   const form = new FormData();
   form.append("userId", userId.trim());
   appendFiles(form, files);
-  return postForm<ProcessDocumentsResponse>("/api/v1/documents/process", form);
+  return postForm<ProcessDocumentsResponse>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`,
+    form,
+  );
 }
 
-async function startProcessFile(userId: string, file: File) {
+async function startProcessFile(dealId: string, userId: string, file: File) {
   const bytes = await file.arrayBuffer();
   const byteFile = new File([bytes], file.name, {
     lastModified: file.lastModified,
@@ -188,7 +267,10 @@ async function startProcessFile(userId: string, file: File) {
   const form = new FormData();
   form.append("userId", userId.trim());
   form.append("files", byteFile, file.name);
-  return postForm<ProcessFileJobResponse>("/api/v1/documents/process_file", form);
+  return postForm<ProcessFileJobResponse>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
+    form,
+  );
 }
 
 function subscribeToProcessFileJob(
@@ -257,12 +339,18 @@ function subscribeToProcessFileJob(
   };
 }
 
-function searchDocumentChunksByVector(search: ChunkVectorSearch) {
-  return post<unknown, ChunkVectorSearch>("/api/v1/documents/search/vector", search);
+function searchDocumentChunksByVector(search: FileChunkVectorSearch) {
+  return post<VectorFileChunkHit[], FileChunkVectorSearch>(
+    "/api/v1/documents/search/vector",
+    search,
+  );
 }
 
-function searchDocumentChunksByKeyword(search: ChunkKeywordSearch) {
-  return post<unknown, ChunkKeywordSearch>("/api/v1/documents/search/keyword", search);
+function searchDocumentChunksByKeyword(search: FileChunkKeywordSearch) {
+  return post<KeywordFileChunkHit[], FileChunkKeywordSearch>(
+    "/api/v1/documents/search/keyword",
+    search,
+  );
 }
 
 function createUser(input: AddUserInput) {
@@ -336,8 +424,11 @@ export const httpQuarryApi: QuarryApi = {
   createDeal,
   createUser,
   getDeal,
+  getDealDocumentPdf,
+  getDealDocumentText,
   getUserByEmail,
   listDealDataRoom,
+  listDealDocuments,
   listDeals,
   listSummaryFiles,
   previewDealDocument,

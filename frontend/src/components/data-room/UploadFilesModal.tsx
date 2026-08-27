@@ -4,6 +4,7 @@ import type { ProcessFileJobEvent } from "../../contracts/quarryApi";
 import { Icon } from "../ui/Icon";
 
 type UploadFilesModalProps = {
+  dealId: string;
   onClose: () => void;
   userId: string;
 };
@@ -24,7 +25,7 @@ type UploadEntry = {
 const maxFileBytes = 50 * 1024 * 1024;
 const supportedExtensions = new Set(["pdf", "docx"]);
 
-export function UploadFilesModal({ onClose, userId }: UploadFilesModalProps) {
+export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chooseFilesButtonRef = useRef<HTMLButtonElement>(null);
   const processingStartedAtRef = useRef<number | null>(null);
@@ -148,6 +149,10 @@ export function UploadFilesModal({ onClose, userId }: UploadFilesModalProps) {
   }
 
   function handleUpload() {
+    if (!dealId.trim()) {
+      setSelectionError("Open a deal before uploading files.");
+      return;
+    }
     if (!userId.trim()) {
       setSelectionError("Sign in again before uploading files.");
       return;
@@ -176,7 +181,7 @@ export function UploadFilesModal({ onClose, userId }: UploadFilesModalProps) {
 
   async function startEntryUpload(entry: UploadEntry) {
     try {
-      const job = await runtime.api.startProcessFile(userId, entry.file);
+      const job = await runtime.api.startProcessFile(dealId, userId, entry.file);
       setEntries((current) =>
         current.map((currentEntry) =>
           currentEntry.id === entry.id

@@ -8,6 +8,10 @@ type ThemeModeContextValue = {
 };
 
 const THEME_STORAGE_KEY = "quarry-theme-mode";
+const THEME_COLORS: Record<ThemeMode, string> = {
+  "slate-frost": "#f7f7f7",
+  dark: "#070a1b",
+};
 const ThemeModeContext = createContext<ThemeModeContextValue | null>(null);
 
 function getStoredThemeMode(): ThemeMode {
@@ -28,6 +32,7 @@ export function ThemeModeProvider({ children }: ThemeModeProviderProps) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[themeMode]);
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 

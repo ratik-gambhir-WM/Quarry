@@ -8,6 +8,7 @@ export type DataRoomTreeNode = {
   kind: "doc" | "folder" | "pdf" | "sheet";
   name: string;
   relativePath?: string;
+  storedFileId?: string;
 };
 
 export type DataRoomChip =

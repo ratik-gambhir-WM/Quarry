@@ -55,6 +55,7 @@ export type SavedDeal = {
   status: string;
   targetCompany: string;
   transactionType: string;
+  userId: number;
 };
 
 export type SavedDealMetadata = {

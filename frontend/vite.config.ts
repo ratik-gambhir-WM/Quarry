@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
+        "@": new URL("./src", import.meta.url).pathname,
         "@quarry/router": new URL(`./src/platform/Router.${target}.tsx`, import.meta.url).pathname,
         "@quarry/runtime": new URL(`./src/platform/runtime.${target}.ts`, import.meta.url).pathname,
       },
