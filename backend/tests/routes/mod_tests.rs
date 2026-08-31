@@ -7,11 +7,18 @@ use serde_json::Value;
 use std::io::Cursor;
 use tower::ServiceExt;
 
+use crate::{bootstrap::test_application, config::AppConfig};
+
+fn test_router() -> axum::Router {
+    let application = test_application().unwrap();
+    create_router(application.state, &AppConfig::default().http)
+}
+
 use super::*;
 
 #[tokio::test]
 async fn health_route_is_available_under_api_prefix() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
@@ -24,7 +31,7 @@ async fn health_route_is_available_under_api_prefix() {
 
 #[tokio::test]
 async fn versioned_health_and_capabilities_routes_are_available() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let health = app
         .clone()
@@ -48,7 +55,7 @@ async fn versioned_health_and_capabilities_routes_are_available() {
 
 #[tokio::test]
 async fn routes_outside_api_prefix_are_not_found() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
@@ -60,7 +67,7 @@ async fn routes_outside_api_prefix_are_not_found() {
 
 #[tokio::test]
 async fn legacy_command_routes_are_not_exposed() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(
@@ -77,7 +84,7 @@ async fn legacy_command_routes_are_not_exposed() {
 
 #[tokio::test]
 async fn sqlite_user_can_be_saved_and_fetched_by_email() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let create_response = app
         .clone()
         .oneshot(
@@ -129,7 +136,7 @@ async fn sqlite_user_can_be_saved_and_fetched_by_email() {
 
 #[tokio::test]
 async fn sqlite_user_lookup_returns_not_found_for_unknown_email() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let response = app
         .oneshot(
             Request::get("/api/users/by-email?email=missing%40example.com")
@@ -143,9 +150,40 @@ async fn sqlite_user_lookup_returns_not_found_for_unknown_email() {
 }
 
 #[tokio::test]
+async fn sqlite_user_handlers_reject_blank_required_fields() {
+    let app = test_router();
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/users")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{
+                        "firstName":" ","lastName":"Analyst",
+                        "email":"analyst@example.com","apiKey":"test-key","role":"Analyst"
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::BAD_REQUEST);
+
+    let lookup_response = app
+        .oneshot(
+            Request::get("/api/users/by-email?email=%20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lookup_response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn deal_flow_saves_core_fields_then_optional_metadata() {
     const BOUNDARY: &str = "quarry-empty-deal-metadata";
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let create_user = app
         .clone()
         .oneshot(
@@ -291,7 +329,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
 
 #[tokio::test]
 async fn redundant_user_exists_route_is_not_exposed() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let response = app
         .oneshot(
             Request::get("/api/users/exists?email=ada%40example.com")
@@ -306,7 +344,7 @@ async fn redundant_user_exists_route_is_not_exposed() {
 
 #[tokio::test]
 async fn helix_user_routes_are_not_exposed() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let get_response = app
         .clone()
         .oneshot(
@@ -332,7 +370,7 @@ async fn helix_user_routes_are_not_exposed() {
 
 #[tokio::test]
 async fn document_search_validates_input_before_calling_helix() {
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(
@@ -370,7 +408,7 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
     multipart.resize(multipart.len() + FILE_BYTES, b'x');
     multipart.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
 
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
     let response = app
         .oneshot(
             Request::post("/api/deals/DEAL-LARGE/documents/process_file")
@@ -393,7 +431,7 @@ async fn process_file_rejects_a_competing_multipart_deal_id() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"dealId\"\r\n\r\nDEAL-OTHER\r\n--{BOUNDARY}--\r\n"
     );
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(
@@ -417,7 +455,7 @@ async fn process_file_rejects_unsupported_uploads_at_the_handler_boundary() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"notes.txt\"\r\nContent-Type: text/plain\r\n\r\nnotes\r\n--{BOUNDARY}--\r\n"
     );
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(
@@ -441,7 +479,7 @@ async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\n   \r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"report.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\r\n--{BOUNDARY}--\r\n"
     );
-    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+    let app = test_router();
 
     let response = app
         .oneshot(
@@ -465,9 +503,10 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     docx.document
         .push(Paragraph::default().push_text("Raw route text from DOCX."));
     let docx_bytes = docx.write(Cursor::new(Vec::new())).unwrap().into_inner();
-    let state = AppState::in_memory().unwrap();
-    state
-        .with_db(|connection| {
+    let application = test_application().unwrap();
+    application
+        .sqlite
+        .with_connection(|connection| {
             connection.execute(
                 "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst')",
                 [],
@@ -524,7 +563,7 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
             Ok(())
         })
         .unwrap();
-    let app = create_router(state, &AppConfig::default());
+    let app = create_router(application.state, &AppConfig::default().http);
 
     let list_response = app
         .clone()

@@ -1,12 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use quarry_backend::{
+    config::AppConfig,
     core::{
         clients::openai::{OpenAiClient, ResponsesFileInput},
         parsers::docx::parse_docx_from_path,
         prompts::{build_basic_document_summary_prompt, CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT},
         CollectedFile,
     },
-    utils::openai_api_key,
 };
 use std::{
     env, fs,
@@ -16,7 +16,6 @@ use std::{
 use walkdir::WalkDir;
 
 const APP_NAME: &str = "DataRoomCLI";
-const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 const MAX_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_TOTAL_REQUEST_FILE_BYTES: usize = 50 * 1024 * 1024;
 #[tokio::main]
@@ -95,10 +94,12 @@ async fn summarize_dir(path: String) -> Result<(), String> {
         return Err(format!("no supported files found in {}", root.display()));
     }
 
-    let api_key = openai_api_key()?;
-    let client = OpenAiClient::new(&api_key);
-    let model = env::var("OPENAI_DOCUMENT_SUMMARY_MODEL")
-        .unwrap_or_else(|_| DEFAULT_DOCUMENT_SUMMARY_MODEL.to_string());
+    let config = AppConfig::from_env()?;
+    let openai = config
+        .openai
+        .as_ref()
+        .ok_or_else(|| "OpenAI capability is not configured".to_string())?;
+    let client = OpenAiClient::from_config(reqwest::Client::new(), openai);
     let prompt = build_basic_document_summary_prompt(&root, &files, &skipped_files);
     let file_inputs: Vec<ResponsesFileInput<'_>> = files
         .iter()
@@ -113,7 +114,7 @@ async fn summarize_dir(path: String) -> Result<(), String> {
         .gen_model_response_with_files(
             Some(&prompt),
             Some(CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT),
-            Some(&model),
+            Some(&openai.document_summary_model),
             Some(&file_inputs),
         )
         .await?;

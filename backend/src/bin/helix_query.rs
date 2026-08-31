@@ -1,6 +1,9 @@
 use std::{env, process};
 
-use quarry_backend::core::{clients::openai::OpenAiClient, prompts::HELIX_QUERY_EXAMPLE_PROMPT};
+use quarry_backend::{
+    config::AppConfig,
+    core::{clients::openai::OpenAiClient, prompts::HELIX_QUERY_EXAMPLE_PROMPT},
+};
 
 const APP_NAME: &str = "DataRoomCLI";
 
@@ -11,14 +14,18 @@ async fn main() {
         .with_env_filter("quarry_backend=info")
         .try_init();
     let args: Vec<String> = env::args().collect();
-    let api_key = match env::var("OPENAI_API_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
-            eprintln!("error: OPENAI_API_KEY environment variable is not set");
+    let config = match AppConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("error: {error}");
             process::exit(1);
         }
     };
-    let client = OpenAiClient::new(api_key.as_str());
+    let Some(openai) = config.openai.as_ref() else {
+        eprintln!("error: OpenAI capability is not configured");
+        process::exit(1);
+    };
+    let client = OpenAiClient::from_config(reqwest::Client::new(), openai);
 
     let result = match args.get(1).map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => {

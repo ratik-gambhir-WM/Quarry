@@ -1,20 +1,23 @@
-use axum::{extract::Multipart, Json};
+use axum::{
+    extract::{Multipart, State},
+    Json,
+};
 
 use super::upload_support::collect_wm_upload_files;
 use crate::{
-    core::clients::wm_ai_services::{FileExtractResponse, FileUploadServiceClient},
-    handlers::AppError,
+    core::clients::wm_ai_services::FileExtractResponse,
+    handlers::{AppError, AppState},
 };
 
 pub(crate) async fn extract_files_handler(
+    State(state): State<AppState>,
     multipart: Multipart,
 ) -> crate::errors::AppResult<Json<FileExtractResponse>> {
     let files = collect_wm_upload_files(multipart).await?;
-    let client = FileUploadServiceClient::from_env().map_err(AppError::internal)?;
-
-    client
+    state
+        .research
         .extract_files(files)
         .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }

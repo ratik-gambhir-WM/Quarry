@@ -2,6 +2,7 @@ use super::*;
 use std::path::Path;
 
 use crate::{
+    bootstrap::migrate,
     core::{clients::sqlite::SqliteClient, models::document::Document},
     services::document_service::build_file_persistence_input,
     utils::{document_id_from_content, file_version_id, sha256_hex},
@@ -10,9 +11,9 @@ use crate::{
 const OWNER: &str = "analyst@example.com";
 const DEAL_ID: &str = "DEAL-FILES";
 
-fn seed_user_and_deals(state: &crate::state::AppState, owner: &str, deals: &[(&str, &str)]) {
+fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]) {
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute(
                 "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
                 [owner],
@@ -35,10 +36,16 @@ fn seed_user_and_deals(state: &crate::state::AppState, owner: &str, deals: &[(&s
         .unwrap();
 }
 
-fn test_state() -> crate::state::AppState {
-    let state = crate::state::AppState::in_memory().unwrap();
+fn test_state() -> SqliteClient {
+    let state = empty_sqlite();
     seed_user_and_deals(&state, OWNER, &[(DEAL_ID, "Active")]);
     state
+}
+
+fn empty_sqlite() -> SqliteClient {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    migrate(&sqlite).unwrap();
+    sqlite
 }
 
 fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Document {
@@ -71,9 +78,9 @@ async fn persist_file_blob(
     super::persist_file_blob(sqlite, file_persistence).await
 }
 
-fn table_counts(state: &crate::state::AppState) -> (i64, i64, i64) {
+fn table_counts(state: &SqliteClient) -> (i64, i64, i64) {
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             Ok((
                 connection.query_row("SELECT COUNT(*) FROM quarry_files", [], |row| row.get(0))?,
                 connection.query_row("SELECT COUNT(*) FROM quarry_file_versions", [], |row| {
@@ -94,10 +101,9 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
     let document = document("file-1", OWNER, "report.pdf", &file_bytes);
     let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
 
-    let insert_blob_result =
-        persist_file_blob(state.sqlite(), DEAL_ID, &document, file_bytes.clone())
-            .await
-            .unwrap();
+    let insert_blob_result = persist_file_blob(&state, DEAL_ID, &document, file_bytes.clone())
+        .await
+        .unwrap();
 
     assert_eq!(
         insert_blob_result,
@@ -110,7 +116,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
     );
     assert_eq!(table_counts(&state), (1, 1, 1));
     let stored = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 r#"
                 SELECT f.deal_id, f.workspace_id, f.display_name, f.source_uri, f.metadata_json,
@@ -160,7 +166,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
 
 #[tokio::test]
 async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
-    let state = crate::state::AppState::in_memory().unwrap();
+    let state = empty_sqlite();
     seed_user_and_deals(
         &state,
         OWNER,
@@ -169,37 +175,29 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
     let bytes = b"identical attachment bytes".to_vec();
     let first = document("file-first", OWNER, "report.pdf", &bytes);
     let second = document("file-second", OWNER, "copy.pdf", &bytes);
-    persist_file_blob(state.sqlite(), "DEAL-FIRST", &first, bytes.clone())
+    persist_file_blob(&state, "DEAL-FIRST", &first, bytes.clone())
         .await
         .unwrap();
-    persist_file_blob(state.sqlite(), "DEAL-SECOND", &second, bytes)
+    persist_file_blob(&state, "DEAL-SECOND", &second, bytes)
         .await
         .unwrap();
 
-    let first_match = find_current_sqlite_file_by_content_hash(
-        state.sqlite(),
-        "DEAL-FIRST",
-        OWNER,
-        &first.content_hash,
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    let second_match = find_current_sqlite_file_by_content_hash(
-        state.sqlite(),
-        "DEAL-SECOND",
-        OWNER,
-        &first.content_hash,
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let first_match =
+        find_current_sqlite_file_by_content_hash(&state, "DEAL-FIRST", OWNER, &first.content_hash)
+            .await
+            .unwrap()
+            .unwrap();
+    let second_match =
+        find_current_sqlite_file_by_content_hash(&state, "DEAL-SECOND", OWNER, &first.content_hash)
+            .await
+            .unwrap()
+            .unwrap();
 
     assert_eq!(first_match.file_id, "file-first");
     assert_eq!(second_match.file_id, "file-second");
     assert_ne!(first_match.version_id, second_match.version_id);
     assert!(find_current_sqlite_file_by_content_hash(
-        state.sqlite(),
+        &state,
         "DEAL-MISSING",
         OWNER,
         &first.content_hash,
@@ -240,18 +238,16 @@ async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
     cases.push((DEAL_ID, unnormalized_owner, bytes.clone()));
 
     for (deal_id, document, file_bytes) in cases {
-        assert!(
-            persist_file_blob(state.sqlite(), deal_id, &document, file_bytes)
-                .await
-                .is_err()
-        );
+        assert!(persist_file_blob(&state, deal_id, &document, file_bytes)
+            .await
+            .is_err());
         assert_eq!(table_counts(&state), (0, 0, 0));
     }
 }
 
 #[tokio::test]
 async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() {
-    let state = crate::state::AppState::in_memory().unwrap();
+    let state = empty_sqlite();
     seed_user_and_deals(
         &state,
         OWNER,
@@ -262,11 +258,9 @@ async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() 
     let document = document("file-deal", OWNER, "report.pdf", &bytes);
 
     for deal_id in ["DEAL-MISSING", "DEAL-ARCHIVED", "DEAL-OTHER"] {
-        assert!(
-            persist_file_blob(state.sqlite(), deal_id, &document, bytes.clone())
-                .await
-                .is_err()
-        );
+        assert!(persist_file_blob(&state, deal_id, &document, bytes.clone())
+            .await
+            .is_err());
         assert_eq!(table_counts(&state), (0, 0, 0));
     }
 }
@@ -279,21 +273,18 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
     let first = document("file-versions", OWNER, "report.pdf", &first_bytes);
     let second = document("file-versions", OWNER, "report.pdf", &second_bytes);
 
-    let first_insert_blob_result =
-        persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
-            .await
-            .unwrap();
-    let retry_insert_blob_result =
-        persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
-            .await
-            .unwrap();
+    let first_insert_blob_result = persist_file_blob(&state, DEAL_ID, &first, first_bytes.clone())
+        .await
+        .unwrap();
+    let retry_insert_blob_result = persist_file_blob(&state, DEAL_ID, &first, first_bytes.clone())
+        .await
+        .unwrap();
     assert_eq!(retry_insert_blob_result, first_insert_blob_result);
     assert_eq!(table_counts(&state), (1, 1, 1));
 
-    let second_insert_blob_result =
-        persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
-            .await
-            .unwrap();
+    let second_insert_blob_result = persist_file_blob(&state, DEAL_ID, &second, second_bytes)
+        .await
+        .unwrap();
     assert_eq!(
         second_insert_blob_result.file_id,
         first_insert_blob_result.file_id
@@ -303,13 +294,13 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
         first_insert_blob_result.version_id
     );
     assert_eq!(table_counts(&state), (1, 2, 2));
-    persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes)
+    persist_file_blob(&state, DEAL_ID, &first, first_bytes)
         .await
         .unwrap();
     assert_eq!(table_counts(&state), (1, 2, 2));
 
     let versions = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT version_number, content_sha256, is_current FROM quarry_file_versions WHERE file_id = 'file-versions' ORDER BY version_number",
             )?;
@@ -335,10 +326,10 @@ async fn same_bytes_under_different_logical_files_have_distinct_versions() {
     let first = document("logical-1", OWNER, "first.pdf", &bytes);
     let second = document("logical-2", OWNER, "second.pdf", &bytes);
 
-    persist_file_blob(state.sqlite(), DEAL_ID, &first, bytes.clone())
+    persist_file_blob(&state, DEAL_ID, &first, bytes.clone())
         .await
         .unwrap();
-    persist_file_blob(state.sqlite(), DEAL_ID, &second, bytes)
+    persist_file_blob(&state, DEAL_ID, &second, bytes)
         .await
         .unwrap();
 
@@ -351,7 +342,7 @@ async fn same_bytes_under_different_logical_files_have_distinct_versions() {
 
 #[tokio::test]
 async fn reusing_a_file_id_cannot_move_or_restore_it() {
-    let state = crate::state::AppState::in_memory().unwrap();
+    let state = empty_sqlite();
     seed_user_and_deals(
         &state,
         OWNER,
@@ -359,17 +350,17 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
     );
     let bytes = b"attached bytes".to_vec();
     let document = document("attached-file", OWNER, "report.pdf", &bytes);
-    persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes.clone())
+    persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
         .await
         .unwrap();
 
     assert!(
-        persist_file_blob(state.sqlite(), "DEAL-SECOND", &document, bytes.clone())
+        persist_file_blob(&state, "DEAL-SECOND", &document, bytes.clone())
             .await
             .is_err()
     );
     let deal_id = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
                 [],
@@ -380,7 +371,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
     assert_eq!(deal_id, DEAL_ID);
 
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute(
                 "UPDATE quarry_files SET workspace_id = 'other@example.com' WHERE file_id = 'attached-file'",
                 [],
@@ -388,13 +379,11 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
             Ok(())
         })
         .unwrap();
-    assert!(
-        persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes.clone())
-            .await
-            .is_err()
-    );
+    assert!(persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
+        .await
+        .is_err());
     let workspace_id = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 "SELECT workspace_id FROM quarry_files WHERE file_id = 'attached-file'",
                 [],
@@ -405,7 +394,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
     assert_eq!(workspace_id, "other@example.com");
 
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute(
                 "UPDATE quarry_files SET workspace_id = ?1, deleted_at = '2026-01-01T00:00:00Z' WHERE file_id = 'attached-file'",
                 [OWNER],
@@ -413,7 +402,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
             Ok(())
         })
         .unwrap();
-    assert!(persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    assert!(persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .is_err());
     assert_eq!(table_counts(&state), (1, 1, 1));
@@ -423,7 +412,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
 async fn file_table_failure_prevents_child_writes() {
     let state = test_state();
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute_batch(
                 "CREATE TRIGGER reject_file BEFORE INSERT ON quarry_files BEGIN SELECT RAISE(ABORT, 'file rejected'); END;",
             )
@@ -432,7 +421,7 @@ async fn file_table_failure_prevents_child_writes() {
     let bytes = b"file trigger".to_vec();
     let document = document("trigger-file", OWNER, "report.pdf", &bytes);
 
-    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
@@ -444,7 +433,7 @@ async fn file_table_failure_prevents_child_writes() {
 async fn version_insert_failure_rolls_back_the_parent_file() {
     let state = test_state();
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute_batch(
                 "CREATE TRIGGER reject_version BEFORE INSERT ON quarry_file_versions BEGIN SELECT RAISE(ABORT, 'version rejected'); END;",
             )
@@ -453,7 +442,7 @@ async fn version_insert_failure_rolls_back_the_parent_file() {
     let bytes = b"version trigger".to_vec();
     let document = document("trigger-version", OWNER, "report.pdf", &bytes);
 
-    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
@@ -465,7 +454,7 @@ async fn version_insert_failure_rolls_back_the_parent_file() {
 async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
     let state = test_state();
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute_batch(
                 "CREATE TRIGGER erase_version_after_blob_insert AFTER INSERT ON quarry_file_blobs BEGIN DELETE FROM quarry_file_versions WHERE version_id = NEW.version_id; END;",
             )
@@ -474,7 +463,7 @@ async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
     let bytes = b"read-back rollback".to_vec();
     let document = document("read-back-file", OWNER, "report.pdf", &bytes);
 
-    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
@@ -487,11 +476,11 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
     let state = test_state();
     let first_bytes = b"committed version".to_vec();
     let first = document("blob-rollback", OWNER, "report.pdf", &first_bytes);
-    persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes)
+    persist_file_blob(&state, DEAL_ID, &first, first_bytes)
         .await
         .unwrap();
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute_batch(
                 "CREATE TRIGGER reject_blob BEFORE INSERT ON quarry_file_blobs BEGIN SELECT RAISE(ABORT, 'blob rejected'); END;",
             )
@@ -500,14 +489,14 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
     let second_bytes = b"rejected version".to_vec();
     let second = document("blob-rollback", OWNER, "renamed.pdf", &second_bytes);
 
-    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
+    let insert_blob_error = persist_file_blob(&state, DEAL_ID, &second, second_bytes)
         .await
         .unwrap_err();
 
     assert!(insert_blob_error.contains("blob rejected"));
     assert_eq!(table_counts(&state), (1, 1, 1));
     let current = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 "SELECT f.display_name, v.content_sha256, v.is_current FROM quarry_files f JOIN quarry_file_versions v ON v.file_id = f.file_id WHERE f.file_id = 'blob-rollback'",
                 [],
@@ -523,11 +512,11 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
     let state = test_state();
     let bytes = b"original blob".to_vec();
     let original = document("corrupt-file", OWNER, "report.pdf", &bytes);
-    persist_file_blob(state.sqlite(), DEAL_ID, &original, bytes.clone())
+    persist_file_blob(&state, DEAL_ID, &original, bytes.clone())
         .await
         .unwrap();
     state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.execute(
                 "UPDATE quarry_file_blobs SET file_bytes = X'00' WHERE version_id = ?1",
                 [file_version_id(&original.file_id, &original.content_hash)],
@@ -537,13 +526,13 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
         .unwrap();
     let renamed = document("corrupt-file", OWNER, "renamed.pdf", &bytes);
 
-    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &renamed, bytes)
+    let insert_blob_error = persist_file_blob(&state, DEAL_ID, &renamed, bytes)
         .await
         .unwrap_err();
 
     assert!(insert_blob_error.contains("corrupt or collided"));
     let display_name = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 "SELECT display_name FROM quarry_files WHERE file_id = 'corrupt-file'",
                 [],
@@ -560,13 +549,13 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
     let state = test_state();
     let initial_bytes = b"initial".to_vec();
     let initial = document("concurrent-file", OWNER, "report.pdf", &initial_bytes);
-    persist_file_blob(state.sqlite(), DEAL_ID, &initial, initial_bytes)
+    persist_file_blob(&state, DEAL_ID, &initial, initial_bytes)
         .await
         .unwrap();
 
     let mut tasks = Vec::new();
     for bytes in [b"second".to_vec(), b"third".to_vec()] {
-        let sqlite = state.sqlite().clone();
+        let sqlite = state.clone();
         let document = document("concurrent-file", OWNER, "report.pdf", &bytes);
         tasks.push(tokio::spawn(async move {
             persist_file_blob(&sqlite, DEAL_ID, &document, bytes).await
@@ -577,7 +566,7 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
     }
 
     let version_numbers = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT version_number FROM quarry_file_versions WHERE file_id = 'concurrent-file' ORDER BY version_number",
             )?;
@@ -588,7 +577,7 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
         .unwrap();
     assert_eq!(version_numbers, vec![1, 2, 3]);
     let current_count = state
-        .with_db(|connection| {
+        .with_connection(|connection| {
             connection.query_row(
                 "SELECT COUNT(*) FROM quarry_file_versions WHERE file_id = 'concurrent-file' AND is_current = 1",
                 [],

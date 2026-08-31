@@ -6,7 +6,7 @@ use axum::{
 use super::upload_support::collect_selected_deal_uploads;
 use crate::{
     handlers::{AppError, AppState},
-    services::deal_service::{save_deal_metadata, SaveDealMetadataResponse},
+    services::deal_service::SaveDealMetadataResponse,
 };
 
 pub(crate) async fn save_deal_metadata_handler(
@@ -15,16 +15,10 @@ pub(crate) async fn save_deal_metadata_handler(
     multipart: Multipart,
 ) -> crate::errors::AppResult<Json<SaveDealMetadataResponse>> {
     let files = collect_selected_deal_uploads(multipart).await?;
-    save_deal_metadata(&state, &deal_id, files)
+    state
+        .deals
+        .save_metadata(&deal_id, files)
         .await
         .map(Json)
-        .map_err(map_deal_error)
-}
-
-fn map_deal_error(message: String) -> AppError {
-    if message.starts_with("deal not found") {
-        AppError::not_found(message)
-    } else {
-        AppError::bad_request(message)
-    }
+        .map_err(AppError::from)
 }

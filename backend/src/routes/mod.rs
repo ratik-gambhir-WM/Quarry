@@ -17,9 +17,9 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use crate::{config::AppConfig, state::AppState};
+use crate::{config::HttpConfig, state::AppState};
 
-pub fn create_router(state: AppState, config: &AppConfig) -> Router {
+pub fn create_router(state: AppState, config: &HttpConfig) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(config.cors_origins.clone()))

@@ -1,19 +1,19 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::LazyLock,
+    sync::Arc,
 };
+
+pub use crate::repository::document_repository::DealDocumentSummary;
 
 use crate::{
     core::{
-        data_room_helpers::{convert_office_bytes_to_pdf, validate_pdf_bytes, MAX_PDF_BYTES},
+        clients::office_converter::OfficeConverter,
+        data_room_helpers::{validate_pdf_bytes, MAX_PDF_BYTES},
         office_extension_for_mime_type,
         parsers::{docx::parse_docx_from_bytes, pdf::parse_pdf_from_bytes},
     },
-    repository::document_repository::{
-        get_current_deal_document_blob, list_current_deal_documents, DealDocumentSummary,
-        StoredDocumentBlob,
-    },
-    state::AppState,
+    repository::document_repository::{DocumentFileRepository, StoredDocumentBlob},
+    services::error::{ServiceError, ServiceResult},
     utils::require_non_empty,
 };
 use lopdf::{
@@ -29,11 +29,6 @@ const PDF_MAX_LINE_CHARACTERS: usize = 88;
 const MAX_CONCURRENT_OFFICE_PREVIEWS: usize = 2;
 const OFFICE_PREVIEW_CACHE_ENTRIES: usize = 16;
 const OFFICE_PREVIEW_CACHE_BYTES: usize = 128 * 1024 * 1024;
-
-static OFFICE_PREVIEW_SEMAPHORE: LazyLock<Semaphore> =
-    LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_OFFICE_PREVIEWS));
-static OFFICE_PREVIEW_CACHE: LazyLock<Mutex<OfficePreviewCache>> =
-    LazyLock::new(|| Mutex::new(OfficePreviewCache::default()));
 
 #[derive(Default)]
 struct OfficePreviewCache {
@@ -83,85 +78,107 @@ pub struct StoredDocumentText {
     pub text: String,
 }
 
-pub async fn list_deal_documents(
-    state: &AppState,
-    deal_id: &str,
-) -> Result<Vec<DealDocumentSummary>, String> {
-    require_non_empty(deal_id, "dealId")?;
-    list_current_deal_documents(state.sqlite(), deal_id).await
+#[derive(Clone)]
+pub struct StoredDocumentService {
+    files: DocumentFileRepository,
+    office: OfficeConverter,
+    preview_semaphore: Arc<Semaphore>,
+    preview_cache: Arc<Mutex<OfficePreviewCache>>,
 }
 
-pub async fn load_deal_document(
-    state: &AppState,
-    deal_id: &str,
-    file_id: &str,
-) -> Result<Option<StoredDocumentBlob>, String> {
-    require_non_empty(deal_id, "dealId")?;
-    require_non_empty(file_id, "fileId")?;
-    get_current_deal_document_blob(state.sqlite(), deal_id, file_id).await
-}
-
-pub async fn render_stored_document_as_pdf(
-    document: StoredDocumentBlob,
-) -> Result<Vec<u8>, String> {
-    if document.file_bytes.len() as u64 > MAX_PDF_BYTES {
-        return Err(format!(
-            "The stored document is too large to preview ({} MB; limit is {} MB).",
-            document.file_bytes.len() / (1024 * 1024),
-            MAX_PDF_BYTES / (1024 * 1024)
-        ));
+impl StoredDocumentService {
+    pub fn new(files: DocumentFileRepository, office: OfficeConverter) -> Self {
+        Self {
+            files,
+            office,
+            preview_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_OFFICE_PREVIEWS)),
+            preview_cache: Arc::new(Mutex::new(OfficePreviewCache::default())),
+        }
     }
 
-    let pdf_bytes = if document.mime_type == "application/pdf" {
-        document.file_bytes
-    } else {
-        let extension = office_extension_for_mime_type(&document.mime_type).ok_or_else(|| {
+    pub async fn list(&self, deal_id: &str) -> ServiceResult<Vec<DealDocumentSummary>> {
+        require_non_empty(deal_id, "dealId").map_err(ServiceError::validation)?;
+        self.files.list_for_deal(deal_id).await.map_err(Into::into)
+    }
+
+    pub async fn load(&self, deal_id: &str, file_id: &str) -> ServiceResult<StoredDocumentBlob> {
+        require_non_empty(deal_id, "dealId").map_err(ServiceError::validation)?;
+        require_non_empty(file_id, "fileId").map_err(ServiceError::validation)?;
+        self.files
+            .current_blob(deal_id, file_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::not_found(format!(
+                    "file `{file_id}` was not found for deal `{deal_id}`"
+                ))
+            })
+    }
+
+    pub async fn render_pdf(&self, document: StoredDocumentBlob) -> ServiceResult<Vec<u8>> {
+        self.render_pdf_inner(document)
+            .await
+            .map_err(ServiceError::validation)
+    }
+
+    async fn render_pdf_inner(&self, document: StoredDocumentBlob) -> Result<Vec<u8>, String> {
+        if document.file_bytes.len() as u64 > MAX_PDF_BYTES {
+            return Err(format!(
+                "The stored document is too large to preview ({} MB; limit is {} MB).",
+                document.file_bytes.len() / (1024 * 1024),
+                MAX_PDF_BYTES / (1024 * 1024)
+            ));
+        }
+
+        let pdf_bytes = if document.mime_type == "application/pdf" {
+            document.file_bytes
+        } else {
+            let extension = office_extension_for_mime_type(&document.mime_type).ok_or_else(|| {
             format!(
                 "Preview is unsupported for `{}` ({}). Supported formats are PDF, DOC, DOCX, XLS, XLSX, PPT, and PPTX.",
                 document.display_name, document.mime_type
             )
         })?;
-        let cache_key = office_preview_cache_key(
-            &document.mime_type,
-            &document.display_name,
-            &document.file_bytes,
-        );
-        if let Some(cached) = OFFICE_PREVIEW_CACHE.lock().await.get(&cache_key) {
-            validate_pdf_bytes(&cached, "the cached PDF preview")?;
-            return Ok(cached);
-        }
+            let cache_key = office_preview_cache_key(
+                &document.mime_type,
+                &document.display_name,
+                &document.file_bytes,
+            );
+            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+                validate_pdf_bytes(&cached, "the cached PDF preview")?;
+                return Ok(cached);
+            }
 
-        let _permit = OFFICE_PREVIEW_SEMAPHORE
-            .acquire()
+            let _permit = self
+                .preview_semaphore
+                .acquire()
+                .await
+                .map_err(|_| "Office preview conversion is shutting down".to_string())?;
+            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+                validate_pdf_bytes(&cached, "the cached PDF preview")?;
+                return Ok(cached);
+            }
+
+            let display_name = document.display_name;
+            let bytes = document.file_bytes;
+            let office = self.office.clone();
+            let converted = tokio::task::spawn_blocking(move || {
+                render_office_bytes_as_pdf(extension, &display_name, &bytes, |extension, bytes| {
+                    office.convert_bytes(extension, bytes)
+                })
+            })
             .await
-            .map_err(|_| "Office preview conversion is shutting down".to_string())?;
-        if let Some(cached) = OFFICE_PREVIEW_CACHE.lock().await.get(&cache_key) {
-            validate_pdf_bytes(&cached, "the cached PDF preview")?;
-            return Ok(cached);
-        }
+            .map_err(|error| format!("document preview worker failed: {error}"))??;
+            validate_pdf_bytes(&converted, "the converted PDF preview")?;
+            self.preview_cache
+                .lock()
+                .await
+                .insert(cache_key, converted.clone());
+            converted
+        };
 
-        let display_name = document.display_name;
-        let bytes = document.file_bytes;
-        let converted = tokio::task::spawn_blocking(move || {
-            render_office_bytes_as_pdf(
-                extension,
-                &display_name,
-                &bytes,
-                convert_office_bytes_to_pdf,
-            )
-        })
-        .await
-        .map_err(|error| format!("document preview worker failed: {error}"))??;
-        validate_pdf_bytes(&converted, "the converted PDF preview")?;
-        OFFICE_PREVIEW_CACHE
-            .lock()
-            .await
-            .insert(cache_key, converted.clone());
-        converted
-    };
-
-    validate_pdf_bytes(&pdf_bytes, "the PDF preview")?;
-    Ok(pdf_bytes)
+        validate_pdf_bytes(&pdf_bytes, "the PDF preview")?;
+        Ok(pdf_bytes)
+    }
 }
 
 fn office_preview_cache_key(mime_type: &str, display_name: &str, bytes: &[u8]) -> String {
@@ -174,7 +191,18 @@ fn office_preview_cache_key(mime_type: &str, display_name: &str, bytes: &[u8]) -
     format!("{:x}", hasher.finalize())
 }
 
-pub async fn render_stored_document_as_text(
+impl StoredDocumentService {
+    pub async fn render_text(
+        &self,
+        document: StoredDocumentBlob,
+    ) -> ServiceResult<StoredDocumentText> {
+        render_stored_document_as_text(document)
+            .await
+            .map_err(ServiceError::validation)
+    }
+}
+
+async fn render_stored_document_as_text(
     document: StoredDocumentBlob,
 ) -> Result<StoredDocumentText, String> {
     if document.file_bytes.len() as u64 > MAX_PDF_BYTES {

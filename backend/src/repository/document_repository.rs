@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +25,7 @@ use crate::core::{
     nodes::document_node::{FileChunkNode, FileNode, FileVersionNode},
     sqlbuilder::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlQuery, SqlValue},
 };
+use crate::repository::RepositoryError;
 
 #[derive(Debug, Deserialize)]
 struct ProjectionEnvelope<T> {
@@ -67,7 +68,160 @@ pub struct StoredDocumentBlob {
     pub file_bytes: Vec<u8>,
 }
 
-pub async fn list_current_deal_documents(
+#[derive(Clone)]
+pub struct DocumentFileRepository {
+    sqlite: SqliteClient,
+}
+
+impl DocumentFileRepository {
+    pub fn new(sqlite: SqliteClient) -> Self {
+        Self { sqlite }
+    }
+
+    pub async fn list_for_deal(
+        &self,
+        deal_id: &str,
+    ) -> Result<Vec<DealDocumentSummary>, RepositoryError> {
+        list_current_deal_documents(&self.sqlite, deal_id)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn current_blob(
+        &self,
+        deal_id: &str,
+        file_id: &str,
+    ) -> Result<Option<StoredDocumentBlob>, RepositoryError> {
+        get_current_deal_document_blob(&self.sqlite, deal_id, file_id)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn find_current_by_hash(
+        &self,
+        deal_id: &str,
+        workspace_id: &str,
+        content_sha256: &str,
+    ) -> Result<Option<PersistedFileIdentity>, RepositoryError> {
+        find_current_sqlite_file_by_content_hash(
+            &self.sqlite,
+            deal_id,
+            workspace_id,
+            content_sha256,
+        )
+        .await
+        .map_err(RepositoryError::storage)
+    }
+
+    pub(crate) async fn persist(
+        &self,
+        input: FilePersistenceInput,
+    ) -> Result<PersistedFileIdentity, RepositoryError> {
+        persist_file_blob(&self.sqlite, input)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+}
+
+#[derive(Clone)]
+pub struct DocumentIndexRepository {
+    helix: Arc<HelixClient>,
+}
+
+impl DocumentIndexRepository {
+    pub fn new(helix: Arc<HelixClient>) -> Self {
+        Self { helix }
+    }
+
+    pub async fn initialize(&self) -> Result<(), RepositoryError> {
+        ensure_document_indexes(&self.helix)
+            .await
+            .map(|_| ())
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn insert_graph(
+        &self,
+        filename: &str,
+        file_size_bytes: u64,
+        file_node: FileNode,
+        version_node: FileVersionNode,
+        chunk_nodes: Vec<FileChunkNode>,
+    ) -> Result<Value, RepositoryError> {
+        insert_document_graph(
+            &self.helix,
+            filename,
+            file_size_bytes,
+            file_node,
+            version_node,
+            chunk_nodes,
+        )
+        .await
+        .map_err(RepositoryError::storage)
+    }
+
+    pub async fn current_document(
+        &self,
+        workspace_id: &str,
+        file_id: &str,
+    ) -> Result<Option<HelixDocumentVersion>, RepositoryError> {
+        get_current_helix_document(&self.helix, workspace_id, file_id)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn current_document_by_hash(
+        &self,
+        workspace_id: &str,
+        content_sha256: &str,
+    ) -> Result<Option<HelixDocumentVersion>, RepositoryError> {
+        find_current_helix_document_by_content_hash(&self.helix, workspace_id, content_sha256)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn document_version(
+        &self,
+        workspace_id: &str,
+        file_id: &str,
+        version_id: &str,
+    ) -> Result<Option<HelixDocumentVersion>, RepositoryError> {
+        get_helix_document_version(&self.helix, workspace_id, file_id, version_id)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn document_version_chunks(
+        &self,
+        workspace_id: &str,
+        file_id: &str,
+        version_id: &str,
+    ) -> Result<Vec<FileChunkResult>, RepositoryError> {
+        get_helix_document_version_chunks(&self.helix, workspace_id, file_id, version_id)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn search_vector(
+        &self,
+        search: FileChunkVectorSearch,
+    ) -> Result<Vec<VectorFileChunkHit>, RepositoryError> {
+        search_document_chunks_by_vector(&self.helix, search)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+
+    pub async fn search_keyword(
+        &self,
+        search: FileChunkKeywordSearch,
+    ) -> Result<Vec<KeywordFileChunkHit>, RepositoryError> {
+        search_document_chunks_by_keyword(&self.helix, search)
+            .await
+            .map_err(RepositoryError::storage)
+    }
+}
+
+async fn list_current_deal_documents(
     sqlite: &SqliteClient,
     deal_id: &str,
 ) -> Result<Vec<DealDocumentSummary>, String> {
@@ -101,7 +255,7 @@ pub async fn list_current_deal_documents(
         .map_err(|error| format!("failed to decode deal document list: {error}"))
 }
 
-pub async fn get_current_deal_document_blob(
+async fn get_current_deal_document_blob(
     sqlite: &SqliteClient,
     deal_id: &str,
     file_id: &str,
@@ -146,7 +300,7 @@ pub async fn get_current_deal_document_blob(
     .map_err(|error: SqliteClientError| format!("failed to decode document blob: {error}"))
 }
 
-pub async fn find_current_sqlite_file_by_content_hash(
+async fn find_current_sqlite_file_by_content_hash(
     sqlite: &SqliteClient,
     deal_id: &str,
     workspace_id: &str,
@@ -203,7 +357,7 @@ pub async fn find_current_sqlite_file_by_content_hash(
         .map_err(|error: SqliteClientError| format!("failed to decode deal attachment: {error}"))
 }
 
-pub(crate) async fn persist_file_blob(
+async fn persist_file_blob(
     sqlite: &SqliteClient,
     file_persistence: FilePersistenceInput,
 ) -> Result<PersistedFileIdentity, String> {
@@ -232,7 +386,7 @@ pub(crate) async fn persist_file_blob(
         .map_err(|error| format!("failed to persist file transaction: {error}"))
 }
 
-pub(crate) async fn insert_document_graph(
+async fn insert_document_graph(
     helix: &HelixClient,
     filename: &str,
     file_size_bytes: u64,
@@ -664,11 +818,11 @@ fn invalid_row_value(column: &str, expected: &str) -> SqliteClientError {
     ))
 }
 
-pub async fn ensure_document_indexes(helix: &HelixClient) -> Result<Value, String> {
+async fn ensure_document_indexes(helix: &HelixClient) -> Result<Value, String> {
     helix.execute_dynamic_query(create_document_indexes).await
 }
 
-pub async fn find_current_helix_document_by_content_hash(
+async fn find_current_helix_document_by_content_hash(
     helix: &HelixClient,
     workspace_id: &str,
     content_sha256: &str,
@@ -678,7 +832,7 @@ pub async fn find_current_helix_document_by_content_hash(
     map_document_version_response(response, workspace_id, None, None, Some(content_sha256))
 }
 
-pub async fn get_current_helix_document(
+async fn get_current_helix_document(
     helix: &HelixClient,
     workspace_id: &str,
     file_id: &str,
@@ -688,7 +842,7 @@ pub async fn get_current_helix_document(
     map_document_version_response(response, workspace_id, Some(file_id), None, None)
 }
 
-pub async fn get_helix_document_version(
+async fn get_helix_document_version(
     helix: &HelixClient,
     workspace_id: &str,
     file_id: &str,
@@ -709,7 +863,7 @@ pub async fn get_helix_document_version(
     )
 }
 
-pub async fn get_helix_document_version_chunks(
+async fn get_helix_document_version_chunks(
     helix: &HelixClient,
     workspace_id: &str,
     file_id: &str,
@@ -743,7 +897,7 @@ pub async fn get_helix_document_version_chunks(
     Ok(chunks)
 }
 
-pub async fn search_document_chunks_by_vector(
+async fn search_document_chunks_by_vector(
     helix: &HelixClient,
     search: FileChunkVectorSearch,
 ) -> Result<Vec<VectorFileChunkHit>, String> {
@@ -757,7 +911,7 @@ pub async fn search_document_chunks_by_vector(
     Ok(response.chunks.properties)
 }
 
-pub async fn search_document_chunks_by_keyword(
+async fn search_document_chunks_by_keyword(
     helix: &HelixClient,
     search: FileChunkKeywordSearch,
 ) -> Result<Vec<KeywordFileChunkHit>, String> {

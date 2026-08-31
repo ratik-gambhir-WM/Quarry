@@ -1,48 +1,48 @@
-use axum::{extract::Path, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 
 use crate::{
     core::clients::wm_ai_services::{
-        validate_create_index_payload, validate_graph_rag_query_payload, CreateIndexPayload,
-        CreateIndexResponse, GraphRagClient, GraphRagQueryPayload, GraphRagQueryResponse,
-        IndexServiceClient, IndexStatusResponse,
+        CreateIndexPayload, CreateIndexResponse, GraphRagQueryPayload, GraphRagQueryResponse,
+        IndexStatusResponse,
     },
-    handlers::AppError,
+    handlers::{AppError, AppState},
 };
 
 pub(crate) async fn create_index_handler(
+    State(state): State<AppState>,
     Json(payload): Json<CreateIndexPayload>,
 ) -> crate::errors::AppResult<Json<CreateIndexResponse>> {
-    validate_create_index_payload(&payload).map_err(AppError::bad_request)?;
-    let client = IndexServiceClient::from_env().map_err(AppError::internal)?;
-
-    client
+    state
+        .research
         .create_index(payload)
         .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn index_status_handler(
+    State(state): State<AppState>,
     Path(index_id): Path<String>,
 ) -> crate::errors::AppResult<Json<IndexStatusResponse>> {
-    let client = IndexServiceClient::from_env().map_err(AppError::internal)?;
-
-    client
-        .status(&index_id)
+    state
+        .research
+        .index_status(&index_id)
         .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn graph_rag_query_handler(
+    State(state): State<AppState>,
     Json(payload): Json<GraphRagQueryPayload>,
 ) -> crate::errors::AppResult<Json<GraphRagQueryResponse>> {
-    validate_graph_rag_query_payload(&payload).map_err(AppError::bad_request)?;
-    let client = GraphRagClient::from_env().map_err(AppError::internal)?;
-
-    client
-        .query(payload)
+    state
+        .research
+        .graph_rag_query(payload)
         .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }

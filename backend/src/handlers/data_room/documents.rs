@@ -6,9 +6,7 @@ use serde::Deserialize;
 
 use crate::{
     handlers::AppError,
-    services::data_room_service::{
-        build_document_preview, list_deal_data_room, DealDataRoom, DocumentPreview,
-    },
+    services::data_room_service::{DealDataRoom, DocumentPreview},
     state::AppState,
 };
 
@@ -22,9 +20,12 @@ pub(crate) async fn list_deal_data_room_handler(
     State(state): State<AppState>,
     Path(deal_id): Path<String>,
 ) -> crate::errors::AppResult<Json<DealDataRoom>> {
-    list_deal_data_room(&state, deal_id)
+    state
+        .data_rooms
+        .list(deal_id)
+        .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn preview_deal_document_handler(
@@ -32,11 +33,10 @@ pub(crate) async fn preview_deal_document_handler(
     Path(deal_id): Path<String>,
     Json(payload): Json<PreviewDocumentPayload>,
 ) -> crate::errors::AppResult<Json<DocumentPreview>> {
-    tokio::task::spawn_blocking(move || {
-        build_document_preview(&state, &deal_id, &payload.relative_path)
-    })
-    .await
-    .map_err(|err| AppError::internal(format!("document preview worker failed: {err}")))?
-    .map(Json)
-    .map_err(AppError::bad_request)
+    state
+        .data_rooms
+        .preview(&deal_id, &payload.relative_path)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }

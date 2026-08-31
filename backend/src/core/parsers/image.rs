@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{env, fs, path::Path};
+use std::{fs, path::Path};
 
 use crate::core::{
     clients::openai::{OpenAiClient, ResponsesFileInput},
@@ -8,11 +8,11 @@ use crate::core::{
 };
 use base64::{engine::general_purpose, Engine as _};
 
-const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.4";
+const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 
 pub async fn parse_image_file(
     image_path: &Path,
-    openai_client: &OpenAiClient<'_>,
+    openai_client: &OpenAiClient,
 ) -> Result<String, String> {
     let image = fs::read(image_path)
         .map_err(|err| format!("failed to read image file {}: {err}", image_path.display()))?;
@@ -24,15 +24,13 @@ pub async fn parse_image_file(
 pub async fn describe_image(
     image: &[u8],
     mime_type: &str,
-    openai_client: &OpenAiClient<'_>,
+    openai_client: &OpenAiClient,
 ) -> Result<String, String> {
     if image.is_empty() {
         return Err("cannot describe an empty image".to_string());
     }
 
     let normalized_mime_type = normalize_image_mime_type(mime_type)?;
-    let model = env::var("OPENAI_IMAGE_DESCRIPTION_MODEL")
-        .unwrap_or_else(|_| DEFAULT_IMAGE_DESCRIPTION_MODEL.to_string());
     let image_base64 = general_purpose::STANDARD.encode(image);
     let file_inputs = [ResponsesFileInput::ImageData {
         mime_type: normalized_mime_type,
@@ -43,7 +41,7 @@ pub async fn describe_image(
         .gen_model_response_with_files(
             Some(IMAGE_DESCRIPTION_PROMPT),
             None,
-            Some(&model),
+            Some(DEFAULT_IMAGE_DESCRIPTION_MODEL),
             Some(&file_inputs),
         )
         .await?;

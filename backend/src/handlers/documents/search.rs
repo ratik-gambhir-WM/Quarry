@@ -3,70 +3,31 @@ use axum::{extract::State, Json};
 use crate::{
     core::helix_queries::files::search_quarry_file::{
         FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
-        MAX_FILE_CHUNK_SEARCH_LIMIT,
     },
     errors::AppResult,
     handlers::{AppError, AppState},
-    services::document_ingestion_service::{search_chunks_by_keyword, search_chunks_by_vector},
-    utils::require_non_empty,
 };
 
 pub(crate) async fn vector_search_handler(
     State(state): State<AppState>,
     Json(search): Json<FileChunkVectorSearch>,
 ) -> AppResult<Json<Vec<VectorFileChunkHit>>> {
-    validate_vector_search(&search)?;
-    search_chunks_by_vector(&state, search)
+    state
+        .document_search
+        .vector(search)
         .await
         .map(Json)
-        .map_err(AppError::internal)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn keyword_search_handler(
     State(state): State<AppState>,
     Json(search): Json<FileChunkKeywordSearch>,
 ) -> AppResult<Json<Vec<KeywordFileChunkHit>>> {
-    validate_keyword_search(&search)?;
-    search_chunks_by_keyword(&state, search)
+    state
+        .document_search
+        .keyword(search)
         .await
         .map(Json)
-        .map_err(AppError::internal)
-}
-
-fn validate_vector_search(search: &FileChunkVectorSearch) -> AppResult<()> {
-    validate_common(&search.workspace_id, search.limit)?;
-    if search.query_embedding.is_empty() {
-        return Err(AppError::bad_request("queryEmbedding cannot be empty"));
-    }
-    if search
-        .query_embedding
-        .iter()
-        .any(|value| !value.is_finite())
-    {
-        return Err(AppError::bad_request(
-            "queryEmbedding must contain only finite values",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_keyword_search(search: &FileChunkKeywordSearch) -> AppResult<()> {
-    validate_common(&search.workspace_id, search.limit)?;
-    if search.query_text.trim().is_empty() {
-        return Err(AppError::bad_request("queryText cannot be empty"));
-    }
-    Ok(())
-}
-
-fn validate_common(workspace_id: &str, limit: usize) -> AppResult<()> {
-    require_non_empty(workspace_id, "workspaceId").map_err(AppError::bad_request)?;
-    if limit == 0 {
-        return Err(AppError::bad_request("limit must be greater than zero"));
-    }
-    if limit > MAX_FILE_CHUNK_SEARCH_LIMIT {
-        return Err(AppError::bad_request(format!(
-            "limit must not exceed {MAX_FILE_CHUNK_SEARCH_LIMIT}"
-        )));
-    }
-    Ok(())
+        .map_err(AppError::from)
 }
