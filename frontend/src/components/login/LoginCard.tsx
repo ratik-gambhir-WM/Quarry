@@ -32,8 +32,8 @@ export function LoginCard({
   return (
     <section className="glass-panel mx-auto w-full max-w-[440px] rounded-[8px] p-xl">
       <BrandLockup
-        subtitle="Precision insights for executive decision-makers."
-        title="Strategic Portfolio Hub"
+        subtitle="Unearth what matters."
+        title="Quarry"
       />
 
       <form className="mt-xl space-y-lg" onSubmit={onSubmit}>

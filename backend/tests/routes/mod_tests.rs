@@ -412,6 +412,54 @@ async fn process_file_rejects_a_competing_multipart_deal_id() {
 }
 
 #[tokio::test]
+async fn process_file_rejects_unsupported_uploads_at_the_handler_boundary() {
+    const BOUNDARY: &str = "quarry-invalid-document-extension";
+    let multipart = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"notes.txt\"\r\nContent-Type: text/plain\r\n\r\nnotes\r\n--{BOUNDARY}--\r\n"
+    );
+    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+
+    let response = app
+        .oneshot(
+            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(multipart))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
+    const BOUNDARY: &str = "quarry-blank-document-user";
+    let multipart = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\n   \r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"report.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\r\n--{BOUNDARY}--\r\n"
+    );
+    let app = create_router(AppState::in_memory().unwrap(), &AppConfig::default());
+
+    let response = app
+        .oneshot(
+            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(multipart))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     let mut docx = Docx::default();
     docx.document

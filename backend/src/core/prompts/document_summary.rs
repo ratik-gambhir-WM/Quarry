@@ -1,3 +1,7 @@
+use std::path::Path;
+
+use super::super::CollectedFile;
+
 pub const DOCUMENT_SUMMARY_SYSTEM_PROMPT: &str = r#"
 You are a senior M&A technology diligence advisor supporting West Monroe's TTS team.
 
@@ -14,7 +18,15 @@ If files appear missing, skipped, outdated, duplicative, or inconsistent, mentio
 Use Markdown with short sections, clear headings, practical diligence language, and prioritized bullets.
 "#;
 
-pub const DATA_ROOM_TECH_DILIGENCE_SUMMARY_PROMPT: &str = r#"
+pub const CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT: &str = r#"You summarize collections of attached business documents.
+
+Rely on the attached files as the primary source of truth. Produce a concise but complete synthesis
+of the full document set, call out important details from individual files when relevant, and note
+any gaps, contradictions, or follow-up questions. If some files were skipped, mention the impact.
+
+Use Markdown with short sections and clear headings."#;
+
+const DATA_ROOM_TECH_DILIGENCE_SUMMARY_PROMPT: &str = r#"
 Summarize the attached data-room documents for an M&A technology diligence team.
 
 Produce a leadership-ready synthesis with the following sections:
@@ -107,7 +119,7 @@ Provide a table mapping:
   - Security assessment reports for critical applications
 "#;
 
-pub const PRODUCT_AND_APPLICATION_DEEP_DIVE_PROMPT: &str = r#"
+const PRODUCT_AND_APPLICATION_DEEP_DIVE_PROMPT: &str = r#"
 Product and Application Deep Dive
 
 Go beyond a generic technology overview. Identify each major product line, platform, module, or business capability described in the documents and explain how it is enabled by software. Write for a reader who does not know audit, tax, accounting, or compliance terminology.
@@ -132,3 +144,61 @@ For each product line or platform, provide:
 - Vendor, licensing, or third-party dependencies
 - Buyer implications and recommended follow-up
 "#;
+
+pub fn build_document_summary_prompt(
+    root: &Path,
+    files: &[CollectedFile],
+    skipped_files: &[String],
+) -> String {
+    format!(
+        "{}\n\n{}\n\n{}",
+        build_basic_document_summary_prompt(root, files, skipped_files),
+        DATA_ROOM_TECH_DILIGENCE_SUMMARY_PROMPT.trim(),
+        PRODUCT_AND_APPLICATION_DEEP_DIVE_PROMPT.trim(),
+    )
+}
+
+pub fn build_basic_document_summary_prompt(
+    root: &Path,
+    files: &[CollectedFile],
+    skipped_files: &[String],
+) -> String {
+    let manifest = files
+        .iter()
+        .map(|file| {
+            format!(
+                "- {} ({}, {} bytes)",
+                file.relative_path, file.mime_type, file.size_bytes
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let skipped = if skipped_files.is_empty() {
+        "No files were skipped.".to_string()
+    } else {
+        format!(
+            "The following files were skipped because they are unsupported or empty:\n{}",
+            skipped_files
+                .iter()
+                .map(|path| format!("- {path}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+
+    format!(
+        "Summarize the attached document set from `{}`.\n\n\
+Document manifest:\n\
+{}\n\n\
+{}\n\n\
+Please:\n\
+- provide an overall summary of the full document set\n\
+- call out the most important details from each file when useful\n\
+- note contradictions, risks, missing context, or follow-up questions\n\
+- mention skipped files if they could change the conclusion",
+        root.display(),
+        manifest,
+        skipped,
+    )
+}

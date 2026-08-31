@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
+use crate::core::models::document::{Document, DocumentChunk};
 use crate::core::text_chunking::token_bounded_ranges;
-use crate::services::document_ingestion_service::{Document, DocumentChunk};
 use crate::utils::document_id_from_content;
 use docx_rust::{
     app::{App, AppNoApNamespace, AppWithApNamespace},

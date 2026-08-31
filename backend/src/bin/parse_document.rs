@@ -3,6 +3,7 @@ use quarry_backend::{
     core::{
         clients::openai::{OpenAiClient, ResponsesFileInput},
         parsers::docx::parse_docx_from_path,
+        prompts::{build_basic_document_summary_prompt, CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT},
         CollectedFile,
     },
     utils::openai_api_key,
@@ -18,14 +19,6 @@ const APP_NAME: &str = "DataRoomCLI";
 const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 const MAX_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_TOTAL_REQUEST_FILE_BYTES: usize = 50 * 1024 * 1024;
-const DOCUMENT_SUMMARY_SYSTEM_PROMPT: &str = r#"You summarize collections of attached business documents.
-
-Rely on the attached files as the primary source of truth. Produce a concise but complete synthesis
-of the full document set, call out important details from individual files when relevant, and note
-any gaps, contradictions, or follow-up questions. If some files were skipped, mention the impact.
-
-Use Markdown with short sections and clear headings."#;
-
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::dotenv();
@@ -106,7 +99,7 @@ async fn summarize_dir(path: String) -> Result<(), String> {
     let client = OpenAiClient::new(&api_key);
     let model = env::var("OPENAI_DOCUMENT_SUMMARY_MODEL")
         .unwrap_or_else(|_| DEFAULT_DOCUMENT_SUMMARY_MODEL.to_string());
-    let prompt = build_summary_prompt(&root, &files, &skipped_files);
+    let prompt = build_basic_document_summary_prompt(&root, &files, &skipped_files);
     let file_inputs: Vec<ResponsesFileInput<'_>> = files
         .iter()
         .map(|file| ResponsesFileInput::FileData {
@@ -119,7 +112,7 @@ async fn summarize_dir(path: String) -> Result<(), String> {
     let summary = client
         .gen_model_response_with_files(
             Some(&prompt),
-            Some(DOCUMENT_SUMMARY_SYSTEM_PROMPT),
+            Some(CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT),
             Some(&model),
             Some(&file_inputs),
         )
@@ -211,47 +204,6 @@ fn collect_supported_files(root: &Path) -> Result<(Vec<CollectedFile>, Vec<Strin
     skipped_files.sort();
 
     Ok((files, skipped_files))
-}
-
-fn build_summary_prompt(root: &Path, files: &[CollectedFile], skipped_files: &[String]) -> String {
-    let manifest = files
-        .iter()
-        .map(|file| {
-            format!(
-                "- {} ({}, {} bytes)",
-                file.relative_path, file.mime_type, file.size_bytes
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let skipped = if skipped_files.is_empty() {
-        "No files were skipped.".to_string()
-    } else {
-        format!(
-            "The following files were skipped because they are unsupported or empty:\n{}",
-            skipped_files
-                .iter()
-                .map(|path| format!("- {path}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
-
-    format!(
-        "Summarize the attached document set from `{}`.\n\n\
-Document manifest:\n\
-{}\n\n\
-{}\n\n\
-Please:\n\
-- provide an overall summary of the full document set\n\
-- call out the most important details from each file when useful\n\
-- note contradictions, risks, missing context, or follow-up questions\n\
-- mention skipped files if they could change the conclusion",
-        root.display(),
-        manifest,
-        skipped
-    )
 }
 
 fn display_relative_path(root: &Path, path: &Path) -> String {

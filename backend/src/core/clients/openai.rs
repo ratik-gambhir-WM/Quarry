@@ -4,9 +4,9 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use serde_json::{json, Value};
 
+use crate::core::prompts::{DEFAULT_RESPONSES_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS};
+
 const DEFAULT_RESPONSES_MODEL: &str = "gpt-5.5";
-const DEFAULT_RESPONSES_PROMPT: &str = "Provide a helpful response.";
-const DEFAULT_SYSTEM_INSTRUCTIONS: &str = "You are a helpful assistant.";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const OPENAI_EMBEDDINGS_URL: &str = "https://api.openai.com/v1/embeddings";
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";

@@ -4,11 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::core::models::document::{Document as IngestionDocument, DocumentChunk};
 use crate::core::{
     clients::openai::OpenAiClient, parsers::image::describe_image,
     text_chunking::token_bounded_ranges,
 };
-use crate::services::document_ingestion_service::{Document as IngestionDocument, DocumentChunk};
 use crate::utils::document_id_from_content;
 use image::{codecs::png::PngEncoder, ColorType, ImageEncoder};
 use pdf_extract::{xobject::PdfImage, Document, Error as PdfError, Stream};

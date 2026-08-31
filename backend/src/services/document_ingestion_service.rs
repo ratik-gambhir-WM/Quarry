@@ -1,7 +1,9 @@
-use std::{env, path::Path, time::Instant};
+use std::{env, time::Instant};
 
 use futures_util::{stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+pub use crate::core::models::document::{Document, DocumentChunk};
 
 use crate::{
     core::{
@@ -13,45 +15,15 @@ use crate::{
     },
     repository::document_repository::{
         find_current_sqlite_file_by_content_hash, get_current_helix_document,
-        persist_document_and_chunks, search_document_chunks_by_keyword,
-        search_document_chunks_by_vector,
+        search_document_chunks_by_keyword, search_document_chunks_by_vector,
     },
+    services::document_service::persist_document_and_chunks,
     state::AppState,
-    utils::{document_id_from_content, openai_api_key, require_non_empty, sha256_hex},
+    utils::{document_id_from_content, openai_api_key, sha256_hex},
 };
 
 const MAX_CONCURRENT_DOCUMENTS: usize = 8;
 const DOCUMENT_PARSE_API: &str = "document.parse";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Document {
-    pub file_id: String,
-    pub document_id: String,
-    pub user_id: String,
-    pub file_name: String,
-    pub source_type: String,
-    pub local_path: Option<String>,
-    pub file_size_bytes: u64,
-    pub token_count: u64,
-    pub content_hash: String,
-    pub rendered_pdf_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentChunk {
-    pub chunk_id: String,
-    pub document_id: String,
-    pub user_id: String,
-    pub text: String,
-    pub embedding: Option<Vec<f32>>,
-    pub sequence_number: u32,
-    pub page_numbers: Option<Vec<u32>>,
-    pub start_offset: usize,
-    pub end_offset: usize,
-    pub token_count: u32,
-    pub content_hash: String,
-    pub section_title: Option<String>,
-}
 
 #[derive(Debug)]
 pub struct UploadedDocument {
@@ -92,14 +64,6 @@ pub async fn process_uploaded_documents(
     user_id: &str,
     files: Vec<UploadedDocument>,
 ) -> Result<ProcessDocumentsResponse, String> {
-    let deal_id = deal_id.trim();
-    require_non_empty(deal_id, "dealId")?;
-    let user_id = user_id.trim();
-    require_non_empty(user_id, "userId")?;
-    if files.is_empty() {
-        return Err("at least one PDF or DOCX upload is required".to_string());
-    }
-
     let total = files.len();
     let worker_state = state.clone();
     let worker_deal_id = deal_id.to_string();
@@ -150,10 +114,7 @@ async fn process_uploaded_document(
     user_id: String,
 ) -> Result<ProcessedDocument, String> {
     let filename = file.filename.clone();
-    let content_hash = match uploaded_document_content_hash(&file) {
-        Ok(content_hash) => content_hash,
-        Err(error) => return Ok(failed_document(filename, error)),
-    };
+    let content_hash = uploaded_document_content_hash(&file);
     let document_id = document_id_from_content(&user_id, &content_hash);
     let attachment_lock_id = format!("{deal_id}\0{document_id}");
     let _processing_guard = state.lock_document_processing(&attachment_lock_id).await;
@@ -224,20 +185,8 @@ async fn process_uploaded_document(
     )
 }
 
-fn uploaded_document_content_hash(file: &UploadedDocument) -> Result<String, String> {
-    let extension = Path::new(&file.filename)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| "invalid file format".to_string())?;
-    if !matches!(extension.as_str(), "pdf" | "docx") {
-        return Err("invalid file format".to_string());
-    }
-    if file.bytes.is_empty() {
-        return Err("file is empty".to_string());
-    }
-
-    Ok(sha256_hex(&file.bytes))
+fn uploaded_document_content_hash(file: &UploadedDocument) -> String {
+    sha256_hex(&file.bytes)
 }
 
 fn failed_document(filename: String, error: String) -> ProcessedDocument {

@@ -19,7 +19,7 @@ export function SidebarLink({ homeSection, href, icon, label, navigationState }:
         aria-label={label}
         className={({ isActive }) =>
           [
-            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition",
+            "grid w-full grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 text-left transition",
             isActive && (!isVaultLink || homeSection === "vault")
               ? "bg-sidebar-selected text-sidebar-active"
               : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
@@ -30,7 +30,7 @@ export function SidebarLink({ homeSection, href, icon, label, navigationState }:
         to={href}
       >
         <Icon className="h-5 w-5 text-current" name={icon} />
-        <span className="text-[13px] font-medium leading-5">{label}</span>
+        <span className="min-w-0 truncate text-[13px] font-medium leading-5">{label}</span>
       </NavLink>
     );
   }
@@ -38,11 +38,11 @@ export function SidebarLink({ homeSection, href, icon, label, navigationState }:
   return (
     <button
       aria-label={label}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sidebar-text transition hover:bg-sidebar-hover hover:text-sidebar-active"
+      className="grid w-full grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 text-left text-sidebar-text transition hover:bg-sidebar-hover hover:text-sidebar-active"
       type="button"
     >
       <Icon className="h-5 w-5 text-sidebar-muted" name={icon} />
-      <span className="text-[13px] font-medium leading-5">{label}</span>
+      <span className="min-w-0 truncate text-[13px] font-medium leading-5">{label}</span>
     </button>
   );
 }

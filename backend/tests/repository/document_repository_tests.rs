@@ -1,4 +1,11 @@
 use super::*;
+use std::path::Path;
+
+use crate::{
+    core::{clients::sqlite::SqliteClient, models::document::Document},
+    services::document_service::build_file_persistence_input,
+    utils::{document_id_from_content, file_version_id, sha256_hex},
+};
 
 const OWNER: &str = "analyst@example.com";
 const DEAL_ID: &str = "DEAL-FILES";
@@ -54,6 +61,16 @@ fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Documen
     }
 }
 
+async fn persist_file_blob(
+    sqlite: &SqliteClient,
+    deal_id: &str,
+    document: &Document,
+    file_bytes: Vec<u8>,
+) -> Result<PersistedFileIdentity, String> {
+    let file_persistence = build_file_persistence_input(deal_id, document, file_bytes)?;
+    super::persist_file_blob(sqlite, file_persistence).await
+}
+
 fn table_counts(state: &crate::state::AppState) -> (i64, i64, i64) {
     state
         .with_db(|connection| {
@@ -77,12 +94,13 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
     let document = document("file-1", OWNER, "report.pdf", &file_bytes);
     let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
 
-    let persisted = persist_file_blob(state.sqlite(), DEAL_ID, &document, file_bytes.clone())
-        .await
-        .unwrap();
+    let insert_blob_result =
+        persist_file_blob(state.sqlite(), DEAL_ID, &document, file_bytes.clone())
+            .await
+            .unwrap();
 
     assert_eq!(
-        persisted,
+        insert_blob_result,
         PersistedFileIdentity {
             file_id: "file-1".to_string(),
             workspace_id: OWNER.to_string(),
@@ -261,20 +279,29 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
     let first = document("file-versions", OWNER, "report.pdf", &first_bytes);
     let second = document("file-versions", OWNER, "report.pdf", &second_bytes);
 
-    let first_identity = persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
-        .await
-        .unwrap();
-    let retry_identity = persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
-        .await
-        .unwrap();
-    assert_eq!(retry_identity, first_identity);
+    let first_insert_blob_result =
+        persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
+            .await
+            .unwrap();
+    let retry_insert_blob_result =
+        persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes.clone())
+            .await
+            .unwrap();
+    assert_eq!(retry_insert_blob_result, first_insert_blob_result);
     assert_eq!(table_counts(&state), (1, 1, 1));
 
-    let second_identity = persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
-        .await
-        .unwrap();
-    assert_eq!(second_identity.file_id, first_identity.file_id);
-    assert_ne!(second_identity.version_id, first_identity.version_id);
+    let second_insert_blob_result =
+        persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
+            .await
+            .unwrap();
+    assert_eq!(
+        second_insert_blob_result.file_id,
+        first_insert_blob_result.file_id
+    );
+    assert_ne!(
+        second_insert_blob_result.version_id,
+        first_insert_blob_result.version_id
+    );
     assert_eq!(table_counts(&state), (1, 2, 2));
     persist_file_blob(state.sqlite(), DEAL_ID, &first, first_bytes)
         .await
@@ -405,11 +432,11 @@ async fn file_table_failure_prevents_child_writes() {
     let bytes = b"file trigger".to_vec();
     let document = document("trigger-file", OWNER, "report.pdf", &bytes);
 
-    let error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
-    assert!(error.contains("file rejected"));
+    assert!(insert_blob_error.contains("file rejected"));
     assert_eq!(table_counts(&state), (0, 0, 0));
 }
 
@@ -426,11 +453,11 @@ async fn version_insert_failure_rolls_back_the_parent_file() {
     let bytes = b"version trigger".to_vec();
     let document = document("trigger-version", OWNER, "report.pdf", &bytes);
 
-    let error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
-    assert!(error.contains("version rejected"));
+    assert!(insert_blob_error.contains("version rejected"));
     assert_eq!(table_counts(&state), (0, 0, 0));
 }
 
@@ -447,11 +474,11 @@ async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
     let bytes = b"read-back rollback".to_vec();
     let document = document("read-back-file", OWNER, "report.pdf", &bytes);
 
-    let error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
+    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
-    assert!(error.contains("read-back returned 0 rows"));
+    assert!(insert_blob_error.contains("read-back returned 0 rows"));
     assert_eq!(table_counts(&state), (0, 0, 0));
 }
 
@@ -473,11 +500,11 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
     let second_bytes = b"rejected version".to_vec();
     let second = document("blob-rollback", OWNER, "renamed.pdf", &second_bytes);
 
-    let error = persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
+    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &second, second_bytes)
         .await
         .unwrap_err();
 
-    assert!(error.contains("blob rejected"));
+    assert!(insert_blob_error.contains("blob rejected"));
     assert_eq!(table_counts(&state), (1, 1, 1));
     let current = state
         .with_db(|connection| {
@@ -510,11 +537,11 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
         .unwrap();
     let renamed = document("corrupt-file", OWNER, "renamed.pdf", &bytes);
 
-    let error = persist_file_blob(state.sqlite(), DEAL_ID, &renamed, bytes)
+    let insert_blob_error = persist_file_blob(state.sqlite(), DEAL_ID, &renamed, bytes)
         .await
         .unwrap_err();
 
-    assert!(error.contains("corrupt or collided"));
+    assert!(insert_blob_error.contains("corrupt or collided"));
     let display_name = state
         .with_db(|connection| {
             connection.query_row(
@@ -618,133 +645,4 @@ fn rejects_partial_and_mismatched_document_responses() {
     }))
     .unwrap();
     assert!(map_document_version_response(mismatch, OWNER, None, None, None).is_err());
-}
-
-#[test]
-fn maps_service_chunks_to_deterministic_version_scoped_graph_nodes() {
-    let bytes = b"graph document";
-    let document = document("logical-file", OWNER, "report.pdf", bytes);
-    let persisted = PersistedFileIdentity {
-        file_id: document.file_id.clone(),
-        workspace_id: document.user_id.clone(),
-        display_name: document.file_name.clone(),
-        version_id: file_version_id(&document.file_id, &document.content_hash),
-    };
-    let service_chunk = DocumentChunk {
-        chunk_id: "transient-chunk".to_string(),
-        document_id: document.document_id.clone(),
-        user_id: document.user_id.clone(),
-        text: "graph".to_string(),
-        embedding: Some(vec![0.25, 0.5]),
-        sequence_number: 7,
-        page_numbers: Some(vec![3, 2, 3]),
-        start_offset: 1,
-        end_offset: 6,
-        token_count: 1,
-        content_hash: sha256_hex(b"graph"),
-        section_title: Some("Overview".to_string()),
-    };
-
-    let (file, version, first) =
-        graph_nodes_from_persisted(&persisted, &document, std::slice::from_ref(&service_chunk))
-            .unwrap();
-    let (_, _, retry) =
-        graph_nodes_from_persisted(&persisted, &document, &[service_chunk]).unwrap();
-
-    assert_eq!(file.file_id, persisted.file_id);
-    assert_eq!(version.version_id, persisted.version_id);
-    assert_eq!(version.index_generation, persisted.version_id);
-    assert_eq!(first[0].chunk_id, retry[0].chunk_id);
-    assert_eq!(first[0].page_start, Some(2));
-    assert_eq!(first[0].page_end, Some(3));
-    assert_eq!(first[0].section_path, "Overview");
-    assert_eq!(first[0].created_at, version.indexed_at);
-
-    let another_id = deterministic_file_chunk_id(
-        OWNER,
-        "another-file",
-        &persisted.version_id,
-        &persisted.version_id,
-        7,
-        &first[0].chunk_sha256,
-    );
-    assert_ne!(first[0].chunk_id, another_id);
-}
-
-#[test]
-fn graph_mapping_rejects_invalid_chunk_metadata_before_building_a_query() {
-    let bytes = b"invalid graph document";
-    let document = document("logical-file", OWNER, "report.docx", bytes);
-    let persisted = PersistedFileIdentity {
-        file_id: document.file_id.clone(),
-        workspace_id: document.user_id.clone(),
-        display_name: document.file_name.clone(),
-        version_id: file_version_id(&document.file_id, &document.content_hash),
-    };
-    let chunk = |sequence_number, embedding: Option<Vec<f32>>| DocumentChunk {
-        chunk_id: format!("chunk-{sequence_number}"),
-        document_id: document.document_id.clone(),
-        user_id: document.user_id.clone(),
-        text: "text".to_string(),
-        embedding,
-        sequence_number,
-        page_numbers: None,
-        start_offset: 0,
-        end_offset: 4,
-        token_count: 1,
-        content_hash: sha256_hex(b"text"),
-        section_title: None,
-    };
-
-    assert!(graph_nodes_from_persisted(&persisted, &document, &[chunk(1, None)]).is_err());
-    assert!(graph_nodes_from_persisted(
-        &persisted,
-        &document,
-        &[chunk(1, Some(vec![1.0])), chunk(1, Some(vec![1.0]))],
-    )
-    .is_err());
-    assert!(graph_nodes_from_persisted(
-        &persisted,
-        &document,
-        &[chunk(1, Some(vec![1.0])), chunk(2, Some(vec![1.0, 2.0]))],
-    )
-    .is_err());
-
-    let (_, _, docx_chunks) =
-        graph_nodes_from_persisted(&persisted, &document, &[chunk(1, Some(vec![1.0]))]).unwrap();
-    assert_eq!(docx_chunks[0].page_start, None);
-    assert_eq!(docx_chunks[0].page_end, None);
-}
-
-#[test]
-fn rejects_a_chunk_for_another_document_before_persisting() {
-    let document = Document {
-        file_id: "file-1".to_string(),
-        document_id: "doc-1".to_string(),
-        user_id: "user-1".to_string(),
-        file_name: "test.pdf".to_string(),
-        source_type: "pdf".to_string(),
-        local_path: None,
-        file_size_bytes: 1,
-        token_count: 1,
-        content_hash: "hash".to_string(),
-        rendered_pdf_path: None,
-    };
-
-    let chunk = DocumentChunk {
-        chunk_id: "chunk-1".to_string(),
-        document_id: "doc-2".to_string(),
-        user_id: "user-1".to_string(),
-        text: "text".to_string(),
-        embedding: Some(vec![1.0]),
-        sequence_number: 1,
-        page_numbers: None,
-        start_offset: 0,
-        end_offset: 4,
-        token_count: 1,
-        content_hash: "hash".to_string(),
-        section_title: None,
-    };
-
-    assert!(validate_document_chunk_relationship(&document, &chunk).is_err());
 }

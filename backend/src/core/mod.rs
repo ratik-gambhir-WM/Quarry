@@ -4,6 +4,7 @@ pub mod helix_queries;
 pub mod models;
 pub mod nodes;
 pub mod parsers;
+pub mod prompts;
 pub mod sqlbuilder;
 pub mod text_chunking;
 
@@ -16,51 +17,6 @@ pub struct CollectedFile {
     pub mime_type: &'static str,
     pub size_bytes: usize,
     pub data_base64: String,
-}
-
-pub fn build_summary_prompt(
-    root: &Path,
-    files: &[CollectedFile],
-    skipped_files: &[String],
-) -> String {
-    let manifest = files
-        .iter()
-        .map(|file| {
-            format!(
-                "- {} ({}, {} bytes)",
-                file.relative_path, file.mime_type, file.size_bytes
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let skipped = if skipped_files.is_empty() {
-        "No files were skipped.".to_string()
-    } else {
-        format!(
-            "The following files were skipped because they are unsupported or empty:\n{}",
-            skipped_files
-                .iter()
-                .map(|path| format!("- {path}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    };
-
-    format!(
-        "Summarize the attached document set from `{}`.\n\n\
-Document manifest:\n\
-{}\n\n\
-{}\n\n\
-Please:\n\
-- provide an overall summary of the full document set\n\
-- call out the most important details from each file when useful\n\
-- note contradictions, risks, missing context, or follow-up questions\n\
-- mention skipped files if they could change the conclusion",
-        root.display(),
-        manifest,
-        skipped
-    )
 }
 
 pub fn display_relative_path(root: &Path, path: &Path) -> String {

@@ -54,7 +54,7 @@ export function HomeWorkspaceSidebar({
             aria-label="Deal Hub"
             className={({ isActive }) =>
               [
-                "flex items-center gap-3 rounded-lg px-3 py-2 transition",
+                "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 transition",
                 isActive && activeHomeSection === "hub"
                   ? "bg-sidebar-selected text-sidebar-active"
                   : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
@@ -85,7 +85,7 @@ export function HomeWorkspaceSidebar({
               aria-label={deal.room.name}
               className={({ isActive }) =>
                 [
-                  "flex items-center justify-between rounded-lg px-3 py-2 text-sidebar-text transition",
+                  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 text-sidebar-text transition",
                   isActive ? "bg-sidebar-selected text-sidebar-active" : "hover:bg-sidebar-hover hover:text-sidebar-active",
                 ].join(" ")
               }
@@ -93,10 +93,10 @@ export function HomeWorkspaceSidebar({
               state={navigationState}
               to={getDealRoomPath(deal.room.id)}
             >
-              <div className="flex items-center gap-3">
+              <span className="flex h-5 w-5 items-center justify-center">
                 <span className={`h-2.5 w-2.5 rounded-full ${deal.colorClassName}`} />
-                <span className="text-[13px] font-medium leading-5">{deal.room.name}</span>
-              </div>
+              </span>
+              <span className="min-w-0 truncate text-[13px] font-medium leading-5">{deal.room.name}</span>
               {deal.complete ? <Icon className="h-4 w-4 text-sidebar-muted" name="checkCircle" /> : null}
             </NavLink>
           ))}
@@ -104,7 +104,14 @@ export function HomeWorkspaceSidebar({
 
         <SidebarSection title="Internal Initiatives">
           {initiatives.map((item) => (
-            <SidebarLink icon={item.icon} key={item.name} label={item.name} />
+            <SidebarLink
+              homeSection={activeHomeSection}
+              href={item.href}
+              icon={item.icon}
+              key={item.name}
+              label={item.name}
+              navigationState={navigationState}
+            />
           ))}
         </SidebarSection>
 

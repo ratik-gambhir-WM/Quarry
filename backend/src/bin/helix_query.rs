@@ -1,6 +1,6 @@
 use std::{env, process};
 
-use quarry_backend::core::clients::openai::OpenAiClient;
+use quarry_backend::core::{clients::openai::OpenAiClient, prompts::HELIX_QUERY_EXAMPLE_PROMPT};
 
 const APP_NAME: &str = "DataRoomCLI";
 
@@ -43,11 +43,7 @@ async fn main() {
             None => Err("missing content to embed".to_string()),
         },
         Some("response") => client
-            .gen_model_response(
-                Option::from("What is capital of Ohio and how was it founded?"),
-                None,
-                None,
-            )
+            .gen_model_response(Some(HELIX_QUERY_EXAMPLE_PROMPT), None, None)
             .await
             .map(|_t| {}),
 

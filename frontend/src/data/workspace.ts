@@ -451,7 +451,7 @@ export const workspaceInsights: WorkspaceInsight[] = [
 ];
 
 export const workspaceInitiatives: WorkspaceSidebarTool[] = [
-  { icon: "personSearch", name: "Q4 Recruiting" },
+  { href: "/hub/initiatives/vault", icon: "personSearch", name: "Vault" },
   { icon: "terminal", name: "Software Migration" },
 ];
 

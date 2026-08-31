@@ -5,7 +5,13 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::clients::openai::{OpenAiClient, ResponsesFileInput},
+    core::{
+        clients::openai::{OpenAiClient, ResponsesFileInput},
+        prompts::{
+            build_deal_extraction_prompt, DealExtractionPromptVariables,
+            DEAL_EXTRACTION_SYSTEM_PROMPT,
+        },
+    },
     repository::deal_repository::{
         create_deal, get_deal_by_id, get_deal_metadata_by_deal_id, upsert_deal_metadata,
         CreateDealRecord, Deal, DealMetadata, UpsertDealMetadataRecord,
@@ -216,7 +222,25 @@ async fn extract_from_files(
     let client = OpenAiClient::new(&api_key);
     let model = env::var("OPENAI_DEAL_EXTRACTION_MODEL")
         .unwrap_or_else(|_| DEFAULT_DEAL_EXTRACTION_MODEL.to_string());
-    let prompt = build_deal_extraction_prompt(deal, files);
+    let manifest = files
+        .iter()
+        .map(|file| {
+            format!(
+                "- {} ({}, {} bytes)",
+                file.source_file.relative_path, file.mime_type, file.source_file.size_bytes
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = build_deal_extraction_prompt(DealExtractionPromptVariables {
+        deal_id: &deal.deal_id,
+        deal_name: &deal.deal_name,
+        transaction_type: &deal.transaction_type,
+        target_company: &deal.target_company,
+        primary_buyer: &deal.primary_buyer,
+        deal_sponsor: &deal.deal_sponsor,
+        attached_file_manifest: &manifest,
+    });
     let file_inputs = files
         .iter()
         .map(|file| ResponsesFileInput::FileData {
@@ -228,37 +252,12 @@ async fn extract_from_files(
     let response = client
         .gen_model_response_with_files(
             Some(&prompt),
-            Some("You extract private equity diligence questions from deal documents. Return only strict JSON with no Markdown."),
+            Some(DEAL_EXTRACTION_SYSTEM_PROMPT),
             Some(&model),
             Some(&file_inputs),
         )
         .await?;
     parse_deal_extraction(&response)
-}
-
-fn build_deal_extraction_prompt(deal: &Deal, files: &[MatchedDealFile]) -> String {
-    let manifest = files
-        .iter()
-        .map(|file| {
-            format!(
-                "- {} ({}, {} bytes)",
-                file.source_file.relative_path, file.mime_type, file.source_file.size_bytes
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "Deal metadata:\nDeal ID: {}\nDeal name: {}\nTransaction type: {}\nTarget company: {}\nPrimary buyer: {}\nDeal sponsor: {}\n\n\
-Review the attached files. Extract only questions explicitly listed beneath a section heading labeled Key Questions or Key Diligence Questions in an attached Word document. Do not create, infer, rewrite, synthesize, or add questions.\n\n\
-Return strict JSON with exactly one key: \"keyQuestions\". If there is no qualifying section, return an empty array. Do not include Markdown, commentary, citations, or extra keys.\n\nAttached file manifest:\n{}",
-        deal.deal_id,
-        deal.deal_name,
-        deal.transaction_type,
-        deal.target_company,
-        deal.primary_buyer,
-        deal.deal_sponsor,
-        manifest
-    )
 }
 
 fn parse_deal_extraction(response: &str) -> Result<DealExtraction, String> {

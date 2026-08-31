@@ -12,6 +12,9 @@ const DataRoomPage = lazy(() =>
 const GlobalVaultPage = lazy(() =>
   import("./pages/GlobalVaultPage").then((module) => ({ default: module.GlobalVaultPage })),
 );
+const VaultPage = lazy(() =>
+  import("./pages/VaultPage").then((module) => ({ default: module.VaultPage })),
+);
 const SummarizePage = lazy(() =>
   import("./pages/SummarizePage").then((module) => ({ default: module.SummarizePage })),
 );
@@ -32,6 +35,10 @@ function App() {
         <Route
           element={<Suspense fallback={routeFallback}><GlobalVaultPage /></Suspense>}
           path="/hub/vault"
+        />
+        <Route
+          element={<Suspense fallback={routeFallback}><VaultPage /></Suspense>}
+          path="/hub/initiatives/vault"
         />
         <Route
           element={<Suspense fallback={routeFallback}><SummarizePage /></Suspense>}

@@ -1,4 +1,4 @@
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, path::Path as FilePath, time::Duration};
 
 use axum::{
     extract::{Multipart, Path, State},
@@ -20,6 +20,7 @@ use crate::{
         },
         document_service::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
     },
+    utils::require_non_empty,
 };
 
 const COMPLETED_JOB_RETENTION: Duration = Duration::from_secs(10 * 60);
@@ -36,6 +37,7 @@ pub(crate) async fn process_documents_handler(
     Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<Json<ProcessDocumentsResponse>> {
+    let deal_id = normalize_required_request_value(deal_id, "dealId")?;
     let (user_id, files) = collect_document_upload(multipart).await?;
     process_uploaded_documents(&state, &deal_id, &user_id, files)
         .await
@@ -48,6 +50,7 @@ pub(crate) async fn start_process_file_handler(
     Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<ProcessFileJobResponse>)> {
+    let deal_id = normalize_required_request_value(deal_id, "dealId")?;
     let (user_id, mut files) = collect_document_upload(multipart).await?;
     if files.len() != 1 {
         return Err(AppError::bad_request(
@@ -121,6 +124,7 @@ pub(crate) async fn process_document_job_events_handler(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let job_id = normalize_required_request_value(job_id, "jobId")?;
     let receiver = state
         .subscribe_to_document_job(&job_id)
         .await
@@ -185,6 +189,7 @@ async fn collect_document_upload(
             .map(str::to_string)
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| AppError::bad_request("every file must include a filename"))?;
+        validate_document_upload_filename(&filename)?;
         let bytes = field.bytes().await.map_err(|error| {
             AppError::bad_request(format!("failed to read upload `{filename}`: {error}"))
         })?;
@@ -212,14 +217,34 @@ async fn collect_document_upload(
         });
     }
 
-    let user_id = user_id
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::bad_request("userId is required"))?;
+    let user_id = normalize_required_request_value(user_id.unwrap_or_default(), "userId")?;
     if files.is_empty() {
         return Err(AppError::bad_request(
             "at least one PDF or DOCX upload is required",
         ));
     }
     Ok((user_id, files))
+}
+
+fn normalize_required_request_value(value: String, field: &str) -> AppResult<String> {
+    require_non_empty(&value, field).map_err(AppError::bad_request)?;
+    Ok(value.trim().to_string())
+}
+
+fn validate_document_upload_filename(filename: &str) -> AppResult<()> {
+    if filename.trim() != filename {
+        return Err(AppError::bad_request(
+            "upload filenames must not contain surrounding whitespace",
+        ));
+    }
+    let extension = FilePath::new(filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    if !matches!(extension.as_deref(), Some("pdf" | "docx")) {
+        return Err(AppError::bad_request(format!(
+            "upload `{filename}` must be a PDF or DOCX file"
+        )));
+    }
+    Ok(())
 }

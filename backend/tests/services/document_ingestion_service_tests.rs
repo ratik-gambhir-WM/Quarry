@@ -15,13 +15,7 @@ fn upload_content_hash_is_stable_until_document_bytes_change() {
         bytes: b"changed bytes".to_vec(),
     };
 
-    let original_hash = uploaded_document_content_hash(&original).unwrap();
-    assert_eq!(
-        original_hash,
-        uploaded_document_content_hash(&renamed).unwrap()
-    );
-    assert_ne!(
-        original_hash,
-        uploaded_document_content_hash(&changed).unwrap()
-    );
+    let original_hash = uploaded_document_content_hash(&original);
+    assert_eq!(original_hash, uploaded_document_content_hash(&renamed));
+    assert_ne!(original_hash, uploaded_document_content_hash(&changed));
 }
