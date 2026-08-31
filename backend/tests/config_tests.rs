@@ -15,8 +15,8 @@ fn default_config_is_local_and_has_a_timeout() {
 #[test]
 fn parses_all_sections_from_an_injected_source() {
     let config = AppConfig::from_values([
-        ("PATHFINDER_API_PORT", "4010"),
-        ("PATHFINDER_DATABASE_PATH", "/tmp/quarry.sqlite3"),
+        ("QUARRY_API_PORT", "4010"),
+        ("QUARRY_DATABASE_PATH", "/tmp/quarry.sqlite3"),
         ("HELIX_URL", "http://helix.internal:6969"),
         ("OPENAI_API_KEY", "secret"),
         ("OPENAI_EMBEDDING_MODEL", "embedding-model"),
@@ -38,7 +38,7 @@ fn parses_all_sections_from_an_injected_source() {
 
 #[test]
 fn rejects_invalid_values_and_partial_optional_capabilities() {
-    assert!(AppConfig::from_values([("PATHFINDER_REQUEST_TIMEOUT_SECONDS", "0")]).is_err());
+    assert!(AppConfig::from_values([("QUARRY_REQUEST_TIMEOUT_SECONDS", "0")]).is_err());
     assert!(
         AppConfig::from_values([("OPENAI_EMBEDDING_MODEL", "model-only")])
             .unwrap_err()

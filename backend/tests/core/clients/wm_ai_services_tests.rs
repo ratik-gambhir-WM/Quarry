@@ -61,9 +61,9 @@ fn build_graph_rag_query_request_body_keeps_application_name_server_side() {
     };
 
     assert_eq!(
-        build_graph_rag_query_request_body("pathfinder-dev", &payload),
+        build_graph_rag_query_request_body("quarry-dev", &payload),
         json!({
-            "applicationName": "pathfinder-dev",
+            "applicationName": "quarry-dev",
             "question": "What are the risks?",
         })
     );

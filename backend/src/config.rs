@@ -171,21 +171,21 @@ impl Default for AppConfig {
 }
 
 fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, String> {
-    let host = value(values, "PATHFINDER_API_HOST").unwrap_or("127.0.0.1");
+    let host = value(values, "QUARRY_API_HOST").unwrap_or("127.0.0.1");
     let host = host
         .parse::<IpAddr>()
-        .map_err(|error| format!("PATHFINDER_API_HOST must be an IP address: {error}"))?;
-    let port = parse_value(values, "PATHFINDER_API_PORT", DEFAULT_API_PORT)?;
+        .map_err(|error| format!("QUARRY_API_HOST must be an IP address: {error}"))?;
+    let port = parse_value(values, "QUARRY_API_PORT", DEFAULT_API_PORT)?;
     let timeout_seconds = parse_value(
         values,
-        "PATHFINDER_REQUEST_TIMEOUT_SECONDS",
+        "QUARRY_REQUEST_TIMEOUT_SECONDS",
         DEFAULT_REQUEST_TIMEOUT_SECONDS,
     )?;
     if timeout_seconds == 0 {
-        return Err("PATHFINDER_REQUEST_TIMEOUT_SECONDS must be greater than zero".to_string());
+        return Err("QUARRY_REQUEST_TIMEOUT_SECONDS must be greater than zero".to_string());
     }
 
-    let cors_origins = value(values, "PATHFINDER_CORS_ORIGINS")
+    let cors_origins = value(values, "QUARRY_CORS_ORIGINS")
         .unwrap_or(DEFAULT_CORS_ORIGINS)
         .split(',')
         .map(str::trim)
@@ -196,7 +196,7 @@ fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, Str
         })
         .collect::<Result<Vec<_>, _>>()?;
     if cors_origins.is_empty() {
-        return Err("PATHFINDER_CORS_ORIGINS must include at least one origin".to_string());
+        return Err("QUARRY_CORS_ORIGINS must include at least one origin".to_string());
     }
 
     Ok(HttpConfig {
@@ -207,10 +207,10 @@ fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, Str
 }
 
 fn parse_sqlite_config(values: &HashMap<String, String>) -> SqliteConfig {
-    let path = value(values, "PATHFINDER_DATABASE_PATH")
+    let path = value(values, "QUARRY_DATABASE_PATH")
         .map(PathBuf::from)
         .or_else(|| {
-            value(values, "PATHFINDER_DATA_DIR")
+            value(values, "QUARRY_DATA_DIR")
                 .map(|directory| PathBuf::from(directory).join(DEFAULT_DATABASE_FILE_NAME))
         })
         .unwrap_or_else(|| PathBuf::from("data").join(DEFAULT_DATABASE_FILE_NAME));
