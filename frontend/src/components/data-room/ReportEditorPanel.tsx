@@ -21,7 +21,7 @@ export function ReportEditorPanel({
 }: ReportEditorPanelProps) {
   return (
     <section className="glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-background px-5">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-outline-variant bg-background px-5">
         <div className="min-w-0">
           <h1 className="truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room</h1>
           <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{versionLabel}</p>

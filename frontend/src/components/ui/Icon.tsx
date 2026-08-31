@@ -1,8 +1,13 @@
+import { BookOpenIcon } from "./book-open";
+import { BoxesIcon } from "./icons/BoxesIcon";
 import { HomeIcon } from "./icons/HomeIcon";
+import { TelescopeIcon } from "./telescope";
 
 type IconName =
   | "arrowRight"
   | "bookmark"
+  | "bookOpen"
+  | "boxes"
   | "chevronDown"
   | "chevronLeft"
   | "chevronRight"
@@ -40,6 +45,7 @@ type IconName =
   | "settings"
   | "terminal"
   | "timeline"
+  | "telescope"
   | "upload"
   | "alert";
 
@@ -52,6 +58,12 @@ const iconClassName = "fill-none stroke-current stroke-2";
 
 export function Icon({ className = "h-5 w-5", name }: IconProps) {
   switch (name) {
+    case "bookOpen":
+      return <BookOpenIcon className={className} size={20} />;
+    case "boxes":
+      return <BoxesIcon className={className} size={20} />;
+    case "telescope":
+      return <TelescopeIcon className={className} size={20} />;
     case "mail":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">

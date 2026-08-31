@@ -58,6 +58,7 @@ const emptySourceFiles: SelectedSourceFiles = {
 
 export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const navigate = useNavigate();
+  const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState(emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
   const [createdDealId, setCreatedDealId] = useState<string | null>(null);
@@ -66,6 +67,16 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const [fieldError, setFieldError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const form = formRef.current;
+      const firstField = form?.querySelector<HTMLElement>("input:not([type='hidden']), select, textarea");
+      (firstField ?? form?.querySelector<HTMLElement>("button"))?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -168,8 +179,12 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
         type="button"
       />
       <form
+        aria-labelledby="add-deal-dialog-title"
+        aria-modal="true"
         className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-[720px] flex-col gap-5 overflow-y-auto rounded-[19px] border border-outline-variant bg-white p-6 shadow-[0_28px_70px_rgba(7,1,84,0.2)]"
         onSubmit={handleSubmit}
+        ref={formRef}
+        role="dialog"
       >
         <ModalHeader onClose={onClose} sources={step === "sources"} />
 
@@ -228,7 +243,7 @@ function ModalHeader({ onClose, sources }: { onClose: () => void; sources: boole
     <div className="flex items-start justify-between gap-4">
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Active Deals</p>
-        <h2 className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]">
+        <h2 className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]" id="add-deal-dialog-title">
           {sources ? "Add deal metadata" : "Add deal"}
         </h2>
       </div>

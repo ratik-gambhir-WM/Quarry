@@ -64,9 +64,20 @@ export type DealRoomData = {
   timeline: DealTimelineItem[];
 };
 
+export type DealPortfolioMetadata = {
+  closeDate?: string;
+  dealSponsor?: string;
+  primaryBuyer?: string;
+  startDate?: string;
+  status: string;
+  targetCompany?: string;
+  transactionType?: string;
+};
+
 export type WorkspaceDeal = {
   colorClassName: string;
   complete?: boolean;
+  portfolio: DealPortfolioMetadata;
   room: DealRoomData;
 };
 
@@ -85,6 +96,11 @@ export const workspaceDeals: WorkspaceDeal[] = [
   {
     colorClassName: "bg-primary",
     complete: true,
+    portfolio: {
+      status: "Completed",
+      targetCompany: "Alpha Corp",
+      transactionType: "Manufacturing acquisition",
+    },
     room: {
       id: "project-alpha",
       keyQuestions: [
@@ -151,6 +167,11 @@ export const workspaceDeals: WorkspaceDeal[] = [
   },
   {
     colorClassName: "bg-[#6b87c8]",
+    portfolio: {
+      status: "Under Review",
+      targetCompany: "Beta Holdings",
+      transactionType: "Platform acquisition",
+    },
     room: {
       id: "project-beta",
       keyQuestions: [
@@ -217,6 +238,10 @@ export const workspaceDeals: WorkspaceDeal[] = [
   },
   {
     colorClassName: "bg-muted",
+    portfolio: {
+      status: "Risk Watch",
+      transactionType: "Merger",
+    },
     room: {
       id: "logistics-merger",
       keyQuestions: [

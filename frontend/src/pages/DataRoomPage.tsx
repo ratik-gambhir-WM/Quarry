@@ -257,7 +257,7 @@ export function DataRoomPage() {
   const dataRoomView = getDealDataRoomView(deal.room);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background text-on-surface">
+    <div className="workspace-shell relative h-screen overflow-hidden text-on-surface">
       <div className="workspace-ambient pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute left-[15%] top-[22%] h-[22rem] w-[22rem] rounded-full bg-tertiary-fixed/16 blur-3xl" />
         <div className="absolute right-[10%] top-[12%] h-[26rem] w-[26rem] rounded-full bg-primary-fixed/18 blur-3xl" />
@@ -280,7 +280,7 @@ export function DataRoomPage() {
             selectedFilePath={selectedDocument?.relativePath}
             treeLoading={treeLoading}
           />
-          <main className="relative flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0">
+          <main className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0">
             {isUnavailableDataRoom ? (
               <UnavailableDataRoomState
                 onConnectToSharePoint={() => setIsConnectSharePointModalOpen(true)}
@@ -350,7 +350,7 @@ function EmptyDataRoomState({
 }: EmptyDataRoomStateProps) {
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+      <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
         <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
           Data Room Vault
         </h1>
@@ -386,7 +386,7 @@ function UnavailableDataRoomState({
 }: UnavailableDataRoomStateProps) {
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex h-16 shrink-0 items-center border-b border-outline-variant bg-background px-5">
+      <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
         <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
           Data Room Vault
         </h1>

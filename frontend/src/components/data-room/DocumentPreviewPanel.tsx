@@ -48,7 +48,7 @@ export function DocumentPreviewPanel({
 
   return (
     <section className="glass-panel workspace-pane relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex h-16 min-w-0 shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-outline-variant bg-background px-5">
+      <header className="flex h-12 min-w-0 shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-outline-variant bg-background px-5">
         <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
             <Icon className="h-5 w-5" name={iconNameForNode(document.kind)} />
