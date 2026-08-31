@@ -1,10 +1,13 @@
-use std::{fs, path::Path, time::Instant};
+use std::{fs, path::Path, sync::Arc, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::core::prompts::{DEFAULT_RESPONSES_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS};
+use crate::{
+    config::OpenAiConfig,
+    core::prompts::{DEFAULT_RESPONSES_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS},
+};
 
 const DEFAULT_RESPONSES_MODEL: &str = "gpt-5.5";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -14,8 +17,10 @@ const OPENAI_EMBEDDINGS_API: &str = "openai.embeddings";
 const OPENAI_RESPONSES_API: &str = "openai.responses";
 const MAX_LOGGED_ERROR_REASON_CHARS: usize = 1_000;
 
-pub struct OpenAiClient<'a> {
-    api_key: &'a str,
+#[derive(Clone)]
+pub struct OpenAiClient {
+    http_client: reqwest::Client,
+    api_key: Arc<str>,
 }
 
 pub enum ResponsesFileInput<'a> {
@@ -34,9 +39,16 @@ pub enum ResponsesFileInput<'a> {
     FilePath(&'a Path),
 }
 
-impl<'a> OpenAiClient<'a> {
-    pub fn new(api_key: &'a str) -> Self {
-        OpenAiClient { api_key }
+impl OpenAiClient {
+    pub fn new(http_client: reqwest::Client, api_key: impl Into<String>) -> Self {
+        Self {
+            http_client,
+            api_key: Arc::from(api_key.into()),
+        }
+    }
+
+    pub fn from_config(http_client: reqwest::Client, config: &OpenAiConfig) -> Self {
+        Self::new(http_client, config.api_key.expose())
     }
 
     pub async fn gen_model_response(
@@ -56,7 +68,6 @@ impl<'a> OpenAiClient<'a> {
         model: Option<&str>,
         file_inputs: Option<&[ResponsesFileInput<'_>]>,
     ) -> Result<String, String> {
-        let openai_client = reqwest::Client::new();
         let prompt = prompt.unwrap_or(DEFAULT_RESPONSES_PROMPT).trim();
         let system_instructions = system_instructions
             .unwrap_or(DEFAULT_SYSTEM_INSTRUCTIONS)
@@ -79,9 +90,10 @@ impl<'a> OpenAiClient<'a> {
             build_responses_request_body(model, system_instructions, prompt, file_inputs)?;
         let started_at = Instant::now();
 
-        let response = match openai_client
+        let response = match self
+            .http_client
             .post(OPENAI_RESPONSES_URL)
-            .bearer_auth(self.api_key)
+            .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
             .await
@@ -134,7 +146,6 @@ impl<'a> OpenAiClient<'a> {
     where
         F: FnMut(&str) + Send,
     {
-        let openai_client = reqwest::Client::new();
         let prompt = prompt.unwrap_or(DEFAULT_RESPONSES_PROMPT).trim();
         let system_instructions = system_instructions
             .unwrap_or(DEFAULT_SYSTEM_INSTRUCTIONS)
@@ -158,9 +169,10 @@ impl<'a> OpenAiClient<'a> {
         request_body["stream"] = json!(true);
         let started_at = Instant::now();
 
-        let mut response = match openai_client
+        let mut response = match self
+            .http_client
             .post(OPENAI_RESPONSES_URL)
-            .bearer_auth(self.api_key)
+            .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
             .await
@@ -312,13 +324,13 @@ impl<'a> OpenAiClient<'a> {
         filename: Option<&str>,
         file_size_bytes: Option<u64>,
     ) -> Result<Vec<Vec<f64>>, String> {
-        let openai_client: reqwest::Client = reqwest::Client::new();
         let request_body = build_embeddings_request_body(contents, model)?;
         let started_at = Instant::now();
 
-        let response = match openai_client
+        let response = match self
+            .http_client
             .post(OPENAI_EMBEDDINGS_URL)
-            .bearer_auth(self.api_key)
+            .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
             .await

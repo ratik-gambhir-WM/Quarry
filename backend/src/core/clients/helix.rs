@@ -7,7 +7,8 @@ use helix_db::{
 use serde::de::DeserializeOwned;
 use tokio::{sync::Mutex, time::sleep};
 
-const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6969";
+use crate::config::HelixConfig;
+
 const MAX_WRITE_ATTEMPTS: usize = 5;
 const INITIAL_WRITE_RETRY_DELAY: Duration = Duration::from_millis(25);
 
@@ -17,10 +18,11 @@ pub struct HelixClient {
 }
 
 impl HelixClient {
-    pub fn new() -> Result<Self, String> {
-        let url = std::env::var("HELIX_URL").unwrap_or_else(|_| DEFAULT_HELIX_URL.to_string());
-        let api_key = std::env::var("HELIX_API_KEY").ok();
-        Self::with_config(&url, api_key.as_deref())
+    pub fn from_config(config: &HelixConfig) -> Result<Self, String> {
+        Self::with_config(
+            &config.url,
+            config.api_key.as_ref().map(|api_key| api_key.expose()),
+        )
     }
 
     pub fn with_config(url: &str, api_key: Option<&str>) -> Result<Self, String> {

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use helix_db::dsl::prelude::*;
-use quarry_backend::core::clients::helix::HelixClient;
+use quarry_backend::{config::AppConfig, core::clients::helix::HelixClient};
 use serde_json::Value;
 
 #[tokio::main]
@@ -10,7 +10,8 @@ async fn main() -> Result<()> {
         .with_env_filter("quarry_backend=info")
         .try_init();
 
-    let helix = HelixClient::new().map_err(anyhow::Error::msg)?;
+    let config = AppConfig::from_env().map_err(anyhow::Error::msg)?;
+    let helix = HelixClient::from_config(&config.helix).map_err(anyhow::Error::msg)?;
     let before: Value = helix
         .execute_dynamic_query(count_all_nodes)
         .await

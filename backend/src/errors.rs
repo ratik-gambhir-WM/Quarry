@@ -18,6 +18,10 @@ pub enum AppError {
     BadRequest(String),
     #[error("{0}")]
     NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
+    Unavailable(String),
     #[error("internal server error")]
     Internal(String),
 }
@@ -36,11 +40,26 @@ impl AppError {
     }
 }
 
+impl From<crate::services::error::ServiceError> for AppError {
+    fn from(error: crate::services::error::ServiceError) -> Self {
+        use crate::services::error::ServiceError;
+        match error {
+            ServiceError::Validation(message) => Self::BadRequest(message),
+            ServiceError::NotFound(message) => Self::NotFound(message),
+            ServiceError::Conflict(message) => Self::Conflict(message),
+            ServiceError::Unavailable(message) => Self::Unavailable(message),
+            ServiceError::Internal(message) => Self::Internal(message),
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, message),
+            Self::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
             Self::Internal(context) => {
                 tracing::error!(error = %context, "request failed with an internal error");
                 (

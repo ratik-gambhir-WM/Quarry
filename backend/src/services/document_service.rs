@@ -1,9 +1,4 @@
-use crate::core::clients::{
-    helix::HelixClient,
-    openai::{OpenAiClient, ResponsesFileInput},
-    sqlite::SqliteClient,
-};
-use crate::core::parsers::docx::parse_docx_from_path as parse_docx_from_path_in_parser;
+use crate::core::clients::openai::{OpenAiClient, ResponsesFileInput};
 use crate::core::{
     display_relative_path, infer_supported_mime_type,
     models::{
@@ -14,8 +9,9 @@ use crate::core::{
     prompts::{build_document_summary_prompt, DOCUMENT_SUMMARY_SYSTEM_PROMPT},
     CollectedFile,
 };
-use crate::repository::document_repository::{insert_document_graph, persist_file_blob};
-use crate::utils::{document_id_from_content, file_version_id, openai_api_key, sha256_hex};
+use crate::repository::document_repository::{DocumentFileRepository, DocumentIndexRepository};
+use crate::services::error::{ServiceError, ServiceResult};
+use crate::utils::{document_id_from_content, file_version_id, sha256_hex};
 use base64::engine::general_purpose;
 use base64::Engine;
 use chrono::{SecondsFormat, Utc};
@@ -23,10 +19,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::{env, fs};
+use std::{fs, sync::Arc};
 use walkdir::WalkDir;
 
-const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 pub const MAX_FILE_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_TOTAL_REQUEST_FILE_BYTES: usize = 50 * 1024 * 1024;
 
@@ -47,13 +42,9 @@ pub struct SummarizableFile {
     pub supported: bool,
 }
 
-pub fn parse_docx_from_path(path: &Path) -> Result<String, String> {
-    parse_docx_from_path_in_parser(path)
-}
-
-pub async fn persist_document_and_chunks(
-    sqlite: &SqliteClient,
-    helix: &HelixClient,
+pub(crate) async fn persist_document_and_chunks(
+    files: &DocumentFileRepository,
+    index: &DocumentIndexRepository,
     deal_id: &str,
     document: Document,
     chunks: Vec<DocumentChunk>,
@@ -63,18 +54,22 @@ pub async fn persist_document_and_chunks(
     let document_filename = document.file_name.clone();
     let document_file_size_bytes = document.file_size_bytes;
     let file_persistence = build_file_persistence_input(deal_id, &document, file_bytes)?;
-    let insert_blob_result = persist_file_blob(sqlite, file_persistence).await?;
+    let insert_blob_result = files
+        .persist(file_persistence)
+        .await
+        .map_err(|error| error.to_string())?;
     let (file_node, version_node, chunk_nodes) =
         build_helix_graph_nodes(&insert_blob_result, &document, &chunks)?;
-    let insert_document_chunk_result = insert_document_graph(
-        helix,
-        &document_filename,
-        document_file_size_bytes,
-        file_node,
-        version_node,
-        chunk_nodes,
-    )
-    .await
+    let insert_document_chunk_result = index
+        .insert_graph(
+            &document_filename,
+            document_file_size_bytes,
+            file_node,
+            version_node,
+            chunk_nodes,
+        )
+        .await
+        .map_err(|error| error.to_string())
     .map_err(|error| {
         format!(
             "Helix indexing failed after SQLite committed file_id `{}` and version_id `{}`: {error}",
@@ -412,109 +407,143 @@ fn normalized_workspace_identity(value: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-pub async fn summarize_dir(path: String) -> Result<String, String> {
-    let root = PathBuf::from(&path);
-    if !root.exists() {
-        return Err(format!("path does not exist: {}", root.display()));
-    }
-    if !root.is_dir() {
-        return Err(format!("path is not a directory: {}", root.display()));
-    }
-    let (files, skipped_files) = collect_dir_content(&root)?;
-
-    summarize_collected_files(&path, files, skipped_files).await
+#[derive(Clone)]
+pub struct DocumentSummaryService {
+    openai: Option<Arc<OpenAiClient>>,
+    model: String,
 }
 
-pub fn list_summarizable_files(path: String) -> Result<Vec<SummarizableFile>, String> {
-    let root = PathBuf::from(&path);
-    if !root.exists() {
-        return Err(format!("path does not exist: {}", root.display()));
-    }
-    if !root.is_dir() {
-        return Err(format!("path is not a directory: {}", root.display()));
+impl DocumentSummaryService {
+    pub fn new(openai: Option<Arc<OpenAiClient>>, model: String) -> Self {
+        Self { openai, model }
     }
 
-    let mut files = Vec::new();
-    for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() {
-            continue;
+    pub async fn summarize_dir(&self, path: String) -> ServiceResult<String> {
+        let root = PathBuf::from(&path);
+        if !root.exists() {
+            return Err(ServiceError::validation(format!(
+                "path does not exist: {}",
+                root.display()
+            )));
         }
-        let path = entry.into_path();
-        let metadata = fs::metadata(&path)
-            .map_err(|err| format!("failed to read metadata for {}: {err}", path.display()))?;
-        if metadata.len() == 0 {
-            continue;
+        if !root.is_dir() {
+            return Err(ServiceError::validation(format!(
+                "path is not a directory: {}",
+                root.display()
+            )));
         }
-        let mime_type = infer_supported_mime_type(&path);
-        let filename = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| format!("failed to derive filename from {}", path.display()))?
-            .to_string();
-        files.push(SummarizableFile {
-            path: path.display().to_string(),
-            filename,
-            relative_path: display_relative_path(&root, &path),
-            mime_type: mime_type.unwrap_or("unsupported").to_string(),
-            size_bytes: metadata.len() as usize,
-            supported: mime_type.is_some(),
-        });
-    }
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(files)
-}
-
-pub async fn summarize_paths(paths: Vec<String>) -> Result<String, String> {
-    if paths.is_empty() {
-        return Err("no files selected for summary".to_string());
-    }
-    let selected_paths = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-    let root = common_parent_path(&selected_paths).unwrap_or_default();
-    let (files, skipped_files) = collect_paths_content(&root, &selected_paths)?;
-    summarize_collected_files(&root.display().to_string(), files, skipped_files).await
-}
-
-pub async fn summarize_collected_files(
-    root_label: &str,
-    files: Vec<CollectedFile>,
-    skipped_files: Vec<String>,
-) -> Result<String, String> {
-    if files.is_empty() {
-        return Err(format!("no supported files found in {root_label}"));
+        let (files, skipped_files) =
+            collect_dir_content(&root).map_err(ServiceError::validation)?;
+        self.summarize_collected_files(&path, files, skipped_files)
+            .await
     }
 
-    let api_key = openai_api_key()?;
-    let client = OpenAiClient::new(&api_key);
-    let model = env::var("OPENAI_DOCUMENT_SUMMARY_MODEL")
-        .unwrap_or_else(|_| DEFAULT_DOCUMENT_SUMMARY_MODEL.to_string());
-    let root = Path::new(root_label);
-    let prompt = build_document_summary_prompt(root, &files, &skipped_files);
-    let file_inputs: Vec<ResponsesFileInput<'_>> = files
-        .iter()
-        .map(|file| ResponsesFileInput::FileData {
-            filename: file.filename.as_str(),
-            mime_type: file.mime_type,
-            data_base64: file.data_base64.as_str(),
-        })
-        .collect();
+    pub fn list_files(&self, path: String) -> ServiceResult<Vec<SummarizableFile>> {
+        let root = PathBuf::from(&path);
+        if !root.exists() {
+            return Err(ServiceError::validation(format!(
+                "path does not exist: {}",
+                root.display()
+            )));
+        }
+        if !root.is_dir() {
+            return Err(ServiceError::validation(format!(
+                "path is not a directory: {}",
+                root.display()
+            )));
+        }
 
-    let summary = client
-        .gen_model_response_with_files(
-            Some(&prompt),
-            Some(DOCUMENT_SUMMARY_SYSTEM_PROMPT),
-            Some(&model),
-            Some(&file_inputs),
-        )
-        .await?;
-
-    println!("{summary}");
-    // write_summary(&summary)?;
-
-    if !skipped_files.is_empty() {
-        eprintln!("skipped {} unsupported or empty files", skipped_files.len());
+        let mut files = Vec::new();
+        for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.into_path();
+            let metadata = fs::metadata(&path).map_err(|error| {
+                ServiceError::validation(format!(
+                    "failed to read metadata for {}: {error}",
+                    path.display()
+                ))
+            })?;
+            if metadata.len() == 0 {
+                continue;
+            }
+            let mime_type = infer_supported_mime_type(&path);
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    ServiceError::validation(format!(
+                        "failed to derive filename from {}",
+                        path.display()
+                    ))
+                })?
+                .to_string();
+            files.push(SummarizableFile {
+                path: path.display().to_string(),
+                filename,
+                relative_path: display_relative_path(&root, &path),
+                mime_type: mime_type.unwrap_or("unsupported").to_string(),
+                size_bytes: metadata.len() as usize,
+                supported: mime_type.is_some(),
+            });
+        }
+        files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        Ok(files)
     }
 
-    Ok(summary)
+    pub async fn summarize_paths(&self, paths: Vec<String>) -> ServiceResult<String> {
+        if paths.is_empty() {
+            return Err(ServiceError::validation("no files selected for summary"));
+        }
+        let selected_paths = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        let root = common_parent_path(&selected_paths).unwrap_or_default();
+        let (files, skipped_files) =
+            collect_paths_content(&root, &selected_paths).map_err(ServiceError::validation)?;
+        self.summarize_collected_files(&root.display().to_string(), files, skipped_files)
+            .await
+    }
+
+    pub async fn summarize_collected_files(
+        &self,
+        root_label: &str,
+        files: Vec<CollectedFile>,
+        skipped_files: Vec<String>,
+    ) -> ServiceResult<String> {
+        if files.is_empty() {
+            return Err(ServiceError::validation(format!(
+                "no supported files found in {root_label}"
+            )));
+        }
+        let client = self
+            .openai
+            .as_ref()
+            .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
+        let root = Path::new(root_label);
+        let prompt = build_document_summary_prompt(root, &files, &skipped_files);
+        let file_inputs: Vec<ResponsesFileInput<'_>> = files
+            .iter()
+            .map(|file| ResponsesFileInput::FileData {
+                filename: file.filename.as_str(),
+                mime_type: file.mime_type,
+                data_base64: file.data_base64.as_str(),
+            })
+            .collect();
+
+        client
+            .gen_model_response_with_files(
+                Some(&prompt),
+                Some(DOCUMENT_SUMMARY_SYSTEM_PROMPT),
+                Some(&self.model),
+                Some(&file_inputs),
+            )
+            .await
+            .map_err(ServiceError::internal)
+    }
+
+    pub fn save_markdown(&self, summary: &str, path: String) -> ServiceResult<()> {
+        crate::core::write_summary(summary, path).map_err(ServiceError::validation)
+    }
 }
 
 fn collect_dir_content(root: &Path) -> Result<(Vec<CollectedFile>, Vec<String>), String> {

@@ -1,5 +1,10 @@
 use super::*;
-use crate::services::user_service::{save_sqlite_user, AddUserInput};
+use crate::{
+    bootstrap::migrate,
+    core::clients::sqlite::SqliteClient,
+    repository::{deal_repository::DealRepository, user_repository::UserRepository},
+    services::user_service::{AddUserInput, UserService},
+};
 
 fn input() -> SaveDealInput {
     SaveDealInput {
@@ -30,7 +35,7 @@ fn validates_dates_and_optional_data_room_location() {
     invalid_dates.close_date = "2026-01-01".to_string();
     assert_eq!(
         validate_deal_input(&invalid_dates).unwrap_err(),
-        "closeDate cannot be before startDate"
+        ServiceError::validation("closeDate cannot be before startDate")
     );
 
     let mut both_locations = input();
@@ -38,33 +43,41 @@ fn validates_dates_and_optional_data_room_location() {
         Some("https://company.sharepoint.com/sites/deal-room".to_string());
     assert_eq!(
         validate_deal_input(&both_locations).unwrap_err(),
-        "localPath and sharepointLink cannot both be provided"
+        ServiceError::validation("localPath and sharepointLink cannot both be provided")
     );
 
     let mut invalid_sharepoint_link = no_location;
     invalid_sharepoint_link.sharepoint_link = Some("http://example.com/deal-room".to_string());
     assert_eq!(
         validate_deal_input(&invalid_sharepoint_link).unwrap_err(),
-        "sharepointLink must be an HTTPS SharePoint URL"
+        ServiceError::validation("sharepointLink must be an HTTPS SharePoint URL")
     );
 }
 
-#[test]
-fn saves_core_deal_and_empty_metadata_in_the_first_call() {
-    let state = AppState::in_memory().unwrap();
-    let user = save_sqlite_user(
-        &state,
-        AddUserInput {
+#[tokio::test]
+async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    migrate(&sqlite).unwrap();
+    let users_repository = UserRepository::new(sqlite.clone());
+    let users = UserService::new(users_repository.clone());
+    let deals = DealService::new(
+        users_repository,
+        DealRepository::new(sqlite),
+        None,
+        "test-model".to_string(),
+    );
+    let user = users
+        .create(AddUserInput {
             first_name: "Avery".to_string(),
             last_name: "Analyst".to_string(),
             email: "analyst@example.com".to_string(),
             api_key: "test-key".to_string(),
             role: "Analyst".to_string(),
-        },
-    )
-    .unwrap();
+        })
+        .await
+        .unwrap();
 
-    let response = save_deal(&state, input()).unwrap();
+    let response = deals.create(input()).await.unwrap();
 
     assert_eq!(response.deal.deal_id, "DEAL-000184");
     assert_eq!(response.deal.user_id, user.id);

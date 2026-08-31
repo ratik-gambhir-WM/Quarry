@@ -2,8 +2,11 @@ use rusqlite::Row;
 use serde::Serialize;
 
 use crate::{
-    core::sqlbuilder::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlQuery},
-    state::AppState,
+    core::{
+        clients::sqlite::SqliteClient,
+        sqlbuilder::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlQuery},
+    },
+    repository::RepositoryError,
 };
 
 const DEAL_COLUMNS: [&str; 10] = [
@@ -60,56 +63,115 @@ pub struct DealWithMetadata {
     pub metadata: Option<DealMetadata>,
 }
 
-pub struct CreateDealRecord<'a> {
-    pub deal_id: &'a str,
+pub struct CreateDealRecord {
+    pub deal_id: String,
     pub user_id: i64,
-    pub deal_name: &'a str,
-    pub status: &'a str,
-    pub start_date: &'a str,
-    pub close_date: &'a str,
-    pub transaction_type: &'a str,
-    pub target_company: &'a str,
-    pub primary_buyer: &'a str,
-    pub deal_sponsor: &'a str,
+    pub deal_name: String,
+    pub status: String,
+    pub start_date: String,
+    pub close_date: String,
+    pub transaction_type: String,
+    pub target_company: String,
+    pub primary_buyer: String,
+    pub deal_sponsor: String,
 }
 
-pub struct UpsertDealMetadataRecord<'a> {
-    pub deal_id: &'a str,
+pub struct UpsertDealMetadataRecord {
+    pub deal_id: String,
     pub user_id: i64,
-    pub key_questions_json: &'a str,
-    pub local_path: Option<&'a str>,
-    pub sharepoint_link: Option<&'a str>,
+    pub key_questions_json: String,
+    pub local_path: Option<String>,
+    pub sharepoint_link: Option<String>,
 }
 
-pub fn create_deal(state: &AppState, record: CreateDealRecord<'_>) -> Result<Deal, String> {
+#[derive(Clone)]
+pub struct DealRepository {
+    sqlite: SqliteClient,
+}
+
+impl DealRepository {
+    pub fn new(sqlite: SqliteClient) -> Self {
+        Self { sqlite }
+    }
+
+    pub async fn create(&self, record: CreateDealRecord) -> Result<Deal, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || create_deal(&sqlite, &record)).await
+    }
+
+    pub async fn by_id(&self, deal_id: String) -> Result<Option<Deal>, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || deal_by_id(&sqlite, &deal_id)).await
+    }
+
+    pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || list_deals(&sqlite)).await
+    }
+
+    pub async fn with_metadata(
+        &self,
+        deal_id: String,
+    ) -> Result<Option<DealWithMetadata>, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || get_deal_with_metadata(&sqlite, &deal_id)).await
+    }
+
+    pub async fn metadata(&self, deal_id: String) -> Result<Option<DealMetadata>, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || get_deal_metadata_by_deal_id(&sqlite, &deal_id)).await
+    }
+
+    pub async fn upsert_metadata(
+        &self,
+        record: UpsertDealMetadataRecord,
+    ) -> Result<DealMetadata, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || upsert_deal_metadata(&sqlite, &record)).await
+    }
+
+    pub async fn archive(&self, deal_id: String) -> Result<Option<Deal>, RepositoryError> {
+        let sqlite = self.sqlite.clone();
+        run_blocking(move || archive_deal(&sqlite, &deal_id)).await
+    }
+}
+
+async fn run_blocking<T>(
+    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, RepositoryError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| RepositoryError::BlockingWorker(error.to_string()))?
+        .map_err(RepositoryError::storage)
+}
+
+fn create_deal(sqlite: &SqliteClient, record: &CreateDealRecord) -> Result<Deal, String> {
     let query = build_query(
         SqlBuilder::insert_into("deals")
-            .value("deal_id", record.deal_id)
+            .value("deal_id", &record.deal_id)
             .value("user_id", record.user_id)
-            .value("deal_name", record.deal_name)
-            .value("status", record.status)
-            .value("start_date", record.start_date)
-            .value("close_date", record.close_date)
-            .value("transaction_type", record.transaction_type)
-            .value("target_company", record.target_company)
-            .value("primary_buyer", record.primary_buyer)
-            .value("deal_sponsor", record.deal_sponsor)
+            .value("deal_name", &record.deal_name)
+            .value("status", &record.status)
+            .value("start_date", &record.start_date)
+            .value("close_date", &record.close_date)
+            .value("transaction_type", &record.transaction_type)
+            .value("target_company", &record.target_company)
+            .value("primary_buyer", &record.primary_buyer)
+            .value("deal_sponsor", &record.deal_sponsor)
             .build(),
         "deal insert",
     )?;
-    state
-        .sqlite()
+    sqlite
         .write(&query)
         .map_err(|error| format!("failed to insert deal: {error}"))?;
-    deal_by_id(state, record.deal_id)?
+    deal_by_id(sqlite, &record.deal_id)?
         .ok_or_else(|| format!("inserted deal `{}` could not be loaded", record.deal_id))
 }
 
-pub fn get_deal_by_id(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
-    deal_by_id(state, deal_id)
-}
-
-pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
+fn list_deals(sqlite: &SqliteClient) -> Result<Vec<DealWithMetadata>, String> {
     let query = build_query(
         SqlBuilder::select("deals")
             .columns(DEAL_COLUMNS)
@@ -118,8 +180,7 @@ pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
             .build(),
         "deal list select",
     )?;
-    let deals = state
-        .sqlite()
+    let deals = sqlite
         .read_with(&query, deal_from_row)
         .map_err(|error| format!("failed to list deals: {error}"))?
         .into_iter()
@@ -127,25 +188,25 @@ pub fn list_deals(state: &AppState) -> Result<Vec<DealWithMetadata>, String> {
 
     deals
         .map(|deal| {
-            let metadata = get_deal_metadata_by_deal_id(state, &deal.deal_id)?;
+            let metadata = get_deal_metadata_by_deal_id(sqlite, &deal.deal_id)?;
             Ok(DealWithMetadata { deal, metadata })
         })
         .collect()
 }
 
-pub fn get_deal_with_metadata(
-    state: &AppState,
+fn get_deal_with_metadata(
+    sqlite: &SqliteClient,
     deal_id: &str,
 ) -> Result<Option<DealWithMetadata>, String> {
-    let Some(deal) = get_deal_by_id(state, deal_id)? else {
+    let Some(deal) = deal_by_id(sqlite, deal_id)? else {
         return Ok(None);
     };
-    let metadata = get_deal_metadata_by_deal_id(state, deal_id)?;
+    let metadata = get_deal_metadata_by_deal_id(sqlite, deal_id)?;
     Ok(Some(DealWithMetadata { deal, metadata }))
 }
 
-pub fn get_deal_metadata_by_deal_id(
-    state: &AppState,
+fn get_deal_metadata_by_deal_id(
+    sqlite: &SqliteClient,
     deal_id: &str,
 ) -> Result<Option<DealMetadata>, String> {
     let query = build_query(
@@ -155,23 +216,22 @@ pub fn get_deal_metadata_by_deal_id(
             .build(),
         "deal metadata select",
     )?;
-    state
-        .sqlite()
+    sqlite
         .read_one_with(&query, deal_metadata_from_row)
         .map_err(|error| format!("failed to read deal metadata: {error}"))
 }
 
-pub fn upsert_deal_metadata(
-    state: &AppState,
-    record: UpsertDealMetadataRecord<'_>,
+fn upsert_deal_metadata(
+    sqlite: &SqliteClient,
+    record: &UpsertDealMetadataRecord,
 ) -> Result<DealMetadata, String> {
     let query = build_query(
         SqlBuilder::insert_into("deal_metadata")
-            .value("deal_id", record.deal_id)
+            .value("deal_id", &record.deal_id)
             .value("user_id", record.user_id)
-            .value("key_questions_json", record.key_questions_json)
-            .value("local_path", record.local_path)
-            .value("sharepoint_link", record.sharepoint_link)
+            .value("key_questions_json", &record.key_questions_json)
+            .value("local_path", record.local_path.as_deref())
+            .value("sharepoint_link", record.sharepoint_link.as_deref())
             .on_conflict_update(
                 ConflictUpdate::new(["deal_id"])
                     .set_excluded("user_id")
@@ -182,11 +242,10 @@ pub fn upsert_deal_metadata(
             .build(),
         "deal metadata upsert",
     )?;
-    state
-        .sqlite()
+    sqlite
         .write(&query)
         .map_err(|error| format!("failed to upsert deal metadata: {error}"))?;
-    get_deal_metadata_by_deal_id(state, record.deal_id)?.ok_or_else(|| {
+    get_deal_metadata_by_deal_id(sqlite, &record.deal_id)?.ok_or_else(|| {
         format!(
             "upserted metadata for deal `{}` could not be loaded",
             record.deal_id
@@ -194,7 +253,7 @@ pub fn upsert_deal_metadata(
     })
 }
 
-pub fn archive_deal(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
+fn archive_deal(sqlite: &SqliteClient, deal_id: &str) -> Result<Option<Deal>, String> {
     let query = build_query(
         SqlBuilder::update("deals")
             .set("status", "Archived")
@@ -202,17 +261,16 @@ pub fn archive_deal(state: &AppState, deal_id: &str) -> Result<Option<Deal>, Str
             .build(),
         "deal archive update",
     )?;
-    let updated = state
-        .sqlite()
+    let updated = sqlite
         .write(&query)
         .map_err(|error| format!("failed to archive deal: {error}"))?;
     if updated.rows_affected == 0 {
         return Ok(None);
     }
-    get_deal_by_id(state, deal_id)
+    deal_by_id(sqlite, deal_id)
 }
 
-fn deal_by_id(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
+fn deal_by_id(sqlite: &SqliteClient, deal_id: &str) -> Result<Option<Deal>, String> {
     let query = build_query(
         SqlBuilder::select("deals")
             .columns(DEAL_COLUMNS)
@@ -220,8 +278,7 @@ fn deal_by_id(state: &AppState, deal_id: &str) -> Result<Option<Deal>, String> {
             .build(),
         "deal select",
     )?;
-    state
-        .sqlite()
+    sqlite
         .read_one_with(&query, deal_from_row)
         .map_err(|error| format!("failed to read deal: {error}"))
 }

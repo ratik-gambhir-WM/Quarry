@@ -8,66 +8,52 @@ use axum::{
 use crate::{
     errors::AppResult,
     handlers::{AppError, AppState},
-    repository::document_repository::DealDocumentSummary,
-    services::stored_document_service::{
-        list_deal_documents, load_deal_document, render_stored_document_as_pdf,
-        render_stored_document_as_text, StoredDocumentText,
-    },
-    utils::require_non_empty,
+    services::stored_document_service::{DealDocumentSummary, StoredDocumentText},
 };
 
 pub(crate) async fn list_deal_documents_handler(
     State(state): State<AppState>,
     Path(deal_id): Path<String>,
 ) -> AppResult<Json<Vec<DealDocumentSummary>>> {
-    require_non_empty(&deal_id, "dealId").map_err(AppError::bad_request)?;
-    list_deal_documents(&state, &deal_id)
+    state
+        .stored_documents
+        .list(&deal_id)
         .await
         .map(Json)
-        .map_err(AppError::internal)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn get_deal_document_text_handler(
     State(state): State<AppState>,
     Path((deal_id, file_id)): Path<(String, String)>,
 ) -> AppResult<Json<StoredDocumentText>> {
-    require_non_empty(&deal_id, "dealId").map_err(AppError::bad_request)?;
-    require_non_empty(&file_id, "fileId").map_err(AppError::bad_request)?;
-
-    let requested_file_id = file_id.clone();
-    let document = load_deal_document(&state, &deal_id, &file_id)
+    let document = state
+        .stored_documents
+        .load(&deal_id, &file_id)
         .await
-        .map_err(AppError::internal)?
-        .ok_or_else(|| {
-            AppError::not_found(format!(
-                "file `{requested_file_id}` was not found for deal `{deal_id}`"
-            ))
-        })?;
-    render_stored_document_as_text(document)
+        .map_err(AppError::from)?;
+    state
+        .stored_documents
+        .render_text(document)
         .await
         .map(Json)
-        .map_err(AppError::bad_request)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn get_deal_document_pdf_handler(
     State(state): State<AppState>,
     Path((deal_id, file_id)): Path<(String, String)>,
 ) -> AppResult<Response> {
-    require_non_empty(&deal_id, "dealId").map_err(AppError::bad_request)?;
-    require_non_empty(&file_id, "fileId").map_err(AppError::bad_request)?;
-
-    let requested_file_id = file_id.clone();
-    let document = load_deal_document(&state, &deal_id, &file_id)
+    let document = state
+        .stored_documents
+        .load(&deal_id, &file_id)
         .await
-        .map_err(AppError::internal)?
-        .ok_or_else(|| {
-            AppError::not_found(format!(
-                "file `{requested_file_id}` was not found for deal `{deal_id}`"
-            ))
-        })?;
-    let pdf_bytes = render_stored_document_as_pdf(document)
+        .map_err(AppError::from)?;
+    let pdf_bytes = state
+        .stored_documents
+        .render_pdf(document)
         .await
-        .map_err(AppError::bad_request)?;
+        .map_err(AppError::from)?;
 
     let mut headers = HeaderMap::new();
     headers.insert(

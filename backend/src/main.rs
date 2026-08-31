@@ -1,8 +1,5 @@
 use anyhow::{Context, Result};
-use quarry_backend::{
-    config::AppConfig, create_router, repository::document_repository::ensure_document_indexes,
-    state::AppState,
-};
+use quarry_backend::{bootstrap::bootstrap, config::AppConfig};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -12,18 +9,13 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = AppConfig::from_env().map_err(anyhow::Error::msg)?;
-    let state = AppState::new().map_err(anyhow::Error::msg)?;
-    ensure_document_indexes(state.helix())
+    let application = bootstrap(config).await?;
+    let listener = TcpListener::bind(application.bind_address)
         .await
-        .map_err(anyhow::Error::msg)
-        .context("failed to initialize Helix document indexes")?;
-    let app = create_router(state, &config);
-    let listener = TcpListener::bind(config.bind_address)
-        .await
-        .with_context(|| format!("failed to bind {}", config.bind_address))?;
+        .with_context(|| format!("failed to bind {}", application.bind_address))?;
 
-    tracing::info!(address = %config.bind_address, "Quarry API listening");
-    axum::serve(listener, app)
+    tracing::info!(address = %application.bind_address, "Quarry API listening");
+    axum::serve(listener, application.router)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("API server failed")?;

@@ -1,6 +1,11 @@
 pub mod data_room_service;
+pub mod database_service;
 pub mod deal_service;
 pub mod document_ingestion_service;
+pub mod document_job_service;
+pub mod document_search_service;
 pub mod document_service;
+pub mod error;
+pub mod research_service;
 pub mod stored_document_service;
 pub mod user_service;

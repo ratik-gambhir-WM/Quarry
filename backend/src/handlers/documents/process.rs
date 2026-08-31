@@ -8,22 +8,16 @@ use axum::{
 };
 use futures_util::stream::{self, Stream};
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::{
-    document_jobs::DocumentJobEvent,
     errors::AppResult,
     handlers::{AppError, AppState},
     services::{
-        document_ingestion_service::{
-            process_uploaded_documents, ProcessDocumentsResponse, UploadedDocument,
-        },
+        document_ingestion_service::{ProcessDocumentsResponse, UploadedDocument},
         document_service::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
     },
     utils::require_non_empty,
 };
-
-const COMPLETED_JOB_RETENTION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,10 +33,12 @@ pub(crate) async fn process_documents_handler(
 ) -> AppResult<Json<ProcessDocumentsResponse>> {
     let deal_id = normalize_required_request_value(deal_id, "dealId")?;
     let (user_id, files) = collect_document_upload(multipart).await?;
-    process_uploaded_documents(&state, &deal_id, &user_id, files)
+    state
+        .document_ingestion
+        .process(&deal_id, &user_id, files)
         .await
         .map(Json)
-        .map_err(AppError::internal)
+        .map_err(AppError::from)
 }
 
 pub(crate) async fn start_process_file_handler(
@@ -58,65 +54,18 @@ pub(crate) async fn start_process_file_handler(
         ));
     }
 
-    let file = files.remove(0);
-    let filename = file.filename.clone();
-    let job_id = Uuid::new_v4().to_string();
-    state
-        .create_document_job(DocumentJobEvent::processing(
-            job_id.clone(),
-            filename.clone(),
-        ))
-        .await;
-
-    let worker_state = state.clone();
-    let worker_deal_id = deal_id.clone();
-    let worker_job_id = job_id.clone();
-    let worker_filename = filename.clone();
-    tokio::spawn(async move {
-        let event =
-            match process_uploaded_documents(&worker_state, &worker_deal_id, &user_id, vec![file])
-                .await
-            {
-                Ok(response) => match response.documents.into_iter().next() {
-                    Some(document) if document.skipped => DocumentJobEvent::skipped(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document.document_id,
-                    ),
-                    Some(document) if document.success => DocumentJobEvent::completed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document.document_id,
-                        document.chunk_count,
-                    ),
-                    Some(document) => DocumentJobEvent::failed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document
-                            .error
-                            .unwrap_or_else(|| "document processing failed".to_string()),
-                    ),
-                    None => DocumentJobEvent::failed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        "document processing returned no result".to_string(),
-                    ),
-                },
-                Err(error) => {
-                    DocumentJobEvent::failed(worker_job_id.clone(), worker_filename.clone(), error)
-                }
-            };
-
-        worker_state
-            .update_document_job(&worker_job_id, event)
-            .await;
-        tokio::time::sleep(COMPLETED_JOB_RETENTION).await;
-        worker_state.remove_document_job(&worker_job_id).await;
-    });
+    let started = state
+        .document_jobs
+        .start(deal_id, user_id, files.remove(0))
+        .await
+        .map_err(AppError::from)?;
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ProcessFileJobResponse { job_id, filename }),
+        Json(ProcessFileJobResponse {
+            job_id: started.job_id,
+            filename: started.filename,
+        }),
     ))
 }
 
@@ -126,9 +75,10 @@ pub(crate) async fn process_document_job_events_handler(
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let job_id = normalize_required_request_value(job_id, "jobId")?;
     let receiver = state
-        .subscribe_to_document_job(&job_id)
+        .document_jobs
+        .subscribe(&job_id)
         .await
-        .ok_or_else(|| AppError::not_found(format!("document job `{job_id}` was not found")))?;
+        .map_err(AppError::from)?;
 
     let events = stream::unfold(
         (receiver, true, false),

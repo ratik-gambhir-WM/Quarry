@@ -293,7 +293,7 @@ fn pdf_pages_from_texts(page_texts: &[String]) -> Vec<PdfPage> {
 
 pub async fn extract_pdf_image_descriptions(
     path: &Path,
-    openai_client: &OpenAiClient<'_>,
+    openai_client: &OpenAiClient,
 ) -> Result<Vec<String>, String> {
     let images = extract_pdf_images(path)?;
     let mut descriptions = Vec::with_capacity(images.len());

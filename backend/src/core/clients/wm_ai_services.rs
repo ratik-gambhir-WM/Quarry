@@ -1,5 +1,3 @@
-use std::env;
-
 use reqwest::{
     header::{HeaderMap, HeaderValue},
     multipart::{Form, Part},
@@ -89,21 +87,21 @@ pub struct GraphRagQueryResponse {
     pub confidence: Option<f64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FileUploadServiceClient {
     http_client: Client,
     base_url: String,
     api_key: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct IndexServiceClient {
     http_client: Client,
     base_url: String,
     api_key: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GraphRagClient {
     http_client: Client,
     base_url: String,
@@ -112,16 +110,9 @@ pub struct GraphRagClient {
 }
 
 impl FileUploadServiceClient {
-    pub fn from_env() -> Result<Self, String> {
-        Ok(Self::new(
-            env_var("WM_FILE_UPLOAD_SERVICE_URL")?,
-            env_var("WM_FILE_UPLOAD_API_KEY")?,
-        ))
-    }
-
-    pub fn new(base_url: String, api_key: String) -> Self {
+    pub fn new(http_client: Client, base_url: String, api_key: String) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client,
             base_url,
             api_key,
         }
@@ -160,16 +151,9 @@ impl FileUploadServiceClient {
 }
 
 impl IndexServiceClient {
-    pub fn from_env() -> Result<Self, String> {
-        Ok(Self::new(
-            env_var("WM_INDEX_SERVICE_URL")?,
-            env_var("WM_INDEX_SERVICE_API_KEY")?,
-        ))
-    }
-
-    pub fn new(base_url: String, api_key: String) -> Self {
+    pub fn new(http_client: Client, base_url: String, api_key: String) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client,
             base_url,
             api_key,
         }
@@ -211,17 +195,14 @@ impl IndexServiceClient {
 }
 
 impl GraphRagClient {
-    pub fn from_env() -> Result<Self, String> {
-        Ok(Self::new(
-            env_var("WM_GRAPHRAG_URL")?,
-            env_var("WM_GRAPHRAG_API_KEY")?,
-            env_var("WM_GRAPHRAG_APPLICATION_NAME")?,
-        ))
-    }
-
-    pub fn new(base_url: String, api_key: String, application_name: String) -> Self {
+    pub fn new(
+        http_client: Client,
+        base_url: String,
+        api_key: String,
+        application_name: String,
+    ) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client,
             base_url,
             api_key,
             application_name,
@@ -303,19 +284,6 @@ fn build_graph_rag_query_request_body(
         "applicationName": application_name,
         "question": payload.question,
     })
-}
-
-fn env_var(name: &str) -> Result<String, String> {
-    env::var(name)
-        .map(|value| value.trim().to_string())
-        .map_err(|_| format!("{name} environment variable is not set"))
-        .and_then(|value| {
-            if value.is_empty() {
-                Err(format!("{name} environment variable is empty"))
-            } else {
-                Ok(value)
-            }
-        })
 }
 
 fn auth_headers(api_key: &str) -> Result<HeaderMap, String> {

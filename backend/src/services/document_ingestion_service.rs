@@ -1,28 +1,29 @@
-use std::{env, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+    time::Instant,
+};
 
 use futures_util::{stream, StreamExt};
 use serde::Serialize;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 pub use crate::core::models::document::{Document, DocumentChunk};
 
 use crate::{
     core::{
         clients::openai::OpenAiClient,
-        helix_queries::files::search_quarry_file::{
-            FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
-        },
+        models::file_persistence::PersistedFileIdentity,
         parsers::{ParsedQuarryFile, QuarryFile},
     },
-    repository::document_repository::{
-        find_current_sqlite_file_by_content_hash, get_current_helix_document,
-        search_document_chunks_by_keyword, search_document_chunks_by_vector,
+    repository::document_repository::{DocumentFileRepository, DocumentIndexRepository},
+    services::{
+        document_service::persist_document_and_chunks,
+        error::{ServiceError, ServiceResult},
     },
-    services::document_service::persist_document_and_chunks,
-    state::AppState,
-    utils::{document_id_from_content, openai_api_key, sha256_hex},
+    utils::{document_id_from_content, sha256_hex},
 };
 
-const MAX_CONCURRENT_DOCUMENTS: usize = 8;
 const DOCUMENT_PARSE_API: &str = "document.parse";
 
 #[derive(Debug)]
@@ -58,131 +59,252 @@ pub struct ProcessDocumentsResponse {
     pub documents: Vec<ProcessedDocument>,
 }
 
-pub async fn process_uploaded_documents(
-    state: &AppState,
-    deal_id: &str,
-    user_id: &str,
-    files: Vec<UploadedDocument>,
-) -> Result<ProcessDocumentsResponse, String> {
-    let total = files.len();
-    let worker_state = state.clone();
-    let worker_deal_id = deal_id.to_string();
-    let worker_user_id = user_id.to_string();
-    let mut indexed_documents = stream::iter(files.into_iter().enumerate())
-        .map(|(index, file)| {
-            let state = worker_state.clone();
-            let deal_id = worker_deal_id.clone();
-            let user_id = worker_user_id.clone();
-            let filename = file.filename.clone();
-
-            async move {
-                let worker = tokio::spawn(process_uploaded_document(state, file, deal_id, user_id));
-                let document = match worker.await {
-                    Ok(document) => document,
-                    Err(error) => Ok(failed_document(
-                        filename,
-                        format!("document processing task failed: {error}"),
-                    )),
-                };
-                (index, document)
-            }
-        })
-        .buffer_unordered(MAX_CONCURRENT_DOCUMENTS)
-        .collect::<Vec<_>>()
-        .await;
-    indexed_documents.sort_unstable_by_key(|(index, _)| *index);
-    let documents = indexed_documents
-        .into_iter()
-        .map(|(_, document)| document)
-        .collect::<Result<Vec<_>, _>>()?;
-    let succeeded = documents.iter().filter(|document| document.success).count();
-    let skipped = documents.iter().filter(|document| document.skipped).count();
-
-    Ok(ProcessDocumentsResponse {
-        total,
-        succeeded,
-        skipped,
-        failed: total - succeeded,
-        documents,
-    })
+#[derive(Clone)]
+pub struct DocumentIngestionService {
+    files: DocumentFileRepository,
+    index: DocumentIndexRepository,
+    openai: Option<Arc<OpenAiClient>>,
+    embedding_model: String,
+    processing_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
+    max_concurrent_documents: usize,
 }
 
-async fn process_uploaded_document(
-    state: AppState,
-    file: UploadedDocument,
-    deal_id: String,
-    user_id: String,
-) -> Result<ProcessedDocument, String> {
-    let filename = file.filename.clone();
-    let content_hash = uploaded_document_content_hash(&file);
-    let document_id = document_id_from_content(&user_id, &content_hash);
-    let attachment_lock_id = format!("{deal_id}\0{document_id}");
-    let _processing_guard = state.lock_document_processing(&attachment_lock_id).await;
-    let existing_attachment = match find_current_sqlite_file_by_content_hash(
-        state.sqlite(),
-        &deal_id,
-        &user_id,
-        &content_hash,
-    )
-    .await
-    {
-        Ok(attachment) => attachment,
-        Err(error) => {
-            return Ok(failed_document(
-                filename,
-                format!("failed to check for an existing deal attachment: {error}"),
-            ));
-        }
-    };
-    if let Some(existing) = &existing_attachment {
-        match get_current_helix_document(state.helix(), &user_id, &existing.file_id).await {
-            Ok(Some(indexed))
-                if indexed.version.version_id == existing.version_id
-                    && indexed.version.content_sha256 == content_hash =>
-            {
-                return Ok(ProcessedDocument {
-                    filename,
-                    document_id: Some(document_id),
-                    chunk_count: 0,
-                    success: true,
-                    skipped: true,
-                    error: None,
-                });
-            }
-            Ok(Some(_)) | Ok(None) => {}
-            Err(error) => {
-                return Ok(failed_document(
-                    filename,
-                    format!("failed to check the existing deal attachment index: {error}"),
-                ));
-            }
+impl DocumentIngestionService {
+    pub fn new(
+        files: DocumentFileRepository,
+        index: DocumentIndexRepository,
+        openai: Option<Arc<OpenAiClient>>,
+        embedding_model: String,
+        max_concurrent_documents: usize,
+    ) -> Self {
+        Self {
+            files,
+            index,
+            openai,
+            embedding_model,
+            processing_locks: Arc::new(Mutex::new(HashMap::new())),
+            max_concurrent_documents,
         }
     }
 
-    let api_key = openai_api_key()?;
-    let openai = OpenAiClient::new(&api_key);
-    Ok(
-        match process_document(
-            &state,
-            file,
-            deal_id,
-            user_id,
-            existing_attachment.as_ref(),
-            &openai,
+    pub async fn process(
+        &self,
+        deal_id: &str,
+        user_id: &str,
+        files: Vec<UploadedDocument>,
+    ) -> ServiceResult<ProcessDocumentsResponse> {
+        if self.openai.is_none() {
+            return Err(ServiceError::unavailable(
+                "OpenAI capability is not configured",
+            ));
+        }
+        let total = files.len();
+        let worker_service = self.clone();
+        let worker_deal_id = deal_id.to_string();
+        let worker_user_id = user_id.to_string();
+        let mut indexed_documents = stream::iter(files.into_iter().enumerate())
+            .map(|(index, file)| {
+                let service = worker_service.clone();
+                let deal_id = worker_deal_id.clone();
+                let user_id = worker_user_id.clone();
+                let filename = file.filename.clone();
+                async move {
+                    let worker = tokio::spawn(async move {
+                        service
+                            .process_uploaded_document(file, deal_id, user_id)
+                            .await
+                    });
+                    let document = match worker.await {
+                        Ok(document) => document,
+                        Err(error) => Ok(failed_document(
+                            filename,
+                            format!("document processing task failed: {error}"),
+                        )),
+                    };
+                    (index, document)
+                }
+            })
+            .buffer_unordered(self.max_concurrent_documents)
+            .collect::<Vec<_>>()
+            .await;
+        indexed_documents.sort_unstable_by_key(|(index, _)| *index);
+        let documents = indexed_documents
+            .into_iter()
+            .map(|(_, document)| document)
+            .collect::<ServiceResult<Vec<_>>>()?;
+        let succeeded = documents.iter().filter(|document| document.success).count();
+        let skipped = documents.iter().filter(|document| document.skipped).count();
+
+        Ok(ProcessDocumentsResponse {
+            total,
+            succeeded,
+            skipped,
+            failed: total - succeeded,
+            documents,
+        })
+    }
+
+    async fn process_uploaded_document(
+        &self,
+        file: UploadedDocument,
+        deal_id: String,
+        user_id: String,
+    ) -> ServiceResult<ProcessedDocument> {
+        let filename = file.filename.clone();
+        let content_hash = uploaded_document_content_hash(&file);
+        let document_id = document_id_from_content(&user_id, &content_hash);
+        let attachment_lock_id = format!("{deal_id}\0{document_id}");
+        let _processing_guard = self.lock_processing(&attachment_lock_id).await;
+        let existing_attachment = match self
+            .files
+            .find_current_by_hash(&deal_id, &user_id, &content_hash)
+            .await
+        {
+            Ok(attachment) => attachment,
+            Err(error) => {
+                return Ok(failed_document(
+                    filename,
+                    format!("failed to check for an existing deal attachment: {error}"),
+                ));
+            }
+        };
+        if let Some(existing) = &existing_attachment {
+            match self
+                .index
+                .current_document(&user_id, &existing.file_id)
+                .await
+            {
+                Ok(Some(indexed))
+                    if indexed.version.version_id == existing.version_id
+                        && indexed.version.content_sha256 == content_hash =>
+                {
+                    return Ok(ProcessedDocument {
+                        filename,
+                        document_id: Some(document_id),
+                        chunk_count: 0,
+                        success: true,
+                        skipped: true,
+                        error: None,
+                    });
+                }
+                Ok(Some(_)) | Ok(None) => {}
+                Err(error) => {
+                    return Ok(failed_document(
+                        filename,
+                        format!("failed to check the existing deal attachment index: {error}"),
+                    ));
+                }
+            }
+        }
+
+        let openai = self
+            .openai
+            .as_ref()
+            .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
+        Ok(
+            match self
+                .process_document(file, deal_id, user_id, existing_attachment.as_ref(), openai)
+                .await
+            {
+                Ok((document_id, chunk_count)) => ProcessedDocument {
+                    filename,
+                    document_id: Some(document_id),
+                    chunk_count,
+                    success: true,
+                    skipped: false,
+                    error: None,
+                },
+                Err(error) => failed_document(filename, error),
+            },
+        )
+    }
+
+    async fn process_document(
+        &self,
+        file: UploadedDocument,
+        deal_id: String,
+        user_id: String,
+        existing_attachment: Option<&PersistedFileIdentity>,
+        openai: &OpenAiClient,
+    ) -> Result<(String, usize), String> {
+        let filename = file.filename.clone();
+        let mut graph = parse_document(file, user_id)?;
+        if let Some(existing) = existing_attachment {
+            graph.document.file_id.clone_from(&existing.file_id);
+        }
+        let document_id = graph.document.document_id.clone();
+        let chunk_count = graph.chunks.len();
+        self.embed_chunks(
+            &filename,
+            graph.document.file_size_bytes,
+            &mut graph.chunks,
+            openai,
+        )
+        .await?;
+        persist_document_and_chunks(
+            &self.files,
+            &self.index,
+            &deal_id,
+            graph.document,
+            graph.chunks,
+            graph.file_bytes,
         )
         .await
-        {
-            Ok((document_id, chunk_count)) => ProcessedDocument {
+        .map_err(|error| format!("failed to persist `{filename}`: {error}"))?;
+        Ok((document_id, chunk_count))
+    }
+
+    async fn embed_chunks(
+        &self,
+        filename: &str,
+        file_size_bytes: u64,
+        chunks: &mut [DocumentChunk],
+        openai: &OpenAiClient,
+    ) -> Result<(), String> {
+        if chunks.is_empty() {
+            return Ok(());
+        }
+        let contents = chunks
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>();
+        let embeddings = openai
+            .gen_embeddings_for_file(
+                &contents,
+                Some(&self.embedding_model),
                 filename,
-                document_id: Some(document_id),
-                chunk_count,
-                success: true,
-                skipped: false,
-                error: None,
-            },
-            Err(error) => failed_document(filename, error),
-        },
-    )
+                file_size_bytes,
+            )
+            .await
+            .map_err(|error| format!("failed to embed chunks for `{filename}`: {error}"))?;
+        if chunks.len() != embeddings.len() {
+            return Err(format!(
+                "OpenAI returned {} embeddings for {} chunks in `{filename}`",
+                embeddings.len(),
+                chunks.len()
+            ));
+        }
+        for (chunk, embedding) in chunks.iter_mut().zip(embeddings) {
+            chunk.embedding = Some(embedding.into_iter().map(|value| value as f32).collect());
+        }
+        Ok(())
+    }
+
+    async fn lock_processing(&self, document_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.processing_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            match locks.get(document_id).and_then(Weak::upgrade) {
+                Some(lock) => lock,
+                None => {
+                    let lock = Arc::new(Mutex::new(()));
+                    locks.insert(document_id.to_string(), Arc::downgrade(&lock));
+                    lock
+                }
+            }
+        };
+        lock.lock_owned().await
+    }
 }
 
 fn uploaded_document_content_hash(file: &UploadedDocument) -> String {
@@ -198,20 +320,6 @@ fn failed_document(filename: String, error: String) -> ProcessedDocument {
         skipped: false,
         error: Some(error),
     }
-}
-
-pub async fn search_chunks_by_vector(
-    state: &AppState,
-    search: FileChunkVectorSearch,
-) -> Result<Vec<VectorFileChunkHit>, String> {
-    search_document_chunks_by_vector(state.helix(), search).await
-}
-
-pub async fn search_chunks_by_keyword(
-    state: &AppState,
-    search: FileChunkKeywordSearch,
-) -> Result<Vec<KeywordFileChunkHit>, String> {
-    search_document_chunks_by_keyword(state.helix(), search).await
 }
 
 fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocumentGraph, String> {
@@ -232,7 +340,6 @@ fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocum
             file_bytes,
         })
     })();
-
     match &result {
         Ok(_) => tracing::info!(
             api = DOCUMENT_PARSE_API,
@@ -249,75 +356,6 @@ fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocum
         ),
     }
     result
-}
-
-async fn process_document(
-    state: &AppState,
-    file: UploadedDocument,
-    deal_id: String,
-    user_id: String,
-    existing_attachment: Option<&crate::core::models::file_persistence::PersistedFileIdentity>,
-    openai: &OpenAiClient<'_>,
-) -> Result<(String, usize), String> {
-    let filename = file.filename.clone();
-    let mut graph = parse_document(file, user_id)?;
-    if let Some(existing) = existing_attachment {
-        graph.document.file_id.clone_from(&existing.file_id);
-    }
-    let document_id = graph.document.document_id.clone();
-    let chunk_count = graph.chunks.len();
-    embed_chunks(
-        &filename,
-        graph.document.file_size_bytes,
-        &mut graph.chunks,
-        openai,
-    )
-    .await?;
-    persist_document_and_chunks(
-        state.sqlite(),
-        state.helix(),
-        &deal_id,
-        graph.document,
-        graph.chunks,
-        graph.file_bytes,
-    )
-    .await
-    .map_err(|error| format!("failed to persist `{filename}`: {error}"))?;
-
-    Ok((document_id, chunk_count))
-}
-
-async fn embed_chunks(
-    filename: &str,
-    file_size_bytes: u64,
-    chunks: &mut [DocumentChunk],
-    openai: &OpenAiClient<'_>,
-) -> Result<(), String> {
-    if chunks.is_empty() {
-        return Ok(());
-    }
-
-    let contents = chunks
-        .iter()
-        .map(|chunk| chunk.text.as_str())
-        .collect::<Vec<_>>();
-    let model = env::var("OPENAI_EMBEDDING_MODEL").ok();
-    let embeddings = openai
-        .gen_embeddings_for_file(&contents, model.as_deref(), filename, file_size_bytes)
-        .await
-        .map_err(|error| format!("failed to embed chunks for `{filename}`: {error}"))?;
-
-    if chunks.len() != embeddings.len() {
-        return Err(format!(
-            "OpenAI returned {} embeddings for {} chunks in `{filename}`",
-            embeddings.len(),
-            chunks.len()
-        ));
-    }
-    for (chunk, embedding) in chunks.iter_mut().zip(embeddings) {
-        chunk.embedding = Some(embedding.into_iter().map(|value| value as f32).collect());
-    }
-    Ok(())
 }
 
 #[cfg(test)]
