@@ -8,6 +8,7 @@ import {
 import { Icon } from "../ui/Icon";
 import { PlusIcon, type PlusIconHandle } from "../ui/plus";
 import { AddDealModal } from "../hub/sidebar/AddDealModal";
+import { DealsToolbarButton } from "./DealsToolbarButton";
 
 type AddDealMenuProps = {
   email?: string;
@@ -29,18 +30,16 @@ export function AddDealMenu({ email }: AddDealMenuProps) {
     <>
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
-          <button
+          <DealsToolbarButton
             aria-label="Deal portfolio actions"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest text-text-main shadow-sm transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
             onBlur={() => plusIconRef.current?.stopAnimation()}
             onFocus={() => plusIconRef.current?.startAnimation()}
             onMouseEnter={() => plusIconRef.current?.startAnimation()}
             onMouseLeave={() => plusIconRef.current?.stopAnimation()}
             ref={triggerRef}
-            type="button"
           >
             <PlusIcon className="h-4 w-4" ref={plusIconRef} size={16} />
-          </button>
+          </DealsToolbarButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"

@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import type { DealPortfolioView } from "../../data/dealsView";
 import { getDealRoomPath, type WorkspaceLocationState } from "../../data/workspace";
+import { formatShortUtcDate } from "../../lib/formatters";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
+import { DataTableHeaderRow, DataTableHeading } from "../ui/DataTable";
 import { ViewTransition } from "../ui/ViewTransition";
 
 type DealsTableProps = {
@@ -10,13 +12,6 @@ type DealsTableProps = {
   onReset: () => void;
 };
 
-const closeDateFormatter = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-  year: "numeric",
-});
-
 export function DealsTable({ deals, navigationState, onReset }: DealsTableProps) {
   if (deals.length === 0) return <DealsEmptyState onReset={onReset} />;
 
@@ -24,15 +19,15 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
     <div className="overflow-x-auto border-y border-outline-variant/70">
       <table className="w-full min-w-[980px] border-collapse text-left">
           <thead>
-            <tr className="border-b border-outline-variant/70 text-[11px] font-normal uppercase tracking-[0.08em] text-muted">
-              <th className="px-5 py-3 font-medium" scope="col">Deal</th>
-              <th className="px-4 py-3 font-medium" scope="col">Lifecycle</th>
-              <th className="px-4 py-3 font-medium" scope="col">Status</th>
-              <th className="px-4 py-3 font-medium" scope="col">Type</th>
-              <th className="px-4 py-3 font-medium" scope="col">Sponsor</th>
-              <th className="px-4 py-3 font-medium" scope="col">Target close</th>
-              <th className="px-5 py-3 text-right font-medium" scope="col">Open questions</th>
-            </tr>
+            <DataTableHeaderRow>
+              <DataTableHeading className="px-5">Deal</DataTableHeading>
+              <DataTableHeading>Lifecycle</DataTableHeading>
+              <DataTableHeading>Status</DataTableHeading>
+              <DataTableHeading>Type</DataTableHeading>
+              <DataTableHeading>Sponsor</DataTableHeading>
+              <DataTableHeading>Target close</DataTableHeading>
+              <DataTableHeading className="px-5 text-right">Open questions</DataTableHeading>
+            </DataTableHeaderRow>
           </thead>
           <tbody className="divide-y divide-outline-variant/60">
             {deals.map((deal) => (
@@ -78,7 +73,7 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
                     <span className="block truncate">{deal.sponsor ?? "—"}</span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-4 text-[12px] font-normal text-on-surface">
-                    {formatCloseDate(deal.closeDate)}
+                    {formatShortUtcDate(deal.closeDate)}
                   </td>
                   <td className="px-5 py-4 text-right text-[12px] font-medium tabular-nums text-text-main">
                     {deal.openQuestionCount}
@@ -108,10 +103,4 @@ export function DealsEmptyState({ onReset }: { onReset: () => void }) {
       </button>
     </WorkspaceCard>
   );
-}
-
-function formatCloseDate(value?: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : closeDateFormatter.format(date);
 }

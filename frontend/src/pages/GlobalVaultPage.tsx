@@ -39,7 +39,8 @@ export function GlobalVaultPage() {
               label="Upload files"
               onChange={setFileSelection}
             />
-            <DirectoryUploadField
+            <UploadField
+              directory
               helperText="Choose a local folder to stage its contents."
               label="Upload folder"
               onChange={setDirectorySelection}
@@ -90,12 +91,21 @@ export function GlobalVaultPage() {
 
 type UploadFieldProps = {
   accept?: string;
+  directory?: boolean;
   helperText: string;
   label: string;
   onChange: (selection: SelectionSummary) => void;
 };
 
-function UploadField({ accept, helperText, label, onChange }: UploadFieldProps) {
+function UploadField({ accept, directory = false, helperText, label, onChange }: UploadFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!directory || !inputRef.current) return;
+    inputRef.current.setAttribute("directory", "");
+    inputRef.current.setAttribute("webkitdirectory", "");
+  }, [directory]);
+
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     onChange(summarizeSelection(event.target.files));
   }
@@ -105,42 +115,6 @@ function UploadField({ accept, helperText, label, onChange }: UploadFieldProps) 
       <span className="text-[13px] font-semibold uppercase tracking-[0.14em] text-muted">{label}</span>
       <input
         accept={accept}
-        className="rounded-[22px] border border-primary/16 bg-white px-5 py-4 text-[14px] text-text-main shadow-[0_8px_20px_rgba(7,1,84,0.04)] file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-[13px] file:font-semibold file:text-primary hover:file:bg-primary/14"
-        multiple
-        onChange={handleChange}
-        type="file"
-      />
-      <span className="text-[13px] text-muted">{helperText}</span>
-    </label>
-  );
-}
-
-type DirectoryUploadFieldProps = {
-  helperText: string;
-  label: string;
-  onChange: (selection: SelectionSummary) => void;
-};
-
-function DirectoryUploadField({ helperText, label, onChange }: DirectoryUploadFieldProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!inputRef.current) {
-      return;
-    }
-
-    inputRef.current.setAttribute("directory", "");
-    inputRef.current.setAttribute("webkitdirectory", "");
-  }, []);
-
-  function handleChange(event: ChangeEvent<HTMLInputElement>) {
-    onChange(summarizeSelection(event.target.files));
-  }
-
-  return (
-    <label className="flex flex-col gap-3">
-      <span className="text-[13px] font-semibold uppercase tracking-[0.14em] text-muted">{label}</span>
-      <input
         className="rounded-[22px] border border-primary/16 bg-white px-5 py-4 text-[14px] text-text-main shadow-[0_8px_20px_rgba(7,1,84,0.04)] file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-[13px] file:font-semibold file:text-primary hover:file:bg-primary/14"
         multiple
         onChange={handleChange}

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { DialogBackdrop } from "../ui/DialogBackdrop";
+import { DialogHeader } from "../ui/DialogHeader";
 import { Icon } from "../ui/Icon";
+import { ModalTextField } from "../ui/ModalField";
 
 type ConnectSharePointModalProps = {
   onClose: () => void;
@@ -24,17 +27,7 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
   }, [onClose]);
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center px-4 py-6"
-      role="presentation"
-    >
-      <button
-        aria-label="Close connect to SharePoint dialog"
-        className="absolute inset-0 cursor-default"
-        onClick={onClose}
-        type="button"
-      />
-
+    <DialogBackdrop closeLabel="Close connect to SharePoint dialog" onClose={onClose}>
       <section
         aria-describedby="connect-sharepoint-description"
         aria-labelledby="connect-sharepoint-title"
@@ -42,43 +35,38 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
         className="relative z-10 w-full max-w-[560px] overflow-hidden rounded-[20px] border border-outline-variant bg-surface-container-lowest shadow-[0_28px_70px_rgba(7,1,84,0.24)]"
         role="dialog"
       >
-        <header className="flex items-start justify-between gap-5 border-b border-outline-variant px-6 py-5">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Data Room</p>
-            <h2
-              className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]"
-              id="connect-sharepoint-title"
-            >
-              Connect to SharePoint
-            </h2>
-            <p className="mt-2 text-[13px] leading-5 text-muted" id="connect-sharepoint-description">
+        <DialogHeader
+          className="border-b border-outline-variant px-6 py-5"
+          closeLabel="Close connect to SharePoint dialog"
+          description={
+            <span id="connect-sharepoint-description">
               Add the Teams channel and SharePoint locations associated with this data room.
-            </p>
-          </div>
-          <button
-            aria-label="Close connect to SharePoint dialog"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-            onClick={onClose}
-            type="button"
-          >
-            <Icon className="h-5 w-5 rotate-45" name="plus" />
-          </button>
-        </header>
+            </span>
+          }
+          eyebrow="Data Room"
+          onClose={onClose}
+          title="Connect to SharePoint"
+          titleId="connect-sharepoint-title"
+        />
 
         <div className="space-y-5 px-6 py-5">
-          <ConnectionLinkField
+          <ModalTextField
             id="teams-channel-link"
-            inputRef={teamsChannelInputRef}
             label="Teams channel link"
-            onChange={setTeamsChannelLink}
+            onValueChange={setTeamsChannelLink}
             placeholder="https://teams.microsoft.com/l/channel/..."
+            ref={teamsChannelInputRef}
+            required={false}
+            type="url"
             value={teamsChannelLink}
           />
-          <ConnectionLinkField
+          <ModalTextField
             id="sharepoint-link"
             label="SharePoint link"
-            onChange={setSharePointLink}
+            onValueChange={setSharePointLink}
             placeholder="https://yourcompany.sharepoint.com/sites/..."
+            required={false}
+            type="url"
             value={sharePointLink}
           />
         </div>
@@ -105,41 +93,6 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
           </div>
         </footer>
       </section>
-    </div>
-  );
-}
-
-type ConnectionLinkFieldProps = {
-  id: string;
-  inputRef?: React.RefObject<HTMLInputElement | null>;
-  label: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  value: string;
-};
-
-function ConnectionLinkField({
-  id,
-  inputRef,
-  label,
-  onChange,
-  placeholder,
-  value,
-}: ConnectionLinkFieldProps) {
-  return (
-    <div className="space-y-2">
-      <label className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted" htmlFor={id}>
-        {label}
-      </label>
-      <input
-        className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[14px] text-text-main outline-none transition placeholder:text-muted/60 focus:border-primary-container focus:ring-4 focus:ring-primary-fixed/40"
-        id={id}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        placeholder={placeholder}
-        ref={inputRef}
-        type="url"
-        value={value}
-      />
-    </div>
+    </DialogBackdrop>
   );
 }

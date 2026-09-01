@@ -1,5 +1,7 @@
 import type { KanbanCardRenderer } from "../kanban-board/types";
 import { getDealTransitionName, type DealLifecycle } from "../../data/dealsView";
+import { formatShortUtcDate } from "../../lib/formatters";
+import { MetadataGrid, MetadataItem } from "../ui/MetadataGrid";
 import { ViewTransition } from "../ui/ViewTransition";
 
 export type DealKanbanCardData = {
@@ -13,13 +15,6 @@ export type DealKanbanCardData = {
   targetCompany?: string;
   type: string;
 };
-
-const closeDateFormatter = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-  year: "numeric",
-});
 
 export const dealCardRenderer: KanbanCardRenderer<DealKanbanCardData> = {
   id: "deal-card",
@@ -48,31 +43,17 @@ export function DealKanbanCard({ deal }: { deal: DealKanbanCardData }) {
           </span>
         </div>
 
-        <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 border-t border-outline-variant/60 pt-3">
-          <div className="min-w-0">
-            <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">Type</dt>
-            <dd className="mt-1 truncate text-[11px] font-normal text-on-surface">{deal.type}</dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">Sponsor</dt>
-            <dd className="mt-1 truncate text-[11px] font-normal text-on-surface">{deal.sponsor ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">Target close</dt>
-            <dd className="mt-1 text-[11px] font-normal text-on-surface">{formatCloseDate(deal.closeDate)}</dd>
-          </div>
-          <div>
-            <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">Open questions</dt>
-            <dd className="mt-1 text-[11px] font-medium tabular-nums text-text-main">{deal.openQuestionCount}</dd>
-          </div>
-        </dl>
+        <MetadataGrid className="mt-4">
+          <MetadataItem label="Type" truncate value={deal.type} />
+          <MetadataItem label="Sponsor" truncate value={deal.sponsor ?? "—"} />
+          <MetadataItem label="Target close" value={formatShortUtcDate(deal.closeDate)} />
+          <MetadataItem
+            label="Open questions"
+            value={deal.openQuestionCount}
+            valueClassName="font-medium tabular-nums text-text-main"
+          />
+        </MetadataGrid>
       </article>
     </ViewTransition>
   );
-}
-
-function formatCloseDate(value?: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : closeDateFormatter.format(date);
 }

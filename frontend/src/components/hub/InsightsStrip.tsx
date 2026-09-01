@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceInsight } from "../../data/workspace";
+import { DataTableHeaderRow, DataTableHeading } from "../ui/DataTable";
 import { Icon } from "../ui/Icon";
 import { ViewColumnsIcon } from "../ui/icons/ViewColumnsIcon";
 import { WorkspaceCard } from "./WorkspaceCard";
@@ -161,15 +162,15 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
         <div className="workspace-scrollbar-hidden overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse text-left">
             <thead>
-              <tr className="border-b border-outline-variant/70 bg-surface-container-low/70">
-                <ReviewTableHeading className="min-w-64">Document</ReviewTableHeading>
-                {visibleColumns.includes("category") ? <ReviewTableHeading>Category</ReviewTableHeading> : null}
+              <DataTableHeaderRow surface>
+                <DataTableHeading className="min-w-64" density="compact">Document</DataTableHeading>
+                {visibleColumns.includes("category") ? <DataTableHeading density="compact">Category</DataTableHeading> : null}
                 {visibleColumns.includes("finding") ? (
-                  <ReviewTableHeading className="min-w-96">Extracted finding</ReviewTableHeading>
+                  <DataTableHeading className="min-w-96" density="compact">Extracted finding</DataTableHeading>
                 ) : null}
-                {visibleColumns.includes("confidence") ? <ReviewTableHeading>Confidence</ReviewTableHeading> : null}
-                {visibleColumns.includes("status") ? <ReviewTableHeading>Review status</ReviewTableHeading> : null}
-              </tr>
+                {visibleColumns.includes("confidence") ? <DataTableHeading density="compact">Confidence</DataTableHeading> : null}
+                {visibleColumns.includes("status") ? <DataTableHeading density="compact">Review status</DataTableHeading> : null}
+              </DataTableHeaderRow>
             </thead>
             <tbody className="divide-y divide-outline-variant/55">
               {items.length > 0 ? (
@@ -239,17 +240,6 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
         </div>
       </WorkspaceCard>
     </div>
-  );
-}
-
-function ReviewTableHeading({ children, className = "" }: { children: string; className?: string }) {
-  return (
-    <th
-      className={`px-4 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted ${className}`}
-      scope="col"
-    >
-      {children}
-    </th>
   );
 }
 

@@ -2,6 +2,7 @@ import type { DealRoomData } from "../../data/workspace";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
 import { DealRoomOverview } from "./DealRoomHeader";
+import { DealRoomViewIntro } from "./DealRoomViewIntro";
 
 type SiteVisitsViewProps = {
   deal: DealRoomData;
@@ -37,21 +38,18 @@ export function SiteVisitsView({ deal }: SiteVisitsViewProps) {
       <DealRoomOverview subtitle={`${deal.name} field diligence`} />
 
       <WorkspaceCard className="p-8" radius="compact">
-        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Site Visits</p>
-            <h1 className="mt-3 type-display text-text-main">
-              Field Diligence Plan
-            </h1>
-            <p className="mt-4 max-w-2xl text-[15px] leading-7 text-text-main/78">
-              Coordinate in-person reviews, owners, and open prep work for {deal.name}.
-            </p>
-          </div>
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[13px] font-bold text-white shadow-[0_10px_26px_rgba(80,101,142,0.24)] transition hover:bg-primary-container">
-            <Icon className="h-4 w-4" name="plus" />
-            New Visit
-          </button>
-        </div>
+        <DealRoomViewIntro
+          action={
+            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[13px] font-bold text-white shadow-[0_10px_26px_rgba(80,101,142,0.24)] transition hover:bg-primary-container">
+              <Icon className="h-4 w-4" name="plus" />
+              New Visit
+            </button>
+          }
+          className="flex-col gap-5 md:flex-row"
+          description={<>Coordinate in-person reviews, owners, and open prep work for {deal.name}.</>}
+          eyebrow="Site Visits"
+          title="Field Diligence Plan"
+        />
 
         <div className="mt-8 grid gap-4">
           {siteVisits.map((visit) => (

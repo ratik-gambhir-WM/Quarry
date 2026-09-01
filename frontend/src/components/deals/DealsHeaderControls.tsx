@@ -18,6 +18,7 @@ import {
 } from "../ui/magnifying-glass";
 import { TableCellsIcon, type TableCellsIconHandle } from "../ui/table-cells";
 import { ViewColumnsIcon, type ViewColumnsIconHandle } from "../ui/view-columns";
+import { DealsToolbarButton } from "./DealsToolbarButton";
 
 export type DealsView = "kanban" | "table";
 
@@ -104,17 +105,15 @@ export function DealLifecycleFilter({ onScopeChange, scope }: DealLifecycleFilte
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <DealsToolbarButton
           aria-label="Filter deals by lifecycle"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest text-text-main shadow-sm transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
           onBlur={() => iconRef.current?.stopAnimation()}
           onFocus={() => iconRef.current?.startAnimation()}
           onMouseEnter={() => iconRef.current?.startAnimation()}
           onMouseLeave={() => iconRef.current?.stopAnimation()}
-          type="button"
         >
           <AdjustmentsHorizontalIcon className="h-4 w-4" ref={iconRef} size={16} />
-        </button>
+        </DealsToolbarButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
@@ -155,30 +154,21 @@ export function DealsViewToggle({ onPreloadKanban, onViewChange, view }: DealsVi
 
   return (
     <div aria-label="Deals view" className="flex items-center gap-1" role="group">
-      <button
+      <DealsToolbarButton
+        active={view === "table"}
         aria-label="Table view"
         aria-pressed={view === "table"}
-        className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
-          view === "table"
-            ? "border-primary-container bg-primary-container text-on-primary-container"
-            : "border-outline-variant bg-surface-container-lowest text-text-main hover:bg-surface-container-high"
-        }`}
         onClick={() => onViewChange("table")}
         onMouseEnter={() => tableIconRef.current?.startAnimation()}
         onMouseLeave={() => tableIconRef.current?.stopAnimation()}
         title="Table view"
-        type="button"
       >
         <TableCellsIcon className="h-4 w-4" ref={tableIconRef} size={16} />
-      </button>
-      <button
+      </DealsToolbarButton>
+      <DealsToolbarButton
+        active={view === "kanban"}
         aria-label="Kanban view"
         aria-pressed={view === "kanban"}
-        className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
-          view === "kanban"
-            ? "border-primary-container bg-primary-container text-on-primary-container"
-            : "border-outline-variant bg-surface-container-lowest text-text-main hover:bg-surface-container-high"
-        }`}
         onClick={() => onViewChange("kanban")}
         onFocus={onPreloadKanban}
         onMouseEnter={() => {
@@ -187,10 +177,9 @@ export function DealsViewToggle({ onPreloadKanban, onViewChange, view }: DealsVi
         }}
         onMouseLeave={() => kanbanIconRef.current?.stopAnimation()}
         title="Kanban view"
-        type="button"
       >
         <ViewColumnsIcon className="h-4 w-4" ref={kanbanIconRef} size={16} />
-      </button>
+      </DealsToolbarButton>
     </div>
   );
 }
