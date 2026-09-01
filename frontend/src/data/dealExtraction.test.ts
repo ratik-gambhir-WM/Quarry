@@ -27,5 +27,20 @@ describe("buildWorkspaceDealFromPersisted", () => {
     expect(workspaceDeal.room.summary).toContain(
       "diligence materials, findings, and open questions",
     );
+    expect(workspaceDeal.portfolio).toEqual({
+      closeDate: "2026-09-12",
+      dealSponsor: "Thoma Bravo",
+      primaryBuyer: "Cvs",
+      startDate: "2026-08-03",
+      status: "Active",
+      targetCompany: "Target",
+      transactionType: "Acquisition",
+    });
+  });
+
+  it.each(["Closed", " completed "])("normalizes %s as complete", (status) => {
+    const workspaceDeal = buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null);
+
+    expect(workspaceDeal.complete).toBe(true);
   });
 });

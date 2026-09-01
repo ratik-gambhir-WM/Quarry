@@ -1,8 +1,7 @@
 //! Isolated SharePoint / Microsoft Graph client.
 //!
-//! This module mirrors the standalone TypeScript SharePoint client. It is
-//! intentionally not registered in `core::clients` yet, so consumers can wire
-//! it into the backend when they are ready.
+//! This module is exposed under `core::clients` but is not assembled by backend
+//! bootstrap or wired into product routes and services.
 
 mod auth;
 pub mod cache;

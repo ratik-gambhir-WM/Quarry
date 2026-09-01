@@ -7,9 +7,17 @@ import type {
   LocalDealSourceFile,
   SaveDealInput,
 } from "../../../data/dealExtraction";
+import { formatFileSize } from "../../../lib/formatters";
+import { DialogBackdrop } from "../../ui/DialogBackdrop";
+import { DialogHeader } from "../../ui/DialogHeader";
 import { Icon } from "../../ui/Icon";
+import {
+  ModalField,
+  ModalInput,
+  ModalTextField,
+  modalControlClassName,
+} from "../../ui/ModalField";
 import { TransactionTypePicker } from "./DealTypePicker";
-import { ModalTextField } from "./ModalTextField";
 
 type AddDealModalProps = {
   email?: string;
@@ -58,6 +66,7 @@ const emptySourceFiles: SelectedSourceFiles = {
 
 export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const navigate = useNavigate();
+  const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState(emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
   const [createdDealId, setCreatedDealId] = useState<string | null>(null);
@@ -66,6 +75,16 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const [fieldError, setFieldError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const form = formRef.current;
+      const firstField = form?.querySelector<HTMLElement>("input:not([type='hidden']), select, textarea");
+      (firstField ?? form?.querySelector<HTMLElement>("button"))?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -159,19 +178,28 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   }
 
   return (
-    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-6">
-      <button
-        aria-label="Close add deal dialog"
-        className="absolute inset-0 cursor-default disabled:cursor-wait"
-        disabled={isSubmitting}
-        onClick={onClose}
-        type="button"
-      />
+    <DialogBackdrop
+      className="z-50 px-6 py-0"
+      closeLabel="Close add deal dialog"
+      disabled={isSubmitting}
+      onClose={onClose}
+    >
       <form
+        aria-labelledby="add-deal-dialog-title"
+        aria-modal="true"
         className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-[720px] flex-col gap-5 overflow-y-auto rounded-[19px] border border-outline-variant bg-white p-6 shadow-[0_28px_70px_rgba(7,1,84,0.2)]"
         onSubmit={handleSubmit}
+        ref={formRef}
+        role="dialog"
       >
-        <ModalHeader onClose={onClose} sources={step === "sources"} />
+        <DialogHeader
+          className="gap-4"
+          closeLabel="Close add deal dialog"
+          eyebrow="Active Deals"
+          onClose={onClose}
+          title={step === "sources" ? "Add deal metadata" : "Add deal"}
+          titleId="add-deal-dialog-title"
+        />
 
         {step === "details" ? (
           <DealDetailsStep
@@ -219,28 +247,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
           </button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function ModalHeader({ onClose, sources }: { onClose: () => void; sources: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Active Deals</p>
-        <h2 className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]">
-          {sources ? "Add deal metadata" : "Add deal"}
-        </h2>
-      </div>
-      <button
-        aria-label="Close add deal dialog"
-        className="flex h-10 w-10 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high"
-        onClick={onClose}
-        type="button"
-      >
-        <Icon className="h-5 w-5 rotate-45" name="plus" />
-      </button>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -260,53 +267,152 @@ function DealDetailsStep({
   return (
     <div className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <ModalTextField label="Deal ID" onChange={(value) => onUpdateField("dealId", value)} placeholder="DEAL-000184" value={form.dealId} />
-        <ModalTextField label="Deal name" onChange={(value) => onUpdateField("dealName", value)} placeholder="Acme acquisition of WidgetCo" value={form.dealName} />
+        <ModalTextField
+          id="add-deal-id"
+          label="Deal ID"
+          onValueChange={(value) => onUpdateField("dealId", value)}
+          placeholder="DEAL-000184"
+          value={form.dealId}
+        />
+        <ModalTextField
+          id="add-deal-name"
+          label="Deal name"
+          onValueChange={(value) => onUpdateField("dealName", value)}
+          placeholder="Acme acquisition of WidgetCo"
+          value={form.dealName}
+        />
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
-        <SelectField label="Status" onChange={(value) => onUpdateField("status", value)} options={["Active", "Pipeline", "On Hold", "Closed"]} value={form.status} />
-        <ModalTextField label="Start date" onChange={(value) => onUpdateField("startDate", value)} placeholder="2026-02-14" type="date" value={form.startDate} />
-        <ModalTextField label="Close date" onChange={(value) => onUpdateField("closeDate", value)} placeholder="2026-05-01" type="date" value={form.closeDate} />
+        <SelectField
+          label="Status"
+          onChange={(value) => onUpdateField("status", value)}
+          options={["Active", "Pipeline", "On Hold", "Closed"]}
+          value={form.status}
+        />
+        <ModalTextField
+          id="add-deal-start-date"
+          label="Start date"
+          onValueChange={(value) => onUpdateField("startDate", value)}
+          placeholder="2026-02-14"
+          type="date"
+          value={form.startDate}
+        />
+        <ModalTextField
+          id="add-deal-close-date"
+          label="Close date"
+          onValueChange={(value) => onUpdateField("closeDate", value)}
+          placeholder="2026-05-01"
+          type="date"
+          value={form.closeDate}
+        />
       </div>
-      <TransactionTypePicker error={!form.transactionType ? error : ""} onChange={(value) => onUpdateField("transactionType", value)} value={form.transactionType} />
+      <TransactionTypePicker
+        error={!form.transactionType ? error : ""}
+        onChange={(value) => onUpdateField("transactionType", value)}
+        value={form.transactionType}
+      />
       <div className="grid gap-4 sm:grid-cols-3">
-        <ModalTextField autoComplete="organization" label="Target company" onChange={(value) => onUpdateField("targetCompany", value)} placeholder="Target" value={form.targetCompany} />
-        <ModalTextField autoComplete="organization" label="Primary buyer" onChange={(value) => onUpdateField("primaryBuyer", value)} placeholder="CVS" value={form.primaryBuyer} />
-        <ModalTextField autoComplete="organization" label="Deal sponsor" onChange={(value) => onUpdateField("dealSponsor", value)} placeholder="Thoma Bravo" value={form.dealSponsor} />
+        <ModalTextField
+          autoComplete="organization"
+          id="add-deal-target-company"
+          label="Target company"
+          onValueChange={(value) => onUpdateField("targetCompany", value)}
+          placeholder="Target"
+          value={form.targetCompany}
+        />
+        <ModalTextField
+          autoComplete="organization"
+          id="add-deal-primary-buyer"
+          label="Primary buyer"
+          onValueChange={(value) => onUpdateField("primaryBuyer", value)}
+          placeholder="CVS"
+          value={form.primaryBuyer}
+        />
+        <ModalTextField
+          autoComplete="organization"
+          id="add-deal-sponsor"
+          label="Deal sponsor"
+          onValueChange={(value) => onUpdateField("dealSponsor", value)}
+          placeholder="Thoma Bravo"
+          value={form.dealSponsor}
+        />
       </div>
       {runtime.target === "desktop" ? (
         <LocalFolderField disabled={isSubmitting} error={error} onChoose={onChooseLocalFolder} value={form.localPath} />
       ) : (
-        <ModalTextField label="SharePoint link" onChange={(value) => onUpdateField("sharepointLink", value)} placeholder="https://company.sharepoint.com/sites/deal-room" required={false} type="url" value={form.sharepointLink} />
+        <ModalTextField
+          id="add-deal-sharepoint-link"
+          label="SharePoint link"
+          onValueChange={(value) => onUpdateField("sharepointLink", value)}
+          optional
+          placeholder="https://company.sharepoint.com/sites/deal-room"
+          type="url"
+          value={form.sharepointLink}
+        />
       )}
     </div>
   );
 }
 
-function SelectField({ label, onChange, options, value }: { label: string; onChange: (value: string) => void; options: string[]; value: string }) {
+function SelectField({
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  options: string[];
+  value: string;
+}) {
   const id = `add-deal-${label.toLowerCase().replace(/\s+/g, "-")}`;
   return (
-    <div className="space-y-2">
-      <label className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted" htmlFor={id}>{label}</label>
-      <select className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[14px] text-text-main outline-none" id={id} onChange={(event) => onChange(event.currentTarget.value)} required value={value}>
+    <ModalField htmlFor={id} label={label}>
+      <select
+        className={modalControlClassName}
+        id={id}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        required
+        value={value}
+      >
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
-    </div>
+    </ModalField>
   );
 }
 
-function LocalFolderField({ disabled, error, onChoose, value }: { disabled: boolean; error: string; onChoose: () => void; value: string }) {
+function LocalFolderField({
+  disabled,
+  error,
+  onChoose,
+  value,
+}: {
+  disabled: boolean;
+  error: string;
+  onChoose: () => void;
+  value: string;
+}) {
   return (
-    <div className="space-y-2">
-      <label className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-muted" htmlFor="add-deal-local-path">Local data room folder</label>
+    <ModalField error={error} htmlFor="add-deal-local-path" label="Local data room folder">
       <div className="flex gap-3">
-        <input className="min-w-0 flex-1 rounded-2xl border border-outline-variant px-4 py-3 text-[14px]" id="add-deal-local-path" placeholder="Choose a folder" readOnly required value={value} />
-        <button className="flex items-center gap-2 rounded-2xl border border-outline-variant bg-white px-4 py-3 text-[13px] font-semibold text-primary" disabled={disabled} onClick={onChoose} type="button">
+        <ModalInput
+          className="min-w-0 flex-1"
+          id="add-deal-local-path"
+          placeholder="Choose a folder"
+          readOnly
+          required
+          value={value}
+        />
+        <button
+          className="flex items-center gap-2 rounded-2xl border border-outline-variant bg-white px-4 py-3 text-[13px] font-semibold text-primary"
+          disabled={disabled}
+          onClick={onChoose}
+          type="button"
+        >
           <Icon className="h-4 w-4" name="folderOpen" /> Browse
         </button>
       </div>
-      {error ? <p className="px-1 text-[12px] font-medium text-error">{error}</p> : null}
-    </div>
+    </ModalField>
   );
 }
 
@@ -366,12 +472,6 @@ function isLocalDealSourceFile(file: SourceFileSelection | null): file is LocalD
 function localFileContentsToFile(file: LocalDealFileContents) {
   const bytes = Uint8Array.from(atob(file.dataBase64), (character) => character.charCodeAt(0));
   return new File([bytes], file.filename, { type: file.mimeType });
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fileIcon(filename: string): "doc" | "pdf" | "sheet" {

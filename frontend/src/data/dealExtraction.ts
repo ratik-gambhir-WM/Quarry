@@ -104,9 +104,20 @@ function buildWorkspaceDeal(
   _metadata: SavedDealMetadata | null,
   extraction: DealExtractionResult,
 ): WorkspaceDeal {
+  const normalizedStatus = deal.status.trim().toLowerCase();
+
   return {
     colorClassName: "bg-primary",
-    complete: deal.status.toLowerCase() === "closed",
+    complete: normalizedStatus === "closed" || normalizedStatus === "completed",
+    portfolio: {
+      closeDate: deal.closeDate || undefined,
+      dealSponsor: deal.dealSponsor || undefined,
+      primaryBuyer: deal.primaryBuyer || undefined,
+      startDate: deal.startDate || undefined,
+      status: deal.status || "Unknown",
+      targetCompany: deal.targetCompany || undefined,
+      transactionType: deal.transactionType || undefined,
+    },
     room: {
       id: deal.dealId,
       keyQuestions: extraction.keyQuestions,

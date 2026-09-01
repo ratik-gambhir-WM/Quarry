@@ -26,12 +26,13 @@ export function DealRoomWorkspaceSidebar({
   return (
     <SidebarFrame
       alignedHeader
-      centeredLogo
       email={email}
-      headerBackLabel="Back to main homepage"
-      headerBackTo="/hub"
+      headerBackLabel="Back to deals"
+      headerBackTo="/hub/deals"
       navigationState={navigationState}
       profileDeal={activeDeal}
+      sidebarIcon="dashboard"
+      sidebarLabel="Deal Room"
     >
       <nav className="space-y-1">
         {dealRoomSidebarLinks.map((link) => {

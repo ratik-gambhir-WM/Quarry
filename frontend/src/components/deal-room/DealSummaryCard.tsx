@@ -1,4 +1,5 @@
 import type { DealRoomData } from "../../data/workspace";
+import { DataTableHeaderRow, DataTableHeading } from "../ui/DataTable";
 import { Icon } from "../ui/Icon";
 
 type DealSummaryCardProps = {
@@ -26,10 +27,12 @@ export function DealSummaryCard({ deal }: DealSummaryCardProps) {
                     <col className="w-1/2" />
                   </colgroup>
                   <thead>
-                    <tr className="border-b border-outline-variant/70 bg-surface-container-low/70">
-                      <QuestionTableHeading>Question</QuestionTableHeading>
-                      <QuestionTableHeading divided>Answer</QuestionTableHeading>
-                    </tr>
+                    <DataTableHeaderRow surface>
+                      <DataTableHeading density="compact">Question</DataTableHeading>
+                      <DataTableHeading className="border-l border-outline-variant/70" density="compact">
+                        Answer
+                      </DataTableHeading>
+                    </DataTableHeaderRow>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/55">
                     {deal.keyQuestions.map((question, index) => (
@@ -48,18 +51,5 @@ export function DealSummaryCard({ deal }: DealSummaryCardProps) {
         </div>
       </div>
     </section>
-  );
-}
-
-function QuestionTableHeading({ children, divided = false }: { children: string; divided?: boolean }) {
-  return (
-    <th
-      className={`px-4 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted ${
-        divided ? "border-l border-outline-variant/70" : ""
-      }`}
-      scope="col"
-    >
-      {children}
-    </th>
   );
 }

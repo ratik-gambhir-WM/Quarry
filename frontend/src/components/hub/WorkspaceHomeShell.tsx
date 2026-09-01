@@ -5,9 +5,10 @@ import { useWorkspaceDeals } from "../../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../../hooks/useWorkspaceSession";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import type { ActiveHomeSection } from "./sidebar/sidebarTypes";
 
 type WorkspaceHomeShellProps = {
-  activeHomeSection?: "account" | "hub" | "logs" | "summarize" | "vault";
+  activeHomeSection?: ActiveHomeSection;
   children: ReactNode;
   header: ReactNode;
 };

@@ -1,5 +1,4 @@
 import { Icon } from "../../ui/Icon";
-import { WorkspaceCard } from "../WorkspaceCard";
 
 type AiSearchCardProps = {
   suggestions: string[];
@@ -7,7 +6,7 @@ type AiSearchCardProps = {
 
 export function AiSearchCard({ suggestions }: AiSearchCardProps) {
   return (
-    <WorkspaceCard className="col-span-12 lg:col-span-8 p-6">
+    <section className="col-span-12 px-1 py-2 sm:px-3 lg:col-span-8">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
@@ -41,6 +40,6 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
           </button>
         ))}
       </div>
-    </WorkspaceCard>
+    </section>
   );
 }

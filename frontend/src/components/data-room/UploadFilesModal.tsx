@@ -1,6 +1,9 @@
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import type { ProcessFileJobEvent } from "../../contracts/quarryApi";
+import { formatFileSize } from "../../lib/formatters";
+import { DialogBackdrop } from "../ui/DialogBackdrop";
+import { DialogHeader } from "../ui/DialogHeader";
 import { Icon } from "../ui/Icon";
 
 type UploadFilesModalProps = {
@@ -259,47 +262,27 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
   }
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center px-4 py-6"
-      role="presentation"
+    <DialogBackdrop
+      closeLabel="Close upload files dialog"
+      disabled={activeCount > 0}
+      onClose={onClose}
     >
-      <button
-        aria-label="Close upload files dialog"
-        className="absolute inset-0 cursor-default disabled:cursor-wait"
-        disabled={activeCount > 0}
-        onClick={onClose}
-        type="button"
-      />
-
       <section
         aria-labelledby="upload-files-title"
         aria-modal="true"
         className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-[680px] flex-col overflow-hidden rounded-[20px] border border-outline-variant bg-surface-container-lowest shadow-[0_28px_70px_rgba(7,1,84,0.24)]"
         role="dialog"
       >
-        <header className="flex items-start justify-between gap-5 border-b border-outline-variant px-6 py-5">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">Data Room</p>
-            <h2
-              className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]"
-              id="upload-files-title"
-            >
-              Upload files
-            </h2>
-            <p className="mt-2 text-[13px] leading-5 text-muted">
-              Choose PDF and DOCX files from your Mac, then select which ones to process.
-            </p>
-          </div>
-          <button
-            aria-label="Close upload files dialog"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-40"
-            disabled={activeCount > 0}
-            onClick={onClose}
-            type="button"
-          >
-            <Icon className="h-5 w-5 rotate-45" name="plus" />
-          </button>
-        </header>
+        <DialogHeader
+          className="border-b border-outline-variant px-6 py-5"
+          closeLabel="Close upload files dialog"
+          description="Choose PDF and DOCX files from your Mac, then select which ones to process."
+          disabled={activeCount > 0}
+          eyebrow="Data Room"
+          onClose={onClose}
+          title="Upload files"
+          titleId="upload-files-title"
+        />
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <input
@@ -404,7 +387,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
           </div>
         </footer>
       </section>
-    </div>
+    </DialogBackdrop>
   );
 }
 
@@ -506,12 +489,6 @@ function getFileExtension(filename: string) {
 
 function fileIdentity(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`;
-}
-
-function formatFileSize(sizeBytes: number) {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatElapsedSeconds(seconds: number) {

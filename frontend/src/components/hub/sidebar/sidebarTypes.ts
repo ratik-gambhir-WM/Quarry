@@ -1,6 +1,6 @@
 import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../../../data/workspace";
 
-export type ActiveHomeSection = "account" | "hub" | "logs" | "summarize" | "tauri-playground" | "vault";
+export type ActiveHomeSection = "account" | "deals" | "hub" | "logs" | "summarize" | "tauri-playground" | "vault";
 
 export type ActiveDealSection =
   | "data-room"

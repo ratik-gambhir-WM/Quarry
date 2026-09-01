@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, useMemo, useState } from "react";
+import { FormEvent, PointerEvent, type ReactNode, useMemo, useState } from "react";
 import { DealRoomData, DealTask, DealTimelineItem, DealTimelineTone } from "../../data/workspace";
 import {
   moveReminder,
@@ -33,6 +33,8 @@ type CalendarDay = {
 
 const categoryOptions: TimelineCategory[] = ["Key Meeting / Call", "Key Activity", "Deliverable"];
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+const activityControlClassName =
+  "h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16";
 
 const initialFormState: TimelineFormState = {
   category: "Key Meeting / Call",
@@ -662,24 +664,22 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
         </div>
 
         <div className="space-y-5">
-          <label className="block min-w-0">
-            <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Activity Title</span>
+          <ActivityFormField label="Activity Title">
             <input
               autoFocus
-              className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
+              className={activityControlClassName}
               onChange={(event) => onChange({ ...formState, title: event.target.value })}
               placeholder="e.g. Stakeholder Interview"
               required
               type="text"
               value={formState.title}
             />
-          </label>
+          </ActivityFormField>
 
           <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <label className="block min-w-0">
-              <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Category</span>
+            <ActivityFormField label="Category">
               <select
-                className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+                className={activityControlClassName}
                 onChange={(event) => onChange({ ...formState, category: event.target.value as TimelineCategory })}
                 value={formState.category}
               >
@@ -687,33 +687,30 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
                   <option key={category}>{category}</option>
                 ))}
               </select>
-            </label>
+            </ActivityFormField>
 
-            <label className="block min-w-0">
-              <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Date</span>
+            <ActivityFormField label="Date">
               <input
-                className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+                className={activityControlClassName}
                 onChange={(event) => onChange({ ...formState, date: event.target.value })}
                 required
                 type="date"
                 value={formState.date}
               />
-            </label>
+            </ActivityFormField>
           </div>
 
-          <label className="block min-w-0">
-            <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Time</span>
+          <ActivityFormField label="Time">
             <input
-              className="h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
+              className={activityControlClassName}
               onChange={(event) => onChange({ ...formState, time: event.target.value })}
               required
               type="time"
               value={formState.time}
             />
-          </label>
+          </ActivityFormField>
 
-          <label className="block min-w-0">
-            <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">Notes</span>
+          <ActivityFormField label="Notes">
             <textarea
               className="min-h-24 w-full resize-y rounded-xl border border-outline-variant bg-white/55 px-4 py-3 text-[15px] leading-6 text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
               onChange={(event) => onChange({ ...formState, detail: event.target.value })}
@@ -721,7 +718,7 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
               rows={3}
               value={formState.detail}
             />
-          </label>
+          </ActivityFormField>
 
           <button
             className="h-12 w-full rounded-2xl bg-primary px-5 text-[15px] font-bold text-white shadow-[0_12px_28px_rgba(80,101,142,0.26)] transition hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-55"
@@ -733,6 +730,17 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
         </div>
       </form>
     </div>
+  );
+}
+
+function ActivityFormField({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }
 

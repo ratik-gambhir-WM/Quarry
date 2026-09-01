@@ -33,7 +33,7 @@ export function ChipBankPanel({ chips, onCollapse }: ChipBankPanelProps) {
 
   return (
     <section className="-ml-px flex w-[clamp(360px,30vw,440px)] min-w-[360px] max-w-[440px] flex-none flex-col border-l border-outline-variant/70 bg-background text-sidebar-text [font-family:var(--font-sidebar)]">
-      <div className="flex h-16 shrink-0 items-center border-b border-outline-variant/70 px-4">
+      <div className="flex h-12 shrink-0 items-center border-b border-outline-variant/70 px-4">
         <ChipBankHeader onCollapse={onCollapse} />
       </div>
       <div className="border-b border-outline-variant/70 px-4 py-4">

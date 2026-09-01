@@ -21,6 +21,9 @@ const SummarizePage = lazy(() =>
 const LogsPage = lazy(() =>
   import("./pages/LogsPage").then((module) => ({ default: module.LogsPage })),
 );
+const Deals = lazy(() =>
+  import("./pages/Deals").then((module) => ({ default: module.Deals })),
+);
 
 const routeFallback = <div className="min-h-screen bg-background" />;
 
@@ -47,6 +50,10 @@ function App() {
         <Route
           element={<Suspense fallback={routeFallback}><LogsPage /></Suspense>}
           path="/hub/logs"
+        />
+        <Route
+          element={<Suspense fallback={routeFallback}><Deals /></Suspense>}
+          path="/hub/deals"
         />
         <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
         <Route

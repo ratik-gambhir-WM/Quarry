@@ -60,12 +60,13 @@ export function DataRoomExplorer({
   return (
     <SidebarFrame
       alignedHeader
-      centeredLogo
       email={email}
       headerBackLabel="Back to Deal Room"
       headerBackTo={dealRoomPath}
       navigationState={navigationState}
       profileSubtitle={dealName}
+      sidebarIcon="folderOpen"
+      sidebarLabel="Data Room"
     >
       {({ collapsed }) =>
         collapsed ? (

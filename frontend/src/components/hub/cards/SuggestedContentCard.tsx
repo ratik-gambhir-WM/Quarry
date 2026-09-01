@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../ui/Icon";
-import { WorkspaceCard } from "../WorkspaceCard";
 import { useWorkspaceHomeDeals } from "../WorkspaceHomeShell";
 
 type ContentTab = "Recent" | "Analyzed" | "Files to review";
@@ -73,9 +72,7 @@ export function SuggestedContentCard() {
   const groups = contentByTab[activeTab];
 
   return (
-    <WorkspaceCard className="relative px-5 pb-6 pt-5 sm:px-7 sm:pb-7">
-      <div aria-hidden="true" className="absolute left-1/2 top-0 h-[3px] w-14 -translate-x-1/2 rounded-b-full bg-text-main" />
-
+    <section className="relative px-1 pb-4 pt-1 sm:px-3 sm:pb-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div aria-label="Content views" className="flex items-center gap-1" role="tablist">
           {tabs.map((tab) => (
@@ -138,7 +135,7 @@ export function SuggestedContentCard() {
           </div>
         ))}
       </div>
-    </WorkspaceCard>
+    </section>
   );
 }
 
