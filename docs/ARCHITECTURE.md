@@ -208,7 +208,7 @@ Desktop mode uses hash routing so the bundled static assets do not need server-s
 The live frontend is an npm package using:
 
 - React/React DOM 19 canary in the active working tree
-- Vite 7 and TypeScript 5.8 with strict/no-unused/no-emit checks
+- Vite 7 and TypeScript 6.0 with strict/no-unused/no-emit checks
 - React Router DOM 7
 - Tailwind CSS 4's CSS-first Vite integration
 - Radix/shadcn primitives, Lucide icons, Motion, and dnd-kit
