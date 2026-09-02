@@ -39,27 +39,24 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
               >
                 <tr className="deals-table-row transition-colors hover:bg-[var(--theme-workspace-chrome)] focus-within:bg-[var(--theme-workspace-chrome)]">
                   <td className="px-5 py-4">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${deal.colorClassName}`} />
-                      <div className="min-w-0">
-                        <ViewTransition
-                          default="none"
-                          name={`${deal.transitionName}-title`}
-                          share="text-morph"
+                    <div className="min-w-0">
+                      <ViewTransition
+                        default="none"
+                        name={`${deal.transitionName}-title`}
+                        share="text-morph"
+                      >
+                        <Link
+                          aria-label={`Open ${deal.name}`}
+                          className="block truncate text-[13px] font-medium text-text-main outline-none hover:text-primary focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-primary-fixed"
+                          state={navigationState}
+                          to={getDealRoomPath(deal.id)}
                         >
-                          <Link
-                            aria-label={`Open ${deal.name}`}
-                            className="block truncate text-[13px] font-medium text-text-main outline-none hover:text-primary focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-primary-fixed"
-                            state={navigationState}
-                            to={getDealRoomPath(deal.id)}
-                          >
-                            {deal.name}
-                          </Link>
-                        </ViewTransition>
-                        <p className="mt-1 truncate text-[11px] font-normal text-muted">
-                          {deal.targetCompany ?? "Target company unavailable"}
-                        </p>
-                      </div>
+                          {deal.name}
+                        </Link>
+                      </ViewTransition>
+                      <p className="mt-1 truncate text-[11px] font-normal text-muted">
+                        {deal.targetCompany ?? "Target company unavailable"}
+                      </p>
                     </div>
                   </td>
                   <td className="px-4 py-4 text-[12px] font-normal text-on-surface">

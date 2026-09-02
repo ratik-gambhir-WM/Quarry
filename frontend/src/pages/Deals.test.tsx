@@ -41,6 +41,7 @@ describe("Deals", () => {
     const table = screen.getByRole("table");
     expect(table).toBeTruthy();
     expect(table.closest(".workspace-card")).toBeNull();
+    expect(table.querySelectorAll('tbody [aria-hidden="true"]')).toHaveLength(0);
     expect(screen.getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
     const tableViewButton = screen.getByRole("button", { name: "Table view", pressed: true });
     expect(tableViewButton.closest("header")).toBeTruthy();
@@ -78,6 +79,28 @@ describe("Deals", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add deal" })).toBeNull());
     await waitFor(() => expect(trigger).toBe(document.activeElement));
+  });
+
+  it("closes the expanded deal search from its trailing control and restores trigger focus", async () => {
+    const user = userEvent.setup({ skipHover: true });
+    renderDeals();
+    const trigger = screen.getByRole("button", { name: "Search deals" });
+
+    expect(screen.queryByRole("button", { name: "Close deal search" })).toBeNull();
+    await user.click(trigger);
+
+    const searchbox = screen.getByRole("searchbox", { name: "Search deals" });
+    const closeButton = screen.getByRole("button", { name: "Close deal search" });
+    expect(closeButton.parentElement?.lastElementChild).toBe(closeButton);
+    await user.type(searchbox, "Project Beta");
+    await user.click(closeButton);
+
+    expect(screen.queryByRole("searchbox", { name: "Search deals" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
+    await waitFor(() => expect(trigger).toBe(document.activeElement));
+
+    await user.click(trigger);
+    expect((screen.getByRole("searchbox", { name: "Search deals" }) as HTMLInputElement).value).toBe("");
   });
 
   it("lazy-loads the read-only kanban and keeps cards keyboard actionable", async () => {

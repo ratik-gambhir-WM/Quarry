@@ -29,6 +29,9 @@
   --color-error-container: var(--theme-error-surface);
   --color-primary-fixed: var(--theme-focus);
   --color-on-primary-fixed: #070154;
+  --color-action: var(--theme-action);
+  --color-action-hover: var(--theme-action-hover);
+  --color-on-action: var(--theme-on-action);
   --color-secondary-fixed: var(--theme-secondary-fixed);
   --color-secondary-fixed-dim: #50658e;
   --color-on-secondary-fixed: var(--theme-text-strong);
@@ -107,10 +110,10 @@
       0 0 0 0.5px rgba(15, 23, 42, 0.02);
     --theme-surface-base: #ffffff;
     --theme-surface-raised: #ffffff;
-    --theme-surface-subtle: #f6f8fc;
-    --theme-surface-muted: #eef3fa;
-    --theme-surface-hover: #e8eef8;
-    --theme-surface-strong: #ced7e6;
+    --theme-surface-subtle: #f7f7f8;
+    --theme-surface-muted: #f3f3f5;
+    --theme-surface-hover: #f0f0f0;
+    --theme-surface-strong: #e7e7e7;
     --theme-translucent-surface: #ffffff;
 
     /* Content and borders */
@@ -118,20 +121,23 @@
     --theme-text-strong: #070154;
     --theme-text-muted: #66748f;
     --theme-text-subtle: #50658e;
-    --theme-border: #ced7e6;
-    --theme-border-strong: #50658e;
-    --theme-translucent-border: #ced7e6;
+    --theme-border: #dcdce1;
+    --theme-border-strong: #a8a8af;
+    --theme-translucent-border: #dcdce1;
 
     /* Interactive and supporting accents */
     --theme-interactive: #50658e;
     --theme-on-interactive: #ffffff;
-    --theme-interactive-soft: #e8eef8;
-    --theme-interactive-soft-hover: #ced7e6;
+    --theme-interactive-soft: #f0f0f0;
+    --theme-interactive-soft-hover: #e7e7e7;
     --theme-focus: #e8eef8;
-    --theme-secondary: #ced7e6;
-    --theme-secondary-surface: #ced7e6;
-    --theme-secondary-fixed: #ced7e6;
-    --theme-tertiary: #e8eef8;
+    --theme-action: #0c006b;
+    --theme-action-hover: #211781;
+    --theme-on-action: #ffffff;
+    --theme-secondary: #e7e7e7;
+    --theme-secondary-surface: #e7e7e7;
+    --theme-secondary-fixed: #e7e7e7;
+    --theme-tertiary: #f0f0f0;
 
     /* Sidebar */
     --theme-sidebar-active: #242424;
@@ -146,7 +152,7 @@
 
     /* Shared elevated primitives */
     --theme-panel: #ffffff;
-    --theme-panel-border: #ced7e6;
+    --theme-panel-border: #dcdce1;
     --theme-panel-hover: #ffffff;
     --theme-panel-shadow: 0 8px 22px rgba(7, 1, 84, 0.06);
     --theme-panel-shadow-hover: 0 12px 28px rgba(7, 1, 84, 0.1);
@@ -192,6 +198,9 @@
     --theme-interactive-soft: rgba(255, 255, 255, 0.1);
     --theme-interactive-soft-hover: rgba(255, 255, 255, 0.14);
     --theme-focus: #ffffff;
+    --theme-action: #ffffff;
+    --theme-action-hover: #f0f0f0;
+    --theme-on-action: #0c006b;
     --theme-secondary: #9aa4b6;
     --theme-secondary-surface: #070154;
     --theme-secondary-fixed: #25304d;
@@ -693,6 +702,13 @@
   --duration-exit: 150ms;
   --duration-enter: 210ms;
   --duration-move: 400ms;
+}
+
+@media (hover: hover) {
+  html:not([data-theme="dark"])
+    button:not(:disabled):not(.bg-action):not(.bg-primary):not(.bg-primary-container):hover {
+    background-color: var(--theme-surface-hover);
+  }
 }
 
 /* Keep persistent workspace chrome and floating controls out of Deals view snapshots. */

@@ -55,8 +55,14 @@ cancel/clean up correctly, and retain complete dependencies.
   event names, and error behavior.
 - Do not attach new feature code directly to `runtime.target` when a capability contract or an
   explicit platform composition can express the difference.
-- Static workspace data and request-error fallbacks are development fixtures. Do not present a
-  failed request as a successful authoritative fixture response without clear UI semantics.
+- Put shipped mock/demo/placeholder data in explicit files under `src/fixtures/<feature>/` and
+  import it into consumers. Do not define product fixture records inline in pages, components,
+  hooks, or `src/data`; reserve `src/data` for domain types, mappers, selectors, and other
+  non-fixture logic. Keep one-off test inputs inside their tests and shared test fixtures under
+  `src/test/fixtures/`.
+- Keep fixture imports easy to identify and remove when the API is ready. Do not copy fixture data
+  into fallback branches or present a failed request as successful authoritative data; the UI must
+  visibly distinguish server state from development fixtures.
 - Avoid placing server data already owned by a request/cache/router into duplicate local state
   unless it is an intentional edit buffer.
 

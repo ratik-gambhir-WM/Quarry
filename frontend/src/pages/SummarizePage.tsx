@@ -207,7 +207,7 @@ export function SummarizePage() {
             Browse Folder
           </button>
           <button
-            className="shrink-0 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-white transition hover:bg-primary-container disabled:cursor-not-allowed disabled:bg-primary/35"
+            className="shrink-0 rounded-full bg-action px-5 py-2 text-[13px] font-semibold text-on-action transition enabled:hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-35"
             disabled={!selectedPath.trim() || isSummarizing || (folderFiles.length > 0 && selectedFilePaths.size === 0)}
             type="submit"
           >

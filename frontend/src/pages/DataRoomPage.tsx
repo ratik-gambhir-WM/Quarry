@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
-import { ChipBankPanel } from "../components/data-room/ChipBankPanel";
 import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
 import type {
@@ -13,7 +12,6 @@ import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { EmptyState } from "../components/empty-state/empty-state";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
-  getDealDataRoomView,
   hasDataRoomFiles,
   isUnconfiguredDataRoomError,
 } from "../data/dataRoom";
@@ -22,6 +20,7 @@ import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPrev
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
 import { getDealRoomPath } from "../data/workspace";
+import { getDealDataRoomView } from "../fixtures/data-room/report";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
@@ -36,7 +35,6 @@ export function DataRoomPage() {
   const location = useLocation();
   const { deals, loaded } = useWorkspaceDeals();
   const { email } = useWorkspaceSession();
-  const [isChipBankOpen, setIsChipBankOpen] = useState(false);
   const [isConnectSharePointModalOpen, setIsConnectSharePointModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [localDataRoom, setLocalDataRoom] = useState<DealDataRoom | null>(null);
@@ -292,35 +290,26 @@ export function DataRoomPage() {
                 onUploadFiles={() => setIsUploadModalOpen(true)}
               />
             ) : (
-              <>
-                <div className="flex min-h-0 min-w-[420px] flex-1 basis-0 overflow-hidden">
-                  {selectedDocument ? (
-                    <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
-                      <DocumentPreviewPanel
-                        document={selectedDocument}
-                        key={selectedDocument.id}
-                        onClose={handleClosePreview}
-                        onOpenDocumentSearch={
-                          isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
-                        }
-                        onRequestRawText={handleRequestRawText}
-                        preview={preview}
-                        rawText={rawText}
-                      />
-                    </Suspense>
-                  ) : (
-                    <ReportEditorPanel
-                      blocks={dataRoomView.editorBlocks}
-                      onOpenDocumentSearch={
-                        isChipBankOpen ? undefined : () => setIsChipBankOpen(true)
-                      }
-                      reportTitle={dataRoomView.reportTitle}
-                      versionLabel={dataRoomView.versionLabel}
+              <div className="flex min-h-0 min-w-0 flex-1 basis-0 overflow-hidden">
+                {selectedDocument ? (
+                  <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
+                    <DocumentPreviewPanel
+                      document={selectedDocument}
+                      key={selectedDocument.id}
+                      onClose={handleClosePreview}
+                      onRequestRawText={handleRequestRawText}
+                      preview={preview}
+                      rawText={rawText}
                     />
-                  )}
-                </div>
-                {isChipBankOpen ? <ChipBankPanel chips={dataRoomView.chips} onCollapse={() => setIsChipBankOpen(false)} /> : null}
-              </>
+                  </Suspense>
+                ) : (
+                  <ReportEditorPanel
+                    blocks={dataRoomView.editorBlocks}
+                    reportTitle={dataRoomView.reportTitle}
+                    versionLabel={dataRoomView.versionLabel}
+                  />
+                )}
+              </div>
             )}
           </main>
         </div>

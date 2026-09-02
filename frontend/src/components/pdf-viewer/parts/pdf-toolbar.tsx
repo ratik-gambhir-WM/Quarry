@@ -12,14 +12,18 @@ import { PdfZoomControls } from "./pdf-zoom-controls";
 
 interface PdfToolbarProps {
   className?: string;
+  leadingContent?: ReactNode;
   onPrintAction?: () => void;
   printActionLabel?: ReactNode;
+  trailingContent?: ReactNode;
 }
 
 export function PdfToolbar({
   className,
+  leadingContent,
   onPrintAction,
   printActionLabel,
+  trailingContent,
 }: PdfToolbarProps) {
   const { labels } = usePdfViewer();
 
@@ -29,20 +33,23 @@ export function PdfToolbar({
         role="toolbar"
         aria-label={labels.toolbarAriaLabel}
         className={cn(
-          "flex items-center gap-1 border-b border-border bg-card px-2 py-1.5",
+          "grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-border bg-card px-2 py-1.5",
           className,
         )}
       >
-        <PdfPageNav />
-        <PdfPageIndicator />
-        <Separator orientation="vertical" className="mx-1 h-5" />
-        <PdfZoomControls />
-        <Separator orientation="vertical" className="mx-1 h-5" />
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="min-w-0">{leadingContent}</div>
+        <div className="flex shrink-0 items-center justify-center gap-1">
+          <PdfPageNav />
+          <PdfPageIndicator />
+          <Separator orientation="vertical" className="mx-1 h-5" />
+          <PdfZoomControls />
+        </div>
+        <div className="flex min-w-0 items-center justify-end gap-1">
           <PdfActionMenu
             onPrintAction={onPrintAction}
             printActionLabel={printActionLabel}
           />
+          {trailingContent}
         </div>
       </div>
     </TooltipProvider>

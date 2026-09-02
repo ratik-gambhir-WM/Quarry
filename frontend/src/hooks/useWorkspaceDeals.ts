@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import { buildWorkspaceDealFromPersisted } from "../data/dealExtraction";
-import { workspaceDeals, type WorkspaceDeal } from "../data/workspace";
+import type { WorkspaceDeal } from "../data/workspace";
+import { workspaceDeals } from "../fixtures/workspace/portfolio";
 
 export function useWorkspaceDeals() {
   const [deals, setDeals] = useState<WorkspaceDeal[]>(workspaceDeals);

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { XIcon } from "lucide-react";
 import type { DealScope } from "../../data/dealsView";
 import {
   DropdownMenu,
@@ -12,10 +13,7 @@ import {
   AdjustmentsHorizontalIcon,
   type AdjustmentsHorizontalIconHandle,
 } from "../ui/adjustments-horizontal";
-import {
-  MagnifyingGlassIcon,
-  type MagnifyingGlassIconHandle,
-} from "../ui/magnifying-glass";
+import { Icon } from "../ui/Icon";
 import { TableCellsIcon, type TableCellsIconHandle } from "../ui/table-cells";
 import { ViewColumnsIcon, type ViewColumnsIconHandle } from "../ui/view-columns";
 import { DealsToolbarButton } from "./DealsToolbarButton";
@@ -29,18 +27,18 @@ type DealsSearchProps = {
 
 export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
   const [open, setOpen] = useState(false);
-  const iconRef = useRef<MagnifyingGlassIconHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   function openSearch() {
     setOpen(true);
-    iconRef.current?.startAnimation();
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function closeSearch() {
+    onQueryChange("");
     setOpen(false);
-    iconRef.current?.stopAnimation();
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
   }
 
   return (
@@ -56,26 +54,21 @@ export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
         aria-label="Search deals"
         className="absolute left-0 z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
         onClick={openSearch}
-        onFocus={() => iconRef.current?.startAnimation()}
-        onMouseEnter={() => iconRef.current?.startAnimation()}
-        onMouseLeave={() => {
-          if (!open) iconRef.current?.stopAnimation();
-        }}
+        ref={triggerRef}
         type="button"
       >
-        <MagnifyingGlassIcon className="h-4 w-4" ref={iconRef} size={16} />
+        <Icon className="h-4 w-4" name="search" />
       </button>
       <input
         aria-hidden={!open}
         aria-label="Search deals"
-        className={`h-full min-w-0 flex-1 bg-transparent pl-8 pr-3 text-[12px] text-text-main outline-none transition-opacity duration-200 placeholder:text-muted motion-reduce:transition-none ${
+        className={`h-full min-w-0 flex-1 appearance-none bg-transparent pl-8 pr-8 text-[12px] text-text-main outline-none transition-opacity duration-200 placeholder:text-muted motion-reduce:transition-none [&::-webkit-search-cancel-button]:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.preventDefault();
-          onQueryChange("");
           closeSearch();
         }}
         placeholder="Search deals"
@@ -84,6 +77,16 @@ export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
         type="search"
         value={query}
       />
+      {open ? (
+        <button
+          aria-label="Close deal search"
+          className="absolute right-0 z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+          onClick={closeSearch}
+          type="button"
+        >
+          <XIcon aria-hidden="true" className="h-4 w-4" />
+        </button>
+      ) : null}
     </div>
   );
 }

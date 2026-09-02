@@ -147,7 +147,7 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
           <div className="flex flex-wrap items-center gap-6">
             <TimelineLegend />
             <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[12px] font-bold text-white shadow-[0_10px_26px_rgba(80,101,142,0.24)] transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-action px-5 text-[12px] font-bold text-on-action shadow-[0_10px_26px_rgba(7,1,84,0.2)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
               onClick={() => openNewActivity()}
               type="button"
             >
@@ -457,7 +457,7 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
         </div>
         <button
           aria-expanded={showNewReminderForm}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 text-[13px] font-bold text-white shadow-[0_10px_26px_rgba(80,101,142,0.22)] transition hover:bg-primary-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-action px-5 text-[13px] font-bold text-on-action shadow-[0_10px_26px_rgba(7,1,84,0.2)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
           onClick={() => setShowNewReminderForm((isOpen) => !isOpen)}
           type="button"
         >
@@ -513,7 +513,7 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
                       Cancel
                     </button>
                     <button
-                      className="rounded-full bg-primary px-4 py-2 text-[12px] font-bold text-white transition hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-full bg-action px-4 py-2 text-[12px] font-bold text-on-action transition enabled:hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={!newReminderLabel.trim()}
                       type="submit"
                     >
@@ -721,7 +721,7 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
           </ActivityFormField>
 
           <button
-            className="h-12 w-full rounded-2xl bg-primary px-5 text-[15px] font-bold text-white shadow-[0_12px_28px_rgba(80,101,142,0.26)] transition hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-55"
+            className="h-12 w-full rounded-2xl bg-action px-5 text-[15px] font-bold text-on-action shadow-[0_12px_28px_rgba(7,1,84,0.22)] transition enabled:hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-55"
             disabled={!canSubmit}
             type="submit"
           >

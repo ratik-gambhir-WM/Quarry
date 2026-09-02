@@ -9,7 +9,7 @@ import { WorkspaceLayout } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
-import { workspaceInsights } from "../data/workspace";
+import { workspaceInsights } from "../fixtures/workspace/portfolio";
 import type { DealTimelineItem, WorkspaceDeal, WorkspaceLocationState } from "../data/workspace";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";

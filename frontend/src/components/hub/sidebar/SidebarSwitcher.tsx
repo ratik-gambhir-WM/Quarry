@@ -1,121 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { SidebarSpaceIcon, SidebarSpaceId } from "../../../data/sidebar";
+import { workspaceSidebarSpaces } from "../../../fixtures/sidebar/spaces";
 import { Icon } from "../../ui/Icon";
 import { SidebarSection } from "./SidebarSection";
 
-type SidebarSpaceIcon =
-  | "bookmark"
-  | "checkCircle"
-  | "dashboard"
-  | "dataset"
-  | "doc"
-  | "folderOpen"
-  | "graph"
-  | "grid"
-  | "home"
-  | "listAlt"
-  | "notification"
-  | "person"
-  | "search"
-  | "settings"
-  | "shield"
-  | "sparkles"
-  | "timeline";
-
-type MockSidebarItem = {
-  icon: SidebarSpaceIcon;
-  id: string;
-  label: string;
-};
-
-type MockSidebarSection = {
-  items: MockSidebarItem[];
-  title: string;
-};
-
-type MockSidebarSpace = {
-  description: string;
-  icon: SidebarSpaceIcon;
-  id: Exclude<SidebarSpaceId, "current">;
-  label: string;
-  sections: MockSidebarSection[];
-};
-
-export type SidebarSpaceId = "current" | "diligence" | "operations" | "research";
-
-const mockSidebarSpaces: MockSidebarSpace[] = [
-  {
-    description: "Workstreams and findings",
-    icon: "graph",
-    id: "diligence",
-    label: "Diligence",
-    sections: [
-      {
-        title: "Workstreams",
-        items: [
-          { icon: "dashboard", id: "commercial-review", label: "Commercial Review" },
-          { icon: "timeline", id: "financial-review", label: "Financial Review" },
-          { icon: "grid", id: "operational-review", label: "Operational Review" },
-          { icon: "shield", id: "legal-compliance", label: "Legal & Compliance" },
-        ],
-      },
-      {
-        title: "Workspace",
-        items: [
-          { icon: "folderOpen", id: "data-requests", label: "Data Requests" },
-          { icon: "sparkles", id: "findings", label: "Findings" },
-          { icon: "listAlt", id: "deliverables", label: "Deliverables" },
-        ],
-      },
-    ],
-  },
-  {
-    description: "Research and saved evidence",
-    icon: "search",
-    id: "research",
-    label: "Research",
-    sections: [
-      {
-        title: "Discover",
-        items: [
-          { icon: "search", id: "research-library", label: "Research Library" },
-          { icon: "person", id: "expert-calls", label: "Expert Calls" },
-          { icon: "timeline", id: "market-signals", label: "Market Signals" },
-        ],
-      },
-      {
-        title: "Your Library",
-        items: [
-          { icon: "bookmark", id: "saved-evidence", label: "Saved Evidence" },
-          { icon: "doc", id: "recent-work", label: "Recent Work" },
-        ],
-      },
-    ],
-  },
-  {
-    description: "Team workflows and tools",
-    icon: "grid",
-    id: "operations",
-    label: "Operations",
-    sections: [
-      {
-        title: "Team",
-        items: [
-          { icon: "checkCircle", id: "assignments", label: "Assignments" },
-          { icon: "timeline", id: "calendar", label: "Calendar" },
-          { icon: "notification", id: "activity", label: "Activity" },
-        ],
-      },
-      {
-        title: "Manage",
-        items: [
-          { icon: "settings", id: "integrations", label: "Integrations" },
-          { icon: "dataset", id: "templates", label: "Templates" },
-        ],
-      },
-    ],
-  },
-];
+export type { SidebarSpaceId } from "../../../data/sidebar";
 
 type SidebarSwitcherProps = {
   activeSpaceId: SidebarSpaceId;
@@ -145,7 +35,7 @@ export function SidebarSwitcher({
       id: "current" as const,
       label: currentLabel,
     },
-    ...mockSidebarSpaces,
+    ...workspaceSidebarSpaces,
   ];
   const activeSpace = options.find((space) => space.id === activeSpaceId) ?? options[0];
 
@@ -205,7 +95,7 @@ export function SidebarSwitcher({
     const activeIndex =
       activeSpaceId === "current"
         ? 0
-        : Math.max(1, mockSidebarSpaces.findIndex((space) => space.id === activeSpaceId) + 1);
+        : Math.max(1, workspaceSidebarSpaces.findIndex((space) => space.id === activeSpaceId) + 1);
     const focusIndex = openFocusIndexRef.current ?? activeIndex;
     openFocusIndexRef.current = null;
     const frame = window.requestAnimationFrame(() => itemRefs.current[focusIndex]?.focus());
@@ -347,7 +237,7 @@ const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
 
 export function MockSidebarNavigation({ spaceId }: { spaceId: Exclude<SidebarSpaceId, "current"> }) {
-  const space = mockSidebarSpaces.find((candidate) => candidate.id === spaceId) ?? mockSidebarSpaces[0];
+  const space = workspaceSidebarSpaces.find((candidate) => candidate.id === spaceId) ?? workspaceSidebarSpaces[0];
   const [activeItemId, setActiveItemId] = useState(space.sections[0].items[0].id);
 
   return (
@@ -387,5 +277,5 @@ export function MockSidebarNavigation({ spaceId }: { spaceId: Exclude<SidebarSpa
 }
 
 function isSidebarSpaceId(value: string): value is SidebarSpaceId {
-  return value === "current" || mockSidebarSpaces.some((space) => space.id === value);
+  return value === "current" || workspaceSidebarSpaces.some((space) => space.id === value);
 }

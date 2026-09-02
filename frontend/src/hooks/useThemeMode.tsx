@@ -1,6 +1,7 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 export type ThemeMode = "slate-frost" | "dark";
+export const DARK_THEME_ENABLED = false;
 
 type ThemeModeContextValue = {
   setThemeMode: (themeMode: ThemeMode) => void;
@@ -20,7 +21,7 @@ function getStoredThemeMode(): ThemeMode {
   }
 
   const storedThemeMode = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return storedThemeMode === "dark" ? "dark" : "slate-frost";
+  return DARK_THEME_ENABLED && storedThemeMode === "dark" ? "dark" : "slate-frost";
 }
 
 type ThemeModeProviderProps = {
@@ -28,7 +29,10 @@ type ThemeModeProviderProps = {
 };
 
 export function ThemeModeProvider({ children }: ThemeModeProviderProps) {
-  const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredThemeMode);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(getStoredThemeMode);
+  const setThemeMode = useCallback((nextThemeMode: ThemeMode) => {
+    setThemeModeState(DARK_THEME_ENABLED ? nextThemeMode : "slate-frost");
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;

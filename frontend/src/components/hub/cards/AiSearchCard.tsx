@@ -26,7 +26,7 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
           placeholder="Search across deals or ask AI a question..."
           type="text"
         />
-        <button className="absolute right-2 top-1/2 inline-flex h-12 -translate-y-1/2 items-center gap-2 rounded-2xl bg-primary px-6 text-sm font-semibold text-white transition hover:bg-primary-container">
+        <button className="absolute right-2 top-1/2 inline-flex h-12 -translate-y-1/2 items-center gap-2 rounded-2xl bg-action px-6 text-sm font-semibold text-on-action transition enabled:hover:bg-action-hover">
           <Icon className="h-4 w-4" name="send" />
           Ask AI
         </button>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { getTeamLabel, WorkspaceDeal, WorkspaceLocationState } from "../../../data/workspace";
+import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/navigation";
 import { WestMonroeMark } from "../../brand/WestMonroeMark";
 import { Icon } from "../../ui/Icon";
 import { ProfilePreferences } from "./ProfilePreferences";
@@ -38,7 +39,7 @@ export function SidebarFrame({
   const [collapsed, setCollapsed] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const teamLabel = getTeamLabel(email);
-  const subtitle = profileDeal ? profileDeal.room.name : profileSubtitle ?? "Focus: Project Alpha";
+  const subtitle = profileDeal ? profileDeal.room.name : profileSubtitle ?? defaultWorkspaceProfileSubtitle;
 
   return (
     <aside

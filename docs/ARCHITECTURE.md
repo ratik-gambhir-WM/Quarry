@@ -128,6 +128,7 @@ Quarry/
 ├── .agents/skills/                   project-local development skills
 ├── frontend/
 │   ├── src/                          shared React application
+│   │   └── fixtures/                 shipped mock/demo records grouped by feature
 │   ├── scripts/                      runtime-boundary enforcement
 │   ├── src-tauri/                    Tauri desktop crate
 │   ├── package.json                  npm scripts and declared dependencies
@@ -249,7 +250,8 @@ authorization controls.
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
 | `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
-| `data/` | UI domain types, fixtures, mapping, pure selectors | workspace, deal extraction, deals view |
+| `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
+| `fixtures/` | Explicit shipped mock/demo/placeholder records, grouped by consuming feature | workspace portfolio, hub activity, Data Room search/report data |
 | `contracts/` | Transport-neutral application contract | `QuarryApi`, runtime and platform capabilities |
 | `api/` | Browser and Tauri transport adapters | HTTP, multipart, binary, SSE, IPC mapping |
 | `platform/` | Build-selected router/runtime composition | web and desktop adapters |
@@ -260,20 +262,30 @@ authorization controls.
 Quarry currently uses React-local state, narrow contexts, and pure data modules rather than a
 global state or query-cache library.
 
-- `ThemeModeProvider` owns the `slate-frost`/`dark` choice, mirrors it to the root element and
-  `localStorage`, and updates the browser theme color.
+- `ThemeModeProvider` owns theme application, mirrors it to the root element and `localStorage`,
+  and updates the browser theme color. The dark palette remains defined for restoration, but the
+  current feature flag normalizes stored or requested dark mode to `slate-frost` and hides the
+  profile theme picker.
 - `WorkspaceHomeShell` loads deals and provides them through a context. The context currently
   defaults to an empty array rather than failing outside the provider.
-- `useWorkspaceDeals` fetches once, maps persisted deals, merges server records with static
-  `workspaceDeals` fixtures by ID, and silently falls back to fixtures when the request fails.
+- `useWorkspaceDeals` fetches once, maps persisted deals, merges server records with the explicit
+  `fixtures/workspace/portfolio.ts` records by ID, and silently falls back to those fixtures when
+  the request fails.
 - The PDF viewer uses an internal context plus focused hooks for document loading, zoom,
   virtualization, keyboard behavior, selection, page tracking, drop, and printing.
+- A selected Data Room document owns its search-overlay state. The overlay is triggered from the
+  document chrome, including the PDF toolbar during preview, remains inside the document canvas
+  boundary, filters fixture-backed excerpts synchronously, and uses the existing PDF viewer handle
+  for supported current-document page jumps without remounting the viewer on open or cancel.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
-Static fixtures make development screens usable when the backend is unavailable, but they are not
-authoritative product data. New code must keep fallback data visibly distinct from successful
-server state and avoid masking operational failures.
+Runtime fixtures live under `frontend/src/fixtures/`, grouped by feature and imported directly by
+every consumer. This makes the fixture tree a removable development boundary: deleting it should
+surface every remaining fixture-backed product path as an import/type failure. Fixtures make
+development screens usable when the backend is unavailable, but they are not authoritative
+product data. New code must keep fallback data visibly distinct from successful server state and
+avoid masking operational failures.
 
 ### 5.5 Feature inventory and maturity
 
@@ -283,19 +295,23 @@ server state and avoid masking operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search/filter, table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, summary, timeline, activity and selected views | Several diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, upload jobs, PDF/text preview | Report/chip content is partly fixture-derived; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, upload jobs, PDF/text preview, and document/PDF-toolbar search overlay with local mock results and current-PDF page jumps | Report/search content is partly fixture-derived; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
 | Logs | View/export/clear bounded activity log | Session-local only |
-| Account/profile | Displays fetched user details and theme preference | Profile data moves through router/UI state; not an auth session |
+| Account/profile | Displays fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Profile data moves through router/UI state; not an auth session |
 
 ### 5.6 UI and styling system
 
 [`frontend/src/index.css`](../frontend/src/index.css) is the styling source of truth. It imports
 Tailwind 4, animation utilities, and shadcn CSS, then defines semantic tokens for canvas, surfaces,
 content, borders, interaction, sidebar, status, typography, spacing, radii, and shared panels.
-Light and dark themes change the tokens rather than component structure.
+The active light palette uses neutral gray surface/hover/border tokens, preserves the slate text
+tokens, and separates deep-navy action fills from text/link interaction colors. Enabled neutral
+buttons share the light-gray hover surface; filled primary actions share the deep-navy action
+tokens. The retained dark palette changes tokens rather than component structure, but is currently
+disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
@@ -706,6 +722,8 @@ for images, spreadsheets, and PowerPoint.
 2. A PDF request returns original PDF bytes or converts a supported stored source to PDF.
 3. A text request parses the stored PDF/DOCX into canonical raw text.
 4. The frontend's PDF viewer renders bytes with pdf.js/react-pdf.
+5. The selected-file header can open a panel-scoped search overlay while the viewer stays mounted;
+   supported local mock results call the viewer's typed page-navigation action.
 
 Stored-document DOCX-to-PDF conversion has a built-in fallback renderer when LibreOffice is
 unavailable. Local data-room DOCX, XLSX, and PPTX previews call the Office converter directly and
@@ -716,6 +734,12 @@ therefore require LibreOffice.
 Keyword and vector requests carry a caller-supplied workspace identity and limit. Services validate
 common constraints and delegate to the Helix index repository. There is currently no server-side
 identity binding to prove that the caller owns the requested workspace.
+
+The Data Room document-search overlay does not consume these endpoints. It currently filters
+deterministic fixture excerpts in the shared frontend, can navigate only valid page targets in the
+already selected PDF, and highlights terms only in result text. Cross-document activation and
+programmatic text highlighting inside the PDF require stable result identities and an expanded
+viewer contract.
 
 ## 11. Configuration
 
@@ -859,6 +883,8 @@ tests opt into happy-dom per file. Coverage currently includes:
 - Deals table/filter/modal/Kanban interactions in the uncommitted work
 - sidebar/layout interactions
 - PDF source normalization and page tracking
+- Data Room document-search filtering, accessible overlay interaction, viewer mount preservation,
+  and supported page-target activation
 
 There is no browser end-to-end suite or visual regression suite.
 

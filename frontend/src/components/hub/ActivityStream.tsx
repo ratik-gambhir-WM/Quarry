@@ -1,61 +1,8 @@
 import type { ReactNode } from "react";
-import { workspaceInsights } from "../../data/workspace";
+import { hubActivityTasks, hubRecentFiles } from "../../fixtures/hub/activity";
+import { workspaceInsights } from "../../fixtures/workspace/portfolio";
 import { Icon } from "../ui/Icon";
 import { WorkspaceCard } from "./WorkspaceCard";
-
-const tasks = [
-  {
-    checked: true,
-    label: "Finalize Q3 Financial Extract for Project Alpha",
-    tag: { tone: "error" as const, value: "High Priority" },
-  },
-  {
-    checked: false,
-    label: "Review legal disclosures for Logistics Merger",
-    tag: { tone: "success" as const, value: "Due Today" },
-  },
-  {
-    checked: false,
-    label: "Approve analyst transcript summary: CEO Site Visit",
-    tag: { tone: "muted" as const, value: "Alpha" },
-  },
-  {
-    checked: false,
-    label: "Initialize Data Room for Project Gamma",
-    tag: { tone: "icon" as const, value: "more" as const },
-  },
-] as const;
-
-const recentFiles = [
-  {
-    deal: "Project Alpha",
-    icon: "pdf" as const,
-    time: "2m ago",
-    title: "Q3 Financial Report.pdf",
-    tone: "error" as const,
-  },
-  {
-    deal: "Project Beta",
-    icon: "doc" as const,
-    time: "1h ago",
-    title: "Meeting Minutes - Legal Review.doc",
-    tone: "accent" as const,
-  },
-  {
-    deal: "Logistics Merger",
-    icon: "sheet" as const,
-    time: "3h ago",
-    title: "Logistics_Due_Diligence.xlsx",
-    tone: "primary" as const,
-  },
-  {
-    deal: "Project Alpha",
-    icon: "pdf" as const,
-    time: "Yesterday",
-    title: "Environmental Impact Study.pdf",
-    tone: "error" as const,
-  },
-] as const;
 
 const activityFilters = ["All", "Tasks", "Docs", "Insights"] as const;
 
@@ -90,21 +37,21 @@ export function ActivityStream() {
       </div>
 
       <div className="mt-4 flex flex-col gap-4">
-        <StreamTaskCard item={tasks[0]} />
+        <StreamTaskCard item={hubActivityTasks[0]} />
         <StreamInsightCard item={workspaceInsights[0]} />
-        <StreamFileCard item={recentFiles[1]} />
-        <StreamTaskCard item={tasks[1]} />
+        <StreamFileCard item={hubRecentFiles[1]} />
+        <StreamTaskCard item={hubActivityTasks[1]} />
         <StreamInsightCard item={workspaceInsights[1]} />
-        <StreamFileCard item={recentFiles[0]} />
-        <StreamTaskCard item={tasks[2]} />
-        <StreamFileCard item={recentFiles[2]} />
-        <StreamTaskCard item={tasks[3]} />
+        <StreamFileCard item={hubRecentFiles[0]} />
+        <StreamTaskCard item={hubActivityTasks[2]} />
+        <StreamFileCard item={hubRecentFiles[2]} />
+        <StreamTaskCard item={hubActivityTasks[3]} />
       </div>
     </section>
   );
 }
 
-function StreamTaskCard({ item }: { item: (typeof tasks)[number] }) {
+function StreamTaskCard({ item }: { item: (typeof hubActivityTasks)[number] }) {
   const toneClassName =
     item.tag.tone === "error"
       ? "bg-error"
@@ -184,7 +131,7 @@ function StreamInsightCard({ item }: { item: (typeof workspaceInsights)[number] 
   );
 }
 
-function StreamFileCard({ item }: { item: (typeof recentFiles)[number] }) {
+function StreamFileCard({ item }: { item: (typeof hubRecentFiles)[number] }) {
   const toneClassName = item.tone === "error" ? "bg-error" : item.tone === "accent" ? "bg-accent" : "bg-primary";
   const iconToneClassName =
     item.tone === "error"

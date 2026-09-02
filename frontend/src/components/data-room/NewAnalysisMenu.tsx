@@ -47,7 +47,7 @@ export function NewAnalysisMenu({ onConnectToSharePoint, onUploadNewFile }: NewA
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="New analysis"
-        className="flex h-9 w-full items-center justify-center gap-3 rounded-lg bg-[#0c006b] px-3 text-white shadow-sm transition enabled:hover:bg-[#211781] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-50 [html[data-theme=dark]_&]:bg-white [html[data-theme=dark]_&]:text-[#0c006b] [html[data-theme=dark]_&]:enabled:hover:bg-[#f1eff8]"
+        className="flex h-9 w-full items-center justify-center gap-3 rounded-lg bg-action px-3 text-on-action shadow-sm transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-50"
         onClick={() => setOpen((current) => !current)}
         title="New analysis"
         type="button"

@@ -152,8 +152,16 @@ request -> router -> handler -> service -> repository/client
   Do not edit generated `dist` output or bypass semantic theme tokens with a parallel style system.
 - Preserve semantic HTML, accessible names, keyboard/focus behavior, reduced-motion behavior,
   and visible async feedback.
-- The static `workspace.ts` data and error fallbacks are development fixtures. Keep fixture and
-  server-derived data visibly distinct; do not silently promote fixtures to authoritative data.
+- Put all runtime mock, demo, placeholder, and development-fixture product data under
+  `frontend/src/fixtures/`, grouped by feature and split into clearly named fixture files. Pages,
+  components, hooks, and `data/` modules must import fixtures explicitly rather than defining mock
+  records inline. Keep domain types, mappers, and selectors in `frontend/src/data/`; do not mix
+  them with deletable fixture records. Test-only values that are never shipped may remain local to
+  one test, while shared test fixtures belong under `frontend/src/test/fixtures/`.
+- Keep fixture and server-derived data visibly distinct; do not silently promote fixtures to
+  authoritative data or duplicate a fixture as an error fallback. The runtime fixture tree should
+  be removable during API integration so TypeScript/import failures identify every remaining
+  product-fixture consumer.
 
 ## Backend development rules
 

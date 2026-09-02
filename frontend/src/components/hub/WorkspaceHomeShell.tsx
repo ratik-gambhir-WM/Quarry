@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import { workspaceInitiatives, workspaceTools, type WorkspaceDeal } from "../../data/workspace";
+import type { WorkspaceDeal } from "../../data/workspace";
+import { workspaceInitiatives, workspaceTools } from "../../fixtures/workspace/navigation";
 import { useWorkspaceDeals } from "../../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../../hooks/useWorkspaceSession";
 import { WorkspaceLayout } from "./WorkspaceLayout";

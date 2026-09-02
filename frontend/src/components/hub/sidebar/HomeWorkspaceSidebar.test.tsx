@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { workspaceDeals, workspaceTools } from "../../../data/workspace";
+import { workspaceTools } from "../../../fixtures/workspace/navigation";
+import { workspaceDeals } from "../../../fixtures/workspace/portfolio";
 import { HomeWorkspaceSidebar } from "./HomeWorkspaceSidebar";
 
 describe("HomeWorkspaceSidebar", () => {

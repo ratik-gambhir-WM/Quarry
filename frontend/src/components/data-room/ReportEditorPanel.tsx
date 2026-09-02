@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorBlock } from "../../data/dataRoom";
 import { Icon } from "../ui/Icon";
-import { EdgePanelOpenButton } from "./EdgePanelOpenButton";
 
 const documentViews = ["Document", "Summary", "Notes", "Findings"] as const;
 type DocumentView = (typeof documentViews)[number];
 
 type ReportEditorPanelProps = {
   blocks: EditorBlock[];
-  onOpenDocumentSearch?: () => void;
   reportTitle: string;
   versionLabel: string;
 };
 
 export function ReportEditorPanel({
   blocks,
-  onOpenDocumentSearch,
   reportTitle,
   versionLabel,
 }: ReportEditorPanelProps) {
@@ -28,12 +25,6 @@ export function ReportEditorPanel({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <DocumentViewMenu />
-          {onOpenDocumentSearch ? (
-            <EdgePanelOpenButton
-              label="Open document search"
-              onClick={onOpenDocumentSearch}
-            />
-          ) : null}
         </div>
       </header>
 

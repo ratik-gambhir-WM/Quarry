@@ -236,7 +236,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
             {step === "details" ? "Cancel" : "Skip files"}
           </button>
           <button
-            className="inline-flex min-w-[148px] items-center justify-center gap-2 rounded-full bg-primary-container px-6 py-3 text-[13px] font-semibold text-on-primary-container shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition hover:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
+            className="inline-flex min-w-[148px] items-center justify-center gap-2 rounded-full bg-action px-6 py-3 text-[13px] font-semibold text-on-action shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
             disabled={isSubmitting}
             type="submit"
           >
