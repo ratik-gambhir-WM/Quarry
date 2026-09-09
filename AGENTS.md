@@ -34,6 +34,8 @@ desktop API gateway. Do not reintroduce their older “save command only” mode
      [`.agents/skills/axum-development/SKILL.md`](.agents/skills/axum-development/SKILL.md)
    - Verification for any code or documentation change:
      [`.agents/skills/code-verification/SKILL.md`](.agents/skills/code-verification/SKILL.md)
+   - Multi-axis review after implementation, before merge, or when review is requested:
+     [`.agents/skills/code-review-and-quality/SKILL.md`](.agents/skills/code-review-and-quality/SKILL.md)
 4. Inspect the relevant manifest, lockfile, entrypoint, nearby implementation, and nearby tests.
 5. State the behavior and contracts that must remain stable before editing.
 6. Make the smallest coherent change and verify it in the affected build roots.
@@ -272,7 +274,8 @@ normal code check.
 
 - Treat `.env*`, local databases, API keys, tokens, absolute paths, user email, and document
   contents as sensitive. Do not print them in command output, fixtures, screenshots, or logs.
-- Do not read or modify a real `.env`; use `.env.example` only as a documented schema.
+- Do not read or modify a real `.env` unless the user explicitly requests configuration work. Use
+  the configuration sections of `docs/ARCHITECTURE.md` as the documented environment schema.
 - Do not put secrets in `VITE_*`, browser storage, client bundles, or Tauri command arguments when
   a server-held secret is appropriate.
 - The current users table contains a development-era `api_key` field and the login flow is profile

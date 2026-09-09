@@ -28,6 +28,21 @@ Quarry-multiplatform/
 
 ## Frontend commands
 
+To start the complete local stack from the repository root, use the root launcher:
+
+```sh
+./quarry web
+./quarry desktop
+```
+
+Both modes start the Axum API on `http://127.0.0.1:3001`, wait for its health endpoint, and then
+start the selected UI. The desktop mode runs Tauri, whose development command starts the desktop
+Vite mode. Stopping either child stops the other. The launcher deliberately rejects calls made
+from `frontend/`, `backend/`, or any directory other than the repository root.
+
+The executable is named `quarry`, so shells configured to include the repository root on `PATH`
+may use `quarry web` and `quarry desktop` without the `./` prefix.
+
 ```sh
 cd frontend
 npm install
@@ -41,8 +56,12 @@ npm run dev:desktop
 Web mode uses `BrowserRouter`; configure the static host to rewrite application routes to
 `index.html`. Desktop mode uses `HashRouter` and bundles the same UI source.
 
+`frontend/.env` is the only live frontend environment file. Both Vite modes read it; keep only
+public `VITE_*` browser configuration there and do not create additional `.env.local` or
+mode-specific environment files.
+
 For local development, an empty `VITE_API_BASE_URL` uses Vite's `/api` proxy to
-`http://127.0.0.1:3001`. A packaged desktop build must set an HTTPS `VITE_API_BASE_URL`, and the
+`http://127.0.0.1:3001`. A packaged desktop build must set an HTTPS `QUARRY_API_BASE_URL`, and the
 same exact origin must replace `https://api.example.invalid` in `frontend/src-tauri/tauri.conf.json`
 before release.
 
@@ -50,17 +69,24 @@ before release.
 
 ```sh
 cd backend
-cp .env.example .env
 cargo test
 cargo run
 ```
 
+`backend/.env` is the only backend environment file. It is ignored by Git and may contain
+server-side secrets. Supported keys and defaults are documented in the configuration section of
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#11-configuration).
+
+The combined `quarry` launcher still relies on the backend configuration and local services below.
+It pins only the development API host and port so the web proxy and desktop relay address the same
+Axum process.
+
 The shared client uses `/api/v1`. The original `/api` routes remain available temporarily for
 backward compatibility. `/api/v1/capabilities` advertises the initial contract features.
 
-The inherited backend still requires the local development dependencies described in
-`backend/.env.example`, including Helix for normal startup. The example OpenAI key is deliberately
-empty; server secrets belong only in local secret stores or deployment configuration.
+The backend still requires its configured local development dependencies, including Helix for
+normal startup. Server secrets belong only in `backend/.env`, local secret stores, or deployment
+configuration.
 
 ## Desktop-native boundary
 
@@ -87,5 +113,5 @@ real identity and tenant authorization, removal of user-managed OpenAI keys, dur
 storage/jobs, provider-specific deployment, production CSP/CORS, signed desktop artifacts, and
 updater configuration.
 
-The credential that existed in the original `Quarry-web/backend/.env.example` was not copied here.
-It must still be revoked and removed from the original repository's history by its owners.
+The credential that existed in the original Quarry-web configuration template was not copied
+here. It must still be revoked and removed from the original repository's history by its owners.

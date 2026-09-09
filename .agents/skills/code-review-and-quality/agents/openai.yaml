@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Review and Quality"
+  short_description: "Review changes across five quality axes"
+  default_prompt: "Use $code-review-and-quality to review this change before merge."

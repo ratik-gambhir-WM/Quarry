@@ -103,8 +103,8 @@ introduced.
   optional group; partial WM AI configuration must fail precisely.
 - Helix is mandatory during normal bootstrap and index initialization.
 - Keep secrets in `SecretString` or an equivalent redacted wrapper.
-- Update `.env.example` when the schema changes, but remember it currently has known partial-OpenAI
-  drift; test the parser rather than assuming the example starts the app.
+- Keep the configuration tables in `docs/ARCHITECTURE.md` aligned with parser changes. Quarry uses
+  only the ignored `backend/.env` at runtime and does not maintain a second env-shaped template.
 - The Rust SharePoint client is isolated and not assembled into routes/services. A stored
   SharePoint URL is metadata, not an active import.
 

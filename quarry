@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+
+set -u
+set -o pipefail
+
+readonly QUARRY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly QUARRY_API_HOST="127.0.0.1"
+readonly QUARRY_API_PORT="3001"
+readonly QUARRY_API_URL="http://${QUARRY_API_HOST}:${QUARRY_API_PORT}"
+readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
+
+backend_pid=""
+ui_pid=""
+
+usage() {
+  cat <<'EOF'
+Usage: quarry <web|desktop>
+
+  web      Start the Axum API, then the React UI in web mode.
+  desktop  Start the Axum API, then the React UI in Tauri desktop mode.
+
+Run this command from the Quarry repository root.
+EOF
+}
+
+fail() {
+  printf 'quarry: %s\n' "$1" >&2
+  exit 1
+}
+
+process_group_is_running() {
+  local pid="$1"
+  [[ -n "$pid" ]] && kill -0 -- "-${pid}" 2>/dev/null
+}
+
+signal_process_group() {
+  local pid="$1"
+  local signal="$2"
+
+  if process_group_is_running "$pid"; then
+    kill "-${signal}" -- "-${pid}" 2>/dev/null || true
+  elif [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "-${signal}" "$pid" 2>/dev/null || true
+  fi
+}
+
+children_are_running() {
+  process_group_is_running "$ui_pid" || process_group_is_running "$backend_pid"
+}
+
+cleanup() {
+  local exit_status=$?
+  local attempt
+
+  trap - EXIT INT TERM HUP
+
+  signal_process_group "$ui_pid" INT
+  signal_process_group "$backend_pid" INT
+
+  for attempt in {1..30}; do
+    if ! children_are_running; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  signal_process_group "$ui_pid" TERM
+  signal_process_group "$backend_pid" TERM
+
+  for attempt in {1..20}; do
+    if ! children_are_running; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  signal_process_group "$ui_pid" KILL
+  signal_process_group "$backend_pid" KILL
+
+  if [[ -n "$ui_pid" ]]; then
+    wait "$ui_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$backend_pid" ]]; then
+    wait "$backend_pid" 2>/dev/null || true
+  fi
+
+  exit "$exit_status"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+if [[ "$(pwd -P)" != "$QUARRY_ROOT" ]]; then
+  fail "run this command from ${QUARRY_ROOT}, not from $(pwd -P)"
+fi
+
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
+  usage >&2
+  exit 64
+fi
+
+case "$1" in
+  web)
+    readonly ui_label="React web UI"
+    readonly ui_command="dev:web"
+    ;;
+  desktop)
+    readonly ui_label="Tauri desktop UI"
+    readonly ui_command="dev:desktop"
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
+
+for required_command in cargo npm curl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    fail "required command not found: ${required_command}"
+  fi
+done
+
+if curl --fail --silent --max-time 1 "${QUARRY_API_URL}/api/v1/health" >/dev/null 2>&1; then
+  fail "another Quarry API is already running at ${QUARRY_API_URL}"
+fi
+
+printf 'Starting Axum API at %s...\n' "$QUARRY_API_URL"
+set -m
+(
+  cd "$QUARRY_ROOT/backend" || exit 1
+  exec env \
+    QUARRY_API_HOST="$QUARRY_API_HOST" \
+    QUARRY_API_PORT="$QUARRY_API_PORT" \
+    cargo run --locked
+) &
+backend_pid=$!
+set +m
+
+readonly startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
+while ! curl --fail --silent --max-time 1 "${QUARRY_API_URL}/api/v1/health" >/dev/null 2>&1; do
+  if ! kill -0 "$backend_pid" 2>/dev/null; then
+    wait "$backend_pid"
+    backend_status=$?
+    backend_pid=""
+    if [[ $backend_status -eq 0 ]]; then
+      backend_status=1
+    fi
+    printf 'quarry: Axum API exited before becoming ready.\n' >&2
+    exit "$backend_status"
+  fi
+
+  if ((SECONDS >= startup_deadline)); then
+    fail "Axum API did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+  fi
+
+  sleep 0.25
+done
+
+printf 'Axum API is ready. Starting %s...\n' "$ui_label"
+set -m
+(
+  cd "$QUARRY_ROOT/frontend" || exit 1
+  if [[ "$ui_command" == "dev:web" ]]; then
+    exec env VITE_API_BASE_URL= npm run "$ui_command"
+  fi
+  exec env QUARRY_API_BASE_URL="$QUARRY_API_URL" npm run "$ui_command"
+) &
+ui_pid=$!
+set +m
+
+while true; do
+  if ! kill -0 "$backend_pid" 2>/dev/null; then
+    wait "$backend_pid"
+    backend_status=$?
+    backend_pid=""
+    if [[ $backend_status -eq 0 ]]; then
+      backend_status=1
+    fi
+    printf 'quarry: Axum API stopped; shutting down %s.\n' "$ui_label" >&2
+    exit "$backend_status"
+  fi
+
+  if ! kill -0 "$ui_pid" 2>/dev/null; then
+    wait "$ui_pid"
+    ui_status=$?
+    ui_pid=""
+    exit "$ui_status"
+  fi
+
+  sleep 0.5
+done

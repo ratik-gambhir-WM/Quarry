@@ -11,6 +11,7 @@ import {
 export type DataRoomDocumentSearchProps = {
   currentFileName: string;
   currentPageCount: number;
+  finalFocusEl?: () => HTMLElement | null;
   onActivateResult: (result: DocumentSearchResult) => void;
   onOpenChange?: (open: boolean) => void;
   onSelectionFocus?: () => void;
@@ -21,6 +22,7 @@ export type DataRoomDocumentSearchProps = {
 export function DataRoomDocumentSearch({
   currentFileName,
   currentPageCount,
+  finalFocusEl,
   onActivateResult,
   onOpenChange,
   onSelectionFocus,
@@ -67,6 +69,7 @@ export function DataRoomDocumentSearch({
       buttonProps={{ "aria-label": "Search document", iconOnly: true }}
       dialogDescription={`Search local mock excerpts for ${currentFileName}.`}
       dialogTitle={`Search ${currentFileName}`}
+      finalFocusEl={finalFocusEl}
       items={items}
       onOpenChange={onOpenChange}
       onSelect={activateItem}

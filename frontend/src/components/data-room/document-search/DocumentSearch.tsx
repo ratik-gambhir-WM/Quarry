@@ -24,6 +24,7 @@ export type DocumentSearchConfig = {
   dialogDescription?: string;
   dialogTitle?: string;
   enableKeyboardShortcut?: boolean;
+  finalFocusEl?: () => HTMLElement | null;
   items: DocumentSearchItem[];
   onOpenChange?: (open: boolean) => void;
   onSelect: (item: DocumentSearchItem) => void;
@@ -227,6 +228,7 @@ export default function DocumentSearch({
   dialogDescription = "Search local mock results.",
   dialogTitle = "Search",
   enableKeyboardShortcut = false,
+  finalFocusEl,
   items,
   onOpenChange,
   onSelect,
@@ -302,6 +304,9 @@ export default function DocumentSearch({
             if (selectedItemRef.current && onSelectionFocus) {
               event.preventDefault();
               onSelectionFocus();
+            } else if (finalFocusEl) {
+              event.preventDefault();
+              finalFocusEl()?.focus();
             }
           }}
           onOpenAutoFocus={(event) => {

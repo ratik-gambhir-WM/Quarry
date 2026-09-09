@@ -121,6 +121,7 @@ remains the final product router and trust boundary for server-owned data.
 ```text
 Quarry/
 ├── AGENTS.md                         repository-wide agent rules
+├── quarry                            root-only local process launcher
 ├── docs/
 │   ├── ARCHITECTURE.md               this canonical Markdown reference
 │   ├── adr/                          accepted architectural decisions
@@ -139,7 +140,7 @@ Quarry/
 │   ├── tests/                        manually included Rust test modules
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
-│   ├── .env.example                  configuration schema, with known drift
+│   ├── .env                          ignored local runtime configuration
 │   └── helix.toml                    local Helix metadata, partly stale
 └── plans/                            ignored, non-canonical local plans
 ```
@@ -148,14 +149,23 @@ Quarry/
 
 | Root | Package | Primary commands | Relationship to product build |
 | --- | --- | --- | --- |
+| repository root | Bash launcher | `./quarry web`, `./quarry desktop` | Local Axum-plus-UI process orchestration only |
 | `frontend/` | npm application | `npm test`, typechecks, Vite builds | Shared web and desktop UI |
 | `frontend/src-tauri/` | Cargo crate `quarry-desktop` | Rust format, Clippy, tests | Native desktop shell |
 | `backend/` | Cargo crate `quarry-backend` | Rust format, Clippy, tests | Product API |
 
-There is no root workspace file or root orchestration command. The backend contains an isolated
-Rust SharePoint client under `backend/src/core/clients/sharepoint_client/`; it is tested but not
-assembled into application state or exposed through routes. Treat it as inactive infrastructure
-until ownership and product integration are explicitly decided.
+There is no root workspace manifest. The root `quarry` executable is a development-only process
+supervisor, not another build root: it can run only while the working directory is the repository
+root. Both modes start `cargo run --locked` from `backend/`, pin Axum to `127.0.0.1:3001`, wait for
+`/api/v1/health`, and then run either `npm run dev:web` or `npm run dev:desktop` from `frontend/`.
+It pins the matching frontend API-base variable and stops both child process groups when either
+child exits or the launcher receives a termination signal. Backend configuration, migrations,
+Helix startup, and Tauri's own `beforeDevCommand` remain owned by their existing build roots.
+
+The backend contains an isolated Rust SharePoint client under
+`backend/src/core/clients/sharepoint_client/`; it is tested but not assembled into application
+state or exposed through routes. Treat it as inactive infrastructure until ownership and product
+integration are explicitly decided.
 
 ## 4. Distribution and runtime composition
 
@@ -248,7 +258,7 @@ authorization controls.
 | --- | --- | --- |
 | `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, summarize |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
-| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition, registry arc menu |
+| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition, registry arc menu and floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
@@ -279,6 +289,9 @@ global state or query-cache library.
   reusable search component accepts result-activation, focus, portal, and trigger contracts. A
   selected preview exposes only generic page-count, requested-page, and focus capabilities; this
   preserves current-document page jumps without coupling the search UI to the PDF viewer.
+- `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
+  panel is a frontend-local scaffold: its text survives panel close/reopen during the current
+  Data Room route mount, but is neither persisted nor connected to an API.
 - A populated Data Room with no selected document renders a read-only ReUI file-review grid built
   from the same explorer nodes. File identity and folder context remain runtime-derived, while the
   displayed review findings are explicitly illustrative fixtures. Its compact search control is
@@ -304,7 +317,7 @@ avoid masking operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, summary, timeline, activity and selected views | Several diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, and persistent arc-menu search with local mock results and current-PDF page jumps | Review/search content is partly fixture-derived; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
@@ -327,8 +340,11 @@ TanStack React Table. The Data Room view switcher lives in the registry arc menu
 sidebar; its full action set stays mounted across the file-review grid and selected-document
 preview. It starts closed but visible, uses the same deep-navy action token as New Analysis, has a
 dedicated downward-arrow hide control, and remains recoverable as a centered bottom-edge bookmark.
-Data Room, Diligence Graph, and Synthesis Canvas are disabled in that menu. Notes and Search are
-enabled; Notes does not yet have a persisted workspace, and Search exposes fixture-backed results.
+Data Room and Diligence Graph are disabled in that menu. Synthesis Canvas is enabled and opens a
+draggable, resizable floating panel with a route-local unsaved text draft; Notes and Search are
+also enabled, though Notes does not yet have a persisted workspace and Search exposes
+fixture-backed results. Launching Synthesis Canvas or Search retracts the arc shortcuts to the
+closed Views trigger, and closing the overlay returns keyboard focus to that trigger.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
@@ -768,8 +784,12 @@ an expanded viewer contract.
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
 
-The root README currently says packaged desktop uses `VITE_API_BASE_URL`; that is stale for the
-implemented Tauri relay. The Rust client reads `QUARRY_API_BASE_URL`.
+Local development has one live environment file per build root: `frontend/.env` for public Vite
+configuration shared by web and desktop UI builds, and `backend/.env` for Axum configuration and
+server-side secrets. Additional `.env.local` and mode-specific frontend environment files are not
+part of the maintained configuration. Environment keys and defaults are documented below instead
+of in another env-shaped template file. The Rust desktop client reads `QUARRY_API_BASE_URL`; the
+root launcher pins it to the loopback API.
 
 ### 11.2 Backend core configuration
 
@@ -823,11 +843,10 @@ All fields are required if any one is present:
 
 - Helix is not optional during bootstrap: the client is always constructed and document indexes
   are initialized before the server starts.
-- `.env.example` currently supplies model names while leaving `OPENAI_API_KEY` empty. Because
-  non-empty model values activate the OpenAI group, copying it unchanged can produce a partial
-  configuration error. Treat the example as a schema with known drift, not a guaranteed runnable
-  file.
-- `.env.example` lists `AZUREAD_*`, but `AppConfig` does not parse or wire them.
+- Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
+  `OPENAI_API_KEY`; partial configuration fails startup validation.
+- The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
+  parse or wire them into the product application.
 - Data-room environment roots are not always a fallback: if a deal metadata row exists with a
   null local path, current service behavior may not consult the per-deal environment mapping.
 - Secrets use `SecretString` with redacted debug output. Do not bypass it when adding configuration.
@@ -903,8 +922,9 @@ tests opt into happy-dom per file. Coverage currently includes:
 - PDF source normalization and page tracking
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
   viewer mount preservation, and generic requested-page navigation
-- Data Room arc-menu closed initial state, enabled persistent search, hide/restore behavior, and
-  persistence across file-preview selection
+- Data Room arc-menu closed initial state, enabled persistent search and Synthesis Canvas panel,
+  synthesis editing and focus restoration, overlay-aware hide/restore behavior, and persistence
+  across file-preview selection
 - Data Room tree flattening and illustrative file-review row mapping
 - Data Room file-review search expansion, filtering, dismissal, and focus restoration
 
@@ -924,6 +944,16 @@ previews, and isolated SharePoint behavior.
 There is no live integration suite for Helix, OpenAI, WM AI, Microsoft Graph, or LibreOffice.
 
 ### 14.3 Standard gates
+
+From the repository root, the local full-stack development entrypoints are:
+
+```sh
+./quarry web
+./quarry desktop
+```
+
+These are runtime operations rather than verification gates. They start the backend only with
+known local/disposable data and require its configured Helix service.
 
 From `frontend/`:
 
