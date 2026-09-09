@@ -1,7 +1,4 @@
 export type WorkspaceLocationState = {
-  accountLookupComplete?: boolean;
-  accountLookupError?: string;
-  accountUser?: WorkspaceAccountUser | null;
   email?: string;
 };
 
@@ -50,6 +47,14 @@ export type DealTask = {
   priority?: boolean;
 };
 
+export type DealResource = {
+  availability: "available" | "unavailable" | "coming-soon";
+  href?: string;
+  id: "sow" | "fact-sheet" | "sharepoint";
+  label: string;
+  sourceName?: string;
+};
+
 export type DealRoomData = {
   id: string;
   keyQuestions: string[];
@@ -58,6 +63,7 @@ export type DealRoomData = {
   overviewSubtitle: string;
   phaseLabel: string;
   pendingTasks: DealTask[];
+  resources: DealResource[];
   sectorLabel: string;
   stageLabel: string;
   summary: string;
@@ -82,7 +88,9 @@ export type WorkspaceDeal = {
 };
 
 export type WorkspaceInsight = {
+  analyzedAtLabel?: string;
   category: string;
+  confidenceLabel?: string;
   deal: string;
   fileIcon: "doc" | "image" | "pdf" | "sheet";
   fileName: string;

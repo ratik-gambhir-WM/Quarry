@@ -1,6 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { useTable } from "@tanstack/react-table";
 import type { WorkspaceInsight } from "../../data/workspace";
-import { DataTableHeaderRow, DataTableHeading } from "../ui/DataTable";
+import {
+  DataGrid,
+  DataGridContainer,
+  dataGridFeatures,
+  type DataGridFeatures,
+} from "../reui/data-grid/data-grid";
+import { DataGridColumnHeader } from "../reui/data-grid/data-grid-column-header";
+import { DataGridScrollArea } from "../reui/data-grid/data-grid-scroll-area";
+import { DataGridTable } from "../reui/data-grid/data-grid-table";
+import {
+  quarryDataGridHeaderClassName,
+  quarryDataGridTableClassNames,
+} from "../reui/data-grid/quarry-data-grid";
 import { Icon } from "../ui/Icon";
 import { ViewColumnsIcon } from "../ui/icons/ViewColumnsIcon";
 import { WorkspaceCard } from "./WorkspaceCard";
@@ -101,6 +115,113 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
     }));
   }
 
+  const columns = useMemo<ColumnDef<DataGridFeatures, WorkspaceInsight>[]>(
+    () => [
+      {
+        accessorKey: "fileName",
+        id: "document",
+        header: ({ column }) => (
+          <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Document" />
+        ),
+        cell: ({ row }) => (
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
+              <Icon className="size-4.5" name={row.original.fileIcon} />
+            </span>
+            <div className="min-w-0">
+              <p className="max-w-56 truncate text-[13px] font-semibold text-text-main">{row.original.fileName}</p>
+              {row.original.analyzedAtLabel ? (
+                <p className="mt-1 text-[11px] text-muted">{row.original.analyzedAtLabel}</p>
+              ) : null}
+            </div>
+          </div>
+        ),
+        size: 260,
+        meta: { headerTitle: "Document" },
+      },
+      ...(visibleColumns.includes("category")
+        ? [{
+            accessorKey: "category",
+            header: ({ column }) => (
+              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Category" />
+            ),
+            cell: ({ row }) => (
+              <span className="inline-flex whitespace-nowrap rounded-lg bg-surface-container-high px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+                {row.original.category}
+              </span>
+            ),
+            size: 160,
+            meta: { headerTitle: "Category" },
+          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        : []),
+      ...(visibleColumns.includes("finding")
+        ? [{
+            accessorKey: "quote",
+            id: "finding",
+            header: ({ column }) => (
+              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Extracted finding" />
+            ),
+            cell: ({ row }) => <p className="whitespace-normal text-[13px] leading-6 text-text-main/82">{row.original.quote}</p>,
+            size: 440,
+            meta: { fillWidth: true, headerTitle: "Extracted finding" },
+          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        : []),
+      ...(visibleColumns.includes("confidence")
+        ? [{
+            accessorKey: "confidenceLabel",
+            id: "confidence",
+            header: ({ column }) => (
+              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Confidence" />
+            ),
+            cell: ({ row }) => (
+              <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-text-main">
+                {row.original.confidenceLabel ? <span className="size-2 rounded-full bg-primary" /> : null}
+                {row.original.confidenceLabel ?? "Unavailable"}
+              </span>
+            ),
+            size: 140,
+            meta: { headerTitle: "Confidence" },
+          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        : []),
+      ...(visibleColumns.includes("status")
+        ? [{
+            id: "status",
+            header: ({ column }) => (
+              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Review status" />
+            ),
+            cell: ({ row }) => {
+              const status = reviewStatuses[row.original.fileName] ?? "Needs review";
+              return (
+                <button
+                  aria-label={`Mark ${row.original.fileName} as ${status === "Reviewed" ? "needing review" : "reviewed"}`}
+                  className={`whitespace-nowrap rounded-xl border px-3 py-2 text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed motion-reduce:transition-none ${
+                    status === "Reviewed"
+                      ? "border-primary/20 bg-primary/10 text-primary"
+                      : "border-outline-variant bg-surface-container-lowest text-muted hover:text-text-main"
+                  }`}
+                  onClick={() => toggleReviewStatus(row.original.fileName)}
+                  type="button"
+                >
+                  {status}
+                </button>
+              );
+            },
+            size: 160,
+            meta: { headerTitle: "Review status" },
+          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        : []),
+    ],
+    [reviewStatuses, visibleColumns],
+  );
+  const tableData = useMemo(() => [...items], [items]);
+  const table = useTable({
+    columns,
+    data: tableData,
+    features: dataGridFeatures,
+    getRowId: (row) => `${row.deal}-${row.fileName}`,
+    state: { pagination: { pageIndex: 0, pageSize: Math.max(tableData.length, 1) } },
+  });
+
   return (
     <div className="px-2 pt-6">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -159,85 +280,19 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
       </div>
 
       <WorkspaceCard className="overflow-hidden" radius="compact">
-        <div className="workspace-scrollbar-hidden overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-left">
-            <thead>
-              <DataTableHeaderRow surface>
-                <DataTableHeading className="min-w-64" density="compact">Document</DataTableHeading>
-                {visibleColumns.includes("category") ? <DataTableHeading density="compact">Category</DataTableHeading> : null}
-                {visibleColumns.includes("finding") ? (
-                  <DataTableHeading className="min-w-96" density="compact">Extracted finding</DataTableHeading>
-                ) : null}
-                {visibleColumns.includes("confidence") ? <DataTableHeading density="compact">Confidence</DataTableHeading> : null}
-                {visibleColumns.includes("status") ? <DataTableHeading density="compact">Review status</DataTableHeading> : null}
-              </DataTableHeaderRow>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/55">
-              {items.length > 0 ? (
-                items.map((item, index) => {
-                  const status = reviewStatuses[item.fileName] ?? "Needs review";
-                  const confidence = item.image ? "92%" : index % 2 === 0 ? "96%" : "94%";
-
-                  return (
-                    <tr className="group transition hover:bg-surface-container-low/55" key={`${item.deal}-${item.fileName}`}>
-                      <td className="px-4 py-4 align-top">
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
-                            <Icon className="h-4.5 w-4.5" name={item.fileIcon} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="max-w-56 truncate text-[13px] font-semibold text-text-main">{item.fileName}</p>
-                            <p className="mt-1 text-[11px] text-muted">Analyzed today</p>
-                          </div>
-                        </div>
-                      </td>
-                      {visibleColumns.includes("category") ? (
-                        <td className="px-4 py-4 align-top">
-                          <span className="inline-flex whitespace-nowrap rounded-lg bg-surface-container-high px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                            {item.category}
-                          </span>
-                        </td>
-                      ) : null}
-                      {visibleColumns.includes("finding") ? (
-                        <td className="px-4 py-4 align-top text-[13px] leading-6 text-text-main/82">{item.quote}</td>
-                      ) : null}
-                      {visibleColumns.includes("confidence") ? (
-                        <td className="px-4 py-4 align-top">
-                          <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-text-main">
-                            <span className="h-2 w-2 rounded-full bg-primary" />
-                            {confidence}
-                          </span>
-                        </td>
-                      ) : null}
-                      {visibleColumns.includes("status") ? (
-                        <td className="px-4 py-4 align-top">
-                          <button
-                            aria-label={`Mark ${item.fileName} as ${status === "Reviewed" ? "needing review" : "reviewed"}`}
-                            className={`whitespace-nowrap rounded-xl border px-3 py-2 text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
-                              status === "Reviewed"
-                                ? "border-primary/20 bg-primary/10 text-primary"
-                                : "border-outline-variant bg-surface-container-lowest text-muted hover:text-text-main"
-                            }`}
-                            onClick={() => toggleReviewStatus(item.fileName)}
-                            type="button"
-                          >
-                            {status}
-                          </button>
-                        </td>
-                      ) : null}
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td className="px-6 py-10 text-center text-[13px] text-muted" colSpan={visibleColumns.length + 1}>
-                    Analyzed documents will appear here when extraction is complete.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataGrid
+          emptyMessage="Analyzed documents will appear here when extraction is complete."
+          recordCount={items.length}
+          table={table}
+          tableClassNames={quarryDataGridTableClassNames}
+          tableLayout={{ cellBorder: true, dense: true, headerBackground: false, headerBorder: true, rowBorder: true, width: "fixed" }}
+        >
+          <DataGridContainer>
+            <DataGridScrollArea orientation="horizontal">
+              <DataGridTable />
+            </DataGridScrollArea>
+          </DataGridContainer>
+        </DataGrid>
       </WorkspaceCard>
     </div>
   );

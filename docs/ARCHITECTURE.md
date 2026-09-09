@@ -248,6 +248,12 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 | `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy |
 | all other paths | Redirect to `/login` | eager |
 
+Both router targets opt into React transitions. `App.tsx` keys one shared React View Transition
+boundary by pathname, so web and desktop route changes cross-fade while unsupported browsers fall
+back to immediate navigation. Lazy route boundaries commit a shadcn-based workspace skeleton on
+the destination route and animate the later content reveal; deal and Data Room lookup waits use
+the same skeleton rather than holding the prior page. Reduced-motion CSS disables the animation.
+
 There is no authenticated route guard. Workspace email is carried in router state and mirrored to
 `sessionStorage` under `quarry.workspace.email`. These navigation conveniences are not identity or
 authorization controls.
@@ -279,6 +285,9 @@ global state or query-cache library.
   profile theme picker.
 - `WorkspaceHomeShell` loads deals and provides them through a context. The context currently
   defaults to an empty array rather than failing outside the provider.
+- `AccountPage` owns its profile request. Profile-menu navigation commits `/hub/account`
+  immediately with the workspace email, and the destination page renders a skeleton until the
+  request resolves to success, empty, or error content.
 - `useWorkspaceDeals` fetches once, maps persisted deals, merges server records with the explicit
   `fixtures/workspace/portfolio.ts` records by ID, and silently falls back to those fixtures when
   the request fails.
@@ -292,6 +301,13 @@ global state or query-cache library.
 - `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
   panel is a frontend-local scaffold: its text survives panel close/reopen during the current
   Data Room route mount, but is neither persisted nor connected to an API.
+- `DealRoomPage` owns two separate navigation layers: the existing sidebar-level Deal Room view
+  and a nested overview section. The overview section enables Overview and File Summary today;
+  Evidence, Findings, Data Points, Open Items, and History remain explicitly disabled until typed
+  backing data and view behavior exist. The page consumes already extracted/persisted key
+  questions and does not trigger extraction. A freshly submitted SOW name is carried only in
+  router state, while a validated persisted SharePoint URL is mapped as an external resource;
+  neither behavior turns the dormant SharePoint client into an import integration.
 - A populated Data Room with no selected document renders a read-only ReUI file-review grid built
   from the same explorer nodes. File identity and folder context remain runtime-derived, while the
   displayed review findings are explicitly illustrative fixtures. Its compact search control is
@@ -316,13 +332,13 @@ avoid masking operational failures.
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, summary, timeline, activity and selected views | Several diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
 | Logs | View/export/clear bounded activity log | Session-local only |
-| Account/profile | Displays fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Profile data moves through router/UI state; not an auth session |
+| Account/profile | Navigates immediately, displays a destination skeleton while fetching, then shows the fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Workspace email moves through router/UI state; profile data is request-local and this is not an auth session |
 
 ### 5.6 UI and styling system
 
@@ -335,10 +351,14 @@ buttons share the light-gray hover surface; filled primary actions share the dee
 tokens. The retained dark palette changes tokens rather than component structure, but is currently
 disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
 
-The populated Data Room and Deals table use the vendored public ReUI data-grid implementation on
-TanStack React Table. The Data Room view switcher lives in the registry arc menu rather than the
-sidebar; its full action set stays mounted across the file-review grid and selected-document
-preview. It starts closed but visible, uses the same deep-navy action token as New Analysis, has a
+Deal Resources keeps each resource icon, title, and availability badge on one horizontal row;
+only an actual source filename adds secondary text beneath the title. The Key Questions header
+identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
+Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
+data-grid implementation on TanStack React Table. The Data Room view
+switcher lives in the registry arc menu rather than the sidebar; its full action set stays
+mounted across the file-review grid and selected-document preview. It starts closed but visible,
+uses the same deep-navy action token as New Analysis, has a
 dedicated downward-arrow hide control, and remains recoverable as a centered bottom-edge bookmark.
 Data Room and Diligence Graph are disabled in that menu. Synthesis Canvas is enabled and opens a
 draggable, resizable floating panel with a route-local unsaved text draft; Notes and Search are

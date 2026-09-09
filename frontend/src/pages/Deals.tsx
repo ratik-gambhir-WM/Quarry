@@ -19,6 +19,7 @@ import { DealsEmptyState, DealsTable } from "../components/deals/DealsTable";
 import { WorkspaceCard } from "../components/hub/WorkspaceCard";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { useWorkspaceHomeDeals, WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
+import { Skeleton } from "../components/ui/skeleton";
 import { markViewTransitionType } from "../components/ui/ViewTransition";
 import { filterDealPortfolioViews, getDealCounts, type DealScope } from "../data/dealsView";
 import { getDealRoomPath, type WorkspaceLocationState } from "../data/workspace";
@@ -149,12 +150,20 @@ function KanbanFallback() {
   return (
     <WorkspaceCard
       aria-label="Loading kanban view"
-      className="flex h-[min(650px,calc(100vh-17rem))] min-h-[420px] items-center justify-center"
+      aria-live="polite"
+      className="h-[min(650px,calc(100vh-17rem))] min-h-[420px] p-5"
       radius="small"
+      role="status"
     >
-      <div className="flex items-center gap-3 text-[13px] font-normal text-muted">
-        <span className="h-4 w-4 rounded-full border-2 border-outline-variant border-t-primary motion-safe:animate-spin" />
-        Loading kanban view…
+      <span className="sr-only">Loading kanban view</span>
+      <div aria-hidden="true" className="grid h-full gap-4 md:grid-cols-3">
+        {Array.from({ length: 3 }, (_, columnIndex) => (
+          <div className="flex flex-col gap-3" key={columnIndex}>
+            <Skeleton className="h-5 w-28" />
+            <Skeleton className="h-28 w-full rounded-xl" />
+            <Skeleton className="h-28 w-full rounded-xl" />
+          </div>
+        ))}
       </div>
     </WorkspaceCard>
   );

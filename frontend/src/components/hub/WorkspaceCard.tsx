@@ -1,10 +1,13 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
+import { cn } from "../../lib/utils";
 
 export type WorkspaceCardRadius = "compact" | "default" | "none" | "small";
 
 type WorkspaceCardProps = Omit<HTMLAttributes<HTMLElement>, "children"> & {
   children: ReactNode;
+  interactive?: boolean;
   radius?: WorkspaceCardRadius;
+  surface?: "chrome" | "default";
 };
 
 const radiusValues: Record<WorkspaceCardRadius, CSSProperties["borderRadius"]> = {
@@ -17,13 +20,20 @@ const radiusValues: Record<WorkspaceCardRadius, CSSProperties["borderRadius"]> =
 export function WorkspaceCard({
   children,
   className = "",
+  interactive = true,
   radius = "default",
+  surface = "default",
   style,
   ...props
 }: WorkspaceCardProps) {
   return (
     <section
-      className={`workspace-card ${className}`}
+      className={cn(
+        "workspace-card",
+        surface === "chrome" && "workspace-card--chrome",
+        !interactive && "workspace-card--static",
+        className,
+      )}
       style={{ borderRadius: radiusValues[radius], ...style }}
       {...props}
     >

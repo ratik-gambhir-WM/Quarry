@@ -1,42 +1,71 @@
-import { Icon } from "../ui/Icon";
+import { useId } from "react";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
-type DealRoomOverviewProps = {
-  subtitle: string;
+export type DealRoomOverviewSection =
+  | "overview"
+  | "file-summary"
+  | "evidence"
+  | "findings"
+  | "data-points"
+  | "open-items"
+  | "history";
+
+type DealRoomHeaderProps = {
+  activeSection: DealRoomOverviewSection;
+  onActiveSectionChange: (section: DealRoomOverviewSection) => void;
 };
 
-export function DealRoomHeader() {
+const sections: ReadonlyArray<{
+  enabled: boolean;
+  label: string;
+  value: DealRoomOverviewSection;
+}> = [
+  { enabled: true, label: "Overview", value: "overview" },
+  { enabled: true, label: "File Summary", value: "file-summary" },
+  { enabled: false, label: "Evidence", value: "evidence" },
+  { enabled: false, label: "Findings", value: "findings" },
+  { enabled: false, label: "Data Points", value: "data-points" },
+  { enabled: false, label: "Open Items", value: "open-items" },
+  { enabled: false, label: "History", value: "history" },
+];
+
+export function DealRoomHeader({ activeSection, onActiveSectionChange }: DealRoomHeaderProps) {
+  const descriptionId = useId();
+
   return (
-    <header className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
-      <h1 className="text-[20px] font-semibold leading-6 tracking-[-0.015em] text-text-main [font-family:var(--font-heading)]">
-        Deal Room
-      </h1>
-      <div aria-label="Deal resources" className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <DealResource icon="doc" label="SOW" />
-        <DealResource icon="doc" label="Fact Sheet" />
-        <DealResource icon="sharepoint" label="SharePoint VDR" />
+    <Tabs
+      className="min-w-0 flex-1 self-stretch"
+      onValueChange={(value) => onActiveSectionChange(value as DealRoomOverviewSection)}
+      value={activeSection}
+    >
+      <div className="workspace-scrollbar-hidden min-w-0 flex-1 overflow-x-auto">
+        <TabsList aria-label="Deal room sections" className="h-full min-w-max gap-7">
+          {sections.map((section) => (
+            <TabsTrigger
+              aria-describedby={section.enabled ? undefined : descriptionId}
+              aria-label={section.enabled ? section.label : `${section.label}, coming soon`}
+              className="relative h-full border-b-2 border-transparent px-1 text-[12px] font-semibold data-[state=active]:border-primary data-[state=active]:text-primary"
+              disabled={!section.enabled}
+              key={section.value}
+              title={section.enabled ? undefined : "Coming soon"}
+              value={section.value}
+            >
+              {section.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
       </div>
-    </header>
+      <span className="sr-only" id={descriptionId}>
+        This deal room section is coming soon and is not yet available.
+      </span>
+    </Tabs>
   );
 }
 
-export function DealRoomOverview({ subtitle }: DealRoomOverviewProps) {
+export function DealRoomOverview({ subtitle }: { subtitle: string }) {
   return (
     <header>
       <p className="type-subtle text-muted">{subtitle}</p>
     </header>
-  );
-}
-
-type DealResourceProps = {
-  icon: "doc" | "sharepoint";
-  label: string;
-};
-
-function DealResource({ icon, label }: DealResourceProps) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted">
-      <Icon className="h-3.5 w-3.5 text-primary" name={icon} />
-      {label}
-    </span>
   );
 }

@@ -1,5 +1,8 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import type { ReactNode } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { ViewTransition } from "./components/ui/ViewTransition";
+import { WorkspacePageSkeleton } from "./components/ui/WorkspacePageSkeleton";
 import { HubPage } from "./pages/HubPage";
 import { DealRoomPage } from "./pages/DealRoomPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -25,48 +28,67 @@ const Deals = lazy(() =>
   import("./pages/Deals").then((module) => ({ default: module.Deals })),
 );
 
-const routeFallback = <div className="min-h-screen bg-background" />;
-
 function App() {
+  const location = useLocation();
+
   return (
     <ThemeModeProvider>
-      <Routes>
-        <Route element={<Navigate replace to="/login" />} path="/" />
-        <Route element={<LoginPage />} path="/login" />
-        <Route element={<HubPage />} path="/hub" />
-        <Route element={<AccountPage />} path="/hub/account" />
-        <Route
-          element={<Suspense fallback={routeFallback}><GlobalVaultPage /></Suspense>}
-          path="/hub/vault"
-        />
-        <Route
-          element={<Suspense fallback={routeFallback}><VaultPage /></Suspense>}
-          path="/hub/initiatives/vault"
-        />
-        <Route
-          element={<Suspense fallback={routeFallback}><SummarizePage /></Suspense>}
-          path="/hub/summarize"
-        />
-        <Route
-          element={<Suspense fallback={routeFallback}><LogsPage /></Suspense>}
-          path="/hub/logs"
-        />
-        <Route
-          element={<Suspense fallback={routeFallback}><Deals /></Suspense>}
-          path="/hub/deals"
-        />
-        <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
-        <Route
-          element={
-            <Suspense fallback={routeFallback}>
-              <DataRoomPage />
-            </Suspense>
-          }
-          path="/hub/deals/:dealId/data-room"
-        />
-        <Route element={<Navigate replace to="/login" />} path="*" />
-      </Routes>
+      <ViewTransition
+        default="none"
+        key={location.pathname}
+        name="quarry-page"
+        share="auto"
+      >
+        <Routes location={location}>
+          <Route element={<Navigate replace to="/login" />} path="/" />
+          <Route element={<LoginPage />} path="/login" />
+          <Route element={<HubPage />} path="/hub" />
+          <Route element={<AccountPage />} path="/hub/account" />
+          <Route
+            element={<LazyPage label="Loading Global Vault"><GlobalVaultPage /></LazyPage>}
+            path="/hub/vault"
+          />
+          <Route
+            element={<LazyPage label="Loading Vault"><VaultPage /></LazyPage>}
+            path="/hub/initiatives/vault"
+          />
+          <Route
+            element={<LazyPage label="Loading Explore"><SummarizePage /></LazyPage>}
+            path="/hub/summarize"
+          />
+          <Route
+            element={<LazyPage label="Loading logs"><LogsPage /></LazyPage>}
+            path="/hub/logs"
+          />
+          <Route
+            element={<LazyPage label="Loading deals"><Deals /></LazyPage>}
+            path="/hub/deals"
+          />
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
+          <Route
+            element={<LazyPage label="Loading data room"><DataRoomPage /></LazyPage>}
+            path="/hub/deals/:dealId/data-room"
+          />
+          <Route element={<Navigate replace to="/login" />} path="*" />
+        </Routes>
+      </ViewTransition>
     </ThemeModeProvider>
+  );
+}
+
+function LazyPage({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <Suspense
+      fallback={
+        <ViewTransition default="none" exit="slide-down">
+          <WorkspacePageSkeleton label={label} />
+        </ViewTransition>
+      }
+    >
+      <ViewTransition default="none" enter="slide-up">
+        {children}
+      </ViewTransition>
+    </Suspense>
   );
 }
 

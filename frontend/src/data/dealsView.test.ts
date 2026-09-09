@@ -30,6 +30,7 @@ function makeDeal(
       overviewSubtitle: "Overview",
       pendingTasks: [],
       phaseLabel: status,
+      resources: [],
       sectorLabel: "Industrials",
       stageLabel: status,
       summary: "Summary",

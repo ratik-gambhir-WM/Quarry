@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildWorkspaceDealFromPersisted, type SavedDeal } from "./dealExtraction";
+import {
+  buildDealResources,
+  buildWorkspaceDealFromExtractionResult,
+  buildWorkspaceDealFromPersisted,
+  type SaveDealMetadataResponse,
+  type SavedDeal,
+  type SavedDealMetadata,
+} from "./dealExtraction";
 
 const savedDeal: SavedDeal = {
   closeDate: "2026-09-12",
@@ -12,6 +19,14 @@ const savedDeal: SavedDeal = {
   targetCompany: "Target",
   transactionType: "Acquisition",
   userId: 1,
+};
+
+const savedMetadata: SavedDealMetadata = {
+  dealId: savedDeal.dealId,
+  keyQuestionsJson: '["First question?","Second question?","Second question?"]',
+  localPath: null,
+  sharepointLink: "https://northwind.sharepoint.com/sites/acme",
+  userId: savedDeal.userId,
 };
 
 describe("buildWorkspaceDealFromPersisted", () => {
@@ -42,5 +57,81 @@ describe("buildWorkspaceDealFromPersisted", () => {
     const workspaceDeal = buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null);
 
     expect(workspaceDeal.complete).toBe(true);
+  });
+
+  it("preserves extracted question order and fresh SOW metadata", () => {
+    const result: SaveDealMetadataResponse = {
+      deal: savedDeal,
+      extraction: { keyQuestions: ["First question?", "Second question?", "Second question?"] },
+      files: [
+        {
+          filename: "Acme SOW.pdf",
+          path: "Acme SOW.pdf",
+          relativePath: "Acme SOW.pdf",
+          sizeBytes: 1200,
+        },
+      ],
+      metadata: savedMetadata,
+    };
+
+    const workspaceDeal = buildWorkspaceDealFromExtractionResult(result, "Acme SOW.pdf");
+
+    expect(workspaceDeal.room.keyQuestions).toEqual([
+      "First question?",
+      "Second question?",
+      "Second question?",
+    ]);
+    expect(workspaceDeal.room.resources).toEqual([
+      {
+        availability: "available",
+        id: "sow",
+        label: "SOW",
+        sourceName: "Acme SOW.pdf",
+      },
+      { availability: "coming-soon", id: "fact-sheet", label: "Fact Sheet" },
+      {
+        availability: "available",
+        href: "https://northwind.sharepoint.com/sites/acme",
+        id: "sharepoint",
+        label: "SharePoint VDR",
+      },
+    ]);
+  });
+
+  it("maps persisted questions identically without claiming a reload-safe SOW", () => {
+    const workspaceDeal = buildWorkspaceDealFromPersisted(savedDeal, savedMetadata);
+
+    expect(workspaceDeal.room.keyQuestions).toEqual([
+      "First question?",
+      "Second question?",
+      "Second question?",
+    ]);
+    expect(workspaceDeal.room.resources[0]).toEqual({
+      availability: "unavailable",
+      id: "sow",
+      label: "SOW",
+    });
+  });
+
+  it("keeps missing or unsafe optional resource values inactive", () => {
+    expect(buildDealResources(null).map((resource) => resource.availability)).toEqual([
+      "unavailable",
+      "coming-soon",
+      "unavailable",
+    ]);
+
+    for (const sharepointLink of [
+      "http://northwind.sharepoint.com/sites/acme",
+      "https://example.com/?next=.sharepoint.com/",
+      "not a URL",
+    ]) {
+      const resources = buildDealResources({ ...savedMetadata, sharepointLink });
+      expect(resources[2]).toEqual({
+        availability: "unavailable",
+        href: undefined,
+        id: "sharepoint",
+        label: "SharePoint VDR",
+      });
+    }
   });
 });

@@ -1,18 +1,45 @@
-import { Navigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
+import { runtime } from "@quarry/runtime";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { WorkspaceCard } from "../components/hub/WorkspaceCard";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { Icon } from "../components/ui/Icon";
-import { WorkspaceLocationState } from "../data/workspace";
+import { Skeleton } from "../components/ui/skeleton";
+import type { WorkspaceAccountUser } from "../data/workspace";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
+type AccountLookupState =
+  | { status: "loading" }
+  | { message: string; status: "error" }
+  | { status: "ready"; user: WorkspaceAccountUser | null };
+
 export function AccountPage() {
-  const location = useLocation();
   const { email } = useWorkspaceSession();
-  const state = (location.state ?? {}) as WorkspaceLocationState;
-  const error = state.accountLookupError ?? "";
-  const lookupComplete = Boolean(state.accountLookupComplete);
-  const user = state.accountUser ?? null;
+  const [lookup, setLookup] = useState<AccountLookupState>({ status: "loading" });
+
+  useEffect(() => {
+    if (!email) return;
+
+    let active = true;
+    setLookup({ status: "loading" });
+    void runtime.api.getUserByEmail(email)
+      .then((user) => {
+        if (active) setLookup({ status: "ready", user });
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLookup({
+            message: error instanceof Error ? error.message : String(error),
+            status: "error",
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [email]);
 
   if (!email) {
     return <Navigate replace to="/login" />;
@@ -30,27 +57,41 @@ export function AccountPage() {
         </header>
 
         <WorkspaceCard className="p-8">
-          {error ? (
-            <p className="text-[16px] font-medium text-error">{error}</p>
-          ) : user ? (
+          {lookup.status === "loading" ? (
+            <AccountInfoSkeleton />
+          ) : lookup.status === "error" ? (
+            <p className="text-[16px] font-medium text-error" role="alert">{lookup.message}</p>
+          ) : lookup.user ? (
             <div className="grid gap-4 md:grid-cols-2">
-              <AccountInfoItem label="Name" value={`${user.firstName} ${user.lastName}`} />
-              <AccountInfoItem label="Email" value={user.email} />
-              <AccountInfoItem label="Role" value={user.role} />
-              <AccountInfoItem label="API key" value={maskApiKey(user.apiKey)} />
-              <AccountInfoItem label="Created" value={formatDateTime(user.createdAt)} />
-              <AccountInfoItem label="Updated" value={formatDateTime(user.updatedAt)} />
+              <AccountInfoItem label="Name" value={`${lookup.user.firstName} ${lookup.user.lastName}`} />
+              <AccountInfoItem label="Email" value={lookup.user.email} />
+              <AccountInfoItem label="Role" value={lookup.user.role} />
+              <AccountInfoItem label="API key" value={maskApiKey(lookup.user.apiKey)} />
+              <AccountInfoItem label="Created" value={formatDateTime(lookup.user.createdAt)} />
+              <AccountInfoItem label="Updated" value={formatDateTime(lookup.user.updatedAt)} />
             </div>
           ) : (
-            <p className="text-[16px] text-muted">
-              {lookupComplete
-                ? `No local account profile found for ${email}.`
-                : "Open Account info from the profile menu to load your local account profile."}
-            </p>
+            <p className="text-[16px] text-muted">No local account profile found for {email}.</p>
           )}
         </WorkspaceCard>
       </div>
     </WorkspaceHomeShell>
+  );
+}
+
+function AccountInfoSkeleton() {
+  return (
+    <div aria-busy="true" aria-live="polite" role="status">
+      <span className="sr-only">Loading account information</span>
+      <div aria-hidden="true" className="grid gap-4 md:grid-cols-2">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div className="space-y-3 rounded-[16px] border border-outline-variant/70 p-5" key={index}>
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-5 w-3/4" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
