@@ -96,7 +96,7 @@ export function DataRoomArcMenu({
     <div
       className={cn(
         "pointer-events-none absolute left-1/2 z-20 flex -translate-x-1/2 flex-col items-center transition-[bottom] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto",
-        hidden ? "-bottom-4" : "bottom-0",
+        hidden ? "-bottom-[0.7rem]" : "bottom-0",
       )}
     >
       {hidden ? null : (

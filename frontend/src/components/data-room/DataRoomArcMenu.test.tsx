@@ -53,6 +53,7 @@ describe("DataRoomArcMenu", () => {
     const showButton = screen.getByRole("button", { name: "Show data room views" });
     expect(showButton.classList.contains("h-[2.45rem]")).toBe(true);
     expect(showButton.classList.contains("w-[4.9rem]")).toBe(true);
+    expect(showButton.parentElement?.classList.contains("-bottom-[0.7rem]")).toBe(true);
     expect(showButton).toBe(document.activeElement);
     expect(screen.queryByRole("menu", { name: "Data room views" })).toBeNull();
 
