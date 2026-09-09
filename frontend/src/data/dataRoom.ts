@@ -9,51 +9,10 @@ export type DataRoomTreeNode = {
   storedFileId?: string;
 };
 
-export type DataRoomChip =
-  | {
-      body: string;
-      category: string;
-      id: string;
-      tone: "accent" | "muted" | "primary";
-      type: "text";
-    }
-  | {
-      bars: number[];
-      category: string;
-      footer: string;
-      id: string;
-      tone: "muted" | "primary";
-      type: "chart";
-    }
-  | {
-      category: string;
-      id: string;
-      rows: Array<{ label: string; value: string }>;
-      tone: "accent" | "primary";
-      type: "metrics";
-    };
-
-export type EditorBlock =
-  | { id: string; text: string; type: "paragraph" }
-  | { id: string; text: string; type: "heading" }
-  | { id: string; text: string; type: "quote" }
-  | { id: string; type: "dropzone" }
-  | {
-      columns: Array<{
-        items: string[];
-        title: string;
-        tone: "error" | "primary";
-      }>;
-      id: string;
-      type: "callouts";
-    };
-
-export type DealDataRoomView = {
-  chips: DataRoomChip[];
-  editorBlocks: EditorBlock[];
-  reportTitle: string;
-  tree: DataRoomTreeNode[];
-  versionLabel: string;
+export type DataRoomFileEntry = {
+  folderPath: string[];
+  node: DataRoomTreeNode;
+  source: "local" | "stored";
 };
 
 export function hasDataRoomFiles(nodes: DataRoomTreeNode[]): boolean {
@@ -67,6 +26,29 @@ export function hasDataRoomFiles(nodes: DataRoomTreeNode[]): boolean {
   }
 
   return false;
+}
+
+export function flattenDataRoomFiles(
+  nodes: readonly DataRoomTreeNode[],
+): DataRoomFileEntry[] {
+  const files: DataRoomFileEntry[] = [];
+
+  function visit(items: readonly DataRoomTreeNode[], folderPath: string[]) {
+    for (const node of items) {
+      if (node.kind === "folder") {
+        visit(node.children ?? [], [...folderPath, node.name]);
+      } else {
+        files.push({
+          folderPath,
+          node,
+          source: node.storedFileId ? "stored" : "local",
+        });
+      }
+    }
+  }
+
+  visit(nodes, []);
+  return files;
 }
 
 export function isUnconfiguredDataRoomError(error: unknown): boolean {

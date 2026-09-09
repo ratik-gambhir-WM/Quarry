@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ForwardedRef } from "react";
+import { createRef, type ForwardedRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PdfToolbarContext,
   PdfViewerHandle,
   PdfViewerProps,
 } from "../pdf-viewer";
-import { DocumentPreviewPanel, type RawTextState } from "./DocumentPreviewPanel";
+import {
+  DocumentPreviewPanel,
+  type DocumentPreviewPanelHandle,
+  type RawTextState,
+} from "./DocumentPreviewPanel";
 
 const pdfMock = vi.hoisted(() => ({
   goToPage: vi.fn(),
@@ -119,16 +123,33 @@ const preview = {
 
 function renderPreview(rawText: RawTextState = { status: "idle" }) {
   const onRequestRawText = vi.fn();
-  const view = render(
+  const onPageCountChange = vi.fn();
+  const onRequestedPageHandled = vi.fn();
+  const previewRef = createRef<DocumentPreviewPanelHandle>();
+  const renderPanel = (requestedPage: number | null) => (
     <DocumentPreviewPanel
       document={document}
       onClose={vi.fn()}
+      onPageCountChange={onPageCountChange}
       onRequestRawText={onRequestRawText}
+      onRequestedPageHandled={onRequestedPageHandled}
       preview={preview}
       rawText={rawText}
-    />,
+      ref={previewRef}
+      requestedPage={requestedPage}
+    />
   );
-  return { ...view, onRequestRawText };
+  const view = render(renderPanel(null));
+  return {
+    ...view,
+    onPageCountChange,
+    onRequestRawText,
+    onRequestedPageHandled,
+    previewRef,
+    requestPage(page: number) {
+      view.rerender(renderPanel(page));
+    },
+  };
 }
 
 beforeEach(() => {
@@ -139,49 +160,29 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("DocumentPreviewPanel search", () => {
-  it("places the only search trigger beside the selected filename", () => {
-    renderPreview();
-    const heading = screen.getByRole("heading", { name: document.name });
-    expect(
-      within(heading.parentElement!).getByRole("button", { name: "Search document" }),
-    ).toBeTruthy();
-    expect(within(heading.parentElement!).queryByText("Search")).toBeNull();
-    expect(screen.queryByLabelText("Open document search")).toBeNull();
-  });
-
-  it("keeps the mounted viewer and position unchanged when search is cancelled", async () => {
-    const user = userEvent.setup();
-    const { container, onRequestRawText } = renderPreview();
+describe("DocumentPreviewPanel navigation contract", () => {
+  it("applies an externally requested page exactly once without remounting", async () => {
+    const { container, onRequestRawText, onRequestedPageHandled, requestPage } = renderPreview();
     const viewer = container.querySelector("[data-testid='pdf-viewer']");
 
-    await user.click(screen.getByRole("button", { name: "Search document" }));
-    expect(container.querySelector("[data-testid='pdf-viewer']")).toBe(viewer);
-    await user.keyboard("{Escape}");
+    requestPage(1);
 
     expect(container.querySelector("[data-testid='pdf-viewer']")).toBe(viewer);
-    expect(pdfMock.goToPage).not.toHaveBeenCalled();
+    await waitFor(() => expect(pdfMock.goToPage).toHaveBeenCalledTimes(1));
+    expect(pdfMock.goToPage).toHaveBeenCalledWith(1);
+    expect(onRequestedPageHandled).toHaveBeenCalledTimes(1);
     expect(pdfMock.mounts).toBe(1);
     expect(pdfMock.unmounts).toBe(0);
     expect(onRequestRawText).not.toHaveBeenCalled();
   });
 
-  it("navigates a supported result exactly once and keeps the document selected", async () => {
-    const user = userEvent.setup();
-    renderPreview();
-    await user.click(screen.getByRole("button", { name: "Search document" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search document" }), "Synthetic");
-    await user.click(
-      screen.getByRole("option", { name: /Synthetic Terms\.pdf.*Open page 1/ }),
-    );
+  it("reports the loaded page count through its reusable preview contract", () => {
+    const { onPageCountChange } = renderPreview();
 
-    expect(pdfMock.goToPage).toHaveBeenCalledTimes(1);
-    expect(pdfMock.goToPage).toHaveBeenCalledWith(1);
-    expect(screen.getByRole("heading", { name: document.name })).toBeTruthy();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onPageCountChange).toHaveBeenCalledWith(3);
   });
 
-  it("returns from raw text before applying a page target", async () => {
+  it("returns from raw text before applying an externally requested page", async () => {
     const user = userEvent.setup();
     const rawText: RawTextState = {
       response: {
@@ -191,19 +192,24 @@ describe("DocumentPreviewPanel search", () => {
       },
       status: "ready",
     };
-    const { onRequestRawText } = renderPreview(rawText);
+    const { onRequestRawText, requestPage } = renderPreview(rawText);
     await user.click(screen.getByRole("button", { name: "Show raw text" }));
     expect(screen.getByText("Synthetic extracted text.")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Search document" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search document" }), "Synthetic");
-    await user.click(
-      screen.getByRole("option", { name: /Synthetic Terms\.pdf.*Open page 1/ }),
-    );
+    requestPage(1);
 
-    expect(screen.getByTestId("pdf-viewer")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("pdf-viewer")).toBeTruthy());
     expect(pdfMock.goToPage).toHaveBeenCalledTimes(1);
     expect(pdfMock.goToPage).toHaveBeenCalledWith(1);
     expect(onRequestRawText).not.toHaveBeenCalled();
+  });
+
+  it("exposes viewer focus without exposing the PDF viewer implementation", async () => {
+    const { previewRef } = renderPreview();
+
+    act(() => previewRef.current?.focusViewer());
+
+    const canvas = screen.getByText("PDF canvas");
+    await waitFor(() => expect(canvas).toBe(canvas.ownerDocument.activeElement));
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  flattenDataRoomFiles,
   hasDataRoomFiles,
   isUnconfiguredDataRoomError,
   type DataRoomTreeNode,
@@ -45,6 +46,38 @@ describe("hasDataRoomFiles", () => {
     ];
 
     expect(hasDataRoomFiles(tree)).toBe(true);
+  });
+});
+
+describe("flattenDataRoomFiles", () => {
+  it("preserves explorer order, folder context, source, and the original node", () => {
+    const localFile: DataRoomTreeNode = {
+      id: "local.pdf",
+      kind: "pdf",
+      name: "local.pdf",
+      relativePath: "Financials/local.pdf",
+    };
+    const storedFile: DataRoomTreeNode = {
+      id: "stored:1",
+      kind: "doc",
+      name: "stored.docx",
+      storedFileId: "1",
+    };
+
+    expect(
+      flattenDataRoomFiles([
+        {
+          children: [localFile],
+          id: "financials",
+          kind: "folder",
+          name: "Financials",
+        },
+        storedFile,
+      ]),
+    ).toEqual([
+      { folderPath: ["Financials"], node: localFile, source: "local" },
+      { folderPath: [], node: storedFile, source: "stored" },
+    ]);
   });
 });
 

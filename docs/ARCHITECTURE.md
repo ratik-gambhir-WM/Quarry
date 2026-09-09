@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Canonical current-state architecture reference |
-| Last verified | 2026-08-31 |
+| Last verified | 2026-09-02 |
 | Repository snapshot | `main` at `4e5830c`, including the active working-tree changes |
 | Audience | Quarry developers, reviewers, operators, and coding agents |
 | Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, persistence, integrations, and verification |
@@ -248,7 +248,8 @@ authorization controls.
 | --- | --- | --- |
 | `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, summarize |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
-| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition |
+| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition, registry arc menu |
+| `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
 | `fixtures/` | Explicit shipped mock/demo/placeholder records, grouped by consuming feature | workspace portfolio, hub activity, Data Room search/report data |
@@ -273,10 +274,18 @@ global state or query-cache library.
   the request fails.
 - The PDF viewer uses an internal context plus focused hooks for document loading, zoom,
   virtualization, keyboard behavior, selection, page tracking, drop, and printing.
-- A selected Data Room document owns its search-overlay state. The overlay is triggered from the
-  document chrome, including the PDF toolbar during preview, remains inside the document canvas
-  boundary, filters fixture-backed excerpts synchronously, and uses the existing PDF viewer handle
-  for supported current-document page jumps without remounting the viewer on open or cancel.
+- `DataRoomPage` owns document-search coordination independently of the selected preview. The
+  enabled search action stays in the persistent arc menu across Data Room states, while the
+  reusable search component accepts result-activation, focus, portal, and trigger contracts. A
+  selected preview exposes only generic page-count, requested-page, and focus capabilities; this
+  preserves current-document page jumps without coupling the search UI to the PDF viewer.
+- A populated Data Room with no selected document renders a read-only ReUI file-review grid built
+  from the same explorer nodes. File identity and folder context remain runtime-derived, while the
+  displayed review findings are explicitly illustrative fixtures. Its compact search control is
+  left-aligned with the grid and expands in normal layout flow so the adjacent status filters move
+  with it; search, status, and file-type controls use a consistent 12-pixel text size. Selecting a
+  file from the grid enters the existing preview state; an empty Data Room continues to use the
+  upload-first state.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
@@ -293,9 +302,9 @@ avoid masking operational failures.
 | --- | --- | --- |
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
-| Deals | Search/filter, table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
+| Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, summary, timeline, activity and selected views | Several diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, upload jobs, PDF/text preview, and document/PDF-toolbar search overlay with local mock results and current-PDF page jumps | Report/search content is partly fixture-derived; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, and persistent arc-menu search with local mock results and current-PDF page jumps | Review/search content is partly fixture-derived; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
@@ -312,6 +321,14 @@ tokens, and separates deep-navy action fills from text/link interaction colors. 
 buttons share the light-gray hover surface; filled primary actions share the deep-navy action
 tokens. The retained dark palette changes tokens rather than component structure, but is currently
 disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
+
+The populated Data Room and Deals table use the vendored public ReUI data-grid implementation on
+TanStack React Table. The Data Room view switcher lives in the registry arc menu rather than the
+sidebar; its full action set stays mounted across the file-review grid and selected-document
+preview. It starts closed but visible, uses the same deep-navy action token as New Analysis, has a
+dedicated downward-arrow hide control, and remains recoverable as a centered bottom-edge bookmark.
+Data Room, Diligence Graph, and Synthesis Canvas are disabled in that menu. Notes and Search are
+enabled; Notes does not yet have a persisted workspace, and Search exposes fixture-backed results.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
@@ -735,11 +752,12 @@ Keyword and vector requests carry a caller-supplied workspace identity and limit
 common constraints and delegate to the Helix index repository. There is currently no server-side
 identity binding to prove that the caller owns the requested workspace.
 
-The Data Room document-search overlay does not consume these endpoints. It currently filters
-deterministic fixture excerpts in the shared frontend, can navigate only valid page targets in the
-already selected PDF, and highlights terms only in result text. Cross-document activation and
-programmatic text highlighting inside the PDF require stable result identities and an expanded
-viewer contract.
+The Data Room document-search overlay does not consume these endpoints. Its reusable frontend
+component currently filters deterministic fixture excerpts, while `DataRoomPage` maps activated
+results to the selected preview's generic requested-page contract. It can navigate only valid page
+targets in the already selected PDF and highlights terms only in result text. Cross-document
+activation and programmatic text highlighting inside the PDF require stable result identities and
+an expanded viewer contract.
 
 ## 11. Configuration
 
@@ -880,11 +898,15 @@ tests opt into happy-dom per file. Coverage currently includes:
 - runtime selection and boundary behavior
 - activity-log redaction and bounds
 - workspace/deal/data-room selectors and mapping
-- Deals table/filter/modal/Kanban interactions in the uncommitted work
+- Deals ReUI table/filter/modal/Kanban interactions in the uncommitted work
 - sidebar/layout interactions
 - PDF source normalization and page tracking
-- Data Room document-search filtering, accessible overlay interaction, viewer mount preservation,
-  and supported page-target activation
+- Data Room document-search filtering, reusable result activation, accessible overlay interaction,
+  viewer mount preservation, and generic requested-page navigation
+- Data Room arc-menu closed initial state, enabled persistent search, hide/restore behavior, and
+  persistence across file-preview selection
+- Data Room tree flattening and illustrative file-review row mapping
+- Data Room file-review search expansion, filtering, dismissal, and focus restoration
 
 There is no browser end-to-end suite or visual regression suite.
 

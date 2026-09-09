@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactElement,
 } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ export type DocumentSearchConfig = {
   onSelectionFocus?: () => void;
   placeholder?: string;
   portalContainer?: HTMLElement | null;
+  trigger?: ReactElement;
 };
 
 type SearchInputProps = {
@@ -231,6 +233,7 @@ export default function DocumentSearch({
   onSelectionFocus,
   placeholder = "What are you looking for?",
   portalContainer,
+  trigger,
 }: DocumentSearchConfig) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -284,9 +287,11 @@ export default function DocumentSearch({
   return (
     <DialogPrimitive.Root modal onOpenChange={setOpen} open={isModalOpen}>
       <DialogPrimitive.Trigger asChild>
-        <DocumentSearchButton showShortcut={enableKeyboardShortcut} {...buttonProps}>
-          {buttonText}
-        </DocumentSearchButton>
+        {trigger ?? (
+          <DocumentSearchButton showShortcut={enableKeyboardShortcut} {...buttonProps}>
+            {buttonText}
+          </DocumentSearchButton>
+        )}
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal container={portalContainer}>
         <DialogPrimitive.Overlay className="pointer-events-auto absolute inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm dark:bg-black/60" />

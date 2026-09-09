@@ -41,7 +41,7 @@ describe("Deals", () => {
     const table = screen.getByRole("table");
     expect(table).toBeTruthy();
     expect(table.closest(".workspace-card")).toBeNull();
-    expect(table.querySelectorAll('tbody [aria-hidden="true"]')).toHaveLength(0);
+    expect(table.querySelectorAll('tbody tr[aria-hidden="true"]')).toHaveLength(0);
     expect(screen.getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
     const tableViewButton = screen.getByRole("button", { name: "Table view", pressed: true });
     expect(tableViewButton.closest("header")).toBeTruthy();

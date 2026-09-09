@@ -2,16 +2,20 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
+import { DataRoomArcMenu } from "../components/data-room/DataRoomArcMenu";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
+import { FileReviewTable } from "../components/data-room/FileReviewTable";
 import type {
+  DocumentPreviewPanelHandle,
   PreviewState,
   RawTextState,
 } from "../components/data-room/DocumentPreviewPanel";
-import { ReportEditorPanel } from "../components/data-room/ReportEditorPanel";
+import type { DocumentSearchResult } from "../components/data-room/document-search/documentSearchModel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { EmptyState } from "../components/empty-state/empty-state";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
+  flattenDataRoomFiles,
   hasDataRoomFiles,
   isUnconfiguredDataRoomError,
 } from "../data/dataRoom";
@@ -20,7 +24,6 @@ import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPrev
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
 import { getDealRoomPath } from "../data/workspace";
-import { getDealDataRoomView } from "../fixtures/data-room/report";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
@@ -45,8 +48,13 @@ export function DataRoomPage() {
   const [storedTreeLoading, setStoredTreeLoading] = useState(true);
   const [dataRoomRefreshVersion, setDataRoomRefreshVersion] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<DataRoomTreeNode | null>(null);
+  const [documentPageCount, setDocumentPageCount] = useState(0);
+  const [documentSearchOpen, setDocumentSearchOpen] = useState(false);
+  const [requestedPreviewPage, setRequestedPreviewPage] = useState<number | null>(null);
+  const [searchPortalContainer, setSearchPortalContainer] = useState<HTMLDivElement | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "loading" });
   const [rawText, setRawText] = useState<RawTextState>({ status: "idle" });
+  const documentPreviewRef = useRef<DocumentPreviewPanelHandle>(null);
   const previewRequestId = useRef(0);
   const rawTextRequestId = useRef(0);
   const storedDocumentsDealId = useRef<string | undefined>(undefined);
@@ -62,6 +70,7 @@ export function DataRoomPage() {
     [dealDocuments, localDataRoom?.tree],
   );
   const dataRoomHasFiles = useMemo(() => hasDataRoomFiles(explorerNodes), [explorerNodes]);
+  const reviewFiles = useMemo(() => flattenDataRoomFiles(explorerNodes), [explorerNodes]);
   const treeError = [storedTreeError, localTreeError].filter(Boolean).join(" ");
   const treeLoading = storedTreeLoading || localTreeLoading;
   const isUnavailableDataRoom = !treeLoading && Boolean(treeError);
@@ -115,6 +124,9 @@ export function DataRoomPage() {
     setLocalTreeLoading(true);
     setLocalTreeError("");
     setLocalDataRoom(null);
+    setDocumentPageCount(0);
+    setDocumentSearchOpen(false);
+    setRequestedPreviewPage(null);
     setSelectedDocument(null);
     previewRequestId.current += 1;
     rawTextRequestId.current += 1;
@@ -151,6 +163,9 @@ export function DataRoomPage() {
 
   const handleSelectDocument = useCallback(
     async (document: DataRoomTreeNode) => {
+      setDocumentPageCount(0);
+      setDocumentSearchOpen(false);
+      setRequestedPreviewPage(null);
       setSelectedDocument(document);
       setPreview({ status: "loading" });
       setRawText({ status: "idle" });
@@ -232,7 +247,24 @@ export function DataRoomPage() {
   const handleClosePreview = useCallback(() => {
     previewRequestId.current += 1;
     rawTextRequestId.current += 1;
+    setDocumentPageCount(0);
+    setDocumentSearchOpen(false);
+    setRequestedPreviewPage(null);
     setSelectedDocument(null);
+  }, []);
+
+  const handleDocumentSearchResult = useCallback((result: DocumentSearchResult) => {
+    if (result.target?.kind === "pdf-page") {
+      setRequestedPreviewPage(result.target.page);
+    }
+  }, []);
+
+  const handleRequestedPageHandled = useCallback(() => {
+    setRequestedPreviewPage(null);
+  }, []);
+
+  const focusDocumentPreview = useCallback(() => {
+    documentPreviewRef.current?.focusViewer();
   }, []);
 
   const handleCloseUploadModal = useCallback(() => {
@@ -251,8 +283,6 @@ export function DataRoomPage() {
   if (!deal) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-muted">Loading data room…</div>;
   }
-
-  const dataRoomView = getDealDataRoomView(deal.room);
 
   return (
     <div className="workspace-shell relative h-screen overflow-hidden text-on-surface">
@@ -297,20 +327,37 @@ export function DataRoomPage() {
                       document={selectedDocument}
                       key={selectedDocument.id}
                       onClose={handleClosePreview}
+                      onPageCountChange={setDocumentPageCount}
                       onRequestRawText={handleRequestRawText}
+                      onRequestedPageHandled={handleRequestedPageHandled}
                       preview={preview}
                       rawText={rawText}
+                      ref={documentPreviewRef}
+                      requestedPage={requestedPreviewPage}
                     />
                   </Suspense>
                 ) : (
-                  <ReportEditorPanel
-                    blocks={dataRoomView.editorBlocks}
-                    reportTitle={dataRoomView.reportTitle}
-                    versionLabel={dataRoomView.versionLabel}
-                  />
+                  <FileReviewTable files={reviewFiles} onSelectFile={handleSelectDocument} />
                 )}
               </div>
             )}
+            <div
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 ${
+                selectedDocument ? "top-12" : "top-0"
+              }`}
+              ref={setSearchPortalContainer}
+            />
+            <DataRoomArcMenu
+              documentSearch={{
+                currentFileName: selectedDocument?.name ?? "Data Room",
+                currentPageCount: selectedDocument ? documentPageCount : 0,
+                onActivateResult: handleDocumentSearchResult,
+                onOpenChange: setDocumentSearchOpen,
+                onSelectionFocus: selectedDocument ? focusDocumentPreview : undefined,
+                portalContainer: searchPortalContainer,
+              }}
+              documentSearchOpen={documentSearchOpen}
+            />
           </main>
         </div>
       </div>

@@ -3,7 +3,6 @@ import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DealExtractionLocationState } from "../../data/dealExtraction";
 import { SidebarFrame } from "../hub/sidebar/SidebarFrame";
 import { Icon } from "../ui/Icon";
-import { DataRoomSidebarTabs } from "./DataRoomSidebarTabs";
 import { NewAnalysisMenu } from "./NewAnalysisMenu";
 
 type DataRoomExplorerProps = {
@@ -69,19 +68,12 @@ export function DataRoomExplorer({
       sidebarLabel="Data Room"
     >
       {({ collapsed }) =>
-        collapsed ? (
-          <div className="space-y-1">
-            <DataRoomSidebarTabs activeTab="data-room" compact />
-          </div>
-        ) : (
+        collapsed ? null : (
           <div className="flex min-h-full flex-col gap-3">
             <NewAnalysisMenu
               onConnectToSharePoint={onConnectToSharePoint}
               onUploadNewFile={onUploadNewFile}
             />
-            <div className="space-y-1">
-              <DataRoomSidebarTabs activeTab="data-room" />
-            </div>
 
             <div className="min-h-0 flex-1 pt-2">
               {rootPath ? (

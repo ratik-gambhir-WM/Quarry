@@ -1,26 +1,34 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import PdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import previewLoadingMark from "../../assets/quarry-preview-mark.svg";
 import type { DealDocumentText } from "../../contracts/quarryApi";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DocumentPreviewResponse } from "../../data/dataRoomPreview";
-import { buildDocumentSearchFixtureResults } from "../../fixtures/data-room/documentSearch";
 import { PdfToolbar, PdfViewer as ShadcnPdfViewer } from "../pdf-viewer";
 import type { PdfViewerHandle } from "../pdf-viewer";
 import { Icon } from "../ui/Icon";
-import DocumentSearch from "./document-search/DocumentSearch";
-import {
-  formatDocumentSearchFileName,
-  isDocumentSearchResultAvailable,
-  type DocumentSearchItem,
-} from "./document-search/documentSearchModel";
 
 type DocumentPreviewPanelProps = {
   document: DataRoomTreeNode;
   onClose: () => void;
+  onPageCountChange: (pageCount: number) => void;
   onRequestRawText: () => void;
+  onRequestedPageHandled: () => void;
   preview: PreviewState;
   rawText: RawTextState;
+  requestedPage: number | null;
+};
+
+export type DocumentPreviewPanelHandle = {
+  focusViewer: () => void;
 };
 
 export type PreviewState =
@@ -34,86 +42,71 @@ export type RawTextState =
   | { message: string; status: "error" }
   | { response: DealDocumentText; status: "ready" };
 
-export function DocumentPreviewPanel({
-  document,
-  onClose,
-  onRequestRawText,
-  preview,
-  rawText,
-}: DocumentPreviewPanelProps) {
+export const DocumentPreviewPanel = forwardRef<
+  DocumentPreviewPanelHandle,
+  DocumentPreviewPanelProps
+>(function DocumentPreviewPanel(
+  {
+    document,
+    onClose,
+    onPageCountChange,
+    onRequestRawText,
+    onRequestedPageHandled,
+    preview,
+    rawText,
+    requestedPage,
+  },
+  ref,
+) {
   const [viewMode, setViewMode] = useState<"preview" | "raw-text">("preview");
-  const [numPages, setNumPages] = useState(0);
-  const [pendingPage, setPendingPage] = useState<number | null>(null);
-  const [searchPortalContainer, setSearchPortalContainer] = useState<HTMLDivElement | null>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PdfViewerHandle>(null);
   const canShowRawText = Boolean(document.storedFileId);
-  const documentSearchResults = useMemo(
-    () => buildDocumentSearchFixtureResults(document.name),
-    [document.name],
-  );
-  const documentSearchItems = useMemo<DocumentSearchItem[]>(
-    () =>
-      documentSearchResults.map((result) => {
-        const available = isDocumentSearchResultAvailable({
-          currentFileName: document.name,
-          numPages,
-          result,
-        });
-        return {
-          disabledReason: available ? undefined : "Preview navigation unavailable",
-          id: result.id,
-          primaryText: formatDocumentSearchFileName(result.fileName),
-          searchText: `${result.fileName} ${result.location} ${result.excerpt}`,
-          secondaryText: result.excerpt,
-          tertiaryText: available
-            ? `${result.location} · Open page ${result.target?.page}`
-            : result.location,
-        };
-      }),
-    [document.name, documentSearchResults, numPages],
-  );
 
   useEffect(() => {
-    if (viewMode !== "preview" || pendingPage === null || !viewerRef.current) {
+    if (requestedPage === null) {
       return;
     }
-    viewerRef.current.actions.goToPage(pendingPage);
-    setPendingPage(null);
-  }, [pendingPage, viewMode]);
+    if (viewMode !== "preview") {
+      setViewMode("preview");
+      return;
+    }
+    if (!viewerRef.current) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      viewerRef.current?.actions.goToPage(requestedPage);
+      onRequestedPageHandled();
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [onRequestedPageHandled, requestedPage, viewMode]);
 
   useEffect(() => {
     if (preview.status !== "ready") {
-      setNumPages(0);
+      onPageCountChange(0);
     }
-  }, [preview.status]);
+  }, [onPageCountChange, preview.status]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusViewer() {
+        requestAnimationFrame(() => {
+          previewBodyRef.current
+            ?.querySelector<HTMLElement>("[data-pdf-viewer-root] [tabindex='0']")
+            ?.focus({ preventScroll: true });
+        });
+      },
+    }),
+    [],
+  );
 
   function showRawText() {
     setViewMode("raw-text");
     if (rawText.status === "idle") {
       onRequestRawText();
     }
-  }
-
-  function selectSearchItem(item: DocumentSearchItem) {
-    const result = documentSearchResults.find((candidate) => candidate.id === item.id);
-    if (result?.target?.kind !== "pdf-page") {
-      return;
-    }
-    if (viewMode === "raw-text") {
-      setPendingPage(result.target.page);
-      setViewMode("preview");
-    } else {
-      viewerRef.current?.actions.goToPage(result.target.page);
-    }
-  }
-
-  function focusViewerAfterSelection() {
-    requestAnimationFrame(() => {
-      previewBodyRef.current
-        ?.querySelector<HTMLElement>("[data-pdf-viewer-root] [tabindex='0']")
-        ?.focus();
-    });
   }
 
   return (
@@ -130,21 +123,6 @@ export function DocumentPreviewPanel({
                   <h1 className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold text-text-main" title={document.name}>
                     {document.name}
                   </h1>
-                  <DocumentSearch
-                    buttonProps={{
-                      "aria-label": "Search document",
-                      className:
-                        "h-8 w-8 min-w-8 shrink-0 rounded-full p-0 md:min-w-8 hover:translate-y-0 hover:bg-surface-container hover:shadow-none",
-                      iconOnly: true,
-                    }}
-                    dialogDescription={`Search local mock excerpts for ${document.name}.`}
-                    dialogTitle={`Search ${document.name}`}
-                    items={documentSearchItems}
-                    onSelect={selectSearchItem}
-                    onSelectionFocus={focusViewerAfterSelection}
-                    placeholder="Search files and excerpts…"
-                    portalContainer={searchPortalContainer}
-                  />
                 </div>
                 <p className="block max-w-full truncate whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
                   {viewMode === "raw-text"
@@ -213,39 +191,18 @@ export function DocumentPreviewPanel({
               <PdfViewer
                 documentName={document.name}
                 onClose={onClose}
-                onLoad={setNumPages}
+                onLoad={onPageCountChange}
                 onShowRawText={canShowRawText ? showRawText : undefined}
                 response={preview.response}
-                search={
-                  <DocumentSearch
-                    buttonProps={{
-                      "aria-label": "Search document",
-                      className:
-                        "h-8 w-8 min-w-8 shrink-0 rounded-full p-0 md:min-w-8 hover:translate-y-0 hover:bg-surface-container hover:shadow-none",
-                      iconOnly: true,
-                    }}
-                    dialogDescription={`Search local mock excerpts for ${document.name}.`}
-                    dialogTitle={`Search ${document.name}`}
-                    items={documentSearchItems}
-                    onSelect={selectSearchItem}
-                    onSelectionFocus={focusViewerAfterSelection}
-                    placeholder="Search files and excerpts…"
-                    portalContainer={searchPortalContainer}
-                  />
-                }
                 viewerRef={viewerRef}
               />
             ) : null}
           </>
         )}
-        <div
-          className="pointer-events-none absolute inset-0 z-30"
-          ref={setSearchPortalContainer}
-        />
       </div>
     </section>
   );
-}
+});
 
 function RawTextViewer({ rawText }: { rawText: RawTextState }) {
   if (rawText.status === "idle" || rawText.status === "loading") {
@@ -280,7 +237,6 @@ function PdfViewer({
   onLoad,
   onShowRawText,
   response,
-  search,
   viewerRef,
 }: {
   documentName: string;
@@ -288,7 +244,6 @@ function PdfViewer({
   onLoad: (numPages: number) => void;
   onShowRawText?: () => void;
   response: DocumentPreviewResponse;
-  search: ReactNode;
   viewerRef: RefObject<PdfViewerHandle | null>;
 }) {
   const decodedPdf = useMemo(() => buildPdfSource(response), [response]);
@@ -320,7 +275,6 @@ function PdfViewer({
                 >
                   {documentName}
                 </h1>
-                {search}
               </div>
             }
             onPrintAction={onShowRawText}
