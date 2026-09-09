@@ -360,6 +360,7 @@ switcher lives in the registry arc menu rather than the sidebar; its full action
 mounted across the file-review grid and selected-document preview. It starts closed but visible,
 uses the same deep-navy action token as New Analysis, has a
 dedicated downward-arrow hide control, and remains recoverable as a centered bottom-edge bookmark.
+The closed Views trigger, hide control, and recoverable bookmark use a compact 70% visual scale.
 Data Room and Diligence Graph are disabled in that menu. Synthesis Canvas is enabled and opens a
 draggable, resizable floating panel with a route-local unsaved text draft; Notes and Search are
 also enabled, though Notes does not yet have a persisted workspace and Search exposes

@@ -30,9 +30,13 @@ describe("DataRoomArcMenu", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Open data room views" })).not.toBeNull();
+    const trigger = screen.getByRole("button", { name: "Open data room views" });
+    expect(trigger.style.height).toBe("39.2px");
+    expect(trigger.style.width).toBe("39.2px");
     expect(screen.queryByRole("menu", { name: "Data room views" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Hide data room views" })).not.toBeNull();
+    const initialHideButton = screen.getByRole("button", { name: "Hide data room views" });
+    expect(initialHideButton.classList.contains("h-[1.05rem]")).toBe(true);
+    expect(initialHideButton.classList.contains("w-[2.8rem]")).toBe(true);
 
     screen.getByRole("button", { name: "Open data room views" }).focus();
     await user.keyboard("{Enter}");
@@ -47,6 +51,8 @@ describe("DataRoomArcMenu", () => {
     await user.click(hideButton);
 
     const showButton = screen.getByRole("button", { name: "Show data room views" });
+    expect(showButton.classList.contains("h-[2.45rem]")).toBe(true);
+    expect(showButton.classList.contains("w-[4.9rem]")).toBe(true);
     expect(showButton).toBe(document.activeElement);
     expect(screen.queryByRole("menu", { name: "Data room views" })).toBeNull();
 
