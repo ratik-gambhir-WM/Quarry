@@ -299,7 +299,7 @@ export default function DocumentSearch({
         <DialogPrimitive.Overlay className="pointer-events-auto absolute inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm dark:bg-black/60" />
         <DialogPrimitive.Content
           aria-describedby="local-search-description"
-          className="pointer-events-auto absolute inset-x-0 top-0 z-50 h-full w-full max-w-full overflow-hidden bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none md:inset-x-4 md:top-[10%] md:mx-auto md:h-auto md:max-h-[80%] md:max-w-[720px] md:rounded-xl"
+          className="pointer-events-auto absolute inset-x-0 top-0 z-50 h-full w-full max-w-full overflow-hidden bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none md:inset-x-4 md:top-1/2 md:mx-auto md:h-auto md:max-h-[80%] md:max-w-[720px] md:-translate-y-1/2 md:rounded-xl"
           onCloseAutoFocus={(event) => {
             if (selectedItemRef.current && onSelectionFocus) {
               event.preventDefault();

@@ -60,9 +60,12 @@ describe("DocumentSearch", () => {
 
     const searchbox = screen.getByRole("searchbox", { name: "Search document" });
     expect(searchbox).toBe(document.activeElement);
-    expect(
-      screen.getByRole("dialog", { name: "Search Synthetic_Terms.pdf" }),
-    ).toBeTruthy();
+    const dialog = screen.getByRole("dialog", {
+      name: "Search Synthetic_Terms.pdf",
+    });
+    expect(dialog).toBeTruthy();
+    expect(dialog.classList.contains("md:top-1/2")).toBe(true);
+    expect(dialog.classList.contains("md:-translate-y-1/2")).toBe(true);
     expect(screen.getByTestId("preview-canvas")).toBeTruthy();
 
     await user.keyboard("{Escape}");

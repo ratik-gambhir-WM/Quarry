@@ -344,7 +344,7 @@ export function DataRoomPage() {
               </div>
             )}
             <div
-              className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 ${
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-50 ${
                 selectedDocument ? "top-12" : "top-0"
               }`}
               ref={setSearchPortalContainer}

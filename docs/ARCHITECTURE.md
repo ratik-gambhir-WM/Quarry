@@ -364,8 +364,10 @@ The closed Views trigger, hide control, and recoverable bookmark use a compact 7
 Data Room and Diligence Graph are disabled in that menu. Synthesis Canvas is enabled and opens a
 draggable, resizable floating panel with a route-local unsaved text draft; Notes and Search are
 also enabled, though Notes does not yet have a persisted workspace and Search exposes
-fixture-backed results. Launching Synthesis Canvas or Search retracts the arc shortcuts to the
-closed Views trigger, and closing the overlay returns keyboard focus to that trigger.
+fixture-backed results. The Search dialog is centered within the usable Data Room surface and its
+overlay remains above sticky file-review chrome. Launching Synthesis Canvas or Search retracts the
+arc shortcuts to the closed Views trigger, and closing the overlay returns keyboard focus to that
+trigger.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
