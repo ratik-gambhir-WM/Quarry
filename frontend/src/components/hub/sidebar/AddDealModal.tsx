@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import type {
+  DealExtractionLocationState,
   LocalDealDataRoom,
   LocalDealFileContents,
   LocalDealSourceFile,
@@ -168,7 +169,11 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
         : selections.filter((file): file is File => file instanceof File);
       const response = await runtime.api.saveDealMetadata(createdDealId, uploads);
       navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
-        state: { email, result: response },
+        state: {
+          email,
+          result: response,
+          sowSourceName: sourceFileName(selectedSourceFiles.sowFile),
+        } satisfies DealExtractionLocationState,
       });
     } catch (error) {
       setSubmitError(errorMessage(error));
@@ -467,6 +472,11 @@ function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDeal
 
 function isLocalDealSourceFile(file: SourceFileSelection | null): file is LocalDealSourceFile {
   return file !== null && "relativePath" in file && "mimeType" in file;
+}
+
+function sourceFileName(file: SourceFileSelection | null) {
+  if (!file) return undefined;
+  return isLocalDealSourceFile(file) ? file.filename : file.name;
 }
 
 function localFileContentsToFile(file: LocalDealFileContents) {

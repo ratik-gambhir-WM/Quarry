@@ -370,9 +370,18 @@
     transition: box-shadow 0.3s ease, background-color 0.3s ease;
   }
 
-  .workspace-card:hover {
+  .workspace-card:not(.workspace-card--static):hover {
     background: var(--theme-panel-hover);
     box-shadow: var(--theme-panel-shadow-hover);
+  }
+
+  .workspace-card--chrome {
+    border-color: var(--theme-workspace-border);
+    background: var(--theme-workspace-chrome);
+  }
+
+  .workspace-card--static {
+    transition: none;
   }
 
   .chip-card {

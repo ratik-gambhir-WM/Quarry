@@ -1,7 +1,16 @@
 import type {
+  DealResource,
   WorkspaceDeal,
   WorkspaceInsight,
 } from "../../data/workspace";
+
+function unavailableDealResources(): DealResource[] {
+  return [
+    { availability: "unavailable", id: "sow", label: "SOW" },
+    { availability: "coming-soon", id: "fact-sheet", label: "Fact Sheet" },
+    { availability: "unavailable", id: "sharepoint", label: "SharePoint VDR" },
+  ];
+}
 
 export const workspaceDeals: WorkspaceDeal[] = [
   {
@@ -32,6 +41,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
         { id: "alpha-litigation", label: "Draft initial memo on EPA litigation", priority: true },
       ],
       phaseLabel: "Phase 1",
+      resources: unavailableDealResources(),
       sectorLabel: "Manufacturing Sector",
       stageLabel: "In Progress",
       summary:
@@ -103,6 +113,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
         { id: "beta-erp", label: "Confirm ERP cutover contingency plan", priority: true },
       ],
       phaseLabel: "Phase 2",
+      resources: unavailableDealResources(),
       sectorLabel: "Industrial Distribution",
       stageLabel: "Under Review",
       summary:
@@ -173,6 +184,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
         { id: "logistics-routing", label: "Draft day-one routing risk memo", priority: true },
       ],
       phaseLabel: "Integration Planning",
+      resources: unavailableDealResources(),
       sectorLabel: "Transportation & Logistics",
       stageLabel: "Risk Watch",
       summary:
@@ -219,7 +231,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
   },
 ];
 
-export const workspaceInsights: WorkspaceInsight[] = [
+const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confidenceLabel">[] = [
   {
     category: "Financials",
     deal: "Project Alpha",
@@ -385,3 +397,9 @@ export const workspaceInsights: WorkspaceInsight[] = [
     toneTextClassName: "text-muted",
   },
 ];
+
+export const workspaceInsights: WorkspaceInsight[] = workspaceInsightRecords.map((insight, index) => ({
+  ...insight,
+  analyzedAtLabel: "Analyzed today",
+  confidenceLabel: insight.image ? "92%" : index % 2 === 0 ? "96%" : "94%",
+}));

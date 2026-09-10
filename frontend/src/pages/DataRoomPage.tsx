@@ -13,6 +13,8 @@ import type {
 import type { DocumentSearchResult } from "../components/data-room/document-search/documentSearchModel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { EmptyState } from "../components/empty-state/empty-state";
+import { Skeleton } from "../components/ui/skeleton";
+import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
   flattenDataRoomFiles,
@@ -281,7 +283,7 @@ export function DataRoomPage() {
   }
 
   if (!deal) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-muted">Loading data room…</div>;
+    return <WorkspacePageSkeleton label="Loading data room" />;
   }
 
   return (
@@ -322,7 +324,7 @@ export function DataRoomPage() {
             ) : (
               <div className="flex min-h-0 min-w-0 flex-1 basis-0 overflow-hidden">
                 {selectedDocument ? (
-                  <Suspense fallback={<div className="min-h-0 flex-1 bg-surface-container" />}>
+                  <Suspense fallback={<DocumentPreviewSkeleton />}>
                     <DocumentPreviewPanel
                       document={selectedDocument}
                       key={selectedDocument.id}
@@ -342,7 +344,7 @@ export function DataRoomPage() {
               </div>
             )}
             <div
-              className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 ${
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-50 ${
                 selectedDocument ? "top-12" : "top-0"
               }`}
               ref={setSearchPortalContainer}
@@ -371,6 +373,24 @@ export function DataRoomPage() {
       {isConnectSharePointModalOpen ? (
         <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />
       ) : null}
+    </div>
+  );
+}
+
+function DocumentPreviewSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      className="flex min-h-0 flex-1 flex-col gap-5 bg-surface-container p-6"
+      role="status"
+    >
+      <span className="sr-only">Loading document preview</span>
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-9 w-24 rounded-full" />
+      </div>
+      <Skeleton className="min-h-0 flex-1 rounded-xl" />
     </div>
   );
 }

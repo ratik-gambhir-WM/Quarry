@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
-import { DealRoomHeader, DealRoomOverview } from "../components/deal-room/DealRoomHeader";
+import {
+  DealRoomHeader,
+  type DealRoomOverviewSection,
+} from "../components/deal-room/DealRoomHeader";
 import { DealSummaryCard } from "../components/deal-room/DealSummaryCard";
 import { DealTimelineView } from "../components/deal-room/DealTimelineView";
 import { UnderConstructionView } from "../components/deal-room/UnderConstructionView";
 import { InsightsStrip } from "../components/hub/InsightsStrip";
 import { WorkspaceLayout } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
+import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
 import { workspaceInsights } from "../fixtures/workspace/portfolio";
@@ -20,10 +24,11 @@ export function DealRoomPage() {
   const { dealId } = useParams();
   const location = useLocation();
   const { deals: persistedDeals, loaded } = useWorkspaceDeals();
-  const extractionResult = (location.state as DealExtractionLocationState | null)?.result;
+  const extractionState = location.state as DealExtractionLocationState | null;
+  const extractionResult = extractionState?.result;
   const extractedDeal =
     extractionResult && extractionResult.deal.dealId === dealId
-      ? buildWorkspaceDealFromExtractionResult(extractionResult)
+      ? buildWorkspaceDealFromExtractionResult(extractionResult, extractionState?.sowSourceName)
       : undefined;
   const deal = extractedDeal ?? persistedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
   const { email, navigationState } = useWorkspaceSession();
@@ -34,6 +39,7 @@ export function DealRoomPage() {
     ? ({
         ...navigationState,
         result: extractionResult,
+        sowSourceName: extractionState?.sowSourceName,
       } satisfies DealExtractionLocationState)
     : navigationState;
 
@@ -42,7 +48,7 @@ export function DealRoomPage() {
   }
 
   if (!deal) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-muted">Loading deal…</div>;
+    return <WorkspacePageSkeleton label="Loading deal" />;
   }
 
   return (
@@ -65,12 +71,18 @@ type DealRoomWorkspaceProps = {
 
 function DealRoomWorkspace({ deal, deals, email, navigationState }: DealRoomWorkspaceProps) {
   const [activeDealView, setActiveDealView] = useState<ActiveDealView>("deal-room");
+  const [activeOverviewSection, setActiveOverviewSection] = useState<DealRoomOverviewSection>("overview");
   const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(() => deal.room.timeline);
   const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal.room.name);
 
   return (
     <WorkspaceLayout
-      header={<DealRoomHeader />}
+      header={activeDealView === "deal-room" ? (
+        <DealRoomHeader
+          activeSection={activeOverviewSection}
+          onActiveSectionChange={setActiveOverviewSection}
+        />
+      ) : undefined}
       sidebar={
         <WorkspaceSidebar
           activeDealId={deal.room.id}
@@ -110,19 +122,17 @@ function DealRoomWorkspace({ deal, deals, email, navigationState }: DealRoomWork
             icon="grid"
             title="Synthesis Canvas"
           />
-        ) : (
+        ) : activeOverviewSection === "file-summary" ? (
           <>
-            <DealRoomOverview subtitle={deal.room.overviewSubtitle} />
-
-            <div className="grid grid-cols-12 gap-6">
-              <DealSummaryCard deal={deal.room} />
-              <InsightsStrip
-                className="col-span-12 mt-2"
-                contextLabel={deal.room.name}
-                items={dealInsights}
-              />
-            </div>
+            <h1 className="sr-only">{deal.room.name}</h1>
+            <InsightsStrip
+              className="mt-2"
+              contextLabel={deal.room.name}
+              items={dealInsights}
+            />
           </>
+        ) : (
+          <DealSummaryCard deal={deal.room} />
         )}
       </div>
     </WorkspaceLayout>

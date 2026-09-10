@@ -1,7 +1,5 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { runtime } from "@quarry/runtime";
-import { WorkspaceAccountUser, WorkspaceLocationState } from "../../../data/workspace";
+import type { WorkspaceLocationState } from "../../../data/workspace";
 import { DARK_THEME_ENABLED, useThemeMode } from "../../../hooks/useThemeMode";
 import { Icon } from "../../ui/Icon";
 
@@ -12,45 +10,16 @@ type ProfilePreferencesProps = {
 
 export function ProfilePreferences({ email, navigationState }: ProfilePreferencesProps) {
   const navigate = useNavigate();
-  const [accountError, setAccountError] = useState("");
-  const [accountLoading, setAccountLoading] = useState(false);
   const { setThemeMode, themeMode } = useThemeMode();
 
-  async function handleAccountInfo() {
+  function handleAccountInfo() {
     const workspaceEmail = email?.trim();
 
-    if (!workspaceEmail) {
-      navigate("/hub/account", { state: navigationState });
-      return;
-    }
-
-    setAccountError("");
-    setAccountLoading(true);
-
-    try {
-      const accountUser: WorkspaceAccountUser | null = await runtime.api.getUserByEmail(workspaceEmail);
-      navigate("/hub/account", {
-        state: {
-          ...navigationState,
-          accountLookupComplete: true,
-          accountUser,
-          email: workspaceEmail,
-        } satisfies WorkspaceLocationState,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setAccountError(message);
-      navigate("/hub/account", {
-        state: {
-          ...navigationState,
-          accountLookupComplete: true,
-          accountLookupError: message,
-          email: workspaceEmail,
-        } satisfies WorkspaceLocationState,
-      });
-    } finally {
-      setAccountLoading(false);
-    }
+    navigate("/hub/account", {
+      state: workspaceEmail
+        ? ({ ...navigationState, email: workspaceEmail } satisfies WorkspaceLocationState)
+        : navigationState,
+    });
   }
 
   return (
@@ -71,15 +40,13 @@ export function ProfilePreferences({ email, navigationState }: ProfilePreference
         <div className="border-t border-outline-variant pt-3">
           <button
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-text-main transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
-            disabled={accountLoading}
-            onClick={() => void handleAccountInfo()}
+            onClick={handleAccountInfo}
             role="menuitem"
             type="button"
           >
             <Icon className="h-4 w-4 text-muted" name="personSearch" />
-            <span>{accountLoading ? "Loading account..." : "Account info"}</span>
+            <span>Account info</span>
           </button>
-          {accountError ? <p className="mt-2 px-3 text-[11px] font-medium text-error">{accountError}</p> : null}
         </div>
       </div>
     </div>

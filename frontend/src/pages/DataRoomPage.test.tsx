@@ -32,11 +32,14 @@ vi.mock("../components/data-room/DataRoomArcMenu", () => ({
   DataRoomArcMenu: ({
     documentSearch,
   }: {
-    documentSearch: { currentFileName: string };
+    documentSearch: { currentFileName: string; portalContainer: HTMLElement | null };
   }) => (
     <nav aria-label="Data room views">
       <button type="button">Search document</button>
       <span>{documentSearch.currentFileName}</span>
+      <span data-testid="search-portal-class">
+        {documentSearch.portalContainer?.className}
+      </span>
     </nav>
   ),
 }));
@@ -98,7 +101,7 @@ describe("DataRoomPage", () => {
     });
   });
 
-  it("keeps the arc menu mounted when a file opens in the preview", async () => {
+  it("keeps the arc menu mounted and its search portal above file-review chrome", async () => {
     const user = userEvent.setup({ skipHover: true });
     render(
       <MemoryRouter initialEntries={["/hub/deals/project-alpha/data-room"]}>
@@ -111,6 +114,7 @@ describe("DataRoomPage", () => {
     const arcMenu = await screen.findByRole("navigation", { name: "Data room views" });
     const searchAction = screen.getByRole("button", { name: "Search document" });
     expect(screen.getByText("Data Room")).not.toBeNull();
+    expect(screen.getByTestId("search-portal-class").textContent).toContain("z-50");
     await user.click(await screen.findByRole("button", { name: "Open test document" }));
 
     expect(await screen.findByRole("region", { name: "Selected document preview" })).not.toBeNull();

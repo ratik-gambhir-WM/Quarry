@@ -29,6 +29,12 @@ type DataRoomArcMenuProps = {
 const SYNTHESIS_PANEL_DEFAULT_SIZE = { width: 360, height: 450 };
 const SYNTHESIS_PANEL_DEFAULT_INSET = { right: 72, bottom: 48 };
 const SYNTHESIS_PANEL_MIN_SIZE = { width: 280, height: 220 };
+const CONTROL_SCALE = 0.7;
+const ARC_MENU_TRIGGER_SIZE = 56 * CONTROL_SCALE;
+const ARC_MENU_ICON_ONLY_TRIGGER_SIZE = 48 * CONTROL_SCALE;
+const ARC_MENU_OPEN_TRIGGER_SIZE = 40 * CONTROL_SCALE;
+const ARC_MENU_TRIGGER_ICON_SIZE = 20 * CONTROL_SCALE;
+const ARC_MENU_CLOSE_ICON_SIZE = 28 * CONTROL_SCALE;
 
 function getInitialSynthesisPanelSize() {
   if (typeof window === "undefined") {
@@ -90,23 +96,29 @@ export function DataRoomArcMenu({
     <div
       className={cn(
         "pointer-events-none absolute left-1/2 z-20 flex -translate-x-1/2 flex-col items-center transition-[bottom] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto",
-        hidden ? "-bottom-4" : "bottom-0",
+        hidden ? "-bottom-[0.7rem]" : "bottom-0",
       )}
     >
       {hidden ? null : (
         <ArcMenu
           ref={arcMenuRef}
           classNames={{
+            caption: "text-[8.4px]",
             closeIcon: "text-on-action",
             triggerFace: "text-on-action",
             triggerSurface:
               "bg-action group-hover/button:bg-action-hover group-active/button:bg-action-hover",
           }}
+          closeIconSize={ARC_MENU_CLOSE_ICON_SIZE}
+          iconOnlyTriggerSize={ARC_MENU_ICON_ONLY_TRIGGER_SIZE}
           menuLabel="Data room views"
           onOpenChange={handleOpenChange}
+          openTriggerSize={ARC_MENU_OPEN_TRIGGER_SIZE}
           open={open}
           triggerCaption="Views"
+          triggerIconSize={ARC_MENU_TRIGGER_ICON_SIZE}
           triggerLabel="Open data room views"
+          triggerSize={ARC_MENU_TRIGGER_SIZE}
         >
           <ArcMenuAction disabled icon={<Icon name="dataset" />} label="Data Room" />
           <ArcMenuAction disabled icon={<Icon name="graph" />} label="Diligence Graph" />
@@ -200,14 +212,17 @@ export function DataRoomArcMenu({
         className={cn(
           "grid place-items-center border border-outline-variant bg-background/95 text-muted-foreground shadow-sm backdrop-blur-md transition-[width,height,border-radius,background-color,color] duration-200 hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-colors",
           hidden
-            ? "h-14 w-28 rounded-t-[2rem] rounded-b-none border-b-0 pb-3"
-            : "mt-1 h-6 w-16 rounded-full",
+            ? "h-[2.45rem] w-[4.9rem] rounded-t-[1.4rem] rounded-b-none border-b-0 pb-[0.525rem]"
+            : "mt-[0.175rem] h-[1.05rem] w-[2.8rem] rounded-full",
         )}
         onClick={toggleHidden}
         title={hidden ? "Show data room views" : "Hide data room views"}
         type="button"
       >
-        <Icon className={hidden ? "h-4 w-4" : "h-5 w-5"} name={hidden ? "grid" : "chevronDown"} />
+        <Icon
+          className={hidden ? "size-[0.7rem]" : "size-3.5"}
+          name={hidden ? "grid" : "chevronDown"}
+        />
       </button>
     </div>
   );
