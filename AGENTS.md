@@ -53,7 +53,7 @@ broadly reformat unrelated work.
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
 | `docs/` | Canonical Markdown architecture, ADRs, retained reports | none |
-| `plans/` | Ignored local planning material; not an authoritative product contract | none |
+| `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
 There is no root workspace manifest or root task runner. Run commands from the correct
 build root. There is currently no CI, deployment manifest, Docker setup, ESLint/Prettier
@@ -320,7 +320,7 @@ or deleting them.
 - Use an ADR for a durable decision that changes a trust boundary, runtime split, data owner,
   public API version, or destructive rollout.
 - Update commands from manifests, not memory. Never document a check that does not exist.
-- Do not link tracked canonical documentation to ignored `plans/` files.
+- Do not treat or link `plans/` files as canonical documentation.
 - If code and documentation drift, update both in the same change or call out the drift explicitly.
 
 ## Definition of done

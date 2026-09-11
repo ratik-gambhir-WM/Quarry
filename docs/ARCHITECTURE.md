@@ -149,7 +149,7 @@ Quarry/
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
 │   └── helix.toml                    local Helix metadata, partly stale
-└── plans/                            ignored, non-canonical local plans
+└── plans/                            tracked, non-canonical implementation plans
 ```
 
 ### 3.1 Independent build roots
