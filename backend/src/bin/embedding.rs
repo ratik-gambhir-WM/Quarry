@@ -1,5 +1,5 @@
 use anyhow::{Error, Result};
-use quarry_backend::{config::AppConfig, core::clients::openai::OpenAiClient};
+use quarry_backend::{adapters::openai::client::OpenAiClient, AppConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {

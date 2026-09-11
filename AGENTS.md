@@ -192,7 +192,7 @@ decision tree is in the code-verification skill.
 ### Shared React/Vite (`frontend/`)
 
 ```sh
-npm test -- src/path/to/file.test.ts
+npm test -- tests/path/to/file.test.ts
 npm run typecheck:web
 npm run typecheck:desktop
 npm run check:boundaries
@@ -218,7 +218,8 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 ```
 
-`autotests = false`; files in `backend/tests/` are included manually with `#[path]`. Use
+`autotests = false`; unit tests mirror `backend/src/` under `backend/tests/unit/`, and cross-module
+suites live under `backend/tests/integration/`. Both are included manually with `#[path]`. Use
 `cargo test <name-filter>` for focused tests. Do not invent `cargo test --test <file>` commands.
 
 Do not use `cargo run` as a routine check. Startup opens/migrates SQLite and connects to Helix.

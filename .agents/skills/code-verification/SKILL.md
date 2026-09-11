@@ -39,7 +39,7 @@ From `frontend/`:
 
 ```sh
 # Focused test; use the actual affected path.
-npm test -- src/path/to/file.test.ts
+npm test -- tests/path/to/file.test.ts
 
 # Target checks.
 npm run typecheck:web
@@ -88,7 +88,8 @@ cargo test --locked --all-targets
 
 Add `cargo build --locked --release` when release compilation, feature flags, or packaging changed.
 
-`autotests = false`: `backend/tests/**` are manual modules, so do not use
+`autotests = false`: `backend/tests/unit/**` mirrors `backend/src/**`, while cross-module suites
+live under `backend/tests/integration/**`. Both are manually included modules, so do not use
 `cargo test --test <filename>`. Confirm a new test file is actually included.
 
 Do not use `cargo run` as a build check. It opens and may migrate SQLite, requires live Helix, and

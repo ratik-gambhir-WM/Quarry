@@ -110,8 +110,11 @@ introduced.
 
 ## Tests in this crate
 
-`autotests = false`. Tests under `backend/tests/` run only when a source module includes them with
-`#[cfg(test)] #[path = "..."] mod tests;`. When adding a file, add and verify the inclusion hook.
+`autotests = false`. Unit tests live under `backend/tests/unit/` in a tree that mirrors
+`backend/src/`; they run only when the owning source module includes them with
+`#[cfg(test)] #[path = "..."] mod tests;`. Cross-module suites live under
+`backend/tests/integration/` and are included from the crate root. When adding a file, add and
+verify the inclusion hook.
 
 Use `cargo test <name-filter>` for focused checks. Do not use `cargo test --test <filename>` for
 these manually included modules.

@@ -96,7 +96,7 @@ Use the narrowest applicable step first, then broaden in proportion to the chang
 
 ```sh
 cd frontend
-npm test -- src/path/to/affected.test.ts
+npm test -- tests/path/to/affected.test.ts
 npm run typecheck:web
 npm run typecheck:desktop
 npm run check:boundaries

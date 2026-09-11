@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Status | Canonical current-state architecture reference |
-| Last verified | 2026-09-02 |
-| Repository snapshot | `main` at `4e5830c`, including the active working-tree changes |
+| Last verified | 2026-09-10 |
+| Repository snapshot | Live working tree after the backend domain modularization |
 | Audience | Quarry developers, reviewers, operators, and coding agents |
 | Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, persistence, integrations, and verification |
 
@@ -12,10 +12,8 @@ This document describes the implementation in the live repository, not an ideali
 When it disagrees with code, manifests, lockfiles, or tests, the executable repository is the
 authority and this document should be corrected in the same change.
 
-The snapshot includes substantial uncommitted frontend work. In particular, the Deals table,
-Kanban view, sidebar switcher, React View Transition integration, related UI primitives, and
-tests are present in the working tree but are not yet committed. Confirm `git status --short`
-before relying on those files as a stable baseline.
+The backend topology described here includes the live domain-modularization change. Confirm
+`git status --short` before relying on working-tree code as a committed baseline.
 
 The root README and [ADR 0001](adr/0001-shared-runtime-boundary.md) retain parts of the original
 desktop design. The current code has a broader Tauri boundary: desktop product API traffic,
@@ -49,9 +47,10 @@ Build-time aliases select the router and runtime adapter:
 - Desktop: `HashRouter` plus Tauri `invoke`/events; Rust `reqwest` then forwards product traffic
   to the same Axum `/api/v1` routes.
 
-The backend uses explicit construction. `AppConfig` parses process configuration once,
-`bootstrap` opens and migrates SQLite, constructs external clients and repositories, assembles
-services, and places service handles in `AppState`. Handlers remain the Axum delivery layer.
+The backend is an explicit modular monolith. `AppConfig` parses process configuration once;
+`app::bootstrap` opens and migrates SQLite, constructs concrete adapters, assembles domain
+services, and merges routers whose private state has already been bound by the owning feature.
+There is no global application state or repository service locator.
 
 SQLite is the canonical store for users, deals, logical files, immutable file versions, and
 file bytes. Helix is the versioned document graph and search projection. Document ingestion
@@ -90,9 +89,9 @@ flowchart LR
 
     subgraph Server[Axum product API]
         Router[Axum /api/v1 router]
-        Services[Application services]
-        Repositories[Repositories and clients]
-        Router --> Services --> Repositories
+        Domains[Domain modules and feature services]
+        Adapters[Concrete infrastructure adapters]
+        Router --> Domains --> Adapters
     end
 
     SQLite[(SQLite\ncanonical records and blobs)]
@@ -105,11 +104,11 @@ flowchart LR
     User --> DesktopUI
     HttpApi --> Router
     Relay --> Router
-    Repositories --> SQLite
-    Repositories --> Helix
-    Repositories --> OpenAI
-    Repositories --> WmAi
-    Repositories --> Office
+    Adapters --> SQLite
+    Adapters --> Helix
+    Adapters --> OpenAI
+    Adapters --> WmAi
+    Adapters --> Office
 ```
 
 The Tauri shell is not a second product backend. It does not own users, deals, document jobs,
@@ -130,14 +129,22 @@ Quarry/
 ├── frontend/
 │   ├── src/                          shared React application
 │   │   └── fixtures/                 shipped mock/demo records grouped by feature
+│   ├── tests/                        Vitest suites mirroring the React source tree
 │   ├── scripts/                      runtime-boundary enforcement
-│   ├── src-tauri/                    Tauri desktop crate
+│   ├── src-tauri/                    Tauri desktop crate with its own mirrored tests/ tree
 │   ├── package.json                  npm scripts and declared dependencies
 │   ├── package-lock.json             npm lockfile
 │   └── vite.config.ts                build-mode composition root
 ├── backend/
-│   ├── src/                          Axum application and utility binaries
-│   ├── tests/                        manually included Rust test modules
+│   ├── src/
+│   │   ├── app/                      configuration, composition, migrations, HTTP shell
+│   │   ├── domains/                  product modules with feature-owned routes and state
+│   │   ├── adapters/                 SQLite, Helix, AI, Office, and SharePoint mechanisms
+│   │   ├── shared/                   small cross-domain primitives and policies
+│   │   └── bin/                      operational and diagnostic utility binaries
+│   ├── tests/
+│   │   ├── unit/                     unit tests mirroring backend/src
+│   │   └── integration/              cross-module router and architecture suites
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
@@ -162,10 +169,10 @@ It pins the matching frontend API-base variable and stops both child process gro
 child exits or the launcher receives a termination signal. Backend configuration, migrations,
 Helix startup, and Tauri's own `beforeDevCommand` remain owned by their existing build roots.
 
-The backend contains an isolated Rust SharePoint client under
-`backend/src/core/clients/sharepoint_client/`; it is tested but not assembled into application
-state or exposed through routes. Treat it as inactive infrastructure until ownership and product
-integration are explicitly decided.
+The backend contains an isolated Rust SharePoint adapter under
+`backend/src/adapters/sharepoint/`; it is tested but not assembled into a domain or exposed
+through routes. Treat it as inactive infrastructure until ownership and product integration are
+explicitly decided.
 
 ## 4. Distribution and runtime composition
 
@@ -332,7 +339,7 @@ avoid masking operational failures.
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables is divided into completed, in-progress, and template empty-state sections with a disabled add-template affordance | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; Deliverables has no backing slide data and its add-template action is unavailable; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -543,78 +550,96 @@ result properties are currently snake_case because their Rust DTO lacks a rename
 ```mermaid
 flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
-    Config --> Bootstrap[bootstrap]
+    Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Sqlite[Open SQLite and run schema v6 migration]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
-    Sqlite --> Repos[Construct repositories]
-    Helix --> Repos
-    Http --> Clients[Construct optional OpenAI and WM clients]
-    Repos --> Services[Construct services]
-    Clients --> Services
-    Services --> State[AppState of Arc service handles]
-    State --> Router[Create Axum router]
+    Sqlite --> Adapters[Construct concrete adapters]
+    Helix --> Adapters
+    Http --> Adapters
+    Adapters --> Domains[Construct domain services]
+    Domains --> FeatureRouters[Bind private feature router state]
+    FeatureRouters --> Router[Merge API and apply global middleware]
     Router --> Serve[Bind and serve with Ctrl-C shutdown]
 ```
 
 [`backend/src/main.rs`](../backend/src/main.rs) is intentionally thin: dotenv, tracing,
-configuration, bootstrap, bind, serve, and graceful shutdown. [`backend/src/bootstrap.rs`](../backend/src/bootstrap.rs)
-owns application construction and is the only place that should grow when a new production
-adapter must be selected and shared.
-
-`AppState` contains ten `Arc<Service>` handles:
-
-- users
-- deals
-- data rooms
-- database status
-- document ingestion
-- document jobs
-- document search
-- document summaries
-- stored documents
-- research
+configuration, bootstrap, bind, serve, and graceful shutdown.
+[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
+and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
+owns SQLite schema evolution. Bootstrap passes each domain only its required capabilities and
+merges the returned, already-state-bound routers; adding a feature does not widen shared request
+state.
 
 ### 8.2 Module responsibilities
 
 | Module | Owns | Must not own |
 | --- | --- | --- |
-| `config` | Typed parsing/defaults/validation and secret redaction | Request behavior or client construction |
-| `bootstrap` | Migrations and dependency graph construction | HTTP extraction or feature UI concerns |
-| `routes` | Endpoint composition and global Tower layers | Business logic |
-| `handlers` | Axum extractors, multipart decoding, response/status/SSE adaptation | Ambient configuration, repository access, client construction |
-| `services` | Use-case validation and orchestration | Axum state or environment reads |
-| `repository` | SQLite and Helix persistence/index capabilities | HTTP response mapping |
-| `core/clients` | Concrete infrastructure communication | Axum state |
-| `core/parsers` | Bytes-to-normalized-document parsing | Persistence and routing |
-| `core/sqlbuilder` | Parameterized SQLite query construction | Domain workflow |
-| `core/helix_queries` and `core/nodes` | Versioned graph shape and query construction | HTTP extraction |
+| `app/config` | Typed parsing/defaults/validation and secret redaction | Request behavior or client construction |
+| `app/bootstrap` | Dependency graph construction and production adapter selection | HTTP extraction or domain workflow |
+| `app/migrations` | SQLite schema creation and migration | Runtime service construction |
+| `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
+| `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
+| `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
+| `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
+| `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
+| `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
-[`backend/tests/architecture_tests.rs`](../backend/tests/architecture_tests.rs) enforces that
-services/repositories do not depend on `AppState`, request/application layers do not read ambient
-configuration, and handlers do not import repositories or construct clients.
+[`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs)
+enforces that
+the removed horizontal roots and global `AppState` do not return, adapters do not import domains,
+request layers do not reach repositories or concrete adapters, domain routers bind their own
+state before composition, domain code does not read ambient configuration, and cross-domain
+imports use public facades instead of another domain's private layers.
+
+#### 8.2.1 Product domain registry
+
+The domain tree reserves ownership for capabilities that are not implemented yet. A comment-only,
+unregistered `mod.rs` is a contributor-facing location marker; it does not represent an API,
+service, model, table, or product capability.
+
+| Domain ownership | Current maturity |
+| --- | --- |
+| `users` | Implemented development profile creation and lookup; not authentication |
+| `deals` | Implemented deal lifecycle, metadata, source selection, and extraction |
+| `data_rooms` | Partial/implemented local-source browsing and preview |
+| `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and Helix search capabilities |
+| `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
+| `research` | Implemented WM AI transport workflows when configured; broader product research remains conceptual |
+| `system`, `dev_support` | Implemented operations and explicitly development-oriented routes |
+| `user_settings` | Partial client-only preferences; backend scaffold only |
+| `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
+| `assistant` | Planned interaction/conversation owner; backend scaffold only |
+| `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
+| `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
+| `vaults`, `notebooks`, `templates`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
+| `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
 
 ### 8.3 Router and middleware
 
-[`backend/src/routes/mod.rs`](../backend/src/routes/mod.rs) merges system, user, deal, document,
-data-room, and research routers. Global Tower layers provide:
+Each active domain exposes a route builder that binds only its required service state.
+[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, development
+support, user, deal, data-room, document-ingestion, document-viewing, document-search, summary,
+and research routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
+same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
+layers provide:
 
 - generated and propagated `x-request-id`
 - HTTP tracing
 - gzip response compression
 - configurable request timeout returning HTTP 408
 - explicit-origin CORS for GET/POST and selected headers
-- shared service state
+- no shared service state; feature state is already bound before composition
 
 Default CORS origins are the two Vite development origins. CORS is browser policy, not
 authentication or authorization.
 
 ### 8.4 Errors
 
-The error boundary is layered:
+The typical error boundary is layered:
 
 ```text
-RepositoryError -> ServiceError -> AppError -> HTTP status + { "error": "..." }
+domain repository error -> domain service error -> AppError -> HTTP status + { "error": "..." }
 ```
 
 `AppError` maps validation, not-found, conflict, unavailable, and internal failures to
@@ -934,7 +959,10 @@ API relay does not yet preserve an end-to-end server request/error identity.
 ### 14.1 Frontend test model
 
 Vitest runs through the Vite configuration. Pure modules use the default environment; interaction
-tests opt into happy-dom per file. Coverage currently includes:
+tests opt into happy-dom per file. All frontend tests live under `frontend/tests/`, mirroring the
+corresponding paths under `frontend/src/`; both TypeScript targets include that test tree. The
+runtime-boundary check rejects `*.test.*` and `*.spec.*` files placed under `frontend/src/`.
+Coverage currently includes:
 
 - HTTP and Tauri API mappings
 - runtime selection and boundary behavior
@@ -955,12 +983,21 @@ There is no browser end-to-end suite or visual regression suite.
 
 ### 14.2 Backend test model
 
-`autotests = false` means Rust tests under `backend/tests/` are manually included from source
-modules. Adding a test file without adding a `#[cfg(test)] #[path = ...] mod tests;` hook will not
-make Cargo execute it.
+`autotests = false` means Rust tests are included explicitly. Unit test bodies live under
+`backend/tests/unit/` in a tree that mirrors `backend/src/`; owning source modules retain only
+`#[cfg(test)] #[path = ...] mod tests;` hooks so those separate files can still exercise private
+items. Cross-module router and repository-architecture suites live under
+`backend/tests/integration/` and are included from the crate root. The architecture suite verifies
+the source/test separation and mirrored unit-test layout; adding a file under `backend/tests/`
+without an inclusion hook will not make Cargo execute it.
 
-Coverage includes configuration, secret redaction, dependency boundaries, schema migration and
-constraints, SQLite transactions/concurrency, repositories, services, router contracts,
+The Tauri crate follows the same model: `autotests = false`, test bodies live under
+`frontend/src-tauri/tests/`, and source modules include them through test-only path hooks. Its
+layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
+
+Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
+router composition, schema migration and constraints, SQLite transactions/concurrency,
+repositories, services, router contracts,
 multipart boundaries, parsing/chunking, Helix query construction, OpenAI/WM mapping, stored
 previews, and isolated SharePoint behavior.
 
@@ -1044,7 +1081,9 @@ current-state reference.
 4. Keep Tauri narrow, validated, least-privileged, and free of product persistence/business logic.
 5. Treat `/api/v1` as the product client contract; use `/api` only for temporary compatibility.
 6. Parse ambient configuration once and construct infrastructure only in bootstrap/composition code.
-7. Keep handlers transport-oriented, services use-case-oriented, and repositories storage-oriented.
+7. Keep each domain vertically cohesive: handlers remain transport-oriented, services
+   use-case-oriented, and owned repositories storage-oriented. Cross-domain calls use narrow
+   public facades; request code never reaches another feature's repository or a concrete adapter.
 8. Treat SQLite as canonical and Helix as a recoverable projection unless a new ADR changes owner.
 9. Preserve exact-content idempotency and deterministic document/version/chunk IDs after `file_id`
    selection; do not assume changed-content uploads retain logical-file identity.
@@ -1063,9 +1102,9 @@ current-state reference.
 | Multipart/binary/SSE | every transport hop and limits/error/lifecycle | contract tests, route tests, desktop tests, runtime observation |
 | Tauri native capability | platform contract, desktop runtime, Rust command, security/CSP/capabilities | frontend desktop typecheck/boundary, Tauri fmt/Clippy/tests |
 | Backend handler | route, extractor, error mapping, service call | focused route test, backend fmt/Clippy/tests |
-| Service/repository | constructor, bootstrap, architecture tests, failure mapping | focused unit tests and full backend gates |
-| SQLite schema | bootstrap migration, repository, state tests, recovery/ADR | disposable database tests; never real local data |
-| Helix graph/query | nodes, query builders, repository, ADR/reindex policy | graph/query tests and explicit integration plan |
+| Domain service/repository | domain facade, constructor, bootstrap, architecture tests, failure mapping | focused unit tests and full backend gates |
+| SQLite schema | `app/migrations`, owning domain store/repository, state tests, recovery/ADR | disposable database tests; never real local data |
+| Helix graph/query | document index models/query/writer/repository, ADR/reindex policy | graph/query tests and explicit integration plan |
 | Config | parser/default/example/bootstrap | config tests, secret redaction, startup plan with disposable config |
 | Styling/theme | semantic tokens, light/dark, reduced motion, affected primitives | typecheck/tests plus visual/keyboard inspection |
 
@@ -1082,12 +1121,13 @@ current-state reference.
 | Tauri command registration/security | [`frontend/src-tauri/src/lib.rs`](../frontend/src-tauri/src/lib.rs), [`frontend/src-tauri/src/security.rs`](../frontend/src-tauri/src/security.rs) |
 | Tauri API gateway | `frontend/src-tauri/src/quarry_api/` |
 | Tauri native files/export | [`frontend/src-tauri/src/deal_files.rs`](../frontend/src-tauri/src/deal_files.rs), [`frontend/src-tauri/src/save_file.rs`](../frontend/src-tauri/src/save_file.rs) |
-| Backend process/composition | [`backend/src/main.rs`](../backend/src/main.rs), [`backend/src/config.rs`](../backend/src/config.rs), [`backend/src/bootstrap.rs`](../backend/src/bootstrap.rs) |
-| Axum state/router/errors | [`backend/src/state.rs`](../backend/src/state.rs), [`backend/src/routes/mod.rs`](../backend/src/routes/mod.rs), [`backend/src/errors.rs`](../backend/src/errors.rs) |
-| Use cases/persistence | `backend/src/services/`, `backend/src/repository/` |
-| Parsers/clients/query models | `backend/src/core/` |
-| Schema and migration | [`backend/src/bootstrap.rs`](../backend/src/bootstrap.rs), [`backend/tests/state_tests.rs`](../backend/tests/state_tests.rs) |
-| Dependency guard tests | [`backend/tests/architecture_tests.rs`](../backend/tests/architecture_tests.rs) |
+| Backend process/composition | [`backend/src/main.rs`](../backend/src/main.rs), [`backend/src/app/config.rs`](../backend/src/app/config.rs), [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) |
+| Axum mounts/middleware/errors | [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs), [`backend/src/app/http/middleware.rs`](../backend/src/app/http/middleware.rs), [`backend/src/app/http/error.rs`](../backend/src/app/http/error.rs) |
+| Product use cases and owned persistence | `backend/src/domains/` |
+| Concrete infrastructure | `backend/src/adapters/` |
+| Cross-domain primitives | `backend/src/shared/` |
+| Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/unit/app/migrations_tests.rs`](../backend/tests/unit/app/migrations_tests.rs) |
+| Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs) |
 | Versioned graph rollout | [ADR 0002](adr/0002-versioned-helix-file-graph-rollout.md) |
 
 ## 19. Glossary

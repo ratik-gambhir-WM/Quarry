@@ -7,7 +7,7 @@
       "@quarry/runtime": ["./src/platform/runtime.desktop.ts"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "tests"],
   "exclude": [
     "src/platform/Router.web.tsx",
     "src/platform/runtime.web.ts"

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use helix_db::dsl::prelude::*;
-use quarry_backend::{config::AppConfig, core::clients::helix::HelixClient};
+use quarry_backend::{adapters::helix::client::HelixClient, AppConfig};
 use serde_json::Value;
 
 #[tokio::main]

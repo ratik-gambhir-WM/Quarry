@@ -4,6 +4,10 @@ mod quarry_api;
 mod save_file;
 mod security;
 
+#[cfg(test)]
+#[path = "../tests/test_layout.rs"]
+mod test_layout;
+
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 
 use crate::{

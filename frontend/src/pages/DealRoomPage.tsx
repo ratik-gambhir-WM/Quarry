@@ -4,6 +4,7 @@ import {
   DealRoomHeader,
   type DealRoomOverviewSection,
 } from "../components/deal-room/DealRoomHeader";
+import { DeliverablesView } from "../components/deal-room/DeliverablesView";
 import { DealSummaryCard } from "../components/deal-room/DealSummaryCard";
 import { DealTimelineView } from "../components/deal-room/DealTimelineView";
 import { UnderConstructionView } from "../components/deal-room/UnderConstructionView";
@@ -95,7 +96,11 @@ function DealRoomWorkspace({ deal, deals, email, navigationState }: DealRoomWork
         />
       }
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
+      <div
+        className={`mx-auto flex w-full max-w-[1440px] flex-col ${
+          activeDealView === "deliverables" ? "h-full" : "gap-6 pb-10"
+        }`}
+      >
         {activeDealView === "timeline" ? (
           <DealTimelineView deal={deal.room} events={timelineItems} onEventsChange={setTimelineItems} />
         ) : activeDealView === "diligence-graph" ? (
@@ -111,11 +116,7 @@ function DealRoomWorkspace({ deal, deals, email, navigationState }: DealRoomWork
             title="Site Visits"
           />
         ) : activeDealView === "deliverables" ? (
-          <UnderConstructionView
-            description="Organize and track the materials prepared for this deal."
-            icon="listAlt"
-            title="Deliverables"
-          />
+          <DeliverablesView />
         ) : activeDealView === "synthesis-canvas" ? (
           <UnderConstructionView
             description="A working canvas for combining findings, risks, and recommendations."
