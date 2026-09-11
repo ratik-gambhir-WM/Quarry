@@ -7,10 +7,14 @@ const allowedTauriFile = "src/platform/runtime.desktop.ts";
 const violations = [];
 
 for (const file of walk(sourceRoot)) {
-  if (!/\.[cm]?[jt]sx?$/.test(file) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
+  if (!/\.[cm]?[jt]sx?$/.test(file)) {
     continue;
   }
   const projectPath = relative(root, file);
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) {
+    violations.push(`${projectPath}: tests belong under the mirrored tests/ tree`);
+    continue;
+  }
   const source = readFileSync(file, "utf8");
   if (source.includes("@tauri-apps/") && projectPath !== allowedTauriFile) {
     violations.push(`${projectPath}: Tauri imports belong only in ${allowedTauriFile}`);

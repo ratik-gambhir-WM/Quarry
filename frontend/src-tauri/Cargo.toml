@@ -5,6 +5,7 @@ description = "Thin desktop shell for the shared Quarry application"
 authors = ["Quarry contributors"]
 edition = "2021"
 default-run = "quarry-desktop"
+autotests = false
 
 [lib]
 name = "quarry_desktop_lib"

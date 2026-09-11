@@ -1,12 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use quarry_backend::{
-    config::AppConfig,
-    core::{
-        clients::openai::{OpenAiClient, ResponsesFileInput},
-        parsers::docx::parse_docx_from_path,
-        prompts::{build_basic_document_summary_prompt, CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT},
-        CollectedFile,
+    adapters::openai::client::{OpenAiClient, ResponsesFileInput},
+    domains::{
+        documents::parse_docx_from_path,
+        summaries::{build_basic_document_summary_prompt, CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT},
     },
+    shared::file_policy::CollectedFile,
+    AppConfig,
 };
 use std::{
     env, fs,

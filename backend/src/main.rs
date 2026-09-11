@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use quarry_backend::{bootstrap::bootstrap, config::AppConfig};
+use quarry_backend::{bootstrap, AppConfig};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

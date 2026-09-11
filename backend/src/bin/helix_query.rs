@@ -1,8 +1,8 @@
 use std::{env, process};
 
 use quarry_backend::{
-    config::AppConfig,
-    core::{clients::openai::OpenAiClient, prompts::HELIX_QUERY_EXAMPLE_PROMPT},
+    adapters::openai::{client::OpenAiClient, helix_prompt::HELIX_QUERY_EXAMPLE_PROMPT},
+    AppConfig,
 };
 
 const APP_NAME: &str = "DataRoomCLI";

@@ -1,19 +1,20 @@
-pub mod bootstrap;
-pub mod config;
-pub mod core;
-pub mod document_jobs;
-pub mod errors;
-pub mod handlers;
-pub mod repository;
-pub mod routes;
-pub mod services;
-pub mod state;
-pub mod utils;
-
-mod events;
+pub mod adapters;
+pub mod app;
+pub mod domains;
+pub mod shared;
 
 #[cfg(test)]
-#[path = "../tests/architecture_tests.rs"]
+#[path = "../tests/integration/architecture_tests.rs"]
 mod architecture_tests;
 
-pub use routes::create_router;
+#[cfg(test)]
+#[path = "../tests/integration/http_tests.rs"]
+mod http_integration_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/support.rs"]
+mod integration_support;
+
+pub use app::bootstrap::{bootstrap, Application};
+pub use app::config::AppConfig;
+pub use app::http::create_router;
