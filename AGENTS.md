@@ -17,11 +17,11 @@ When instructions disagree, use this order:
 3. This root `AGENTS.md`.
 4. Current code, manifests, lockfiles, and tests.
 5. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the maintained architecture narrative.
-6. ADRs and READMEs as historical context.
+6. READMEs as historical context.
 7. Files under `plans/` and the retained architecture `.docx` reports as design inputs only.
 
-Code is the final authority. The root README and ADR 0001 currently lag the implemented
-desktop API gateway. Do not reintroduce their older “save command only” model by accident.
+Code is the final authority. The root README currently lags the implemented desktop API gateway.
+Do not reintroduce its older “save command only” model by accident.
 
 ## Start every task this way
 
@@ -52,7 +52,7 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
-| `docs/` | Canonical Markdown architecture, ADRs, retained reports | none |
+| `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
 There is no root workspace manifest or root task runner. Run commands from the correct
@@ -135,7 +135,8 @@ request -> router -> handler -> service -> repository/client
   rebuilding tables. Never point migration experiments or `cargo run` at valuable local data
   without an explicit backup and user authorization.
 - `cargo run --bin clear_helix` deletes graph data. Run it only under the explicit, backed-up,
-  drained rollout procedure in ADR 0002 and only when the user has authorized that operation.
+  drained rollout procedure in `docs/ARCHITECTURE.md` and only when the user has authorized that
+  operation.
 - Document jobs and several caches are in memory. Do not document them as durable or distributed.
 
 ## Frontend development rules
@@ -175,8 +176,9 @@ request -> router -> handler -> service -> repository/client
   Follow existing client/service offloading patterns.
 - Use bound parameters and the existing SQL builder/client. Preserve transaction and file-version
   invariants when changing persistence.
-- Update migration tests and ADRs for schema or graph changes. Do not edit local SQLite databases,
-  ignored `backend/data/`, or `.env` files as implementation shortcuts.
+- Update migration tests and architecture/recovery documentation for schema or graph changes. Do
+  not edit local SQLite databases, ignored `backend/data/`, or `.env` files as implementation
+  shortcuts.
 - Optional OpenAI and WM AI capabilities must fail explicitly when invoked but unconfigured;
   partial WM AI configuration must fail startup validation. Never move provider keys into
   frontend code or logs.
@@ -261,7 +263,7 @@ normal code check.
 - Make forward migration and rollback/recovery behavior explicit.
 - Protect existing local data; use temporary databases in tests.
 - Verify transactionality, idempotency, foreign keys, current-version uniqueness, and failure paths.
-- Update ADR 0002 or add a new ADR when the operational rollout changes.
+- Update the canonical architecture and recovery procedure when the operational rollout changes.
 
 ### When changing Tauri capabilities
 
@@ -317,8 +319,9 @@ or deleting them.
   the check merely because the code change is small.
 - Keep `docs/ARCHITECTURE.md` descriptive: distinguish current implementation, uncommitted work,
   known gaps, and intended evolution.
-- Use an ADR for a durable decision that changes a trust boundary, runtime split, data owner,
-  public API version, or destructive rollout.
+- Record durable decisions that change a trust boundary, runtime split, data owner, public API
+  version, or destructive rollout in the canonical architecture and an appropriately scoped
+  standalone document when more detail is required.
 - Update commands from manifests, not memory. Never document a check that does not exist.
 - Do not treat or link `plans/` files as canonical documentation.
 - If code and documentation drift, update both in the same change or call out the drift explicitly.

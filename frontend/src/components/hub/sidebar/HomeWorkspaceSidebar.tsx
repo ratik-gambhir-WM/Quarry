@@ -48,7 +48,7 @@ export function HomeWorkspaceSidebar({
           navigationState={navigationState}
         />
         <SidebarLink icon="bookOpen" label="Notebook" />
-        <SidebarLink icon="dataset" label="Templates" />
+        <SidebarLink icon="layers" label="Templates" />
       </SidebarSection>
 
       <div className="mt-3 border-t border-outline-variant/70 pt-3">

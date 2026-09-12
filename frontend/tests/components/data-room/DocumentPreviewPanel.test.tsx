@@ -12,6 +12,7 @@ import type {
 import {
   DocumentPreviewPanel,
   type DocumentPreviewPanelHandle,
+  type PreviewState,
   type RawTextState,
 } from "@/components/data-room/DocumentPreviewPanel";
 
@@ -19,6 +20,7 @@ const pdfMock = vi.hoisted(() => ({
   goToPage: vi.fn(),
   mounts: 0,
   unmounts: 0,
+  pendingSource: false,
 }));
 
 vi.mock("@/components/pdf-viewer", async () => {
@@ -28,6 +30,7 @@ vi.mock("@/components/pdf-viewer", async () => {
     props: PdfViewerProps,
     ref: ForwardedRef<PdfViewerHandle>,
   ) {
+    pdfMock.pendingSource = props.pendingSource ?? false;
     React.useImperativeHandle(
       ref,
       (): PdfViewerHandle =>
@@ -64,16 +67,26 @@ vi.mock("@/components/pdf-viewer", async () => {
     );
     React.useEffect(() => {
       pdfMock.mounts += 1;
-      props.onLoad?.({ numPages: 3, pdfDocument: {} as never });
       return () => {
         pdfMock.unmounts += 1;
       };
     }, []);
+    React.useEffect(() => {
+      if (!props.pendingSource) {
+        props.onLoad?.({ numPages: 3, pdfDocument: {} as never });
+      }
+    }, [props.pendingSource]);
 
     return (
-      <div data-pdf-viewer-root data-testid="pdf-viewer">
+      <div
+        aria-label={props.ariaLabel}
+        data-pdf-viewer-root
+        data-testid="pdf-viewer"
+        role="region"
+      >
         <div tabIndex={0}>PDF canvas</div>
         {props.renderToolbar?.({} as PdfToolbarContext)}
+        {props.pendingSource ? <div data-testid="pdf-page-skeleton" /> : null}
       </div>
     );
   });
@@ -90,7 +103,7 @@ vi.mock("@/components/pdf-viewer", async () => {
       printActionLabel?: string;
       trailingContent?: React.ReactNode;
     }) =>
-      <div>
+      <div aria-label="PDF viewer controls" role="toolbar">
         {leadingContent}
         {onPrintAction ? (
           <button onClick={onPrintAction} type="button">
@@ -121,24 +134,31 @@ const preview = {
   status: "ready" as const,
 };
 
-function renderPreview(rawText: RawTextState = { status: "idle" }) {
+function renderPreview(
+  rawText: RawTextState = { status: "idle" },
+  previewState: PreviewState = preview,
+) {
   const onRequestRawText = vi.fn();
   const onPageCountChange = vi.fn();
   const onRequestedPageHandled = vi.fn();
   const previewRef = createRef<DocumentPreviewPanelHandle>();
-  const renderPanel = (requestedPage: number | null) => (
-    <DocumentPreviewPanel
-      document={document}
-      onClose={vi.fn()}
-      onPageCountChange={onPageCountChange}
-      onRequestRawText={onRequestRawText}
-      onRequestedPageHandled={onRequestedPageHandled}
-      preview={preview}
-      rawText={rawText}
-      ref={previewRef}
-      requestedPage={requestedPage}
-    />
-  );
+  let activePreview = previewState;
+  const renderPanel = (requestedPage: number | null, nextPreview = activePreview) => {
+    activePreview = nextPreview;
+    return (
+      <DocumentPreviewPanel
+        document={document}
+        onClose={vi.fn()}
+        onPageCountChange={onPageCountChange}
+        onRequestRawText={onRequestRawText}
+        onRequestedPageHandled={onRequestedPageHandled}
+        preview={activePreview}
+        rawText={rawText}
+        ref={previewRef}
+        requestedPage={requestedPage}
+      />
+    );
+  };
   const view = render(renderPanel(null));
   return {
     ...view,
@@ -146,6 +166,9 @@ function renderPreview(rawText: RawTextState = { status: "idle" }) {
     onRequestRawText,
     onRequestedPageHandled,
     previewRef,
+    resolvePreview() {
+      view.rerender(renderPanel(null, preview));
+    },
     requestPage(page: number) {
       view.rerender(renderPanel(page));
     },
@@ -156,11 +179,47 @@ beforeEach(() => {
   pdfMock.goToPage.mockReset();
   pdfMock.mounts = 0;
   pdfMock.unmounts = 0;
+  pdfMock.pendingSource = false;
 });
 
 afterEach(cleanup);
 
 describe("DocumentPreviewPanel navigation contract", () => {
+  it("mounts the document viewer header and page skeleton while preview bytes load", () => {
+    const { container, onPageCountChange } = renderPreview(
+      { status: "idle" },
+      { status: "loading" },
+    );
+
+    expect(
+      screen.getByRole("region", { name: `PDF document viewer: ${document.name}` }),
+    ).toBeTruthy();
+    expect(screen.getByRole("toolbar", { name: "PDF viewer controls" })).toBeTruthy();
+    expect(screen.getByText(document.name)).toBeTruthy();
+    expect(screen.getByTestId("pdf-page-skeleton")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close document preview" }).hasAttribute("disabled"))
+      .toBe(false);
+    expect(container.querySelector("section > header")).toBeNull();
+    expect(pdfMock.pendingSource).toBe(true);
+    expect(onPageCountChange).toHaveBeenCalledWith(0);
+  });
+
+  it("replaces the page skeleton without remounting the viewer shell", () => {
+    const { container, resolvePreview } = renderPreview(
+      { status: "idle" },
+      { status: "loading" },
+    );
+    const viewer = container.querySelector("[data-testid='pdf-viewer']");
+
+    resolvePreview();
+
+    expect(container.querySelector("[data-testid='pdf-viewer']")).toBe(viewer);
+    expect(screen.queryByTestId("pdf-page-skeleton")).toBeNull();
+    expect(pdfMock.pendingSource).toBe(false);
+    expect(pdfMock.mounts).toBe(1);
+    expect(pdfMock.unmounts).toBe(0);
+  });
+
   it("applies an externally requested page exactly once without remounting", async () => {
     const { container, onRequestRawText, onRequestedPageHandled, requestPage } = renderPreview();
     const viewer = container.querySelector("[data-testid='pdf-viewer']");

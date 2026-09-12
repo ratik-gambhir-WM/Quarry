@@ -6,7 +6,7 @@ import type { ActiveHomeSection } from "./sidebarTypes";
 type SidebarLinkProps = {
   homeSection?: ActiveHomeSection;
   href?: string;
-  icon: "bookmark" | "bookOpen" | "boxes" | "dataset" | "folderOpen" | "grid" | "personSearch" | "search" | "sparkles" | "telescope" | "terminal" | "timeline";
+  icon: "bookmark" | "bookOpen" | "boxes" | "dataset" | "folderOpen" | "grid" | "layers" | "personSearch" | "search" | "sparkles" | "telescope" | "terminal" | "timeline";
   label: string;
   navigationState?: WorkspaceLocationState;
 };

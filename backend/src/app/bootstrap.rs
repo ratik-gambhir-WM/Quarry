@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use crate::{
     adapters::{
+        diligence_studio::client::DiligenceStudioClient,
         helix::client::HelixClient,
         office::converter::OfficeConverter,
         openai::client::OpenAiClient,
@@ -33,6 +34,7 @@ use crate::{
         },
         summaries::{self, service::SummaryService},
         system::{self, service::DatabaseService},
+        templates::{self, service::TemplateService},
         users::{self, repository::UserRepository, service::UserService, UserDirectory},
     },
 };
@@ -114,12 +116,16 @@ pub(crate) fn assemble_api(
             wm.index_api_key.expose().to_string(),
         ),
         graph_rag: GraphRagClient::new(
-            http,
+            http.clone(),
             wm.graph_rag_url.clone(),
             wm.graph_rag_api_key.expose().to_string(),
             wm.graph_rag_application_name.clone(),
         ),
     });
+    let diligence_studio = config
+        .diligence_studio
+        .as_ref()
+        .map(|studio| Arc::new(DiligenceStudioClient::new(http, studio.base_url.clone())));
 
     let user_directory = UserDirectory::new(users_repository.clone());
     let users = Arc::new(UserService::new(users_repository));
@@ -166,6 +172,7 @@ pub(crate) fn assemble_api(
     ));
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
+    let templates = Arc::new(TemplateService::new(diligence_studio));
 
     Router::new()
         .merge(system::route::routes(database))
@@ -178,6 +185,7 @@ pub(crate) fn assemble_api(
         .merge(search::route::routes(document_search))
         .merge(summaries::route::routes(document_summaries))
         .merge(research::route::routes(research))
+        .merge(templates::route::routes(templates))
 }
 
 fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {

@@ -90,6 +90,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
   function PdfViewer(props, ref) {
     const {
       source,
+      pendingSource = false,
       toolbar = true,
       renderToolbar,
       enableDragDrop = true,
@@ -334,12 +335,13 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
 
     // Status (drives UI surface)
     const status: PdfStatus = useMemo(() => {
+      if (pendingSource || (source != null && internalSource !== source)) return "loading";
       if (documentState.status === "idle") return "empty";
       if (documentState.status === "loading") return "loading";
       if (documentState.status === "password") return "password";
       if (documentState.status === "ready") return "ready";
       return "error";
-    }, [documentState.status]);
+    }, [documentState.status, internalSource, pendingSource, source]);
 
     // Notify load + error
     const lastLoadedRef = useRef<PDFDocumentProxy | null>(null);
