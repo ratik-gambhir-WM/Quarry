@@ -1,7 +1,11 @@
 import { BookOpenIcon } from "./book-open";
+import { CalendarDaysIcon } from "./calendar-days";
 import { BoxesIcon } from "./icons/BoxesIcon";
+import { FileStackIcon } from "./file-stack";
+import { FolderTreeIcon } from "./folder-tree";
 import { HomeIcon } from "./icons/HomeIcon";
 import { LayersIcon } from "./layers";
+import { ShipIcon } from "./ship";
 import { TelescopeIcon } from "./telescope";
 
 type IconName =
@@ -10,6 +14,7 @@ type IconName =
   | "bookOpen"
   | "boxes"
   | "briefcase"
+  | "calendarDays"
   | "chevronDown"
   | "chevronLeft"
   | "chevronRight"
@@ -19,6 +24,8 @@ type IconName =
   | "dataset"
   | "doc"
   | "filter"
+  | "fileStack"
+  | "folderTree"
   | "folderOpen"
   | "graph"
   | "grid"
@@ -42,6 +49,7 @@ type IconName =
   | "send"
   | "sharepoint"
   | "sheet"
+  | "ship"
   | "sidebar"
   | "shield"
   | "sparkles"
@@ -63,6 +71,14 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
   switch (name) {
     case "bookOpen":
       return <BookOpenIcon className={className} size={20} />;
+    case "calendarDays":
+      return <CalendarDaysIcon aria-hidden="true" className={className} size={20} />;
+    case "ship":
+      return <ShipIcon aria-hidden="true" className={className} size={20} />;
+    case "fileStack":
+      return <FileStackIcon aria-hidden="true" className={className} size={20} />;
+    case "folderTree":
+      return <FolderTreeIcon aria-hidden="true" className={className} size={20} />;
     case "boxes":
       return <BoxesIcon className={className} size={20} />;
     case "telescope":

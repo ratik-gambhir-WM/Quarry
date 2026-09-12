@@ -93,7 +93,7 @@ async fn delete_requires_the_upstream_204_contract() {
 
     assert!(matches!(
         client.delete_template("example").await.unwrap_err(),
-        TemplateClientError::InvalidPayload(_)
+        SlideTemplateClientError::InvalidPayload(_)
     ));
 }
 
@@ -190,7 +190,7 @@ async fn preserves_the_exact_single_slide_rejection_without_batch_fallback() {
             .import_pptx_template(vec![1], PptxTemplateImportMode::Single)
             .await
             .unwrap_err(),
-        TemplateClientError::PptxTemplateMustHaveOneSlide
+        SlideTemplateClientError::PptxTemplateMustHaveOneSlide
     ));
 }
 

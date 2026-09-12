@@ -332,7 +332,11 @@ global state or query-cache library.
   failed write from a completed write whose preview refresh failed. The template header and
   gallery subscribe to that same store: a populated catalog exposes explicit single-slide and
   deck import actions, while an empty catalog provides the same actions plus a single-slide PPTX
-  drop zone.
+  drop zone. The Deal Room sidebar keeps Deal Room and Deal Activity as its primary navigation
+  and uses an animated calendar-days icon for Deal Activity. It then groups Data Room, Analysis,
+  and Deliverable under a Deal Artifacts section. Their animated
+  folder-tree, file-stack, and ship icons respectively honor the operating system's reduced-motion
+  preference.
   Deal Room tabs and both Deliverables headers
   occupy the same fixed-height `WorkspaceLayout` header rail and bottom divider. The overview
   section enables Overview and File Summary today; Evidence, Findings, Data Points, Open Items,

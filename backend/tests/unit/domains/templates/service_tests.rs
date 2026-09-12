@@ -58,7 +58,7 @@ async fn pptx_import_rejects_empty_bytes_before_capability_lookup() {
 fn single_slide_rejection_maps_to_the_actionable_product_error() {
     assert_eq!(
         map_pptx_import_client_error(
-            TemplateClientError::PptxTemplateMustHaveOneSlide,
+            SlideTemplateClientError::PptxTemplateMustHaveOneSlide,
             PptxTemplateImportMode::Single,
         ),
         ServiceError::Validation(PPTX_MULTI_SLIDE_IMPORT_MESSAGE.to_string())
@@ -69,7 +69,7 @@ fn single_slide_rejection_maps_to_the_actionable_product_error() {
 fn transport_failure_maps_to_an_uncertain_outcome_without_upstream_details() {
     assert_eq!(
         map_pptx_import_client_error(
-            TemplateClientError::Request("private URL".to_string()),
+            SlideTemplateClientError::Request("private URL".to_string()),
             PptxTemplateImportMode::Batch,
         ),
         ServiceError::Unavailable(
@@ -92,7 +92,9 @@ async fn delete_rejects_an_invalid_template_id_before_capability_lookup() {
 #[test]
 fn upstream_missing_template_maps_to_not_found() {
     assert_eq!(
-        map_delete_client_error(TemplateClientError::Status(reqwest::StatusCode::NOT_FOUND,)),
+        map_slide_template_delete_client_error(SlideTemplateClientError::Status(
+            reqwest::StatusCode::NOT_FOUND,
+        )),
         ServiceError::NotFound("template was not found".to_string())
     );
 }

@@ -65,7 +65,7 @@ pub struct TemplatePreview {
 }
 
 #[derive(Debug, Error)]
-pub enum TemplateClientError {
+pub enum SlideTemplateClientError {
     #[error("upstream request could not be created: {0}")]
     RequestBuild(String),
     #[error("upstream request failed: {0}")]
@@ -115,10 +115,10 @@ impl DiligenceStudioClient {
     pub async fn list_template_previews(
         &self,
         requested_page: usize,
-    ) -> Result<TemplatePreviewPage, TemplateClientError> {
+    ) -> Result<TemplatePreviewPage, SlideTemplateClientError> {
         let mut endpoint = self
             .endpoint("templates/previews")
-            .map_err(TemplateClientError::RequestBuild)?;
+            .map_err(SlideTemplateClientError::RequestBuild)?;
         endpoint
             .query_pairs_mut()
             .append_pair("page", &requested_page.to_string());
@@ -129,43 +129,44 @@ impl DiligenceStudioClient {
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
-            .map_err(|error| TemplateClientError::Request(error.to_string()))?;
+            .map_err(|error| SlideTemplateClientError::Request(error.to_string()))?;
         if !response.status().is_success() {
-            return Err(TemplateClientError::Status(response.status()));
+            return Err(SlideTemplateClientError::Status(response.status()));
         }
         if response
             .content_length()
             .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
         {
-            return Err(TemplateClientError::ResponseTooLarge);
+            return Err(SlideTemplateClientError::ResponseTooLarge);
         }
 
         let mut bytes = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| TemplateClientError::Request(error.to_string()))?;
+            let chunk =
+                chunk.map_err(|error| SlideTemplateClientError::Request(error.to_string()))?;
             if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-                return Err(TemplateClientError::ResponseTooLarge);
+                return Err(SlideTemplateClientError::ResponseTooLarge);
             }
             bytes.extend_from_slice(&chunk);
         }
 
         let payload = serde_json::from_slice::<UpstreamPage>(&bytes)
-            .map_err(|error| TemplateClientError::InvalidJson(error.to_string()))?;
+            .map_err(|error| SlideTemplateClientError::InvalidJson(error.to_string()))?;
         validate_page(payload, requested_page)
     }
 
-    pub async fn delete_template(&self, template_id: &str) -> Result<(), TemplateClientError> {
+    pub async fn delete_template(&self, template_id: &str) -> Result<(), SlideTemplateClientError> {
         if !valid_template_id(template_id) {
             return invalid("template ID is invalid");
         }
         let mut endpoint = self
             .endpoint("templates/")
-            .map_err(TemplateClientError::RequestBuild)?;
+            .map_err(SlideTemplateClientError::RequestBuild)?;
         endpoint
             .path_segments_mut()
             .map_err(|_| {
-                TemplateClientError::RequestBuild(
+                SlideTemplateClientError::RequestBuild(
                     "Diligence Studio base URL cannot accept path segments".to_string(),
                 )
             })?
@@ -178,12 +179,12 @@ impl DiligenceStudioClient {
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
-            .map_err(|error| TemplateClientError::Request(error.to_string()))?;
+            .map_err(|error| SlideTemplateClientError::Request(error.to_string()))?;
         if response.status() == StatusCode::NO_CONTENT {
             return Ok(());
         }
         if !response.status().is_success() {
-            return Err(TemplateClientError::Status(response.status()));
+            return Err(SlideTemplateClientError::Status(response.status()));
         }
         invalid("delete response was not 204 No Content")
     }
@@ -192,14 +193,14 @@ impl DiligenceStudioClient {
         &self,
         bytes: Vec<u8>,
         mode: PptxTemplateImportMode,
-    ) -> Result<PptxTemplateImportResult, TemplateClientError> {
+    ) -> Result<PptxTemplateImportResult, SlideTemplateClientError> {
         let path = match mode {
             PptxTemplateImportMode::Single => "import",
             PptxTemplateImportMode::Batch => "batchImport",
         };
         let mut endpoint = self
             .endpoint(path)
-            .map_err(TemplateClientError::RequestBuild)?;
+            .map_err(SlideTemplateClientError::RequestBuild)?;
         endpoint.query_pairs_mut().append_pair("kind", "diagram");
         let response = self
             .http
@@ -211,7 +212,7 @@ impl DiligenceStudioClient {
             .send()
             .await
             .map_err(|error| {
-                TemplateClientError::Request(if error.is_timeout() {
+                SlideTemplateClientError::Request(if error.is_timeout() {
                     "request timed out".to_string()
                 } else {
                     "request transport failed".to_string()
@@ -225,9 +226,9 @@ impl DiligenceStudioClient {
                 && status == StatusCode::UNPROCESSABLE_ENTITY
                 && code.as_deref() == Some("template_must_have_one_slide")
             {
-                return Err(TemplateClientError::PptxTemplateMustHaveOneSlide);
+                return Err(SlideTemplateClientError::PptxTemplateMustHaveOneSlide);
             }
-            return Err(TemplateClientError::Status(status));
+            return Err(SlideTemplateClientError::Status(status));
         }
         if response_content_type(&response) != Some("application/json") {
             return invalid("import response content type is not application/json");
@@ -240,7 +241,7 @@ impl DiligenceStudioClient {
 fn validate_pptx_import_headers(
     headers: &reqwest::header::HeaderMap,
     mode: PptxTemplateImportMode,
-) -> Result<PptxTemplateImportResult, TemplateClientError> {
+) -> Result<PptxTemplateImportResult, SlideTemplateClientError> {
     let warning_count = parse_count_header(
         headers,
         "x-powerpoint-warning-count",
@@ -291,7 +292,7 @@ fn parse_count_header(
     name: &str,
     allow_zero: bool,
     maximum: usize,
-) -> Result<usize, TemplateClientError> {
+) -> Result<usize, SlideTemplateClientError> {
     let value = required_header(headers, name)?
         .parse::<usize>()
         .map_err(|_| invalid_error("import response count header is invalid"))?;
@@ -304,7 +305,7 @@ fn parse_count_header(
 fn required_header<'a>(
     headers: &'a reqwest::header::HeaderMap,
     name: &str,
-) -> Result<&'a str, TemplateClientError> {
+) -> Result<&'a str, SlideTemplateClientError> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
@@ -348,7 +349,7 @@ async fn read_bounded_error_code(response: Response) -> Option<String> {
 fn validate_page(
     payload: UpstreamPage,
     requested_page: usize,
-) -> Result<TemplatePreviewPage, TemplateClientError> {
+) -> Result<TemplatePreviewPage, SlideTemplateClientError> {
     let pagination = &payload.pagination;
     let empty_catalog = pagination.page == 1
         && pagination.page_size > 0
@@ -398,7 +399,7 @@ fn validate_page(
                 height: preview.height,
             })
         })
-        .collect::<Result<Vec<_>, TemplateClientError>>()?;
+        .collect::<Result<Vec<_>, SlideTemplateClientError>>()?;
 
     Ok(TemplatePreviewPage {
         pagination: TemplatePreviewPagination {
@@ -416,7 +417,7 @@ fn validate_page(
 fn validate_preview(
     preview: &UpstreamPreview,
     total_pixels: &mut u64,
-) -> Result<(), TemplateClientError> {
+) -> Result<(), SlideTemplateClientError> {
     if !valid_template_id(&preview.template_id) {
         return invalid("template ID is invalid");
     }
@@ -462,7 +463,7 @@ fn validate_preview(
     Ok(())
 }
 
-fn validate_preview_url(value: &str) -> Result<(), TemplateClientError> {
+fn validate_preview_url(value: &str) -> Result<(), SlideTemplateClientError> {
     if value.is_empty()
         || value.len() > MAX_PREVIEW_URL_BYTES
         || value.starts_with("//")
@@ -495,12 +496,12 @@ fn valid_template_id(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
-fn invalid<T>(message: &str) -> Result<T, TemplateClientError> {
+fn invalid<T>(message: &str) -> Result<T, SlideTemplateClientError> {
     Err(invalid_error(message))
 }
 
-fn invalid_error(message: &str) -> TemplateClientError {
-    TemplateClientError::InvalidPayload(message.to_string())
+fn invalid_error(message: &str) -> SlideTemplateClientError {
+    SlideTemplateClientError::InvalidPayload(message.to_string())
 }
 
 #[cfg(test)]

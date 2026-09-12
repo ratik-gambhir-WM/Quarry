@@ -7,7 +7,7 @@ use crate::{
         client::DiligenceStudioClient,
         templates::{
             PptxTemplateImportMode as AdapterImportMode,
-            PptxTemplateImportResult as AdapterImportResult, TemplateClientError,
+            PptxTemplateImportResult as AdapterImportResult, SlideTemplateClientError,
             TemplatePreviewPage as AdapterPage, MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES,
         },
     },
@@ -90,7 +90,7 @@ impl TemplateService {
             .list_template_previews(page)
             .await
             .map(Into::into)
-            .map_err(map_client_error)
+            .map_err(map_slide_template_preview_client_error)
     }
 
     pub async fn delete(&self, template_id: &str) -> ServiceResult<()> {
@@ -107,7 +107,7 @@ impl TemplateService {
         client
             .delete_template(template_id)
             .await
-            .map_err(map_delete_client_error)
+            .map_err(map_slide_template_delete_client_error)
     }
 
     pub async fn import_pptx_template(
@@ -136,15 +136,15 @@ impl TemplateService {
     }
 }
 
-fn map_client_error(error: TemplateClientError) -> ServiceError {
+fn map_slide_template_preview_client_error(error: SlideTemplateClientError) -> ServiceError {
     tracing::warn!(error = %error, "Diligence Studio template preview request failed");
     ServiceError::unavailable("template previews are temporarily unavailable")
 }
 
-fn map_delete_client_error(error: TemplateClientError) -> ServiceError {
+fn map_slide_template_delete_client_error(error: SlideTemplateClientError) -> ServiceError {
     if matches!(
         error,
-        TemplateClientError::Status(reqwest::StatusCode::NOT_FOUND)
+        SlideTemplateClientError::Status(reqwest::StatusCode::NOT_FOUND)
     ) {
         return ServiceError::not_found("template was not found");
     }
@@ -153,21 +153,21 @@ fn map_delete_client_error(error: TemplateClientError) -> ServiceError {
 }
 
 fn map_pptx_import_client_error(
-    error: TemplateClientError,
+    error: SlideTemplateClientError,
     import_mode: PptxTemplateImportMode,
 ) -> ServiceError {
     match error {
-        TemplateClientError::PptxTemplateMustHaveOneSlide => {
+        SlideTemplateClientError::PptxTemplateMustHaveOneSlide => {
             ServiceError::validation(PPTX_MULTI_SLIDE_IMPORT_MESSAGE)
         }
-        TemplateClientError::Status(status) if status.is_client_error() => {
+        SlideTemplateClientError::Status(status) if status.is_client_error() => {
             let target = match import_mode {
                 PptxTemplateImportMode::Single => "slide template",
                 PptxTemplateImportMode::Batch => "deck template",
             };
             ServiceError::validation(format!("The selected {target} could not be imported."))
         }
-        TemplateClientError::Request(_) => {
+        SlideTemplateClientError::Request(_) => {
             tracing::warn!("Diligence Studio template import request did not complete");
             ServiceError::unavailable(
                 "Template import could not be confirmed. Refresh templates before trying again.",
