@@ -110,6 +110,7 @@ fn element_text(element: &SlideElement) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join("\n"),
         ),
+        // TODO: Add call to open ai for description to of image for later embedding
         SlideElement::Image(_, _) | SlideElement::Unknown => None,
     }
 }
