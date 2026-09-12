@@ -30,6 +30,11 @@ impl QuarryApiService {
         self.client.get(path).await
     }
 
+    pub async fn delete(&self, path: &str) -> Result<(), String> {
+        validate_api_path(path)?;
+        self.client.delete(path).await
+    }
+
     pub async fn get_pdf(&self, path: &str) -> Result<Vec<u8>, String> {
         validate_pdf_api_path(path)?;
         let response = self.client.get_stream(path).await?;

@@ -116,6 +116,11 @@ For meaningful UI work, run the appropriate development target and inspect the c
 console/network failures, keyboard/focus behavior, relevant viewports, both themes, and each async
 state. Test both distributions when platform behavior or shared contracts changed.
 
+If you start Vite, a preview server, Tauri development mode, or another port-listening process,
+record the process identity and port first. Stop that exact process gracefully before handoff and
+verify the port is no longer listening, including when inspection fails. Do not terminate a
+listener that existed before the task or whose ownership is uncertain.
+
 ## Architecture completion gate
 
 After implementation, re-read the relevant sections of `docs/ARCHITECTURE.md`. Update it in the

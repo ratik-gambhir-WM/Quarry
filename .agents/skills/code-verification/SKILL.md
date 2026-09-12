@@ -20,6 +20,20 @@ external systems.
 Never clean the worktree, revert unrelated files, broadly format user changes, mix package
 managers, or update dependencies merely to make a check run.
 
+## Local process cleanup
+
+When verification starts a server, preview, watcher, or other long-running process that opens a
+local port:
+
+- Check the intended port before startup so pre-existing listeners remain distinguishable from
+  the process started for the task.
+- Record the started process or process-group identity and every port it opens.
+- Stop that exact process or process group gracefully before handoff, including after a failed
+  check; use forced termination only if graceful shutdown does not work.
+- Verify afterward that each recorded port is no longer listening.
+- Never terminate a pre-existing or ambiguously owned listener as cleanup. Ask the user before
+  affecting a process that the current task did not start.
+
 ## Scope routing
 
 | Changed area | Required verification family |
@@ -70,6 +84,9 @@ For meaningful UI changes, run the appropriate development target and inspect:
 - keyboard operation, focus visibility/restoration, and accessible names;
 - light/dark themes, reduced motion, and relevant viewport sizes;
 - both web and desktop when platform behavior or shared contracts changed.
+
+If a development target is started for inspection, follow the local-process cleanup rule: retain
+its process identity, stop it before handoff, and verify its port is free.
 
 ## Backend ladder
 

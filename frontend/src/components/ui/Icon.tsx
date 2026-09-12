@@ -1,6 +1,7 @@
 import { BookOpenIcon } from "./book-open";
 import { BoxesIcon } from "./icons/BoxesIcon";
 import { HomeIcon } from "./icons/HomeIcon";
+import { LayersIcon } from "./layers";
 import { TelescopeIcon } from "./telescope";
 
 type IconName =
@@ -8,6 +9,7 @@ type IconName =
   | "bookmark"
   | "bookOpen"
   | "boxes"
+  | "briefcase"
   | "chevronDown"
   | "chevronLeft"
   | "chevronRight"
@@ -25,6 +27,7 @@ type IconName =
   | "image"
   | "info"
   | "key"
+  | "layers"
   | "listAlt"
   | "mail"
   | "more"
@@ -128,6 +131,8 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       );
     case "home":
       return <HomeIcon className={className} />;
+    case "layers":
+      return <LayersIcon className={className} size={20} />;
     case "dataset":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
@@ -317,6 +322,12 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M7 4.5h10v15l-5-3.5-5 3.5z" />
+        </svg>
+      );
+    case "briefcase":
+      return (
+        <svg aria-hidden="true" className={className} fill="currentColor" viewBox="0 0 24 24">
+          <path d="M9 3a2 2 0 0 0-2 2v1H4a2 2 0 0 0-2 2v3.25c2.76 1.17 5.8 1.81 9 1.87V12a1 1 0 1 1 2 0v1.12c3.2-.06 6.24-.7 9-1.87V8a2 2 0 0 0-2-2h-3V5a2 2 0 0 0-2-2H9Zm6 3H9V5h6v1ZM2 13.4V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.6a25.5 25.5 0 0 1-9 1.72V16a1 1 0 1 1-2 0v-.88a25.5 25.5 0 0 1-9-1.72Z" />
         </svg>
       );
     case "openInNew":

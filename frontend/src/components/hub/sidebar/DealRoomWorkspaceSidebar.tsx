@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { getDataRoomPath, getDealRoomPath } from "../../../data/workspace";
+import { getDataRoomPath, getDealRoomPath, getDeliverablesPath } from "../../../data/workspace";
 import { Icon } from "../../ui/Icon";
 import { SidebarFrame } from "./SidebarFrame";
 import { SidebarStaticItem } from "./SidebarStaticItem";
@@ -10,7 +10,7 @@ const dealRoomSidebarLinks = [
   { icon: "timeline" as const, key: "timeline" as const, label: "Deal Activity" },
   { icon: "person" as const, key: "site-visits" as const, label: "Site Visits" },
   { icon: "folderOpen" as const, key: "data-room" as const, label: "Data Room Vault" },
-  { icon: "listAlt" as const, key: "deliverables" as const, label: "Deliverables" },
+  { icon: "briefcase" as const, key: "deliverables" as const, label: "Artifacts" },
 ];
 
 export function DealRoomWorkspaceSidebar({
@@ -36,8 +36,16 @@ export function DealRoomWorkspaceSidebar({
     >
       <nav className="space-y-1">
         {dealRoomSidebarLinks.map((link) => {
-          if (activeDeal && "key" in link && (link.key === "deal-room" || link.key === "data-room")) {
-            const destination = link.key === "deal-room" ? getDealRoomPath(activeDeal.room.id) : getDataRoomPath(activeDeal.room.id);
+          if (
+            activeDeal
+            && "key" in link
+            && (link.key === "deal-room" || link.key === "data-room" || link.key === "deliverables")
+          ) {
+            const destination = link.key === "deal-room"
+              ? getDealRoomPath(activeDeal.room.id)
+              : link.key === "data-room"
+                ? getDataRoomPath(activeDeal.room.id)
+                : getDeliverablesPath(activeDeal.room.id);
 
             return (
               <NavLink
@@ -67,7 +75,7 @@ export function DealRoomWorkspaceSidebar({
 
           if (
             "key" in link &&
-            (link.key === "timeline" || link.key === "site-visits" || link.key === "deliverables")
+            (link.key === "timeline" || link.key === "site-visits")
           ) {
             return (
               <SidebarStaticItem

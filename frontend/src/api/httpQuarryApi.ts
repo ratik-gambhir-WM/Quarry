@@ -13,6 +13,9 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  PptxTemplateImportMode,
+  PptxTemplateImportResult,
+  TemplatePreviewPage,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
@@ -219,6 +222,28 @@ function listDeals() {
   return get<PersistedDeal[]>("/api/v1/deals");
 }
 
+function listTemplatePreviews(page: number) {
+  return get<TemplatePreviewPage>(
+    `/api/v1/templates/previews?page=${encodeURIComponent(String(page))}`,
+  );
+}
+
+function importPptxTemplate(file: File, importMode: PptxTemplateImportMode) {
+  const form = new FormData();
+  form.append("files", file, file.name);
+  return postForm<PptxTemplateImportResult>(
+    `/api/v1/templates/import?mode=${encodeURIComponent(importMode)}`,
+    form,
+  );
+}
+
+async function deleteTemplate(templateId: string) {
+  await requestJson<void>(
+    `/api/v1/templates/${encodeURIComponent(templateId)}`,
+    { method: "DELETE" },
+  );
+}
+
 function getDeal(dealId: string) {
   return get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`);
 }
@@ -423,13 +448,16 @@ export const httpQuarryApi: QuarryApi = {
   archiveDeal,
   createDeal,
   createUser,
+  deleteTemplate,
   getDeal,
   getDealDocumentPdf,
   getDealDocumentText,
   getUserByEmail,
+  importPptxTemplate,
   listDealDataRoom,
   listDealDocuments,
   listDeals,
+  listTemplatePreviews,
   listSummaryFiles,
   previewDealDocument,
   processDocuments,

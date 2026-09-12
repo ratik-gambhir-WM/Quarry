@@ -1,19 +1,19 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import { ConnectSharePointModal } from "../components/data-room/ConnectSharePointModal";
 import { DataRoomArcMenu } from "../components/data-room/DataRoomArcMenu";
 import { DataRoomExplorer } from "../components/data-room/DataRoomExplorer";
 import { FileReviewTable } from "../components/data-room/FileReviewTable";
-import type {
-  DocumentPreviewPanelHandle,
-  PreviewState,
-  RawTextState,
+import {
+  DocumentPreviewPanel,
+  type DocumentPreviewPanelHandle,
+  type PreviewState,
+  type RawTextState,
 } from "../components/data-room/DocumentPreviewPanel";
 import type { DocumentSearchResult } from "../components/data-room/document-search/documentSearchModel";
 import { UploadFilesModal } from "../components/data-room/UploadFilesModal";
 import { EmptyState } from "../components/empty-state/empty-state";
-import { Skeleton } from "../components/ui/skeleton";
 import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
@@ -28,12 +28,6 @@ import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
 import { getDealRoomPath } from "../data/workspace";
 import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
-
-const DocumentPreviewPanel = lazy(() =>
-  import("../components/data-room/DocumentPreviewPanel").then((module) => ({
-    default: module.DocumentPreviewPanel,
-  })),
-);
 
 export function DataRoomPage() {
   const { dealId } = useParams();
@@ -324,20 +318,18 @@ export function DataRoomPage() {
             ) : (
               <div className="flex min-h-0 min-w-0 flex-1 basis-0 overflow-hidden">
                 {selectedDocument ? (
-                  <Suspense fallback={<DocumentPreviewSkeleton />}>
-                    <DocumentPreviewPanel
-                      document={selectedDocument}
-                      key={selectedDocument.id}
-                      onClose={handleClosePreview}
-                      onPageCountChange={setDocumentPageCount}
-                      onRequestRawText={handleRequestRawText}
-                      onRequestedPageHandled={handleRequestedPageHandled}
-                      preview={preview}
-                      rawText={rawText}
-                      ref={documentPreviewRef}
-                      requestedPage={requestedPreviewPage}
-                    />
-                  </Suspense>
+                  <DocumentPreviewPanel
+                    document={selectedDocument}
+                    key={selectedDocument.id}
+                    onClose={handleClosePreview}
+                    onPageCountChange={setDocumentPageCount}
+                    onRequestRawText={handleRequestRawText}
+                    onRequestedPageHandled={handleRequestedPageHandled}
+                    preview={preview}
+                    rawText={rawText}
+                    ref={documentPreviewRef}
+                    requestedPage={requestedPreviewPage}
+                  />
                 ) : (
                   <FileReviewTable files={reviewFiles} onSelectFile={handleSelectDocument} />
                 )}
@@ -373,24 +365,6 @@ export function DataRoomPage() {
       {isConnectSharePointModalOpen ? (
         <ConnectSharePointModal onClose={() => setIsConnectSharePointModalOpen(false)} />
       ) : null}
-    </div>
-  );
-}
-
-function DocumentPreviewSkeleton() {
-  return (
-    <div
-      aria-busy="true"
-      aria-live="polite"
-      className="flex min-h-0 flex-1 flex-col gap-5 bg-surface-container p-6"
-      role="status"
-    >
-      <span className="sr-only">Loading document preview</span>
-      <div className="flex items-center justify-between gap-4">
-        <Skeleton className="h-5 w-48" />
-        <Skeleton className="h-9 w-24 rounded-full" />
-      </div>
-      <Skeleton className="min-h-0 flex-1 rounded-xl" />
     </div>
   );
 }

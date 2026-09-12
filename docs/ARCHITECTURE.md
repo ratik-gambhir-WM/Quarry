@@ -12,13 +12,19 @@ This document describes the implementation in the live repository, not an ideali
 When it disagrees with code, manifests, lockfiles, or tests, the executable repository is the
 authority and this document should be corrected in the same change.
 
+For a focused map of product-domain ownership, implemented versus reserved domains, canonical
+entities, projections, ephemeral state, identifiers, and model gaps, see the companion
+[`DOMAIN_MODEL.md`](DOMAIN_MODEL.md). This architecture guide remains the source for runtime and
+deployment boundaries; the domain-model guide expands the product/data semantics without turning
+planned domain scaffolds into implemented capabilities.
+
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root README and [ADR 0001](adr/0001-shared-runtime-boundary.md) retain parts of the original
-desktop design. The current code has a broader Tauri boundary: desktop product API traffic,
-PDF bytes, multipart uploads, and document-job events cross Tauri IPC before reaching the same
-Axum API used by the browser. This document records that implemented path.
+The root README retains parts of the original desktop design. The current code has a broader
+Tauri boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events
+cross Tauri IPC before reaching the same Axum API used by the browser. This document records that
+implemented path.
 
 ## Maintenance contract
 
@@ -123,7 +129,7 @@ Quarry/
 ├── quarry                            root-only local process launcher
 ├── docs/
 │   ├── ARCHITECTURE.md               this canonical Markdown reference
-│   ├── adr/                          accepted architectural decisions
+│   ├── DOMAIN_MODEL.md                domain ownership and product/data model companion
 │   └── architecture/                 retained point-in-time DOCX reports
 ├── .agents/skills/                   project-local development skills
 ├── frontend/
@@ -252,6 +258,8 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 | `/hub/logs` | `LogsPage` | lazy |
 | `/hub/deals` | `Deals` | lazy; currently uncommitted |
 | `/hub/deals/:dealId` | `DealRoomPage` | eager |
+| `/hub/deals/:dealId/deliverables` | `DealRoomPage` | eager |
+| `/hub/deals/:dealId/deliverables/templates` | `DealRoomPage` | eager |
 | `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy |
 | all other paths | Redirect to `/login` | eager |
 
@@ -292,6 +300,9 @@ global state or query-cache library.
   profile theme picker.
 - `WorkspaceHomeShell` loads deals and provides them through a context. The context currently
   defaults to an empty array rather than failing outside the provider.
+- Workspace shells render their route-specific sidebar navigation directly. The Deal Hub,
+  Deal Room, and Data Room headers identify the active sidebar but do not offer fixture-backed
+  alternate sidebar spaces.
 - `AccountPage` owns its profile request. Profile-menu navigation commits `/hub/account`
   immediately with the workspace email, and the destination page renders a skeleton until the
   request resolves to success, empty, or error content.
@@ -300,6 +311,10 @@ global state or query-cache library.
   the request fails.
 - The PDF viewer uses an internal context plus focused hooks for document loading, zoom,
   virtualization, keyboard behavior, selection, page tracking, drop, and printing.
+- A Data Room file selection mounts that PDF viewer chrome before preview bytes resolve. The
+  filename and Close action remain available while document controls are disabled and a
+  page-shaped skeleton occupies the canvas; the resolved PDF replaces the skeleton in the same
+  viewer shell.
 - `DataRoomPage` owns document-search coordination independently of the selected preview. The
   enabled search action stays in the persistent arc menu across Data Room states, while the
   reusable search component accepts result-activation, focus, portal, and trigger contracts. A
@@ -308,13 +323,25 @@ global state or query-cache library.
 - `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
   panel is a frontend-local scaffold: its text survives panel close/reopen during the current
   Data Room route mount, but is neither persisted nor connected to an API.
-- `DealRoomPage` owns two separate navigation layers: the existing sidebar-level Deal Room view
-  and a nested overview section. The overview section enables Overview and File Summary today;
-  Evidence, Findings, Data Points, Open Items, and History remain explicitly disabled until typed
-  backing data and view behavior exist. The page consumes already extracted/persisted key
-  questions and does not trigger extraction. A freshly submitted SOW name is carried only in
-  router state, while a validated persisted SharePoint URL is mapped as an external resource;
-  neither behavior turns the dormant SharePoint client into an import integration.
+- `DealRoomPage` owns the sidebar-level Deal Room view, the route-backed Deliverables and template
+  gallery views, and a nested overview section. The Deliverables summary links to a dedicated
+  template route whose request-scoped external store exposes loading, empty, error/retry, and
+  populated states without page-level effect state. The store owns mutually exclusive template
+  deletion, PPTX import, and catalog-refresh operations. It keeps the current carousel visible
+  during writes, refreshes every preview page after a successful import, and distinguishes a
+  failed write from a completed write whose preview refresh failed. The template header and
+  gallery subscribe to that same store: a populated catalog exposes explicit single-slide and
+  deck import actions, while an empty catalog provides the same actions plus a single-slide PPTX
+  drop zone.
+  Deal Room tabs and both Deliverables headers
+  occupy the same fixed-height `WorkspaceLayout` header rail and bottom divider. The overview
+  section enables Overview and File Summary today; Evidence, Findings, Data Points, Open Items,
+  and History remain explicitly disabled until typed backing data and view behavior exist. The
+  page consumes already extracted/persisted key questions and does not trigger extraction. A
+  freshly submitted SOW name
+  is carried only in router state, while a validated persisted SharePoint URL is mapped as an
+  external resource; neither behavior turns the dormant SharePoint client into an import
+  integration.
 - A populated Data Room with no selected document renders a read-only ReUI file-review grid built
   from the same explorer nodes. File identity and folder context remain runtime-derived, while the
   displayed review findings are explicitly illustrative fixtures. Its compact search control is
@@ -339,7 +366,7 @@ avoid masking operational failures.
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables is divided into completed, in-progress, and template empty-state sections with a disabled add-template affordance | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; Deliverables has no backing slide data and its add-template action is unavailable; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; imported templates without an upstream-generated preview remain absent from the preview-only gallery; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -402,6 +429,9 @@ The contract covers:
 - synchronous and job-based document processing
 - document job subscriptions
 - keyword/vector document search
+- paginated template previews through `listTemplatePreviews`
+- app-scoped template deletion through `deleteTemplate`
+- explicit single-slide or deck PPTX import through `importPptxTemplate`
 - path, selection, and upload summarization
 - platform-specific local data-room selection/read and file export
 
@@ -450,6 +480,7 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | --- | --- | --- |
 | `quarry_api_get` | Relay versioned JSON GET | main window/origin; path policy; safe base URL |
 | `quarry_api_get_pdf` | Relay stored document PDF bytes | exact route shape; PDF MIME/signature; 64 MB cap |
+| `quarry_api_delete` | Relay versioned DELETE with a required 204 response | Main window/origin; path policy; safe base URL |
 | `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy |
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
 | `subscribe_document_job` | Consume Axum SSE and emit Tauri event | validated identifiers; scoped event payload |
@@ -468,10 +499,9 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 - Removing the TypeScript listener does not explicitly cancel the Rust upstream SSE request.
 - The desktop client currently converts many server failures to validation-shaped IPC errors and
   does not preserve a stable HTTP status/retry/operation-ID envelope.
-- Desktop new-user login is currently blocked by a specific error-shape mismatch: Axum returns a
-  flat `{ "error": "user not found" }` body, while the Tauri relay only extracts
-  `{ "error": { "message": ... } }`. It therefore emits a generic 404 string that the TypeScript
-  adapter does not recognize as the missing-user result needed to show the account-creation step.
+- The desktop relay accepts both Quarry's flat `{ "error": "..." }` response and nested
+  `{ "error": { "message": "..." } }` responses, but still exposes transport failures as strings
+  rather than a stable typed status/retry envelope.
 - Endpoint mappings exist independently in the web and Tauri adapters, so contract tests are the
   current protection against drift.
 - The production CSP still contains `https://api.example.invalid`; release configuration must align
@@ -480,8 +510,8 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 ## 7. API surface
 
 Axum builds one feature router and mounts it under both `/api` and `/api/v1`. Clients use
-`/api/v1`; `/api` is transitional compatibility. Only GET and POST are enabled by the CORS method
-allowlist.
+`/api/v1`; `/api` is transitional compatibility. GET, POST, and DELETE are enabled by the CORS
+method allowlist.
 
 ### 7.1 System and users
 
@@ -523,8 +553,9 @@ allowlist.
 | POST | `/documents/search/keyword` | Keyword search Helix chunks | Client supplies `workspaceId`, text, limit |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
-Other multipart routes contain service-level 50 MB checks but currently encounter Axum's default
-2 MB body limit first; this mismatch is a known contract gap.
+The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
+at 25 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
+Axum's default 2 MB body limit first; this mismatch remains a known contract gap.
 
 ### 7.4 Research and summarization
 
@@ -539,6 +570,31 @@ Other multipart routes contain service-level 50 MB checks but currently encounte
 | POST | `/summarize/selected` | Summarize selected server paths | OpenAI and server filesystem |
 | POST | `/summarize/upload` | Summarize uploaded files | OpenAI |
 | POST | `/summaries/markdown` | Write Markdown to a server path | Returns 204; development-only trust model |
+
+### 7.5 Template catalog
+
+| Method | Path | Purpose | Dependency |
+| --- | --- | --- | --- |
+| GET | `/templates/previews?page=N` | Read one validated page of rendered template previews | Optional Diligence Studio capability |
+| POST | `/templates/import?mode=single\|batch` | Import one PPTX as one slide template or as one template per deck slide | Optional Diligence Studio capability |
+| DELETE | `/templates/{template_id}` | Delete one template from Quarry's upstream app catalog | Optional Diligence Studio capability |
+
+The handler defaults a missing page to 1 and rejects invalid or zero values. `TemplateService`
+delegates to the typed Diligence Studio templates capability and preserves the stable camelCase
+pagination/preview DTO. Every upstream request sends the fixed `Quarry_WestMonroe` app ID in
+`X-App-Id`, and returned preview URLs must carry the matching `appId` query. `POST
+/templates/import` accepts exactly one non-empty, safe-named `.pptx` multipart `files` part and an
+explicit `single|batch` mode. The single mode maps only to Diligence Studio `/import?kind=diagram`;
+batch maps only to `/batchImport?kind=diagram`. Both send raw PPTX bytes and return only the
+camelCase mode/imported-count/warning-count DTO after validating the upstream 201, JSON content
+type, and operation-specific response headers. Diligence Studio owns conversion, atomic slide
+splitting, preview generation, and persistence; Quarry keeps no imported template copy. The exact
+single-mode multi-slide rejection directs the user to the deck action without an automatic retry.
+Because the upstream writes are not idempotent, timeouts and connection failures are not retried
+and are reported as uncertain outcomes. The fixed `X-App-Id` segregates the upstream catalog but
+is not authentication or authorization. Deletes require the upstream 204 contract; an upstream
+404 remains a 404, while other upstream failures return a sanitized 503. The browser and Tauri
+webview call these Quarry routes; they never connect to Diligence Studio directly.
 
 The API contract is not generated. JSON is generally camelCase, but flattened document search
 result properties are currently snake_case because their Rust DTO lacks a rename rule.
@@ -582,7 +638,7 @@ state.
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
-| `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
+| `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
 [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs)
@@ -612,7 +668,8 @@ service, model, table, or product capability.
 | `assistant` | Planned interaction/conversation owner; backend scaffold only |
 | `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
-| `vaults`, `notebooks`, `templates`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
+| `templates` | Implemented upstream-backed template-preview reads, app-scoped deletion, and explicit single/deck PPTX import; no local persistence |
+| `vaults`, `notebooks`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
 
 ### 8.3 Router and middleware
@@ -620,7 +677,7 @@ service, model, table, or product capability.
 Each active domain exposes a route builder that binds only its required service state.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, development
 support, user, deal, data-room, document-ingestion, document-viewing, document-search, summary,
-and research routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
+research, and template routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
 same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
 layers provide:
 
@@ -628,7 +685,7 @@ layers provide:
 - HTTP tracing
 - gzip response compression
 - configurable request timeout returning HTTP 408
-- explicit-origin CORS for GET/POST and selected headers
+- explicit-origin CORS for GET/POST/DELETE and selected headers
 - no shared service state; feature state is already bound before composition
 
 Default CORS origins are the two Vite development origins. CORS is browser policy, not
@@ -719,10 +776,12 @@ in the current upload path is narrower than the versioned graph shape suggests:
 
 Vector and keyword search query this projection.
 
-SQLite is intended to remain the recovery source. [ADR 0002](adr/0002-versioned-helix-file-graph-rollout.md)
-defines a clear-and-reindex operational procedure for the incompatible graph, but the repository
-currently contains only the destructive `clear_helix` utility—not a bulk SQLite-to-Helix reindex
-command. `clear_helix` is not part of normal startup.
+SQLite is intended to remain the recovery source. An incompatible graph rollout must drain
+ingestion, back up SQLite and Helix, explicitly authorize and run the destructive `clear_helix`
+utility against the selected environment, recreate indexes, reindex from canonical SQLite data,
+and verify graph identities and search before restoring traffic. The repository currently contains
+only `clear_helix`, not a bulk SQLite-to-Helix reindex command, so this procedure cannot yet be
+completed entirely with repository tooling. `clear_helix` is not part of normal startup.
 
 ### 9.3 Cross-store consistency
 
@@ -855,7 +914,16 @@ root launcher pins it to the loopback API.
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
 | `QUARRY_COMPLETED_JOB_RETENTION_SECONDS` | `600` |
+| `DILIGENCE_STUDIO_API_BASE_URL` | Optional versioned service base such as `http://127.0.0.1:43127/api/v1`; missing/blank leaves template catalog reads and writes unavailable |
 | `RUST_LOG` | tracing filter; defaults to Quarry/tower HTTP info |
+
+`DILIGENCE_STUDIO_API_BASE_URL` is parsed once by `AppConfig`, normalized to one trailing slash,
+and passed through bootstrap into one shared `DiligenceStudioClient`. It must use HTTPS except for
+`localhost` or IP loopback HTTP, must end in `/api/v1`, and must not contain credentials, a query,
+or a fragment. Capability methods append relative paths so the version prefix is preserved and
+identify Quarry to the upstream API as `Quarry_WestMonroe`. Local development can place
+`http://127.0.0.1:43127/api/v1` in the ignored `backend/.env`; this is server-side integration
+configuration and must not be exposed through a `VITE_*` variable.
 
 ### 11.3 Optional OpenAI capability group
 
@@ -914,6 +982,10 @@ All fields are required if any one is present:
 - The browser activity log redacts sensitive field names, paths, emails, long values, and arrays.
 - LibreOffice runs with fixed arguments, isolated temporary/profile directories, bounded output,
   concurrency, and a timeout.
+- Diligence Studio responses are streamed under a response cap and validated for pagination,
+  catalog size, Quarry-app-scoped relative preview URLs, PNG base64 bytes, decoded dimensions,
+  and pixel budgets. PPTX imports validate compact success headers and inspect only a bounded
+  error body; hydrated template JSON is neither buffered nor relayed by Quarry.
 
 ### 12.2 Development-only or missing controls
 
@@ -944,6 +1016,10 @@ and deployment TLS/rate limits/observability established.
 - `x-request-id` is generated and returned.
 - Internal application errors log contextual detail while returning a generic message.
 - Parser and AI-client paths record selected timing/failure context.
+- Diligence Studio failures log internal context and surface only stable sanitized responses;
+  preview data is read through on each template gallery request and is not persisted or cached.
+  PPTX import transport failures are surfaced as uncertain because the upstream write has no
+  idempotency contract and Quarry does not retry it.
 
 There is no metrics backend, distributed tracing exporter, audit store, alerting, or durable job
 telemetry in the repository.
@@ -971,6 +1047,7 @@ Coverage currently includes:
 - Deals ReUI table/filter/modal/Kanban interactions in the uncommitted work
 - sidebar/layout interactions
 - PDF source normalization and page tracking
+- PDF pending-source chrome and Data Room preview loading-shell behavior
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
   viewer mount preservation, and generic requested-page navigation
 - Data Room arc-menu closed initial state, enabled persistent search and Synthesis Canvas panel,
@@ -978,6 +1055,11 @@ Coverage currently includes:
   across file-preview selection
 - Data Room tree flattening and illustrative file-review row mapping
 - Data Room file-review search expansion, filtering, dismissal, and focus restoration
+- Deliverables-to-templates route navigation, template pagination, loading/empty/error/retry states,
+  stale-response handling, single-slide carousel layout, confirmed template deletion and failure
+  preservation, explicit single-slide/deck `.pptx` import controls in populated and empty states,
+  local validation, duplicate-action prevention, full-catalog refresh, partial-success recovery,
+  warning messaging, web/desktop transport mappings, and accessible pending feedback
 
 There is no browser end-to-end suite or visual regression suite.
 
@@ -999,7 +1081,7 @@ Coverage includes configuration, secret redaction, modular dependency boundaries
 router composition, schema migration and constraints, SQLite transactions/concurrency,
 repositories, services, router contracts,
 multipart boundaries, parsing/chunking, Helix query construction, OpenAI/WM mapping, stored
-previews, and isolated SharePoint behavior.
+previews, Diligence Studio URL/payload/delete/import validation, and isolated SharePoint behavior.
 
 There is no live integration suite for Helix, OpenAI, WM AI, Microsoft Graph, or LibreOffice.
 
@@ -1057,7 +1139,7 @@ configuration. Never use `clear_helix` as verification.
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
 | Persistence | Local SQLite; destructive pre-v6 migration | Not a production migration/storage strategy |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
-| Reindex tooling | ADR defines clear/reindex operations, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
+| Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
@@ -1066,7 +1148,7 @@ configuration. Never use `clear_helix` as verification.
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | No CI, container, provider, signing, updater, or TLS config | Repository is not independently deployable |
 | Health | Shallow process check | Cannot determine dependency readiness |
-| Docs | README/ADR 0001 describe older desktop boundary | This file should be used for current code |
+| Docs | README describes an older desktop boundary | This file should be used for current code |
 | Plans | Ignored and sometimes stale after implementation | Must not be treated as tracked contract |
 
 The retained `docs/architecture/*.docx` files are useful point-in-time assessments. Their file
@@ -1084,7 +1166,8 @@ current-state reference.
 7. Keep each domain vertically cohesive: handlers remain transport-oriented, services
    use-case-oriented, and owned repositories storage-oriented. Cross-domain calls use narrow
    public facades; request code never reaches another feature's repository or a concrete adapter.
-8. Treat SQLite as canonical and Helix as a recoverable projection unless a new ADR changes owner.
+8. Treat SQLite as canonical and Helix as a recoverable projection unless an explicit architecture
+   change assigns a different owner.
 9. Preserve exact-content idempotency and deterministic document/version/chunk IDs after `file_id`
    selection; do not assume changed-content uploads retain logical-file identity.
 10. Never confuse browser/Tauri validation, CORS, or route state with server authorization.
@@ -1103,8 +1186,8 @@ current-state reference.
 | Tauri native capability | platform contract, desktop runtime, Rust command, security/CSP/capabilities | frontend desktop typecheck/boundary, Tauri fmt/Clippy/tests |
 | Backend handler | route, extractor, error mapping, service call | focused route test, backend fmt/Clippy/tests |
 | Domain service/repository | domain facade, constructor, bootstrap, architecture tests, failure mapping | focused unit tests and full backend gates |
-| SQLite schema | `app/migrations`, owning domain store/repository, state tests, recovery/ADR | disposable database tests; never real local data |
-| Helix graph/query | document index models/query/writer/repository, ADR/reindex policy | graph/query tests and explicit integration plan |
+| SQLite schema | `app/migrations`, owning domain store/repository, state tests, recovery documentation | disposable database tests; never real local data |
+| Helix graph/query | document index models/query/writer/repository, documented reindex policy | graph/query tests and explicit integration plan |
 | Config | parser/default/example/bootstrap | config tests, secret redaction, startup plan with disposable config |
 | Styling/theme | semantic tokens, light/dark, reduced motion, affected primitives | typecheck/tests plus visual/keyboard inspection |
 
@@ -1128,7 +1211,7 @@ current-state reference.
 | Cross-domain primitives | `backend/src/shared/` |
 | Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/unit/app/migrations_tests.rs`](../backend/tests/unit/app/migrations_tests.rs) |
 | Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs) |
-| Versioned graph rollout | [ADR 0002](adr/0002-versioned-helix-file-graph-rollout.md) |
+| Versioned graph rollout and recovery | [Helix versioned file graph](#92-helix-versioned-file-graph) |
 
 ## 19. Glossary
 

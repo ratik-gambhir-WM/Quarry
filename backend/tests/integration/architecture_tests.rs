@@ -163,6 +163,7 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "FileUploadServiceClient::new(",
         "IndexServiceClient::new(",
         "GraphRagClient::new(",
+        "DiligenceStudioClient::new(",
         "UserRepository::new(",
         "DealRepository::new(",
         "DocumentStore::new(",
@@ -215,6 +216,7 @@ fn cross_domain_imports_do_not_reach_private_layers() {
         "summaries",
         "system",
         "users",
+        "templates",
     ];
     for (path, source) in rust_sources("src/domains") {
         let owner = domain_names

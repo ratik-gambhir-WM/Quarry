@@ -6,7 +6,6 @@ import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/nav
 import { WestMonroeMark } from "../../brand/WestMonroeMark";
 import { Icon } from "../../ui/Icon";
 import { ProfilePreferences } from "./ProfilePreferences";
-import { MockSidebarNavigation, SidebarSpaceId, SidebarSwitcher } from "./SidebarSwitcher";
 
 type SidebarFrameProps = {
   alignedHeader?: boolean;
@@ -35,7 +34,6 @@ export function SidebarFrame({
   sidebarLabel = "Workspace",
   showHeaderBackButton = true,
 }: SidebarFrameProps) {
-  const [activeSidebarSpaceId, setActiveSidebarSpaceId] = useState<SidebarSpaceId>("current");
   const [collapsed, setCollapsed] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const teamLabel = getTeamLabel(email);
@@ -73,17 +71,14 @@ export function SidebarFrame({
           ) : null}
 
           {collapsed ? null : (
-            <SidebarSwitcher
-              activeSpaceId={activeSidebarSpaceId}
-              currentIcon={sidebarIcon}
-              currentLabel={sidebarLabel}
-              onOpenChange={(open) => {
-                if (open) {
-                  setProfileMenuOpen(false);
-                }
-              }}
-              onSpaceChange={setActiveSidebarSpaceId}
-            />
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
+                <Icon className="h-4 w-4" name={sidebarIcon} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
+                {sidebarLabel}
+              </span>
+            </div>
           )}
 
           <button
@@ -112,14 +107,7 @@ export function SidebarFrame({
                 : ""
             }`}
           >
-            {activeSidebarSpaceId === "current" ? (
-              typeof children === "function" ? children({ collapsed }) : children
-            ) : (
-              <MockSidebarNavigation
-                key={activeSidebarSpaceId}
-                spaceId={activeSidebarSpaceId}
-              />
-            )}
+            {typeof children === "function" ? children({ collapsed }) : children}
           </div>
 
           <div className="shrink-0 border-t border-outline-variant/70 pt-2">

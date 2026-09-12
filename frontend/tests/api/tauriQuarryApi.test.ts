@@ -2,6 +2,77 @@ import { describe, expect, it, vi } from "vitest";
 import { createTauriQuarryApi } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it("uses the versioned template preview path and preserves its response", async () => {
+    const payload = {
+      pagination: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        page: 2,
+        pageSize: 10,
+        totalItems: 11,
+        totalPages: 2,
+      },
+      previews: [],
+    };
+    const get = vi.fn().mockResolvedValue(payload);
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get,
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      subscribeJob: vi.fn(),
+    });
+
+    await expect(api.listTemplatePreviews(2)).resolves.toEqual(payload);
+    expect(get).toHaveBeenCalledWith("/api/v1/templates/previews?page=2");
+  });
+
+  it("deletes an encoded template through the desktop relay", async () => {
+    const deleteRequest = vi.fn().mockResolvedValue(undefined);
+    const api = createTauriQuarryApi({
+      delete: deleteRequest,
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      subscribeJob: vi.fn(),
+    });
+
+    await expect(api.deleteTemplate("template/one")).resolves.toBeUndefined();
+    expect(deleteRequest).toHaveBeenCalledWith("/api/v1/templates/template%2Fone");
+  });
+
+  it.each(["single", "batch"] as const)(
+    "imports one PPTX through the desktop %s route and normalizes an empty MIME type",
+    async (importMode) => {
+      const result = { importMode, importedCount: importMode === "single" ? 1 : 2, warningCount: 0 };
+      const postMultipart = vi.fn().mockResolvedValue(result);
+      const api = createTauriQuarryApi({
+        delete: vi.fn(),
+        get: vi.fn(),
+        getPdf: vi.fn(),
+        post: vi.fn(),
+        postMultipart,
+        subscribeJob: vi.fn(),
+      });
+      const file = new File([new Uint8Array([1, 2, 3])], "Template.PPTX", { type: "" });
+
+      await expect(api.importPptxTemplate(file, importMode)).resolves.toEqual(result);
+
+      expect(postMultipart).toHaveBeenCalledWith({
+        fields: [],
+        files: [{
+          dataBase64: "AQID",
+          fieldName: "files",
+          filename: "Template.PPTX",
+          mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }],
+        path: `/api/v1/templates/import?mode=${importMode}`,
+      });
+    },
+  );
+
   it("sends multipart document uploads to the deal-scoped path", async () => {
     const postMultipart = vi.fn().mockResolvedValue({
       documents: [],
@@ -11,6 +82,7 @@ describe("createTauriQuarryApi", () => {
       total: 0,
     });
     const api = createTauriQuarryApi({
+      delete: vi.fn(),
       get: vi.fn(),
       getPdf: vi.fn(),
       post: vi.fn(),
@@ -38,6 +110,7 @@ describe("createTauriQuarryApi", () => {
       });
     const getPdf = vi.fn().mockResolvedValue(new Uint8Array([37, 80, 68, 70, 45]).buffer);
     const api = createTauriQuarryApi({
+      delete: vi.fn(),
       get,
       getPdf,
       post: vi.fn(),
