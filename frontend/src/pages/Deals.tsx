@@ -1,6 +1,5 @@
 import {
   lazy,
-  startTransition,
   Suspense,
   useDeferredValue,
   useMemo,
@@ -10,9 +9,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { AddDealMenu } from "../components/deals/AddDealMenu";
 import {
-  DealLifecycleFilter,
   DealsSearch,
-  DealsViewToggle,
+  DealsViewMenu,
   type DealsView,
 } from "../components/deals/DealsHeaderControls";
 import { DealsEmptyState, DealsTable } from "../components/deals/DealsTable";
@@ -21,7 +19,7 @@ import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { useWorkspaceHomeDeals, WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { Skeleton } from "../components/ui/skeleton";
 import { markViewTransitionType } from "../components/ui/ViewTransition";
-import { filterDealPortfolioViews, getDealCounts, type DealScope } from "../data/dealsView";
+import { filterDealPortfolioViews, getDealCounts } from "../data/dealsView";
 import { getDealRoomPath, type WorkspaceLocationState } from "../data/workspace";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
@@ -33,7 +31,6 @@ const DealsKanban = lazy(() =>
 export function Deals() {
   const { email, navigationState } = useWorkspaceSession();
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<DealScope>("all");
   const [view, setView] = useState<DealsView>("table");
   const [, startViewTransition] = useTransition();
 
@@ -53,11 +50,7 @@ export function Deals() {
           actions={
             <>
               <DealsHeaderMetrics />
-              <DealLifecycleFilter
-                onScopeChange={(nextScope) => startTransition(() => setScope(nextScope))}
-                scope={scope}
-              />
-              <DealsViewToggle
+              <DealsViewMenu
                 onPreloadKanban={() => {
                   void loadDealsKanban().catch(() => undefined);
                 }}
@@ -75,9 +68,7 @@ export function Deals() {
       <DealsContent
         navigationState={navigationState}
         onQueryChange={setQuery}
-        onScopeChange={setScope}
         query={query}
-        scope={scope}
         view={view}
       />
     </WorkspaceHomeShell>
@@ -104,25 +95,22 @@ function DealsHeaderMetrics() {
 type DealsContentProps = {
   navigationState?: WorkspaceLocationState;
   onQueryChange: (query: string) => void;
-  onScopeChange: (scope: DealScope) => void;
   query: string;
-  scope: DealScope;
   view: DealsView;
 };
 
-function DealsContent({ navigationState, onQueryChange, onScopeChange, query, scope, view }: DealsContentProps) {
+function DealsContent({ navigationState, onQueryChange, query, view }: DealsContentProps) {
   const deals = useWorkspaceHomeDeals();
   const navigate = useNavigate();
   const deferredQuery = useDeferredValue(query);
 
   const visibleDeals = useMemo(
-    () => filterDealPortfolioViews(deals, deferredQuery, scope),
-    [deals, deferredQuery, scope],
+    () => filterDealPortfolioViews(deals, deferredQuery, "all"),
+    [deals, deferredQuery],
   );
 
   function resetFilters() {
     onQueryChange("");
-    startTransition(() => onScopeChange("all"));
   }
 
   return (

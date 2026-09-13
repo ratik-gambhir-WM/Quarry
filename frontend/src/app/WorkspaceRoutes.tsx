@@ -35,7 +35,7 @@ export function WorkspaceRoutes() {
         <Route element={page("Loading Account", <AccountPage />)} path="account" />
         <Route element={page("Loading Global Vault", <GlobalVaultPage />)} path="vault" />
         <Route element={page("Loading Vault", <VaultPage />)} path="initiatives/vault" />
-        <Route element={page("Loading Explore", <SummarizePage />)} path="summarize" />
+        <Route element={page("Loading Assistant", <SummarizePage />)} path="summarize" />
         <Route element={page("Loading logs", <LogsPage />)} path="logs" />
         <Route element={page("Loading deals", <Deals />)} path="deals" />
         <Route element={page("Loading deal", <DealRoomPage />)} path="deals/:dealId">

@@ -85,6 +85,19 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
         .unwrap();
     assert_eq!(version, LATEST_SCHEMA_VERSION);
     assert_eq!(
+        table_columns(&connection, "deal_metadata"),
+        [
+            "deal_id",
+            "user_id",
+            "key_questions_json",
+            "local_path",
+            "sharepoint_link",
+            "sow_link",
+            "fact_sheet_link",
+            "rl_link",
+        ]
+    );
+    assert_eq!(
         table_columns(&connection, "quarry_files"),
         [
             "file_id",
@@ -342,7 +355,7 @@ fn create_actual_version_5_database(connection: &Connection) {
 }
 
 #[test]
-fn migration_recreates_the_complete_version_6_schema_from_an_actual_version_5_database() {
+fn migration_recreates_the_complete_version_7_schema_from_an_actual_version_5_database() {
     let mut connection = Connection::open_in_memory().unwrap();
     create_actual_version_5_database(&connection);
     connection
@@ -370,7 +383,7 @@ fn migration_recreates_the_complete_version_6_schema_from_an_actual_version_5_da
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
     assert_eq!(
         table_columns(&connection, "deals"),
@@ -431,6 +444,97 @@ fn migration_recreates_the_complete_version_6_schema_from_an_actual_version_5_da
             "#,
         )
         .unwrap();
+}
+
+#[test]
+fn migration_adds_nullable_deal_links_to_version_6_without_losing_data() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    connection
+        .execute_batch(
+            r#"
+            DROP TABLE deal_metadata;
+
+            CREATE TABLE deal_metadata (
+                deal_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL,
+                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
+                local_path TEXT,
+                sharepoint_link TEXT,
+                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
+                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
+                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
+            );
+
+            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
+            PRAGMA user_version = 6;
+            "#,
+        )
+        .unwrap();
+    seed_deal(&connection, "DEAL-V6", "Active");
+    connection
+        .execute(
+            r#"
+            INSERT INTO deal_metadata (
+                deal_id, user_id, key_questions_json, local_path, sharepoint_link
+            ) VALUES ('DEAL-V6', 1, '["Why?"]', '/tmp/data-room', NULL)
+            "#,
+            [],
+        )
+        .unwrap();
+
+    run_migrations(&mut connection).unwrap();
+
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        table_columns(&connection, "deal_metadata"),
+        [
+            "deal_id",
+            "user_id",
+            "key_questions_json",
+            "local_path",
+            "sharepoint_link",
+            "sow_link",
+            "fact_sheet_link",
+            "rl_link",
+        ]
+    );
+    let metadata = connection
+        .query_row(
+            r#"
+            SELECT key_questions_json, local_path, sow_link, fact_sheet_link, rl_link
+            FROM deal_metadata
+            WHERE deal_id = 'DEAL-V6'
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        metadata,
+        (
+            "[\"Why?\"]".to_string(),
+            "/tmp/data-room".to_string(),
+            None,
+            None,
+            None,
+        )
+    );
 }
 
 #[test]

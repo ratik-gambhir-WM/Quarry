@@ -284,7 +284,7 @@ authorization controls.
 | --- | --- | --- |
 | `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, summarize |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
-| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition, registry arc menu and floating panel |
+| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, registry arc menu and floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
@@ -307,7 +307,8 @@ global state or query-cache library.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The Deal Hub and
   Deal Room headers identify the active sidebar but do not offer fixture-backed alternate sidebar
-  spaces. An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
+  spaces. The home sidebar labels `/hub/summarize` as Assistant and uses an animated Twitch glyph.
+  An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
   explorer's left-arrow back control returns to Deal Home.
@@ -390,7 +391,7 @@ operational failures.
 | --- | --- | --- |
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
-| Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
+| Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; imported templates without an upstream-generated preview remain absent from the preview-only gallery; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
@@ -431,6 +432,9 @@ trigger.
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
 and primitives instead of adding hard-coded parallel color/spacing systems.
+The Deals add-deal flow composes the shared ReUI/shadcn dialog, field, input, select, and button
+primitives. Its portal overlay remains separate from the legacy named modal view transition so
+opening the dialog does not capture the page chrome as part of that transition.
 
 The live working tree includes React canary View Transition wrappers and CSS transition recipes.
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
@@ -632,7 +636,7 @@ result properties are currently snake_case because their Rust DTO lacks a rename
 flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
-    Bootstrap --> Sqlite[Open SQLite and run schema v6 migration]
+    Bootstrap --> Sqlite[Open SQLite and run schema v7 migration]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -744,7 +748,7 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 SQLite schema version 6
+### 9.1 SQLite schema version 7
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -755,7 +759,7 @@ schema currently contains:
 | `users` | Development user/profile records and API key | Used by user/deal services |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Core deal record and owner reference | Used |
-| `deal_metadata` | Key-question JSON and an optional local/SharePoint source | Used |
+| `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; the three document-link columns are not yet mapped by a service or route |
 | `quarry_files` | Logical file identity, deal/workspace, soft-delete metadata | Used |
 | `quarry_file_versions` | Immutable version identity/hash/current marker | Used |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
@@ -764,6 +768,7 @@ Key invariants include:
 
 - deals reference an existing user
 - deal metadata has at most one of local path or SharePoint link; both may be absent
+- SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
 - logical files belong to one deal/workspace
 - versions are unique by `(file_id, version_number)` and `(file_id, content_sha256)`
 - at most one current version exists per logical file
@@ -771,9 +776,11 @@ Key invariants include:
 - archiving a deal retains its file records
 
 There is no migrations directory. `PRAGMA user_version` is the migration marker. Databases below
-version 6 are upgraded by dropping all application tables and recreating the complete schema;
-databases above version 6 fail startup. This is deliberately documented as destructive behavior,
-not a production-safe incremental migration strategy.
+version 6 are upgraded by dropping all application tables and recreating the complete version 7
+schema. Version 6 databases are upgraded to version 7 in place by adding the nullable
+`sow_link`, `fact_sheet_link`, and `rl_link` columns to `deal_metadata`; existing rows are
+preserved. Databases above version 7 fail startup. The pre-version-6 rebuild remains deliberately
+destructive and is not a production-safe incremental migration strategy.
 
 ### 9.2 Helix versioned file graph
 

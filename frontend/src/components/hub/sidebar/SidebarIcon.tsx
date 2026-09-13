@@ -29,6 +29,7 @@ const animatedIconNames = new Set<SidebarIconName>([
   "layers",
   "ship",
   "telescope",
+  "twitch",
 ]);
 
 export function SidebarIcon({ className, name }: { className: string; name: SidebarIconName }) {

@@ -120,7 +120,7 @@ these lower layers reads ambient configuration or imports application-wide state
 
 ## 4. Canonical relational model
 
-SQLite schema version 6 is the canonical durable product store. The active relationships are:
+SQLite schema version 7 is the canonical durable product store. The active relationships are:
 
 ```mermaid
 erDiagram
@@ -159,6 +159,9 @@ erDiagram
         json key_questions_json
         text local_path nullable
         text sharepoint_link nullable
+        text sow_link nullable
+        text fact_sheet_link nullable
+        text rl_link nullable
     }
     QUARRY_FILE {
         text file_id PK
@@ -185,7 +188,7 @@ erDiagram
     }
 ```
 
-`app_metadata` and `reminders` also exist in schema version 6, but no current registered domain
+`app_metadata` and `reminders` also exist in schema version 7, but no current registered domain
 service or route consumes them. They are dormant schema, not evidence of implemented application
 metadata or reminder domains.
 

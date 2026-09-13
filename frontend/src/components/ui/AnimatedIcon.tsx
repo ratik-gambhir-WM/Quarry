@@ -7,6 +7,7 @@ import { HomeIcon } from "./icons/HomeIcon";
 import { LayersIcon } from "./layers";
 import { ShipIcon } from "./ship";
 import { TelescopeIcon } from "./telescope";
+import { TwitchIcon } from "./twitch";
 
 export type AnimatedIconName =
   | "bookOpen"
@@ -17,7 +18,8 @@ export type AnimatedIconName =
   | "home"
   | "layers"
   | "ship"
-  | "telescope";
+  | "telescope"
+  | "twitch";
 
 export function AnimatedIcon({ className, name }: { className: string; name: AnimatedIconName }) {
   switch (name) {
@@ -35,6 +37,8 @@ export function AnimatedIcon({ className, name }: { className: string; name: Ani
       return <BoxesIcon className={className} size={20} />;
     case "telescope":
       return <TelescopeIcon className={className} size={20} />;
+    case "twitch":
+      return <TwitchIcon className={className} size={20} />;
     case "home":
       return <HomeIcon className={className} />;
     case "layers":

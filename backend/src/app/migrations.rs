@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 
-const LATEST_SCHEMA_VERSION: i64 = 6;
+const LATEST_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -28,13 +28,15 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
             supported: LATEST_SCHEMA_VERSION,
         });
     }
-    if version < LATEST_SCHEMA_VERSION {
-        recreate_version_6_schema(connection)?;
+    if version < 6 {
+        recreate_version_7_schema(connection)?;
+    } else if version < LATEST_SCHEMA_VERSION {
+        migrate_version_6_to_7(connection)?;
     }
     Ok(())
 }
 
-fn recreate_version_6_schema(connection: &mut Connection) -> Result<(), MigrationError> {
+fn recreate_version_7_schema(connection: &mut Connection) -> Result<(), MigrationError> {
     connection.pragma_update(None, "foreign_keys", "OFF")?;
     let migration = (|| -> Result<(), MigrationError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -112,10 +114,16 @@ fn recreate_version_6_schema(connection: &mut Connection) -> Result<(), Migratio
                 key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
                 local_path TEXT,
                 sharepoint_link TEXT,
+                sow_link TEXT,
+                fact_sheet_link TEXT,
+                rl_link TEXT,
                 FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
                 CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
                 CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
+                CHECK (sow_link IS NULL OR length(trim(sow_link)) > 0),
+                CHECK (fact_sheet_link IS NULL OR length(trim(fact_sheet_link)) > 0),
+                CHECK (rl_link IS NULL OR length(trim(rl_link)) > 0),
                 CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
             );
 
@@ -181,6 +189,26 @@ fn recreate_version_6_schema(connection: &mut Connection) -> Result<(), Migratio
     let restore_foreign_keys = connection.pragma_update(None, "foreign_keys", "ON");
     migration?;
     restore_foreign_keys?;
+    Ok(())
+}
+
+fn migrate_version_6_to_7(connection: &mut Connection) -> Result<(), MigrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        ALTER TABLE deal_metadata
+            ADD COLUMN sow_link TEXT
+            CHECK (sow_link IS NULL OR length(trim(sow_link)) > 0);
+        ALTER TABLE deal_metadata
+            ADD COLUMN fact_sheet_link TEXT
+            CHECK (fact_sheet_link IS NULL OR length(trim(fact_sheet_link)) > 0);
+        ALTER TABLE deal_metadata
+            ADD COLUMN rl_link TEXT
+            CHECK (rl_link IS NULL OR length(trim(rl_link)) > 0);
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
+    transaction.commit()?;
     Ok(())
 }
 

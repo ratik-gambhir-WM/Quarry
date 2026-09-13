@@ -18,7 +18,7 @@ describe("HomeWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const labels = ["Vault", "Research", "Explore", "Topics", "Workspace", "Deals", "Notebook", "Templates", "Logs"];
+    const labels = ["Vault", "Research", "Assistant", "Topics", "Workspace", "Deals", "Notebook", "Templates", "Logs"];
     for (let index = 1; index < labels.length; index += 1) {
       expect(markup.indexOf(`>${labels[index - 1]}<`)).toBeLessThan(markup.indexOf(`>${labels[index]}<`));
     }
@@ -26,6 +26,8 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).toContain('href="/hub/deals"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('href="/hub/logs"');
+    expect(markup).toContain('href="/hub/summarize"');
+    expect(markup).toContain('d="M21 2H3v16h5v4l4-4h5l4-4V2z"');
     expect(markup).toContain("Deal Hub");
     expect(markup).not.toContain("Switch sidebar");
     expect(markup).not.toContain('d="M8.5 4v16');
