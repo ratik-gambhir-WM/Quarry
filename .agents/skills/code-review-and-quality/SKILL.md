@@ -30,6 +30,9 @@ style preference are not the standard.
 - Does the implementation match the request and its observable contracts?
 - Are null, empty, boundary, cancellation, stale, and error states handled where relevant?
 - Are there race conditions, off-by-one errors, state inconsistencies, or silent fallbacks?
+- For React changes, does any `useEffect` body or cleanup call a state setter? Treat that as a
+  required finding and replace it with render derivation, a keyed state owner, event/reducer
+  transitions, or an external-store/subscription boundary.
 - Do tests validate behavior rather than implementation details?
 - Would failures surface clearly rather than being mistaken for success?
 

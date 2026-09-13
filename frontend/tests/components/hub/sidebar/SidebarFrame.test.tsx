@@ -56,4 +56,19 @@ describe("SidebarFrame", () => {
     expect(navigation?.className).toContain("[&_nav>a]:justify-center");
     expect(navigation?.className).toContain("[&_nav>button]:justify-center");
   });
+
+  it("renders its back control as a left arrow to the requested destination", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SidebarFrame headerBackLabel="Back to Deal Room" headerBackTo="/hub/deals/project-alpha">
+          <nav>Data room files</nav>
+        </SidebarFrame>
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('aria-label="Back to Deal Room"');
+    expect(markup).toContain('href="/hub/deals/project-alpha"');
+    expect(markup).toContain('d="M19 12H6"');
+    expect(markup).not.toContain("rotate-180");
+  });
 });

@@ -11,7 +11,9 @@ describe("WorkspaceLayout", () => {
     );
 
     expect(markup).toContain("workspace-shell");
+    expect(markup).toContain("workspace-shell-content");
     expect(markup).toContain("workspace-main-surface");
+    expect(markup).toContain("data-workspace-primary-sidebar");
     expect(markup).toContain("workspace-main-rail flex h-10");
     expect(markup.indexOf("Sidebar")).toBeLessThan(markup.indexOf("workspace-main-surface"));
     expect(markup.indexOf("Header")).toBeLessThan(markup.indexOf("Content"));

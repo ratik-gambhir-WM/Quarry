@@ -1,7 +1,7 @@
 import type { WorkspaceSidebarTool } from "../../data/workspace";
 import { DealRoomWorkspaceSidebar } from "./sidebar/DealRoomWorkspaceSidebar";
 import { HomeWorkspaceSidebar } from "./sidebar/HomeWorkspaceSidebar";
-import type { ActiveDealSection, ActiveHomeSection, DealRoomTabSection, SidebarBaseProps, SidebarMode } from "./sidebar/sidebarTypes";
+import type { ActiveDealSection, ActiveHomeSection, SidebarBaseProps, SidebarMode } from "./sidebar/sidebarTypes";
 
 type WorkspaceSidebarProps = SidebarBaseProps & {
   activeDealId?: string;
@@ -9,7 +9,6 @@ type WorkspaceSidebarProps = SidebarBaseProps & {
   activeSection?: ActiveDealSection;
   initiatives?: WorkspaceSidebarTool[];
   mode?: SidebarMode;
-  onDealRoomSectionChange?: (section: DealRoomTabSection) => void;
   tools?: WorkspaceSidebarTool[];
 };
 
@@ -22,7 +21,6 @@ export function WorkspaceSidebar({
   initiatives = [],
   mode = "home",
   navigationState,
-  onDealRoomSectionChange,
   tools = [],
 }: WorkspaceSidebarProps) {
   if (mode === "deal-room") {
@@ -33,7 +31,6 @@ export function WorkspaceSidebar({
         deals={deals}
         email={email}
         navigationState={navigationState}
-        onDealRoomSectionChange={onDealRoomSectionChange}
       />
     );
   }

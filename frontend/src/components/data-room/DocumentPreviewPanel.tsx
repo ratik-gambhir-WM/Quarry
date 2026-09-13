@@ -9,9 +9,12 @@ import {
 } from "react";
 import PdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import previewLoadingMark from "../../assets/quarry-preview-mark.svg";
-import type { DealDocumentText } from "../../contracts/quarryApi";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
-import type { DocumentPreviewResponse } from "../../data/dataRoomPreview";
+import type {
+  DocumentPreviewResponse,
+  PreviewState,
+  RawTextState,
+} from "../../data/dataRoomPreview";
 import { PdfToolbar, PdfViewer as ShadcnPdfViewer } from "../pdf-viewer";
 import type { PdfViewerHandle } from "../pdf-viewer";
 import { Icon } from "../ui/Icon";
@@ -31,16 +34,7 @@ export type DocumentPreviewPanelHandle = {
   focusViewer: () => void;
 };
 
-export type PreviewState =
-  | { status: "loading" }
-  | { message: string; status: "error" }
-  | { response: DocumentPreviewResponse; status: "ready" };
-
-export type RawTextState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { message: string; status: "error" }
-  | { response: DealDocumentText; status: "ready" };
+export type { PreviewState, RawTextState } from "../../data/dataRoomPreview";
 
 export const DocumentPreviewPanel = forwardRef<
   DocumentPreviewPanelHandle,

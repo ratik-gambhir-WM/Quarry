@@ -2,13 +2,14 @@
 
 Status: proposed
 
-Baseline: live repository verified 2026-09-12, after the backend domain modularization,
-frontend test-tree move, shared View Transition work, and template-import changes
+Baseline: live working tree verified 2026-09-13, after the frontend route/state decomposition,
+workspace data-source hardening, Summarize extraction, and bundle-budget work
 
 Depends on: [Quarry send-query SSE plan](quarry-send-query-sse-plan.md)
 
-Scope: a shared React query page, a small Quarry-owned chat state machine, selected standalone
-assistant-ui Elements-derived presentation sources, and consumption of `QuarryApi.queryModel`
+Scope: a lazy shared React workspace route, a small Quarry-owned chat state machine, selected
+standalone assistant-ui Elements-derived presentation sources, and consumption of
+`QuarryApi.queryModel`
 
 Active route: `/hub/summarize`
 
@@ -17,14 +18,16 @@ Legacy page retained: [`frontend/src/pages/SummarizePage.tsx`](../frontend/src/p
 ## Outcome
 
 Replace the active Explore route's screen with an Ask Quarry chat surface that submits one prompt
-at a time and renders the assistant response incrementally. Preserve the existing workspace shell,
-sidebar hierarchy, route path, build-selected runtime boundary, and lazy View Transition behavior.
+at a time and renders the assistant response incrementally. Preserve the persistent workspace
+provider, existing shell, sidebar hierarchy, route path, build-selected runtime boundary, and
+outer/leaf lazy View Transition behavior.
 
 The first UI release will:
 
 - keep `/hub/summarize`, Research > Explore, `activeHomeSection="summarize"`, and the existing
   sidebar order/labels;
-- lazy-load a new `QueryChatPage` through the existing `LazyPage`/View Transition composition;
+- lazy-load a new `QueryChatPage` from `app/WorkspaceRoutes.tsx` through its existing
+  `page("Loading Explore", ...)`/`LazyPage` composition;
 - call only `runtime.api.queryModel({ files: [], prompt }, handlers)`;
 - omit `model` and `systemInstructions`, leaving defaults server-owned;
 - show the user turn immediately, append ordered deltas, and replace partial text with the
@@ -62,35 +65,39 @@ direct Tauri call, or alternate chat transport.
 
 ## Live baseline and revisions from the earlier plan
 
-| Area | Live repository on 2026-09-12 | Planning consequence |
+| Area | Live working tree on 2026-09-13 | Planning consequence |
 | --- | --- | --- |
-| Active route | `App.tsx` lazy-loads `SummarizePage` at `/hub/summarize` inside `LazyPage label="Loading Explore"`; the app keys a shared View Transition by pathname. | Change only the lazy page target. Preserve the path, loading label, transition wrapper, redirects, and other routes. |
-| Shell | `WorkspaceHomeShell` supplies the home sidebar and renders a fixed-height `WorkspaceLayout` header rail plus a padded, scrolling content surface. | Use `WorkspaceHomeShell` and `WorkspaceHeader`; prove a page-local `h-full min-h-0` layout works before adding any shared layout prop. |
+| Route composition | `App.tsx` keeps Login eager and lazy-loads one `/hub/*` `WorkspaceRoutes` boundary. `WorkspaceRoutes.tsx` mounts a persistent `WorkspaceProvider` and lazy-loads `SummarizePage` at child path `summarize` through `page("Loading Explore", ...)`. The outer View Transition is no longer keyed by pathname. | Replace only the `SummarizePage` lazy target in `WorkspaceRoutes.tsx`. Keep `App.tsx`, the outer workspace boundary, provider lifetime, child path, loading label, page helper, redirects, and all sibling/nested routes unchanged. |
+| Workspace state and shell | `WorkspaceProvider` owns session plus loading/API/demo/error deal-resource state across `/hub/*`. `WorkspaceHomeShell` consumes it, supplies the home sidebar, and may prepend a visible Demo or retryable API-error notice. `WorkspaceLayout` is split into `WorkspaceShell`/`WorkspaceMain` and already accepts `contentClassName`; `WorkspaceHomeShell` does not expose that seam. | Render inside the existing provider through `WorkspaceHomeShell` and `WorkspaceHeader`. Account for optional notices in the available-height calculation. Prefer a narrow fill-mode/content-class pass-through on `WorkspaceHomeShell` only if browser geometry proves the default padded scroll surface cannot keep the transcript and composer in one pane; do not add another provider or layout system. |
 | Sidebar | Research > Explore targets `/hub/summarize`; `HomeWorkspaceSidebar.test.tsx` locks hierarchy and absence of Quick Chat. | Do not add, rename, reorder, or remove navigation items or change `ActiveHomeSection`. |
-| Legacy summarize | `SummarizePage` owns file/path selection, summary APIs, Markdown export, and Summary/Chat tabs. Its `ChatPanel` is inert presentation. | Keep the entire legacy page and summarize components unchanged and unregistered after cutover. Do not mine their state into the new feature. |
+| Legacy summarize | `SummarizePage` is now a thin composition over `useSummarizeWorkflow`, `data/summarize`, extracted picker/tree components, lazy `SummaryPanel`, and the inert presentational `ChatPanel`. | Keep the complete legacy Summarize feature tree unchanged, unregistered, and compiling after cutover. Do not mine its workflow or chat-tab state into the new feature. |
 | Query transport | No `queryModel`, query route, assistant interaction service, or query Tauri relay exists yet. | The SSE plan remains a hard dependency. |
-| Frontend tests | Tests now live under `frontend/tests`, and the boundary check rejects test files under `frontend/src`. | Add all query UI tests under `frontend/tests`, mirroring production paths. |
+| Frontend tests | Tests live under `frontend/tests`; the boundary check rejects tests under `frontend/src`. `App.test.tsx` now characterizes the eager Login/lazy workspace boundary, provider fetch lifetime, and nested Deal Room history. | Add query UI tests under `frontend/tests`, mirror production paths, and extend route coverage without weakening the existing workspace-lifetime assertions. |
 | UI composition | Existing shared primitives include Button, Textarea, Avatar, Tooltip, Icon, semantic tokens, and shadcn aliases. `shadcn` is already a package dependency. | Inspect with the repository-installed CLI and never overwrite customized `components/ui` files. |
 | React/theme | React/React DOM are a 19 canary; route transitions have guarded behavior. The dark palette remains in CSS but the current feature flag forces the active `slate-frost` light mode and hides the picker. | Do not add a second canary dependency or re-enable dark mode. Use semantic tokens so the retained dark palette remains compatible. |
-| Markdown | `react-markdown` and `remark-gfm` are installed and used by summarize. | Reuse them without raw HTML; scope chat styling so `.vault-markdown` and other renderers are unaffected. |
+| Markdown and bundles | `react-markdown` and `remark-gfm` are installed behind Summarize's lazy `SummaryPanel`. Both UI builds emit manifests/target stamps; checked-in guards enforce a 350,000-byte entry budget and a 500,000-byte application-chunk ceiling. | Reuse the Markdown packages without raw HTML, keep them lazy with the query route, scope chat styling, and run both target-specific size guards after their matching builds. Do not raise budgets to absorb the feature. |
 
-The earlier plan's frontend test paths under `src`, dated dirty-tree note, generic dark-mode
-manual test, and `npx shadcn@latest` commands are obsolete.
+The earlier plan's `App.tsx` leaf-route edit, pathname-keyed transition assumption, page-owned
+workspace data, frontend test paths under `src`, generic dark-mode manual test, and
+`npx shadcn@latest` commands are obsolete.
 
 ## Route and legacy-page decisions
 
-- Add `frontend/src/pages/QueryChatPage.tsx` and lazy-load it from `App.tsx` at
-  `/hub/summarize`.
-- Preserve `LazyPage label="Loading Explore"` and the surrounding keyed View Transition.
+- Add `frontend/src/pages/QueryChatPage.tsx` and lazy-load it from
+  `frontend/src/app/WorkspaceRoutes.tsx` at child path `summarize`.
+- Preserve the `page("Loading Explore", ...)` helper, its `LazyPage`/View Transition behavior, the
+  outer `LazyPage label="Loading workspace"`, and the unkeyed app-level View Transition.
 - Render `WorkspaceHomeShell activeHomeSection="summarize"` with
   `header={<WorkspaceHeader title="Ask Quarry" />}`.
-- Remove only the active `App.tsx` lazy import of `SummarizePage`.
-- Keep `SummarizePage.tsx`, `components/summarize/ChatPanel.tsx`, and
-  `components/summarize/PanelTab.tsx` in source and compiling under both targets.
+- Replace only the active `WorkspaceRoutes.tsx` lazy import/element for `SummarizePage`; leave
+  `App.tsx` and `WorkspaceProvider` composition unchanged.
+- Keep `SummarizePage.tsx`, `components/summarize/*`, `hooks/useSummarizeWorkflow.ts`, and
+  `data/summarize.ts` in source and compiling under both targets.
 - Keep `QuarryApi.summarizePath`, `summarizeSelected`, and `summarizeUpload`, their web/desktop
   mappings, Axum summary routes, and tests. Removing one UI caller is not authorization to remove
   those contracts.
-- Add route coverage so `/hub/summarize` cannot accidentally register both old and new pages.
+- Add route coverage so `/hub/summarize` cannot accidentally register both old and new pages, and
+  so navigating among `/hub/*` leaves the workspace provider mounted rather than refetching deals.
 - Confirm the legacy page is absent from production chunks after it loses its only active import;
   do not edit generated `dist` output.
 
@@ -230,9 +237,12 @@ Command/cmdk solely for the excluded model selector.
 
 - Use a page-local full-height flex column with `h-full min-h-0`; give only the transcript its own
   scroll area and keep the composer visible at the bottom.
-- First prove that this fits inside `WorkspaceLayout`'s current padded scrolling content surface.
-  Change `WorkspaceLayout`/`WorkspaceHomeShell` only if browser geometry demonstrates parent
-  scrolling or composer loss, and then add an explicit opt-in content mode plus regression tests.
+- First prove that this fits inside `WorkspaceHomeShell`'s current padded scrolling surface in
+  ordinary API-success, explicit-demo, and workspace-error states. `WorkspaceLayout` already has
+  a `contentClassName` seam. If browser geometry demonstrates parent scrolling or composer loss,
+  expose a narrow fill-mode/content-class option through `WorkspaceHomeShell`, arrange its notice
+  as a shrinking-safe sibling above a `min-h-0 flex-1` content region, and add regression tests.
+  Do not change the default layout used by existing pages.
 - Preserve workspace chrome, the 40-pixel header rail, sidebar, semantic tokens, typography, and
   active `slate-frost` theme. Do not re-enable the currently disabled dark-theme feature.
 - Use semantic tokens rather than hard-coded assistant-ui colors so the retained dark palette is
@@ -259,7 +269,7 @@ Command/cmdk solely for the excluded model selector.
 
 | Path | Change |
 | --- | --- |
-| `frontend/src/App.tsx` | Lazy-load `QueryChatPage` at `/hub/summarize`, preserving `LazyPage`, its loading label, and all route-transition behavior. |
+| `frontend/src/app/WorkspaceRoutes.tsx` | Replace the `SummarizePage` lazy target with `QueryChatPage` at child path `summarize`, preserving the `page("Loading Explore", ...)` helper, provider lifetime, sibling/nested routes, and redirects. |
 | `frontend/src/pages/QueryChatPage.tsx` | Thin route page with existing home shell/sidebar state and Ask Quarry header. |
 | `frontend/src/components/chat/QueryChat.tsx` | Compose empty/thread/composer/status views. |
 | `frontend/src/components/chat/queryChatState.ts` | Typed exchange model, reducer, request-token checks, and transitions. |
@@ -267,19 +277,22 @@ Command/cmdk solely for the excluded model selector.
 | `frontend/src/components/chat/{ChatComposer,ChatThread,ChatMessage,ChatMarkdown}.tsx` | Chat-prefixed wrappers around adapted Elements and existing Quarry primitives. Combine files when a smaller cohesive implementation is clearer. |
 | `frontend/src/components/assistant-ui/elements/*` | Only reviewed standalone source and necessary utilities from the six selected Elements. |
 | `frontend/src/index.css` | Chat-scoped Element/Markdown styling using current semantic tokens and reduced-motion rules. |
+| `frontend/src/components/hub/WorkspaceHomeShell.tsx` | Change only if measured layout requires exposing the existing `WorkspaceLayout.contentClassName` seam or composing workspace notices above a fill-height child. Preserve current default behavior. |
 | `frontend/tests/components/chat/queryChatState.test.ts` | Pure lifecycle/stale-token transition coverage. |
 | `frontend/tests/components/chat/QueryChat.test.tsx` | Interaction, keyboard, focus, announcement, streaming, error, stop, and retry coverage. |
 | `frontend/tests/pages/QueryChatPage.test.tsx` | Shell/header and runtime integration coverage. |
-| `frontend/tests/App.test.tsx` | Route/lazy composition coverage proving Explore selects the new page. |
-| `frontend/tests/components/hub/WorkspaceLayout.test.tsx` | Change only if a shared opt-in content mode proves necessary. |
+| `frontend/tests/app/WorkspaceRoutes.test.tsx` or `frontend/tests/App.test.tsx` | Route/lazy composition coverage proving Explore selects only the new page while the workspace provider remains stable across child navigation. Prefer a focused route test if extending `App.test.tsx` would duplicate provider setup. |
+| `frontend/tests/components/hub/WorkspaceHomeShell.test.tsx` | Extend only if a fill-height option or notice composition changes; preserve explicit demo/error notice coverage. |
 | `frontend/package.json`, `frontend/package-lock.json` | Expected unchanged except for a directly imported dependency proven necessary by live registry inspection. |
 | `docs/ARCHITECTURE.md` | Update route, feature maturity, state ownership, UI source boundary, transport consumer, limitations, and test coverage after implementation. |
 
 Explicitly unchanged:
 
-- `frontend/src/pages/SummarizePage.tsx`;
-- `frontend/src/components/summarize/ChatPanel.tsx`;
-- `frontend/src/components/summarize/PanelTab.tsx`;
+- `frontend/src/App.tsx`, including its eager Login route, lazy `/hub/*` boundary, and unkeyed
+  app-level View Transition;
+- `frontend/src/app/WorkspaceProvider.tsx` and its request lifetime/data-source contract;
+- `frontend/src/pages/SummarizePage.tsx`, `frontend/src/components/summarize/*`,
+  `frontend/src/hooks/useSummarizeWorkflow.ts`, and `frontend/src/data/summarize.ts`;
 - sidebar labels/order/types and workspace session behavior;
 - predecessor contract/transports/backend after its completion;
 - existing summary contracts and routes.
@@ -292,9 +305,11 @@ Explicitly unchanged:
 2. Verify every prerequisite symbol, route, adapter, Tauri command, cancellation path, and focused
    test from the SSE plan.
 3. Run the predecessor's broad backend/frontend/Tauri gates.
-4. Confirm `/hub/summarize`, Explore, `activeHomeSection="summarize"`, and
-   `LazyPage label="Loading Explore"` are still the live route contracts.
-5. Inspect the six live assistant-ui manifests with the installed CLI without mutating files.
+4. Confirm `App.tsx` still owns only the lazy `/hub/*` boundary, `WorkspaceRoutes.tsx` still owns
+   child path `summarize`, and `WorkspaceProvider` still wraps the child route tree.
+5. Confirm Explore, `activeHomeSection="summarize"`, and `page("Loading Explore", ...)` remain the
+   live route/navigation contracts.
+6. Inspect the six live assistant-ui manifests with the installed CLI without mutating files.
 
 Exit: a delayed synthetic stream already works in both adapters and the UI needs no transport
 workaround.
@@ -332,10 +347,11 @@ earlier exchanges never enter later payloads.
 1. Build the empty state, thread, messages, Markdown, coarse status/error/stopped views, retry,
    scroll anchor, and composer from props.
 2. Create the thin `QueryChatPage` in the existing shell with the Ask Quarry header.
-3. Prove the page-local full-height layout inside current `WorkspaceLayout`; add a shared opt-in
-   layout mode only if measured behavior requires it.
-4. Repoint only the `/hub/summarize` lazy import to `QueryChatPage` while preserving the loading
-   label and View Transition structure.
+3. Prove the page-local full-height layout inside current `WorkspaceHomeShell` with no notice, the
+   explicit Demo notice, and the retryable workspace-error notice. Expose only the existing
+   `WorkspaceLayout.contentClassName` seam or a narrow fill option if measurement requires it.
+4. Repoint only the `WorkspaceRoutes.tsx` `summarize` lazy target to `QueryChatPage`, preserving
+   provider lifetime, child path, loading label, and both View Transition boundaries.
 5. Prove no active source imports `SummarizePage` and production builds omit its chunk.
 
 Exit: Explore opens Ask Quarry in both targets, the sidebar and other routes are unchanged, and no
@@ -359,6 +375,8 @@ Cover:
 - composer disabled/enabled state, focus behavior, semantic labels, and coarse live updates;
 - raw HTML not rendering in Markdown;
 - `/hub/summarize` selecting `QueryChatPage`, not `SummarizePage`;
+- child-route navigation leaving `WorkspaceProvider` mounted and avoiding a second deals fetch;
+- composer visibility with absent, demo, and error workspace notices;
 - unchanged sidebar hierarchy and Explore target.
 
 Use synthetic content only. Happy DOM does not prove actual scrolling geometry, sticky layout,
@@ -387,21 +405,28 @@ cd frontend
 npm test -- tests/components/chat/queryChatState.test.ts
 npm test -- tests/components/chat/QueryChat.test.tsx
 npm test -- tests/pages/QueryChatPage.test.tsx
-npm test -- tests/App.test.tsx
+npm test -- tests/app/WorkspaceRoutes.test.tsx
 npm test -- tests/api/httpQuarryApi.test.ts
 npm test -- tests/api/tauriQuarryApi.test.ts
 npm test -- tests/platform/runtime.contract.test.ts
+npm test -- tests/components/hub/WorkspaceHomeShell.test.tsx
 npm test -- tests/components/hub/sidebar/HomeWorkspaceSidebar.test.tsx
 npm run typecheck
 npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
 ```
 
-`check:web-bundle` must follow `build:web`. Inspect both production builds/chunks to confirm
-`QueryChatPage` remains lazy and `SummarizePage` is unreachable.
+If route coverage is added to the existing `tests/App.test.tsx` rather than a focused
+`tests/app/WorkspaceRoutes.test.tsx`, run that actual path instead. `check:web-bundle` and
+`check:bundle-size:web` must follow `build:web`; the desktop size check must immediately follow
+`build:desktop-ui` so it cannot inspect stale or wrong-target output. Inspect both production
+manifests/chunks to confirm `QueryChatPage` remains lazy, `SummarizePage` is unreachable, and the
+new route does not breach the checked-in entry or application-chunk budgets.
 
 This follow-up is frontend-only once the predecessor is complete. Do not rerun backend/Tauri Rust
 gates solely for page composition. If implementation changes the shared query contract, adapter,
@@ -419,7 +444,8 @@ git status --short
 
 Update the relevant `docs/ARCHITECTURE.md` sections after implementation:
 
-- route map: `/hub/summarize` lazy-loads `QueryChatPage` through the existing transition/skeleton;
+- route map: `App.tsx` retains the lazy `/hub/*` boundary while `WorkspaceRoutes.tsx` lazy-loads
+  `QueryChatPage` for `/hub/summarize` through the existing transition/skeleton;
 - feature inventory: Explore is a single-shot streaming assistant interaction UI;
 - frontend layers: adapted standalone Element source remains presentation-only beneath
   Chat-prefixed feature components;
@@ -428,6 +454,8 @@ Update the relevant `docs/ARCHITECTURE.md` sections after implementation:
 - UI/styling: chat uses existing semantic tokens, active light-theme policy, reduced motion, and
   safe Markdown;
 - verification: reducer/component/page/route coverage lives under `frontend/tests`;
+- bundle architecture: the query page remains a leaf chunk under the existing workspace boundary
+  and passes both target-specific size guards;
 - known gaps: no conversation context/persistence/resume, attachments, model picker,
   system-instruction UI, retrieval/citations/tools, identity/authorization/rate limits/quotas;
 - legacy behavior: `SummarizePage` and summary APIs remain in source but the page has no route.
@@ -441,12 +469,14 @@ version, or destructive rollout.
 | --- | --- |
 | Registry source overwrites customized primitives or adds a runtime. | Use installed-CLI dry-run/diff, never `--overwrite`, retain only standalone props-driven source, and review every file/package/CSS change. |
 | React canary or peer requirements drift. | Do not request latest CLI/packages; inspect the live manifest, keep dependencies minimal, and run both targets/builds. |
-| Current `WorkspaceLayout` produces nested scroll or a disappearing composer. | Prove `h-full min-h-0` in the current content box; add only an explicit opt-in layout mode if measured behavior requires it. |
+| Workspace padding or a Demo/error notice produces nested scroll or a disappearing composer. | Test all three notice states; use the existing `WorkspaceLayout.contentClassName` seam through a narrow `WorkspaceHomeShell` option and keep its current default for other routes. |
 | Streaming Markdown flickers or incomplete fences render oddly. | Reuse safe Markdown, render the partial buffer plainly, and replace it with the authoritative completion. |
 | Delta updates steal scroll/focus or flood assistive technology. | Follow only when already pinned, expose jump-to-latest, keep focus policy conditional, and announce coarse states only. |
 | Cancelled/old streams mutate a new exchange. | Token requests, make cleanup idempotent, and ignore stale/duplicate callbacks. |
 | Transcript looks multi-turn although requests are stateless. | Send only the current prompt, state the limitation in UI/architecture, and test payload isolation. |
 | Legacy summarize returns to the route or bundle. | Test the route target, search active imports, and inspect both build outputs. |
+| Query route work accidentally remounts workspace state or duplicates deal loading. | Change only the leaf target inside `WorkspaceRoutes`; retain the provider outside its inner `Routes` and assert fetch count across child navigation. |
+| Chat dependencies consume the remaining entry/chunk budget. | Keep the page lazy, inspect both manifests, and run the target-specific size checks without raising their thresholds. |
 | Copied CSS affects other screens or retained dark tokens. | Scope every rule under chat data slots and use existing semantic tokens. |
 | Prompt/response reaches diagnostics. | Add no page logging/persistence and retain predecessor redaction/log-content tests. |
 
@@ -454,7 +484,8 @@ version, or destructive rollout.
 
 - Editing, deleting, moving, renaming, or modernizing the legacy summarize page/components.
 - Removing or changing summary contracts, adapters, Axum routes, or tests.
-- Changing route path, loading label, sidebar label/order, or `ActiveHomeSection`.
+- Changing `App.tsx`, the `/hub/*` outer boundary, `WorkspaceProvider` lifetime/data-source policy,
+  route path, loading labels, sidebar label/order, or `ActiveHomeSection`.
 - Attachments, drag/drop, paste upload, or previews.
 - Model selection, system-instruction editing, provider settings, or a model catalog.
 - Sending prior displayed turns as provider context.
@@ -468,8 +499,11 @@ version, or destructive rollout.
 
 ## Definition of done
 
-- `/hub/summarize` lazy-loads `QueryChatPage` through the existing View Transition/LazyPage flow in
-  web and desktop; Explore and the sidebar are otherwise unchanged.
+- `/hub/summarize` lazy-loads `QueryChatPage` from `WorkspaceRoutes.tsx` through the existing
+  outer-workspace and leaf View Transition/LazyPage flow in web and desktop; `App.tsx`, Explore,
+  sibling routes, and the sidebar are otherwise unchanged.
+- `WorkspaceProvider` remains mounted across workspace child navigation, deals are not refetched
+  because of the route swap, and API/demo/error notices coexist with a visible composer.
 - Legacy summarize source and APIs remain unchanged, unregistered, compiling, and absent from
   active production chunks.
 - The page sends one original non-blank prompt with `files: []` and no model/instruction keys;
@@ -483,8 +517,9 @@ version, or destructive rollout.
   reduced motion, active theme, retained semantic tokens, and responsive layout are verified.
 - No query/provider content appears in logs, storage, URLs, fixtures, screenshots, or generated
   artifacts.
-- Focused tests, full frontend gates, both UI builds, bundle inspection, and feasible delayed
-  runtime checks pass or any unavailable manual check is reported precisely.
+- Focused tests, full frontend gates, both UI builds, both target-specific bundle-size checks,
+  manifest inspection, and feasible delayed runtime checks pass or any unavailable manual check
+  is reported precisely.
 - `docs/ARCHITECTURE.md` reflects the active query page and dormant summarize page.
 - `git diff --check` is clean and final status review distinguishes implementation changes from
   user-owned work.

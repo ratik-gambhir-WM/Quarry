@@ -28,10 +28,6 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).toContain('href="/hub/logs"');
     expect(markup).toContain("Deal Hub");
     expect(markup).not.toContain("Switch sidebar");
-    expect(markup).toContain('d="M2.97 12.92');
-    expect(markup).toContain('d="m10.065 12.493');
-    expect(markup).toContain('d="M12 6.04168C10.4077');
-    expect(markup).toContain('d="m12.83 2.18');
     expect(markup).not.toContain('d="M8.5 4v16');
     expect(markup).not.toContain("Active Deals");
     expect(markup).not.toContain("Active deals actions");

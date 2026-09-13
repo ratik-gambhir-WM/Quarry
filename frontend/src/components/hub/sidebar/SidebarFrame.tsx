@@ -5,6 +5,7 @@ import { getTeamLabel, WorkspaceDeal, WorkspaceLocationState } from "../../../da
 import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/navigation";
 import { WestMonroeMark } from "../../brand/WestMonroeMark";
 import { Icon } from "../../ui/Icon";
+import { SidebarIcon } from "./SidebarIcon";
 import { ProfilePreferences } from "./ProfilePreferences";
 
 type SidebarFrameProps = {
@@ -59,13 +60,14 @@ export function SidebarFrame({
             <NavLink
               aria-label={headerBackLabel}
               className="group flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+              end
               state={navigationState}
               title={headerBackLabel}
               to={headerBackTo}
             >
               <Icon
-                className="h-4 w-4 rotate-180 transition-transform group-hover:-translate-x-0.5"
-                name="arrowRight"
+                className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
+                name="arrowLeft"
               />
             </NavLink>
           ) : null}
@@ -73,7 +75,7 @@ export function SidebarFrame({
           {collapsed ? null : (
             <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
-                <Icon className="h-4 w-4" name={sidebarIcon} />
+                <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
               </span>
               <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
                 {sidebarLabel}

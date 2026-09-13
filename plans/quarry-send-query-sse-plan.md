@@ -2,8 +2,8 @@
 
 Status: proposed
 
-Baseline: live repository verified 2026-09-12, after the backend domain modularization and
-template-import work
+Baseline: live working tree revalidated 2026-09-13, after the backend domain modularization,
+frontend route/state decomposition, and bundle-budget work
 
 Scope: transport-neutral frontend contract, browser POST-SSE adapter, narrow Tauri relay,
 `assistant::interactions` Axum vertical slice, and the existing OpenAI Responses adapter
@@ -30,7 +30,7 @@ The follow-up UI plan consumes this contract from
 
 ## Live baseline and revisions from the earlier plan
 
-| Area | Live repository on 2026-09-12 | Planning consequence |
+| Area | Live working tree on 2026-09-13 | Planning consequence |
 | --- | --- | --- |
 | Backend topology | `backend/src/app`, `domains`, `adapters`, and `shared`; there is no global `AppState` or horizontal `handlers`, `routes`, `services`, `repository`, or `core` root. | Implement the use case under `domains/assistant/interactions` and merge its already-state-bound router in `app/bootstrap.rs`. Do not recreate removed layers. |
 | Assistant ownership | `domains/assistant/mod.rs` is a comment-only, unregistered scaffold naming interaction/conversation ownership. | Activate only `assistant::interactions`. Conversations and context resolution remain future work. |
@@ -42,10 +42,16 @@ The follow-up UI plan consumes this contract from
 | Browser transport | `httpQuarryApi.ts` uses `fetch`/`FormData`; document-job GET streams use `EventSource`. | POST multipart SSE needs `fetch`, `ReadableStream`, an incremental parser, and `AbortController`. |
 | Desktop transport | `quarry_api/{client,models,service,commands}.rs` relays JSON, PDF, multipart, and document-job SSE; the reqwest client has a 120-second total timeout. | Add a fixed-path query-stream capability with explicit cancellation and a stream-safe timeout policy. |
 | Activity log | Requests/events are stored in a bounded `sessionStorage` log; current key redaction covers many content-like names but not `prompt` explicitly. | Log only safe query metadata and add explicit prompt/instruction/generated-content regression coverage. |
+| Frontend composition | `App.tsx` now keeps Login eager and lazy-loads one `/hub/*` `WorkspaceRoutes` boundary whose persistent `WorkspaceProvider` owns workspace state. `QuarryApi`, `httpQuarryApi`, `tauriQuarryApi`, and the build-selected runtime aliases are unchanged. | This plan remains transport-only: do not edit `App.tsx`, `WorkspaceRoutes`, `WorkspaceProvider`, pages, or workspace state. The follow-up UI plan owns the eventual route consumer. |
+| Frontend bundles | Web and desktop builds now emit manifests and target stamps. Checked-in guards enforce a 350,000-byte entry budget and a 500,000-byte application-chunk ceiling. | Run each target's bundle-size check immediately after its matching build. Do not raise budgets or add query code to an eager route merely to complete the transport. |
 
 The old plan's references to `backend/src/core/clients/openai.rs`, `AppState`,
 `bootstrap::assemble_state`, root `services/handlers/routes`, frontend tests under `src`, and
 `backend/.env.example` are obsolete and must not guide implementation.
+
+The 2026-09-13 frontend restructuring does not alter the request, SSE event, cancellation, or
+security contract below. It only strengthens the requirement that transport work stay below the
+shared runtime boundary and out of route/page composition until the follow-up UI is implemented.
 
 ## Stable public contract
 
@@ -109,7 +115,7 @@ Cache-Control: no-cache, no-store
 | --- | --- | --- |
 | `started` | `{ "type": "started", "model": "gpt-5.5" }` | First event; reports the resolved model. |
 | `delta` | `{ "type": "delta", "delta": "text" }` | One event per semantic `response.output_text.delta` or `response.refusal.delta`, in provider order and without coalescing. |
-| `completed` | `{ "type": "completed", "response": "full text" }` | Exactly one successful terminal; authoritative even when no deltas arrived. |
+| `completed` | `{ "type": "completed", "response": "full text" }` | Exactly one successful terminal. Use non-empty text from the provider's completed response when present; otherwise use the exact accumulated deltas. The terminal is authoritative even when no deltas arrived. |
 | `failed` | `{ "type": "failed", "error": "query generation failed" }` | Exactly one sanitized terminal for failure after HTTP 200 starts. |
 
 Serialize with Axum `Event::json_data`, emit a 15-second keepalive, and suppress proxy buffering.
@@ -257,8 +263,9 @@ explicit and executable.
 3. Add query-specific `stream: true` and `store: false` options without affecting existing callers.
 4. Preserve arbitrary byte boundaries, LF/CRLF, comments, and multi-line `data:` behavior; reject
    invalid UTF-8 and malformed semantic events.
-5. Recognize `response.completed`, failed/incomplete/top-level error events, and EOF. Use completed
-   response text when no deltas arrived.
+5. Recognize `response.completed`, failed/incomplete/top-level error events, and EOF. Treat
+   non-empty completed-response text as authoritative; fall back to the exact accumulated deltas
+   only when the completion payload omits visible text, and fail when neither source has text.
 6. Add a loopback/fake Responses endpoint seam usable only by automated tests.
 7. For this path, log provider status/category and timing only. Do not log raw provider bodies,
    prompts, instructions, filenames, uploads, deltas, or completed text.
@@ -327,11 +334,15 @@ handle/listener remains.
 
 1. Run focused parser, adapter, service, route, cancellation, timeout, and redaction tests.
 2. Run the full backend, frontend, and Tauri gates.
-3. Use synthetic delayed loopback responses to prove first-delta-before-completion, no-delta
-   completion, post-start failure, malformed EOF, cancellation, and concurrent desktop isolation.
+3. Use synthetic delayed loopback responses to prove first-delta-before-completion, authoritative
+   completion that differs from partial deltas, no-delta completion, post-start failure, malformed
+   EOF, cancellation, and concurrent desktop isolation.
 4. Update `docs/ARCHITECTURE.md` from the final implementation, including assistant maturity and
    the fact that this is a non-durable interaction rather than a conversation.
-5. Inspect final diff/status for generated output, dependency churn, secrets, or real user data.
+5. Inspect both Vite manifests and run the matching bundle-size guard after each build; confirm no
+   query UI or assistant presentation/runtime dependency entered the frontend graph and the
+   transport additions stay within the existing entry/application-chunk budgets.
+6. Inspect final diff/status for generated output, dependency churn, secrets, or real user data.
 
 ## Verification commands for implementation
 
@@ -362,8 +373,15 @@ npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
 ```
+
+`check:web-bundle` and `check:bundle-size:web` must follow `build:web`; the desktop size check must
+immediately follow `build:desktop-ui` so it cannot inspect stale or wrong-target output. These
+checks verify the shared transport remains within the current bundle contract; they are not
+authorization to raise either threshold.
 
 From `frontend/src-tauri/`:
 
@@ -405,6 +423,8 @@ git status --short
 ## Out of scope
 
 - Chat/composer UI and response rendering.
+- Frontend route registration, `App.tsx`, `WorkspaceRoutes`, `WorkspaceProvider`, workspace data
+  sourcing/notices, and other page or shell behavior.
 - Durable conversations, messages, interaction records, history, replay, reconnect, or resume.
 - Document search/context retrieval, citations, tools, web search, file search, structured output,
   or function calling.
@@ -421,12 +441,15 @@ git status --short
 - Required prompt, optional overrides, file allowlist, counts, byte limits, and omission/default
   semantics are validated and tested.
 - Provider text/refusal deltas arrive once and in order before exactly one completed/failed
-  terminal; corrupt or premature transport failure becomes exactly one connection error.
+  terminal; completed-response text is authoritative over partial deltas, and corrupt or premature
+  transport failure becomes exactly one connection error.
 - Browser and desktop cleanup cancel the active upstream read and suppress late callbacks.
 - Streaming compression, body limits, total/idle timeouts, buffer bounds, and Tauri base64 memory
   amplification have explicit tested policies.
 - Logs, errors, fixtures, and generated artifacts contain no sensitive query/provider content.
-- Focused tests and all affected backend/frontend/Tauri gates pass without live external services.
+- Focused tests and all affected backend/frontend/Tauri gates pass without live external services;
+  both frontend builds pass their existing target-specific bundle-size guards without threshold
+  changes.
 - `docs/ARCHITECTURE.md` documents the implemented contract, domain maturity, transport,
   configuration, security limits, and verification coverage; no `.env.example` is added.
 - `git diff --check` is clean and final status review distinguishes implementation changes from

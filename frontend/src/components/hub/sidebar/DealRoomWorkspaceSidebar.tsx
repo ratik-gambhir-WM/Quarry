@@ -1,19 +1,25 @@
 import { NavLink } from "react-router-dom";
-import { getDataRoomPath, getDealRoomPath, getDeliverablesPath } from "../../../data/workspace";
-import { Icon } from "../../ui/Icon";
+import {
+  getDataRoomPath,
+  getDealActivityPath,
+  getDealAnalysisPath,
+  getDealRoomPath,
+  getDeliverablesPath,
+} from "../../../data/workspace";
 import { SidebarFrame } from "./SidebarFrame";
+import { SidebarIcon } from "./SidebarIcon";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarStaticItem } from "./SidebarStaticItem";
 import type { DealRoomSidebarProps } from "./sidebarTypes";
 
 const primaryDealRoomLinks = [
   { icon: "dashboard" as const, key: "deal-room" as const, label: "Deal Room" },
-  { icon: "calendarDays" as const, key: "timeline" as const, label: "Deal Activity" },
+  { icon: "calendarDays" as const, key: "activity" as const, label: "Deal Activity" },
 ];
 
 const dealArtifactLinks = [
   { icon: "folderTree" as const, key: "data-room" as const, label: "Data Room" },
-  { icon: "fileStack" as const, key: "site-visits" as const, label: "Analysis" },
+  { icon: "fileStack" as const, key: "analysis" as const, label: "Analysis" },
   { icon: "ship" as const, key: "deliverables" as const, label: "Deliverable" },
 ];
 
@@ -23,19 +29,19 @@ export function DealRoomWorkspaceSidebar({
   deals,
   email,
   navigationState,
-  onDealRoomSectionChange,
 }: DealRoomSidebarProps) {
   const activeDeal = deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
   const renderLink = (link: (typeof primaryDealRoomLinks | typeof dealArtifactLinks)[number]) => {
-    if (
-      activeDeal
-      && (link.key === "deal-room" || link.key === "data-room" || link.key === "deliverables")
-    ) {
+    if (activeDeal) {
       const destination = link.key === "deal-room"
         ? getDealRoomPath(activeDeal.room.id)
+        : link.key === "activity"
+          ? getDealActivityPath(activeDeal.room.id)
         : link.key === "data-room"
           ? getDataRoomPath(activeDeal.room.id)
-          : getDeliverablesPath(activeDeal.room.id);
+          : link.key === "analysis"
+            ? getDealAnalysisPath(activeDeal.room.id)
+            : getDeliverablesPath(activeDeal.room.id);
 
       return (
         <NavLink
@@ -48,30 +54,14 @@ export function DealRoomWorkspaceSidebar({
                 : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active",
             ].join(" ")
           }
+          end={link.key !== "deliverables"}
           key={link.label}
-          onClick={() => {
-            if (link.key === "deal-room") {
-              onDealRoomSectionChange?.("deal-room");
-            }
-          }}
           state={navigationState}
           to={destination}
         >
-          <Icon className="h-5 w-5" name={link.icon} />
+          <SidebarIcon className="h-5 w-5" name={link.icon} />
           <span className="text-[13px] font-medium leading-5">{link.label}</span>
         </NavLink>
-      );
-    }
-
-    if (link.key === "timeline" || link.key === "site-visits") {
-      return (
-        <SidebarStaticItem
-          active={activeSection === link.key}
-          icon={link.icon}
-          key={link.label}
-          label={link.label}
-          onClick={() => onDealRoomSectionChange?.(link.key)}
-        />
       );
     }
 

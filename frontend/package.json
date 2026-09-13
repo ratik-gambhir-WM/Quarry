@@ -17,6 +17,8 @@
     "typecheck:desktop": "tsc -p tsconfig.desktop.json",
     "check:boundaries": "node scripts/check-runtime-boundaries.mjs",
     "check:web-bundle": "node scripts/check-runtime-boundaries.mjs --web-bundle",
+    "check:bundle-size:web": "node scripts/check-bundle-size.mjs --target web",
+    "check:bundle-size:desktop": "node scripts/check-bundle-size.mjs --target desktop",
     "preview": "vite preview",
     "test": "vitest run"
   },

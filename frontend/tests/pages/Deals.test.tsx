@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceProvider } from "@/app/WorkspaceProvider";
 import { Deals } from "@/pages/Deals";
 
 const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
@@ -38,7 +39,7 @@ describe("Deals", () => {
     const user = userEvent.setup({ skipHover: true });
     renderDeals();
 
-    const table = screen.getByRole("table");
+    const table = await screen.findByRole("table");
     expect(table).toBeTruthy();
     const pageHeader = screen.getByRole("heading", { name: "Deals" }).closest("header");
     const portfolioCounts = screen.getByLabelText("Deal portfolio counts");
@@ -140,8 +141,10 @@ describe("Deals", () => {
 function renderDeals() {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/hub/deals", state: { email: "analyst@example.com" } }]}>
-      <Deals />
-      <LocationProbe />
+      <WorkspaceProvider dataSource="demo">
+        <Deals />
+        <LocationProbe />
+      </WorkspaceProvider>
     </MemoryRouter>,
   );
 }

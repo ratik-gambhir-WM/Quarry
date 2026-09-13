@@ -6,22 +6,21 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 import { DealRoomPage } from "@/pages/DealRoomPage";
+import { DealRoomOverviewPage } from "@/pages/deal-room/DealRoomOverviewPage";
+import { DeliverablesPage } from "@/pages/deal-room/DeliverablesPage";
+import { DeliverableTemplatesPage } from "@/pages/deal-room/DeliverableTemplatesPage";
 
-const { listTemplatePreviews, useWorkspaceDealsMock } = vi.hoisted(() => ({
+const { listTemplatePreviews, useWorkspaceMock } = vi.hoisted(() => ({
   listTemplatePreviews: vi.fn(),
-  useWorkspaceDealsMock: vi.fn(),
+  useWorkspaceMock: vi.fn(),
 }));
 
 vi.mock("@quarry/runtime", () => ({
   runtime: { api: { listTemplatePreviews } },
 }));
 
-vi.mock("@/hooks/useWorkspaceDeals", () => ({
-  useWorkspaceDeals: useWorkspaceDealsMock,
-}));
-
-vi.mock("@/hooks/useWorkspaceSession", () => ({
-  useWorkspaceSession: () => ({ email: "analyst@example.com", navigationState: {} }),
+vi.mock("@/app/WorkspaceProvider", () => ({
+  useWorkspace: useWorkspaceMock,
 }));
 
 vi.mock("@/components/hub/WorkspaceSidebar", () => ({
@@ -36,7 +35,13 @@ afterEach(cleanup);
 
 describe("DealRoomPage", () => {
   beforeEach(() => {
-    useWorkspaceDealsMock.mockReturnValue({ deals: workspaceDeals, loaded: true });
+    useWorkspaceMock.mockReturnValue({
+      deals: workspaceDeals,
+      dealsResource: { deals: workspaceDeals, source: "demo", status: "success" },
+      email: "analyst@example.com",
+      navigationState: {},
+      retryDeals: vi.fn(),
+    });
     listTemplatePreviews.mockResolvedValue({
       pagination: {
         hasNextPage: false,
@@ -51,12 +56,20 @@ describe("DealRoomPage", () => {
   });
 
   it("renders the shared workspace skeleton while the deal request is pending", () => {
-    useWorkspaceDealsMock.mockReturnValue({ deals: [], loaded: false });
+    useWorkspaceMock.mockReturnValue({
+      deals: [],
+      dealsResource: { status: "loading" },
+      email: "analyst@example.com",
+      navigationState: {},
+      retryDeals: vi.fn(),
+    });
 
     render(
       <MemoryRouter initialEntries={["/hub/deals/pending-deal"]}>
         <Routes>
-          <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route index element={<DealRoomOverviewPage />} />
+          </Route>
         </Routes>
       </MemoryRouter>,
     );
@@ -70,7 +83,9 @@ describe("DealRoomPage", () => {
     render(
       <MemoryRouter initialEntries={["/hub/deals/project-alpha"]}>
         <Routes>
-          <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route index element={<DealRoomOverviewPage />} />
+          </Route>
         </Routes>
       </MemoryRouter>,
     );
@@ -105,14 +120,10 @@ describe("DealRoomPage", () => {
     render(
       <MemoryRouter initialEntries={["/hub/deals/project-alpha/deliverables"]}>
         <Routes>
-          <Route
-            element={<DealRoomPage initialView="deliverables" />}
-            path="/hub/deals/:dealId/deliverables"
-          />
-          <Route
-            element={<DealRoomPage initialView="deliverable-templates" />}
-            path="/hub/deals/:dealId/deliverables/templates"
-          />
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route element={<DeliverablesPage />} path="deliverables" />
+            <Route element={<DeliverableTemplatesPage />} path="deliverables/templates" />
+          </Route>
         </Routes>
       </MemoryRouter>,
     );
@@ -127,4 +138,5 @@ describe("DealRoomPage", () => {
     await user.click(screen.getByRole("button", { name: "Back to Deliverables" }));
     expect(screen.getByRole("heading", { level: 1, name: "Deliverables" })).not.toBeNull();
   });
+
 });

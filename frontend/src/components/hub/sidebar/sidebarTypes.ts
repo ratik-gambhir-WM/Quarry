@@ -3,15 +3,11 @@ import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from
 export type ActiveHomeSection = "account" | "deals" | "hub" | "logs" | "summarize" | "tauri-playground" | "vault";
 
 export type ActiveDealSection =
+  | "activity"
+  | "analysis"
   | "data-room"
   | "deal-room"
-  | "deliverables"
-  | "diligence-graph"
-  | "site-visits"
-  | "synthesis-canvas"
-  | "timeline";
-
-export type DealRoomTabSection = Exclude<ActiveDealSection, "data-room">;
+  | "deliverables";
 
 export type SidebarMode = "deal-room" | "home";
 
@@ -30,5 +26,4 @@ export type HomeSidebarProps = SidebarBaseProps & {
 export type DealRoomSidebarProps = SidebarBaseProps & {
   activeDealId?: string;
   activeSection: ActiveDealSection;
-  onDealRoomSectionChange?: (section: DealRoomTabSection) => void;
 };

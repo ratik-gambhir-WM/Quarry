@@ -3,6 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceProvider } from "@/app/WorkspaceProvider";
 import type { WorkspaceAccountUser } from "@/data/workspace";
 import { AccountPage } from "@/pages/AccountPage";
 
@@ -68,7 +69,9 @@ describe("AccountPage", () => {
 function renderAccountPage() {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/hub/account", state: { email: "analyst@example.com" } }]}>
-      <AccountPage />
+      <WorkspaceProvider dataSource="api">
+        <AccountPage />
+      </WorkspaceProvider>
     </MemoryRouter>,
   );
 }

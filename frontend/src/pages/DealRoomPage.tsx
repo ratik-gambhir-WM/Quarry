@@ -1,59 +1,47 @@
 import { useState } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import {
-  DealRoomHeader,
-  type DealRoomOverviewSection,
-} from "../components/deal-room/DealRoomHeader";
-import { DeliverablesHeader } from "../components/deal-room/DeliverablesHeader";
-import { TemplatePreviewProvider } from "../components/deal-room/TemplatePreviewStore";
-import { DeliverableTemplatesView } from "../components/deal-room/DeliverableTemplatesView";
-import { DeliverablesView } from "../components/deal-room/DeliverablesView";
-import { DealSummaryCard } from "../components/deal-room/DealSummaryCard";
-import { DealTimelineView } from "../components/deal-room/DealTimelineView";
-import { UnderConstructionView } from "../components/deal-room/UnderConstructionView";
-import { InsightsStrip } from "../components/hub/InsightsStrip";
-import { WorkspaceLayout } from "../components/hub/WorkspaceLayout";
+import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
+import { useWorkspace } from "../app/WorkspaceProvider";
+import type { DealRoomOverviewSection } from "../components/deal-room/DealRoomHeader";
+import { WorkspaceShell } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
+import type { ActiveDealSection } from "../components/hub/sidebar/sidebarTypes";
 import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
 import type { DealExtractionLocationState } from "../data/dealExtraction";
 import { buildWorkspaceDealFromExtractionResult } from "../data/dealExtraction";
-import { workspaceInsights } from "../fixtures/workspace/portfolio";
 import {
-  getDealRoomPath,
-  getDeliverablesPath,
-  getDeliverableTemplatesPath,
   type DealTimelineItem,
   type WorkspaceDeal,
   type WorkspaceLocationState,
 } from "../data/workspace";
-import { useWorkspaceDeals } from "../hooks/useWorkspaceDeals";
-import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
-type ActiveDealView = "deal-room" | "deliverable-templates" | "diligence-graph" | "site-visits" | "deliverables" | "synthesis-canvas" | "timeline";
-
-type DealRoomPageProps = {
-  initialView?: Extract<ActiveDealView, "deal-room" | "deliverable-templates" | "deliverables">;
+export type DealRoomOutletContext = {
+  activeOverviewSection: DealRoomOverviewSection;
+  deal: WorkspaceDeal;
+  deals: WorkspaceDeal[];
+  email?: string;
+  navigationState?: WorkspaceLocationState;
+  setActiveOverviewSection: (section: DealRoomOverviewSection) => void;
+  setTimelineItems: (items: DealTimelineItem[]) => void;
+  timelineItems: DealTimelineItem[];
 };
 
-type DealRoomLocationState = DealExtractionLocationState & {
-  dealView?: Exclude<ActiveDealView, "deliverable-templates">;
-};
+export function useDealRoom() {
+  return useOutletContext<DealRoomOutletContext>();
+}
 
-export function DealRoomPage({ initialView: routeView = "deal-room" }: DealRoomPageProps) {
+export function DealRoomPage() {
   const { dealId } = useParams();
   const location = useLocation();
-  const { deals: persistedDeals, loaded } = useWorkspaceDeals();
-  const extractionState = location.state as DealRoomLocationState | null;
+  const { deals: activeDeals, dealsResource, email, navigationState, retryDeals } = useWorkspace();
+  const extractionState = location.state as DealExtractionLocationState | null;
   const extractionResult = extractionState?.result;
-  const extractedDeal =
-    extractionResult && extractionResult.deal.dealId === dealId
-      ? buildWorkspaceDealFromExtractionResult(extractionResult, extractionState?.sowSourceName)
-      : undefined;
-  const deal = extractedDeal ?? persistedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
-  const { email, navigationState } = useWorkspaceSession();
+  const extractedDeal = extractionResult && extractionResult.deal.dealId === dealId
+    ? buildWorkspaceDealFromExtractionResult(extractionResult, extractionState?.sowSourceName)
+    : undefined;
+  const deal = extractedDeal ?? activeDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
   const deals = extractedDeal
-    ? [extractedDeal, ...persistedDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
-    : persistedDeals;
+    ? [extractedDeal, ...activeDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
+    : activeDeals;
   const dealNavigationState = extractionResult
     ? ({
         ...navigationState,
@@ -61,12 +49,23 @@ export function DealRoomPage({ initialView: routeView = "deal-room" }: DealRoomP
         sowSourceName: extractionState?.sowSourceName,
       } satisfies DealExtractionLocationState)
     : navigationState;
-  const initialView = routeView === "deal-room"
-    ? extractionState?.dealView ?? routeView
-    : routeView;
 
-  if (!deal && loaded) {
-    return <Navigate replace to="/hub" />;
+  if (!deal && dealsResource.status === "error") {
+    return (
+      <section className="flex min-h-screen items-center justify-center p-8" role="alert">
+        <div className="max-w-lg rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center">
+          <h1 className="text-lg font-semibold text-text-main">Deal unavailable</h1>
+          <p className="mt-2 text-sm text-muted">{dealsResource.message}</p>
+          <button className="mt-4 rounded-full bg-action px-4 py-2 text-sm font-semibold text-on-action" onClick={retryDeals} type="button">
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!deal && dealsResource.status === "success") {
+    return <Navigate replace state={navigationState} to="/hub" />;
   }
 
   if (!deal) {
@@ -78,114 +77,65 @@ export function DealRoomPage({ initialView: routeView = "deal-room" }: DealRoomP
       deal={deal}
       deals={deals}
       email={email}
-      initialView={initialView}
-      key={`${deal.room.id}:${initialView}`}
+      key={deal.room.id}
       navigationState={dealNavigationState}
-      requestKey={location.key}
     />
   );
 }
 
-type DealRoomWorkspaceProps = {
+function DealRoomWorkspace({
+  deal,
+  deals,
+  email,
+  navigationState,
+}: {
   deal: WorkspaceDeal;
   deals: WorkspaceDeal[];
   email?: string;
-  initialView: ActiveDealView;
   navigationState?: WorkspaceLocationState;
-  requestKey: string;
-};
-
-function DealRoomWorkspace({ deal, deals, email, initialView, navigationState, requestKey }: DealRoomWorkspaceProps) {
-  const navigate = useNavigate();
-  const [activeDealView, setActiveDealView] = useState<ActiveDealView>(initialView);
+}) {
+  const location = useLocation();
   const [activeOverviewSection, setActiveOverviewSection] = useState<DealRoomOverviewSection>("overview");
   const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(() => deal.room.timeline);
-  const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal.room.name);
-  const openDeliverables = () => navigate(getDeliverablesPath(deal.room.id), { state: navigationState });
-  const openDeliverableTemplates = () => navigate(getDeliverableTemplatesPath(deal.room.id), { state: navigationState });
 
-  const header = activeDealView === "deal-room" ? (
-    <DealRoomHeader
-      activeSection={activeOverviewSection}
-      onActiveSectionChange={setActiveOverviewSection}
-    />
-  ) : activeDealView === "deliverables" ? (
-    <DeliverablesHeader mode="deliverables" onViewTemplates={openDeliverableTemplates} />
-  ) : activeDealView === "deliverable-templates" ? (
-    <DeliverablesHeader mode="templates" onBack={openDeliverables} />
-  ) : undefined;
-
+  const childPath = getDealRoomChildPath(location.pathname, deal.room.id);
+  const activeSection = getActiveDealSection(childPath);
+  const context: DealRoomOutletContext = {
+    activeOverviewSection,
+    deal,
+    deals,
+    email,
+    navigationState,
+    setActiveOverviewSection,
+    setTimelineItems,
+    timelineItems,
+  };
   return (
-    <TemplatePreviewProvider requestKey={requestKey}>
-      <WorkspaceLayout
-        header={header}
-        sidebar={
-          <WorkspaceSidebar
-            activeDealId={deal.room.id}
-            activeSection={activeDealView === "deliverable-templates" ? "deliverables" : activeDealView}
-            deals={deals}
-            email={email}
-            mode="deal-room"
-            navigationState={navigationState}
-            onDealRoomSectionChange={(section) => {
-              setActiveDealView(section);
-              if (section !== "deal-room" && initialView !== "deal-room") {
-                navigate(getDealRoomPath(deal.room.id), {
-                  state: { ...navigationState, dealView: section } satisfies DealRoomLocationState,
-                });
-              }
-            }}
-          />
-        }
-      >
-        <div
-          className={`mx-auto flex w-full max-w-[1440px] flex-col ${
-            activeDealView === "deliverables" || activeDealView === "deliverable-templates" ? "h-full" : "gap-6 pb-10"
-          }`}
-        >
-          {activeDealView === "timeline" ? (
-            <DealTimelineView deal={deal.room} events={timelineItems} onEventsChange={setTimelineItems} />
-          ) : activeDealView === "diligence-graph" ? (
-            <UnderConstructionView
-              description="Evidence relationships and dependency mapping for this deal."
-              icon="graph"
-              title="Diligence Graph"
-            />
-          ) : activeDealView === "site-visits" ? (
-            <UnderConstructionView
-              description="Planning templates and visit notes for diligence fieldwork."
-              icon="person"
-              title="Site Visits"
-            />
-          ) : activeDealView === "deliverable-templates" ? (
-            <DeliverableTemplatesView
-              onRetry={() => navigate(getDeliverableTemplatesPath(deal.room.id), {
-                replace: true,
-                state: navigationState,
-              })}
-            />
-          ) : activeDealView === "deliverables" ? (
-            <DeliverablesView />
-          ) : activeDealView === "synthesis-canvas" ? (
-            <UnderConstructionView
-              description="A working canvas for combining findings, risks, and recommendations."
-              icon="grid"
-              title="Synthesis Canvas"
-            />
-          ) : activeOverviewSection === "file-summary" ? (
-            <>
-              <h1 className="sr-only">{deal.room.name}</h1>
-              <InsightsStrip
-                className="mt-2"
-                contextLabel={deal.room.name}
-                items={dealInsights}
-              />
-            </>
-          ) : (
-            <DealSummaryCard deal={deal.room} />
-          )}
-        </div>
-      </WorkspaceLayout>
-    </TemplatePreviewProvider>
+    <WorkspaceShell
+      sidebar={
+        <WorkspaceSidebar
+          activeDealId={deal.room.id}
+          activeSection={activeSection}
+          deals={deals}
+          email={email}
+          mode="deal-room"
+          navigationState={navigationState}
+        />
+      }
+    >
+      <Outlet context={context} />
+    </WorkspaceShell>
   );
+}
+
+function getDealRoomChildPath(pathname: string, dealId: string) {
+  return pathname.slice(`/hub/deals/${encodeURIComponent(dealId)}`.length);
+}
+
+function getActiveDealSection(childPath: string): ActiveDealSection {
+  if (childPath.startsWith("/activity")) return "activity";
+  if (childPath.startsWith("/data-room")) return "data-room";
+  if (childPath.startsWith("/analysis")) return "analysis";
+  if (childPath.startsWith("/deliverables")) return "deliverables";
+  return "deal-room";
 }
