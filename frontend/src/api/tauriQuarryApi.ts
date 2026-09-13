@@ -13,6 +13,9 @@ import type {
   ProcessFileJobResponse,
   QuarryApi,
   SummarizableFile,
+  PptxTemplateImportMode,
+  PptxTemplateImportResult,
+  TemplatePreviewPage,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import type {
@@ -36,6 +39,7 @@ export type TauriMultipartRequest = {
 };
 
 type TauriTransport = {
+  delete(path: string): Promise<void>;
   get<T>(path: string): Promise<T>;
   getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
@@ -48,10 +52,15 @@ type TauriTransport = {
 };
 
 export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
-  async function multipartFiles(path: string, files: File[], fields: TauriMultipartRequest["fields"] = []) {
+  async function multipartFiles(
+    path: string,
+    files: File[],
+    fields: TauriMultipartRequest["fields"] = [],
+    fallbackMimeType = "application/octet-stream",
+  ) {
     return {
       fields,
-      files: await Promise.all(files.map(fileToMultipart)),
+      files: await Promise.all(files.map((file) => fileToMultipart(file, fallbackMimeType))),
       path,
     } satisfies TauriMultipartRequest;
   }
@@ -63,6 +72,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.post<SaveDealResponse>("/api/v1/deals", input),
     createUser: (input: AddUserInput) =>
       transport.post<WorkspaceAccountUser>("/api/v1/users", input),
+    deleteTemplate: (templateId) =>
+      transport.delete(`/api/v1/templates/${encodeURIComponent(templateId)}`),
     getDeal: (dealId) =>
       transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
     async getDealDocumentPdf(dealId, fileId): Promise<DealDocumentPdf> {
@@ -85,6 +96,22 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         throw error;
       }
     },
+    async importPptxTemplate(
+      file,
+      importMode: PptxTemplateImportMode,
+    ): Promise<PptxTemplateImportResult> {
+      if (!file.name.toLowerCase().endsWith(".pptx")) {
+        throw new Error("Template imports require a .pptx file.");
+      }
+      return transport.postMultipart<PptxTemplateImportResult>(
+        await multipartFiles(
+          `/api/v1/templates/import?mode=${encodeURIComponent(importMode)}`,
+          [file],
+          [],
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+      );
+    },
     listDealDataRoom: (dealId) =>
       transport.get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`),
     listDealDocuments: (dealId) =>
@@ -92,6 +119,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
       ),
     listDeals: () => transport.get<PersistedDeal[]>("/api/v1/deals"),
+    listTemplatePreviews: (page) =>
+      transport.get<TemplatePreviewPage>(
+        `/api/v1/templates/previews?page=${encodeURIComponent(String(page))}`,
+      ),
     listSummaryFiles: (path) =>
       transport.post<SummarizableFile[]>("/api/v1/summarize/files", { path }),
     previewDealDocument: (dealId, relativePath) =>
@@ -175,13 +206,13 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
   };
 }
 
-async function fileToMultipart(file: File) {
+async function fileToMultipart(file: File, fallbackMimeType: string) {
   const relativeFile = file as File & { webkitRelativePath?: string };
   return {
     dataBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
     fieldName: "files",
     filename: relativeFile.webkitRelativePath || file.name,
-    mimeType: file.type || "application/octet-stream",
+    mimeType: file.type || fallbackMimeType,
   };
 }
 

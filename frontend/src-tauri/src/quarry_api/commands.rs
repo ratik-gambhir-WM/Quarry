@@ -9,6 +9,16 @@ use crate::{
 use super::{models::MultipartRequest, service::QuarryApiService};
 
 #[tauri::command]
+pub async fn quarry_api_delete(
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    path: String,
+) -> AppResult<()> {
+    verify_main_window_origin(&window)?;
+    service.delete(&path).await.map_err(api_error)
+}
+
+#[tauri::command]
 pub async fn quarry_api_get(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,

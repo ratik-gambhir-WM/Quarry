@@ -176,6 +176,9 @@ export const DEFAULT_PDF_VIEWER_LABELS: ResolvedPdfViewerLabels = {
 export interface PdfViewerProps {
   source?: PdfSource | null;
 
+  /** Show the viewer loading surface while its source is still being resolved. */
+  pendingSource?: boolean;
+
   toolbar?: boolean;
   renderToolbar?: (ctx: PdfToolbarContext) => ReactNode;
 

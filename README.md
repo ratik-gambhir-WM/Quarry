@@ -22,7 +22,7 @@ Quarry-multiplatform/
 ├── backend/                  hosted Axum API baseline
 │   ├── src/                  application source
 │   └── tests/                mirrors src/ with *_tests.rs unit-test files
-├── docs/adr/                 architecture decisions
+├── docs/                     architecture and domain-model documentation
 └── plans/                    full deployment and migration plan
 ```
 

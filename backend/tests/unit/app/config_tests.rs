@@ -10,6 +10,47 @@ fn default_config_is_local_and_has_a_timeout() {
     assert_eq!(config.sqlite.path, PathBuf::from("data/quarry.sqlite3"));
     assert!(config.openai.is_none());
     assert!(config.wm_ai.is_none());
+    assert!(config.diligence_studio.is_none());
+}
+
+#[test]
+fn parses_and_normalizes_optional_diligence_studio_configuration() {
+    let config = AppConfig::from_values([(
+        "DILIGENCE_STUDIO_API_BASE_URL",
+        "http://127.0.0.1:43127/api/v1",
+    )])
+    .unwrap();
+
+    assert_eq!(
+        config.diligence_studio.unwrap().base_url.as_str(),
+        "http://127.0.0.1:43127/api/v1/"
+    );
+    assert!(
+        AppConfig::from_values([("DILIGENCE_STUDIO_API_BASE_URL", "  ")])
+            .unwrap()
+            .diligence_studio
+            .is_none()
+    );
+    assert!(AppConfig::from_values([(
+        "DILIGENCE_STUDIO_API_BASE_URL",
+        "http://[::1]:43127/api/v1",
+    )])
+    .is_ok());
+}
+
+#[test]
+fn rejects_unsafe_or_unversioned_diligence_studio_urls() {
+    for value in [
+        "http://example.com/api/v1",
+        "https://user:secret@example.com/api/v1",
+        "https://example.com/api",
+        "https://example.com/api/v2",
+        "https://example.com/api/v1?debug=true",
+        "not-a-url",
+    ] {
+        let error = AppConfig::from_values([("DILIGENCE_STUDIO_API_BASE_URL", value)]).unwrap_err();
+        assert!(error.contains("DILIGENCE_STUDIO_API_BASE_URL"), "{error}");
+    }
 }
 
 #[test]

@@ -13,8 +13,8 @@ use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use crate::{
     deal_files::{read_deal_source_files, select_deal_data_room, LocalDealRoots},
     quarry_api::{
-        quarry_api_get, quarry_api_get_pdf, quarry_api_post, quarry_api_post_multipart,
-        subscribe_document_job, QuarryApiService,
+        quarry_api_delete, quarry_api_get, quarry_api_get_pdf, quarry_api_post,
+        quarry_api_post_multipart, subscribe_document_job, QuarryApiService,
     },
     save_file::save_text_file,
 };
@@ -79,6 +79,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_deal_source_files,
+            quarry_api_delete,
             quarry_api_get,
             quarry_api_get_pdf,
             quarry_api_post,

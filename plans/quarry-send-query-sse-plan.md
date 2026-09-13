@@ -1,138 +1,133 @@
 # Quarry send-query SSE plan
 
 Status: proposed
-Scope: shared API contract, browser and Tauri transports, Axum query endpoint/service, and the existing OpenAI Responses client
-Baseline: current working tree inspected on 2026-08-31
-Primary endpoint: `POST /api/v1/query_model`
+
+Baseline: live repository verified 2026-09-12, after the backend domain modularization and
+template-import work
+
+Scope: transport-neutral frontend contract, browser POST-SSE adapter, narrow Tauri relay,
+`assistant::interactions` Axum vertical slice, and the existing OpenAI Responses adapter
+
+Primary client endpoint: `POST /api/v1/query_model`
 
 ## Outcome
 
-Add a single-shot send-query operation that accepts a user-authored prompt, optional user-selected
-model, optional user-authored system instructions, and zero or more user-selected files. Axum will
-call the existing OpenAI Responses streaming function and relay every semantic OpenAI text delta
-to the caller as a Quarry-owned SSE event, in order, without waiting for the full response.
+Add one stateless query interaction that accepts a required prompt, optional model and system
+instruction overrides, and zero or more user-selected files. Axum streams Quarry-owned events as
+OpenAI produces visible text. Web and desktop consumers receive the same typed lifecycle and can
+cancel upstream work.
 
-The first release will:
+This remains an interaction run, not a conversation:
 
-- require the user prompt and never substitute the existing generic default prompt;
-- use the server-side query-model default when `model` is omitted, while allowing the user to
-  override it per request;
-- use `DEFAULT_SYSTEM_INSTRUCTIONS` when `systemInstructions` is omitted, while allowing the user
-  to override it per request;
-- accept only bytes from user-selected multipart uploads—never a caller-selected server path,
-  arbitrary URL, or provider file ID;
-- map supported document uploads to OpenAI `input_file` content and supported image uploads to
-  `input_image` content;
-- translate each OpenAI `response.output_text.delta` or `response.refusal.delta` into exactly one
-  downstream `delta` event;
-- support the browser and Tauri desktop through the shared `QuarryApi` contract;
-- cancel upstream work when the browser request or desktop subscription is cancelled;
-- keep the OpenAI API key and every provider call in the Axum process;
-- avoid database, Helix, conversation-history, and durable-job changes.
+- no conversation ID, prior-message input, `previous_response_id`, persistence, replay, or resume;
+- no SQLite or Helix write;
+- no durable job registry;
+- no provider key, provider URL, server path, remote URL, or provider file ID exposed to clients;
+- no React page or chat component in this plan.
 
-Official OpenAI documentation confirms that the Responses API accepts text, image, and file inputs,
-supports a request-level `instructions` value and model selection, and streams when `stream: true`.
-Implementation should re-check the current file-type guidance while coding because provider input
-support can change: [Create a model response](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+The follow-up UI plan consumes this contract from
+[`quarry-query-chat-ui-plan.md`](quarry-query-chat-ui-plan.md).
 
-## Decisions
+## Live baseline and revisions from the earlier plan
 
-### Public Quarry operation
+| Area | Live repository on 2026-09-12 | Planning consequence |
+| --- | --- | --- |
+| Backend topology | `backend/src/app`, `domains`, `adapters`, and `shared`; there is no global `AppState` or horizontal `handlers`, `routes`, `services`, `repository`, or `core` root. | Implement the use case under `domains/assistant/interactions` and merge its already-state-bound router in `app/bootstrap.rs`. Do not recreate removed layers. |
+| Assistant ownership | `domains/assistant/mod.rs` is a comment-only, unregistered scaffold naming interaction/conversation ownership. | Activate only `assistant::interactions`. Conversations and context resolution remain future work. |
+| OpenAI | `adapters/openai/client.rs` owns the existing Responses request builder and unused streaming entry point; config is in `app/config.rs`. | Evolve this adapter seam and inject it from bootstrap. Handlers must not import the adapter. |
+| Router | `app/http/mod.rs` mounts one assembled API under `/api/v1` and compatibility `/api`; feature route files declare unprefixed paths. | The assistant route declares `/query_model`; clients use `/api/v1/query_model`. |
+| Middleware | Request ID, tracing, gzip, 120-second timeout, and CORS are applied globally. | Streaming must have an explicit compression and timeout policy; do not assume the current global layers are safe for a long-lived body. |
+| Configuration | The repository intentionally has no maintained `.env.example`; `docs/ARCHITECTURE.md` is the environment schema. | Add and test `OPENAI_QUERY_MODEL`, then update the architecture table. Do not create a second env-shaped template. |
+| Tests | Frontend tests live under `frontend/tests`; backend tests mirror `src` under `backend/tests/unit` and are included manually; cross-module HTTP/architecture tests live under `backend/tests/integration`; Tauri tests live under `frontend/src-tauri/tests`. | Put every new test in the matching test tree and add source-module inclusion hooks where required. |
+| Browser transport | `httpQuarryApi.ts` uses `fetch`/`FormData`; document-job GET streams use `EventSource`. | POST multipart SSE needs `fetch`, `ReadableStream`, an incremental parser, and `AbortController`. |
+| Desktop transport | `quarry_api/{client,models,service,commands}.rs` relays JSON, PDF, multipart, and document-job SSE; the reqwest client has a 120-second total timeout. | Add a fixed-path query-stream capability with explicit cancellation and a stream-safe timeout policy. |
+| Activity log | Requests/events are stored in a bounded `sessionStorage` log; current key redaction covers many content-like names but not `prompt` explicitly. | Log only safe query metadata and add explicit prompt/instruction/generated-content regression coverage. |
 
-Use a dedicated feature route instead of placing generic chat behavior under research,
-summarization, or document jobs:
+The old plan's references to `backend/src/core/clients/openai.rs`, `AppState`,
+`bootstrap::assemble_state`, root `services/handlers/routes`, frontend tests under `src`, and
+`backend/.env.example` are obsolete and must not guide implementation.
+
+## Stable public contract
+
+### Request
 
 ```text
 POST /api/v1/query_model
 Content-Type: multipart/form-data
 Accept: text/event-stream
+```
 
+| Multipart field | Cardinality | Contract |
+| --- | --- | --- |
+| `prompt` | exactly one text field | Required; trim only to test non-blank; preserve original content; at most 100,000 Unicode scalar values. |
+| `model` | zero or one text field | Omission selects the configured server default; supplied values are trimmed, non-blank, at most 128 characters, and contain no control characters. |
+| `systemInstructions` | zero or one text field | Omission selects the server-owned default; supplied values are non-blank and at most 50,000 Unicode scalar values; preserve original content. |
+| `files` | repeated file field | Optional; at most 20 files, 50 MB each, and 50 MB aggregate. |
+
+Reject duplicate scalar fields, unknown fields, empty files, unsafe filenames, unsupported file
+types, and limit violations before returning the SSE response. Give the route a scoped body limit
+of the 50 MB aggregate plus 1 MB multipart overhead so Axum's default 2 MB limit does not silently
+replace the documented contract.
+
+Use the existing `shared::file_policy` byte constants where their meaning matches. Keep a
+query-specific allowlist/classifier under the assistant interaction module because document
+ingestion currently accepts only PDF/DOCX and the summary helper's extension list is not a
+provider-security contract. Images map to `ResponsesFileInput::ImageData { detail: "auto" }`;
+supported documents map to `ResponsesFileInput::FileData`. Derive the effective MIME type from a
+normalized leaf filename and validate available magic bytes; never trust only the browser MIME.
+
+Do not expose `FilePath`, `FileUrl`, or `FileId` variants through this route.
+
+### Defaults and provider request
+
+- Add `query_model: String` to `OpenAiConfig` and parse `OPENAI_QUERY_MODEL` with the current
+  `gpt-5.5` default.
+- Include the new key in the existing optional OpenAI capability-group detection: if any OpenAI
+  model setting is supplied, `OPENAI_API_KEY` remains required.
+- Resolve the model and default system instructions in the assistant interaction service. Define
+  the current `You are a helpful assistant.` default as assistant-owned policy; leave the
+  adapter's generic fallback intact for existing callers. Web, desktop TypeScript, and Tauri Rust
+  must preserve omission rather than insert defaults.
+- A present-but-blank override is invalid; it is not equivalent to omission.
+- Always pass the validated prompt, so this operation never uses `DEFAULT_RESPONSES_PROMPT`.
+- Send `stream: true` and `store: false` for this operation. Do not change storage behavior for
+  unrelated extraction, summary, embedding, or image-description calls.
+- Keep production OpenAI endpoints fixed inside the adapter. Any loopback endpoint seam is
+  test-only or constructor-injected exclusively by bootstrap/test support, never request data.
+
+### SSE response
+
+Successful validation and capability resolution return:
+
+```text
 200 OK
 Content-Type: text/event-stream
 Cache-Control: no-cache, no-store
 ```
 
-The router's existing `/api` compatibility mount will expose the same operation temporarily, but
-all new web and desktop clients must call `/api/v1/query_model`.
-
-This is one streaming HTTP exchange. Do not create a POST-to-job plus GET-to-events protocol: query
-generation is not durable, there is no reconnect/resume requirement, and the OpenAI stream is
-already available during the initiating request.
-
-### Request fields
-
-| Multipart field | Cardinality | Rule |
+| Event | JSON data | Rule |
 | --- | --- | --- |
-| `prompt` | exactly one text field | Required, trimmed only for validation, non-blank, at most 100,000 characters; preserve the user's original content when sending it. |
-| `model` | zero or one text field | Omission selects the configured server default; a supplied value must be trimmed, non-blank, at most 128 characters, and contain no control characters. |
-| `systemInstructions` | zero or one text field | Omission selects `DEFAULT_SYSTEM_INSTRUCTIONS`; a supplied value must be non-blank and at most 50,000 characters; preserve the user's original content. |
-| `files` | repeated file field | Optional; maximum 20 files, 50 MB per file and 50 MB in aggregate, using the existing upload-size posture. |
+| `started` | `{ "type": "started", "model": "gpt-5.5" }` | First event; reports the resolved model. |
+| `delta` | `{ "type": "delta", "delta": "text" }` | One event per semantic `response.output_text.delta` or `response.refusal.delta`, in provider order and without coalescing. |
+| `completed` | `{ "type": "completed", "response": "full text" }` | Exactly one successful terminal; authoritative even when no deltas arrived. |
+| `failed` | `{ "type": "failed", "error": "query generation failed" }` | Exactly one sanitized terminal for failure after HTTP 200 starts. |
 
-Reject duplicate scalar fields, unknown fields, empty files, invalid filenames, unsupported
-extensions/MIME types, and limit violations with HTTP 400 before starting the SSE response. Raise
-the route-specific Axum body limit to the 50 MB aggregate plus the existing 1 MB multipart overhead,
-so the handler's documented checks are reachable rather than being pre-empted by Axum's 2 MB
-default.
+Serialize with Axum `Event::json_data`, emit a 15-second keepalive, and suppress proxy buffering.
+Ignore provider events that have no user-visible text, but treat provider failure/incomplete/error
+events, malformed JSON, invalid UTF-8, premature EOF, and a completion with no usable text as
+failures.
 
-The initial upload allowlist should be derived from the current OpenAI input helpers and confirmed
-against the current official provider documentation during implementation. Keep document and image
-classification explicit: images use `ResponsesFileInput::ImageData` with `detail: "auto"`; all
-other allowed files use `ResponsesFileInput::FileData`. Derive the MIME type server-side from a
-normalized leaf filename, validate it against obvious content signatures where supported, and do
-not trust the browser-provided MIME type by itself.
+Pre-stream HTTP failures are:
 
-Do not expose `ResponsesFileInput::FilePath`, `FileUrl`, or `FileId` through this endpoint. Those
-variants can remain available to trusted internal callers, but making them transport inputs would
-introduce server-filesystem, URL-fetch, or cross-user provider-file trust problems.
+- 400 for multipart, scalar, filename, type, or limit validation;
+- 503 when OpenAI is not configured;
+- 500 for unexpected internal failures through the sanitized `AppError` boundary.
 
-### Defaults
+After HTTP 200 begins, do not attempt to change status. Emit one `failed` terminal and close.
 
-- Keep `gpt-5.5` as the current query default rather than changing model policy as part of this
-  feature.
-- Add `OPENAI_QUERY_MODEL` to `OpenAiConfig`, defaulting to `gpt-5.5`, and inject it into the new
-  query service from `bootstrap.rs`.
-- Keep `DEFAULT_SYSTEM_INSTRUCTIONS` as `You are a helpful assistant.` and resolve it in the query
-  service only when the field is absent.
-- A present but blank `model` or `systemInstructions` is invalid; it does not silently select the
-  default. This keeps omission and invalid user input distinct.
-- The endpoint always supplies a validated prompt to the OpenAI client, so
-  `DEFAULT_RESPONSES_PROMPT` is not used by this operation.
-- Set `store: false` on this new streaming Responses call so user prompts and files are not stored
-  by request for later response retrieval. Keep that choice server-owned rather than accepting it
-  from the client.
+### Shared TypeScript API
 
-### SSE contract
-
-Expose Quarry-owned events instead of forwarding raw provider JSON. This keeps the product API
-stable if OpenAI adds or changes non-text events.
-
-| Event name | JSON data | Meaning |
-| --- | --- | --- |
-| `started` | `{ "type": "started", "model": "gpt-5.5" }` | The request passed Quarry validation and the resolved model is known. |
-| `delta` | `{ "type": "delta", "delta": "text" }` | One semantic text/refusal delta from OpenAI. Preserve provider order and do not coalesce adjacent deltas. |
-| `completed` | `{ "type": "completed", "response": "full text" }` | Exactly one successful terminal event. The full text is authoritative and also covers a provider completion that had no delta events. |
-| `failed` | `{ "type": "failed", "error": "query generation failed" }` | Exactly one sanitized terminal event for failures after HTTP 200 has begun. |
-
-Use Axum `Sse`, JSON serialization through `Event::json_data`, a 15-second keepalive, and explicit
-`no-cache, no-store` response headers. Ignore OpenAI events that are not user-visible text, but
-recognize `response.failed`, `response.incomplete`, top-level provider errors, malformed events,
-and premature EOF as failures rather than reporting an empty successful response.
-
-HTTP failures are possible only before the SSE response begins:
-
-- 400: malformed multipart, missing/invalid prompt, invalid overrides, invalid files, or limits;
-- 503: the optional OpenAI capability is not configured;
-- 500: unexpected Quarry failure, using the existing sanitized `AppError` boundary.
-
-After the 200 response begins, failures must use one terminal `failed` event because the status and
-headers can no longer change. Log internal provider context on the server, but never send raw
-provider bodies, API details, keys, prompts, system instructions, filenames, file contents, or
-generated text in errors or tracing.
-
-### Shared TypeScript contract
-
-Extend `frontend/src/contracts/quarryApi.ts` with a transport-neutral API shaped like the existing
-document-job subscription:
+Add to `frontend/src/contracts/quarryApi.ts`:
 
 ```ts
 export type QueryModelInput = {
@@ -156,257 +151,198 @@ export type SendQueryEventHandlers = {
 queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers): () => void;
 ```
 
-The returned function cancels the active upload/stream and releases listeners. `failed` is a
-server terminal event; `onConnectionError` is reserved for failures that prevent or corrupt the
-SSE exchange, including a non-2xx response, wrong content type, malformed frame, or EOF without a
-terminal event. The adapter must deliver at most one terminal notification.
+The returned cleanup function is idempotent. It cancels upload/stream work and suppresses later
+callbacks. `failed` is a valid server terminal; `onConnectionError` is for a non-2xx response,
+wrong content type, malformed Quarry frame/event, transport failure, or EOF without a terminal.
+Each adapter delivers at most one terminal notification.
 
-No React page or chat component is part of this plan. Product UI can consume this contract in a
-follow-up without changing the transport protocol.
-
-## Current-state findings
-
-| Area | Current implementation | Consequence for this change |
-| --- | --- | --- |
-| OpenAI request builder | `backend/src/core/clients/openai.rs` already builds Responses payloads with prompt, instructions, model, `input_file`, and `input_image`. | Reuse it; do not add an SDK or second provider implementation. |
-| OpenAI streaming | `gen_model_response_with_files_streaming` already sets `stream: true`, parses fragmented SSE, emits output/refusal deltas through a callback, and returns the full text. | Adapt its callback/cancellation/error contract for a bounded downstream channel and call it from the query service. |
-| OpenAI defaults | The client currently defaults responses to `gpt-5.5`, `DEFAULT_SYSTEM_INSTRUCTIONS`, and a generic prompt. | Centralize the query model in `OpenAiConfig`; keep system default; make prompt required at the HTTP boundary. |
-| Backend SSE | The document-job handler already uses Axum `Sse`, JSON events, stream unfolding, and 15-second keepalive. | Reuse the delivery pattern, but not the process-local job registry/watch protocol. |
-| Browser SSE | Document jobs use `EventSource` for GET. | A POST with multipart requires `fetch`, `ReadableStream`, an incremental SSE parser, and `AbortController`. |
-| Desktop transport | Tauri supports JSON/multipart POST and GET streaming separately; its HTTP client has a 120-second whole-request timeout. | Add a narrow multipart-stream command and ensure a long response is governed by connect/idle policy rather than a 120-second total timeout. |
-| Desktop cancellation | Removing the current document-job listener does not cancel its upstream Rust request. | The new query stream must include explicit cancellation instead of repeating this known gap. |
-| Upload boundary | Browser uploads are raw multipart; desktop files are base64 over IPC and reconstructed as multipart in Rust. | Preserve the 50 MB byte limits and account for desktop base64 memory amplification. |
-| API contract | Web and desktop endpoint mappings are handwritten and tested separately. | Update both adapters and both test suites in the same change. |
-| Logging | `summarizeFormData`/IPC logging can expose new scalar fields unless their names are treated as sensitive; SSE delta data would contain generated text. | Redact prompt/instructions and log only query event metadata/character counts, never content. |
-| Authentication | Axum currently has no production authentication, authorization, tenancy, rate limiting, or quota enforcement. | The route can follow current development posture, but it must not be described or deployed as public-production safe. |
-
-## Target flow
+## Runtime ownership and target flow
 
 ```mermaid
 sequenceDiagram
-    participant UI as React caller
-    participant Adapter as Web or desktop QuarryApi adapter
-    participant Tauri as Tauri relay (desktop only)
-    participant API as Axum query handler/service
-    participant OAI as OpenAI Responses API
+    participant Caller as React caller
+    participant Adapter as Web or desktop QuarryApi
+    participant Tauri as Tauri query relay
+    participant Handler as assistant interaction handler
+    participant Service as InteractionService
+    participant OpenAI as OpenAI adapter
 
-    UI->>Adapter: queryModel(prompt, optional model/instructions, files)
+    Caller->>Adapter: queryModel(input, handlers)
     opt desktop
-        Adapter->>Tauri: validated IPC multipart stream request
-        Tauri->>API: POST /api/v1/query_model
+        Adapter->>Tauri: fixed-path query subscription
+        Tauri->>Handler: POST /api/v1/query_model
     end
     opt web
-        Adapter->>API: fetch POST /api/v1/query_model
+        Adapter->>Handler: POST /api/v1/query_model
     end
-    API->>API: validate multipart and resolve defaults
-    API->>OAI: Responses request with stream=true and store=false
-    API-->>Adapter: SSE started
-    loop each OpenAI text/refusal delta
-        OAI-->>API: response.*.delta
-        API-->>Adapter: SSE delta
-        Adapter-->>UI: typed delta event
+    Handler->>Service: validated owned request
+    Service->>OpenAI: Responses stream, store=false
+    Service-->>Adapter: started
+    loop each visible provider delta
+        OpenAI-->>Service: text/refusal delta
+        Service-->>Adapter: delta
+        Adapter-->>Caller: typed event
     end
-    OAI-->>API: response.completed
-    API-->>Adapter: SSE completed with full text
-    Adapter-->>UI: typed completed event
+    Service-->>Adapter: completed or failed
 ```
 
-On desktop, Axum SSE frames are parsed in Rust and re-emitted with a per-subscription ID so
-concurrent queries cannot cross-deliver events. The TypeScript adapter filters by that ID and maps
-the same event union used by the browser.
+Backend ownership is:
+
+```text
+app/config parses ambient values
+  -> app/bootstrap constructs OpenAiClient and InteractionService
+  -> domains/assistant/interactions/route binds private HTTP state
+  -> handler validates transport input
+  -> service owns run/default/cancellation/terminal policy
+  -> adapters/openai owns provider HTTP and provider SSE parsing
+```
+
+No assistant handler or route imports `crate::adapters`; no domain code reads ambient environment
+values or constructs infrastructure.
+
+## Planned file changes
+
+| Path | Change |
+| --- | --- |
+| `frontend/src/contracts/quarryApi.ts` | Add query input/event/handler types and `QuarryApi.queryModel`. |
+| `frontend/src/api/querySse.ts` | Strict incremental browser SSE framing and typed Quarry event validation. |
+| `frontend/src/api/httpQuarryApi.ts` | Add multipart POST-SSE mapping, cancellation, terminal rules, and metadata-only activity logging. |
+| `frontend/src/api/tauriQuarryApi.ts` | Add async file-to-IPC mapping and subscription/cancel lifecycle behind the shared synchronous cleanup contract. |
+| `frontend/src/platform/runtime.desktop.ts` | Wire dedicated send/cancel invokes and filtered `quarry-query-event` listening without logging raw query payloads. |
+| `frontend/tests/api/querySse.test.ts` | Parser/framing/event-union tests. |
+| `frontend/tests/api/httpQuarryApi.test.ts` | Browser mapping, streaming, error, cancellation, and redaction coverage. |
+| `frontend/tests/api/tauriQuarryApi.test.ts` | Desktop mapping, subscription isolation, sync cleanup, and cancellation coverage. |
+| `frontend/tests/platform/runtime.contract.test.ts` | Keep both runtime targets structurally aligned. |
+| `frontend/tests/lib/activityLog.test.ts` | Explicit prompt, instruction, filename, file-content, and generated-text redaction tests. |
+| `frontend/src-tauri/src/quarry_api/{models,client,service,commands,mod}.rs` | Add fixed query request/event/control models, stream client behavior, strict parsing, cancellation registry, commands, and exports. Split a focused `query_stream.rs` helper if that keeps `service.rs` cohesive. |
+| `frontend/src-tauri/src/lib.rs` | Manage query-subscription state and register only the narrow send/cancel commands. |
+| `frontend/src-tauri/tests/quarry_api/service_tests.rs` | Fixed path, multipart limits, SSE, terminal, timeout, and cancellation tests. Add a mirrored test file only when the production module is split. |
+| `backend/src/app/config.rs` | Add `OPENAI_QUERY_MODEL` parsing/default/capability detection. |
+| `backend/src/app/bootstrap.rs` | Construct and inject the interaction service and merge its state-bound router. |
+| `backend/src/app/http/{mod,middleware}.rs` | Adjust only as needed to give SSE a deliberate no-buffer/timeout policy while preserving common request ID, trace, CORS, and error behavior. |
+| `backend/src/domains/mod.rs` | Activate the `assistant` domain. |
+| `backend/src/domains/assistant/mod.rs` | Activate only `interactions`; keep conversations/context unimplemented. |
+| `backend/src/domains/assistant/interactions/{mod,model,upload,service,handler,route}.rs` | Own DTOs, validation, stream lifecycle, private route state, and `/query_model`. Combine small files when clearer; do not create empty layers merely to match this table. |
+| `backend/src/adapters/openai/client.rs` | Make the existing streaming seam cancellation/backpressure aware, set query options, and recognize all terminal/failure cases. |
+| `backend/tests/unit/app/config_tests.rs` | New config default, override, activation, and missing-key tests. |
+| `backend/tests/unit/adapters/openai/client_tests.rs` | Request options and provider-stream parsing/cancellation coverage. |
+| `backend/tests/unit/domains/assistant/interactions/*_tests.rs` | Mirrored service/upload tests with explicit `#[cfg(test)] #[path = ...]` hooks in owning source modules. |
+| `backend/tests/integration/http_tests.rs` | `/api/v1` and `/api` route, multipart, HTTP/SSE, body-limit, and unavailable-capability coverage. |
+| `backend/tests/integration/architecture_tests.rs` | Add `assistant` to domain ownership checks and preserve the no-global-state/dependency rules. |
+| `docs/ARCHITECTURE.md` | Record the implemented assistant interaction, route, transport, config, middleware, logging, limits, and known gaps. |
+
+Do not add `backend/.env.example`; it is intentionally absent.
 
 ## Implementation sequence
 
-### Phase 1 — Lock the contract, defaults, and validation
+### Phase 1 — Lock the contract and streaming policy
 
-1. Add the shared `QueryModelInput`, event union, handler type, and `QuarryApi.queryModel` signature.
-2. Add backend-owned query input/event DTOs with camelCase serialization and named validation
-   constants for scalar lengths, file count, and byte limits.
-3. Add `OPENAI_QUERY_MODEL` to `OpenAiConfig`, its optional-capability detection list, config
-   parser defaults/tests, and `backend/.env.example`. Preserve the current rule that any supplied
-   OpenAI model setting requires `OPENAI_API_KEY`.
-4. Keep the client default as a compatibility fallback for existing internal callers, but inject
-   the resolved query default into the new service so runtime behavior does not depend on a hidden
-   client constant.
-5. Document the multipart field names, omission/default behavior, supported file classes, and
-   event schema in tests before adding transport code.
+1. Add the TypeScript contract and backend interaction event/request models.
+2. Add query validation constants and tests, reusing byte-limit constants without widening other
+   domains' file allowlists.
+3. Add `OPENAI_QUERY_MODEL` to config and tests.
+4. Decide and test the full stream timeout behavior at both server and Tauri layers. Preserve the
+   120-second bound for ordinary requests; for query SSE use a documented connection/idle or
+   explicit maximum-duration policy that does not accidentally inherit a whole-response timeout.
+5. Ensure SSE is not gzip-buffered and retains request ID, trace, CORS, and sanitized errors.
 
-Exit criteria:
+Exit: defaults, omission semantics, validation, body limit, and the long-lived response policy are
+explicit and executable.
 
-- The default and override rules are unambiguous and tested.
-- No client duplicates the model or system-instruction default.
-- Prompt, system instructions, model, file count, filenames, types, and sizes have explicit bounds.
+### Phase 2 — Harden the OpenAI adapter seam
 
-### Phase 2 — Harden the existing OpenAI streaming seam
+1. Evolve `gen_model_response_with_files_streaming` rather than creating another provider client.
+2. Give its delta sink a result/async contract so a bounded Tokio channel can apply backpressure
+   and receiver closure can stop reading the upstream body promptly.
+3. Add query-specific `stream: true` and `store: false` options without affecting existing callers.
+4. Preserve arbitrary byte boundaries, LF/CRLF, comments, and multi-line `data:` behavior; reject
+   invalid UTF-8 and malformed semantic events.
+5. Recognize `response.completed`, failed/incomplete/top-level error events, and EOF. Use completed
+   response text when no deltas arrived.
+6. Add a loopback/fake Responses endpoint seam usable only by automated tests.
+7. For this path, log provider status/category and timing only. Do not log raw provider bodies,
+   prompts, instructions, filenames, uploads, deltas, or completed text.
 
-1. Keep `gen_model_response_with_files_streaming` as the one provider entry point. Refactor its
-   delta callback into an async or result-bearing sink so a bounded Tokio channel can apply
-   backpressure and signal receiver cancellation; do not use an unbounded queue for arbitrary
-   client slowness.
-2. Make callback/channel closure stop reading the upstream body promptly, which drops the reqwest
-   response and cancels provider work as far as the transport permits.
-3. Set `stream: true` and `store: false` for the query streaming request without changing the
-   retention behavior of unrelated non-streaming callers.
-4. Preserve fragmented LF/CRLF event parsing and multi-line `data:` handling. Extend parsing to
-   detect provider failure/incomplete/error events and premature EOF explicitly.
-5. Keep the final accumulated text return value. If deltas were absent but
-   `response.completed.response` contains output text, return that text so the service can emit a
-   useful `completed` event.
-6. Add a test-only loopback Responses URL seam or narrow fake gateway so route/service tests can
-   exercise streaming without live OpenAI. Production construction must continue using the fixed
-   official HTTPS endpoint and a server-held key.
+Exit: ordered deltas, completion fallback, backpressure, cancellation, and failure classification
+are covered without live OpenAI.
 
-Exit criteria:
+### Phase 3 — Implement `assistant::interactions`
 
-- One provider delta produces one callback invocation in order.
-- Slow/cancelled downstream consumers stop upstream processing without an unbounded buffer.
-- Provider failure, malformed SSE, invalid UTF-8, and EOF-without-output are typed failures.
-- No live OpenAI request is needed for automated tests.
+1. Replace the comment-only assistant marker with an active `interactions` submodule and declare
+   the assistant domain from `domains/mod.rs`.
+2. Collect multipart fields in the handler into owned bytes/strings. The spawned task must not
+   borrow Axum multipart fields.
+3. Keep transport validation in handler/upload helpers and run/default/terminal orchestration in
+   `InteractionService`.
+4. Fail before 200 when OpenAI is unavailable. After starting, use a bounded channel and emit
+   `started`, ordered deltas, and exactly one terminal.
+5. Bind `AssistantInteractionHttpState` inside `route::routes(...)`; merge that router from
+   `assemble_api`. Do not add global state.
+6. Declare the feature path as `/query_model` and let `app/http` provide both API mounts.
 
-### Phase 3 — Add the Axum query vertical slice
+Exit: both prefixes expose the same behavior, `/api/v1` is the client target, dependency guards
+pass, and no sensitive content enters logs.
 
-1. Create `backend/src/services/query_service.rs` with only an optional `Arc<OpenAiClient>`, the
-   injected default model, and the default system-instruction value it needs. Add it to
-   `services/mod.rs`.
-2. Define an owned `QueryRequest` and `UploadedQueryFile` so the service-owned task never borrows
-   Axum multipart fields. Convert bytes to base64 within the request task, then build borrowed
-   `ResponsesFileInput` values over those owned buffers for the existing client call.
-3. Have `QueryService::stream` validate use-case input, fail synchronously with
-   `ServiceError::Unavailable` if OpenAI is disabled, create a bounded channel, emit `started`, and
-   run the OpenAI stream. Map deltas to `delta`, success to exactly one `completed`, and logged
-   provider failure to exactly one sanitized `failed` event.
-4. Add `queries: Arc<QueryService>` to `AppState`, construct it in `bootstrap::assemble_state`, and
-   update the test application assembler. Do not place the raw OpenAI client or configuration in
-   `AppState`.
-5. Create `backend/src/handlers/query_model.rs` to collect/validate multipart transport facts and adapt
-   the service receiver to Axum `Sse`. Keep OpenAI orchestration out of the handler.
-6. Create `backend/src/routes/query_model.rs`, merge it in `routes/mod.rs`, and attach a route-local body
-   limit equal to the 50 MB aggregate plus multipart overhead.
-7. Set the SSE cache/buffering headers intentionally and keep the existing 15-second keepalive.
-   Verify that the global compression and timeout layers do not buffer or terminate a healthy
-   stream; add a route-specific adjustment only if the runtime test proves one is needed.
+### Phase 4 — Implement browser POST-SSE
 
-Exit criteria:
+1. Build `FormData` in `httpQuarryApi.ts`, omitting absent optional values and preserving original
+   prompt/instruction strings.
+2. Start an async `fetch` reader behind a synchronous, idempotent cleanup function.
+3. Validate status, `text/event-stream`, event names, JSON shapes, order, and exactly-one-terminal.
+4. Parse streaming UTF-8 incrementally across arbitrary chunks. Support LF/CRLF, comments,
+   repeated `data:` lines, and multiple frames per chunk.
+5. Abort the upload/body reader and suppress late callbacks on cleanup.
+6. Record metadata only: route, selected model if safe, file count/aggregate bytes, event name,
+   delta character count, duration, cancellation, and terminal class.
 
-- `POST /api/v1/query_model` streams before the full provider response is complete.
-- Pre-stream validation/configuration failures use HTTP errors; post-start failures use `failed`.
-- Services do not import `AppState`, read environment variables, or construct clients.
-- No prompt, instructions, filename, file bytes, response text, or provider body is logged.
+Exit: the first delta is observable before completion, corrupt streams become one connection
+error, and logs contain no query content.
 
-### Phase 4 — Add browser POST-SSE support
+### Phase 5 — Implement the Tauri relay
 
-1. Implement `queryModel` in `frontend/src/api/httpQuarryApi.ts` using `FormData`, preserving absent
-   optional fields rather than sending empty strings.
-2. Use `fetch` with an `AbortController`; validate non-success responses with the existing
-   `BackendApiError` behavior and require `text/event-stream` before reading the body.
-3. Add a small incremental SSE parser under `frontend/src/api/` that handles arbitrary UTF-8 byte
-   boundaries, LF and CRLF framing, comments/keepalives, repeated `data:` lines, multiple events in
-   one network chunk, and a final partial buffer. Do not split directly on each `ReadableStream`
-   chunk.
-4. Validate event names and JSON against the discriminated union. Reject malformed events,
-   duplicate terminals, events after terminal, and clean EOF without `completed`/`failed` through
-   `onConnectionError`.
-5. Make the returned cleanup abort the upload/response reader and suppress callbacks after
-   cancellation.
-6. Update query activity logging to store only route, model, file count/aggregate bytes, event
-   names, delta character counts, duration, and terminal status. Extend redaction tests so
-   `prompt` and `systemInstructions` can never enter the session activity log.
+1. Add a dedicated request model without a caller-controlled path; the Rust service always posts
+   to `/api/v1/query_model`.
+2. Reuse multipart metadata/base64 validation and byte limits, and validate query scalar fields on
+   both IPC and Axum boundaries.
+3. Use a stream-capable reqwest client/policy that does not change ordinary JSON/PDF timeouts.
+4. Parse SSE strictly. Emit server events only for the four allowed event types, wrapped with a
+   validated subscription ID. Use a separate subscription-scoped `connectionError` control
+   payload for Rust HTTP/content-type/framing/EOF failures; it is not a fifth server SSE event.
+5. Manage request-scoped cancellation senders in dedicated Tauri state. `send_query_stream`
+   registers the subscription, spawns its worker, and returns only after registration succeeds;
+   `cancel_query_stream` signals and removes exactly that worker. The worker removes itself on
+   every terminal/error path. Avoid raw task abort as the normal path so cleanup code still runs.
+   Concurrent subscription IDs must not cross-deliver.
+6. Validate the main window/origin in both commands. No capability or CSP expansion is required.
+7. In TypeScript, install the event listener before invoking send. If cleanup happens during file
+   encoding, listener setup, or before the start acknowledgement, immediately cancel any
+   later-acknowledged subscription and dispose the listener. Map only the scoped control payload
+   to `onConnectionError`.
+8. Use a dedicated redacted activity-log path; never pass raw query args to the generic IPC logger.
 
-Exit criteria:
+Exit: desktop event order matches web, cleanup reaches the upstream reqwest body, and no stale
+handle/listener remains.
 
-- The browser begins receiving typed deltas before completion.
-- Fragmented Unicode and SSE frames reconstruct exactly once and in order.
-- Cancellation closes the Fetch stream and prevents late callbacks.
-- Browser logs contain no user or model-generated content.
+### Phase 6 — Cross-runtime verification and documentation
 
-### Phase 5 — Add the narrow Tauri streaming relay
-
-1. Add a dedicated query-stream IPC request/payload model in
-   `frontend/src-tauri/src/quarry_api/models.rs`. Reuse multipart file validation and byte limits,
-   but fix the upstream path to `/api/v1/query_model` rather than accepting a generic stream path from
-   the webview.
-2. Add `QuarryHttpClient::post_multipart_stream`. Remove the client's global whole-request timeout
-   only if necessary, preserving 120-second timeouts on ordinary JSON/PDF operations and using a
-   connect timeout plus an explicit stream-idle policy for long-running SSE.
-3. Add a service method that submits multipart, validates the `text/event-stream` response type,
-   parses LF/CRLF SSE incrementally, and emits only allowed Quarry event names/data with the
-   subscription ID.
-4. Add `send_query_stream` and `cancel_query_stream` commands. Both must validate the main
-   window/origin and subscription identifier. Store only cancellation handles keyed by
-   subscription ID, remove them on every terminal/error/cancel path, and abort the upstream
-   reqwest body when cancelled.
-5. Register the commands in `frontend/src-tauri/src/lib.rs` and export them from the query API
-   module. No new shell/filesystem capability or CSP relaxation is required.
-6. Extend the TypeScript Tauri transport and `createTauriQuarryApi` so it base64-encodes only the
-   user-selected files, starts the dedicated subscription, filters `quarry-query-event` by
-   subscription ID, maps the shared event union, and invokes cancellation during cleanup.
-7. Pass only a redacted request summary to activity logging; do not log the actual IPC fields,
-   base64 data, SSE data, prompt, instructions, filenames, or output text.
-
-Exit criteria:
-
-- Desktop callers receive the same typed event order and terminal semantics as web callers.
-- Concurrent streams remain isolated by subscription ID.
-- Cleanup cancels the Rust upstream request rather than merely removing the JavaScript listener.
-- The command remains a narrow capability with validated input and a fixed product API path.
-
-### Phase 6 — Tests, documentation, and runtime verification
-
-Backend coverage:
-
-- request-body generation includes the required prompt, resolved instructions/model, supported
-  files/images, `stream: true`, and `store: false`;
-- OpenAI SSE parsing covers split boundaries, CRLF, multiple frames per chunk, Unicode, text and
-  refusal deltas, completed fallback text, provider failure/incomplete/error, malformed JSON,
-  invalid UTF-8, callback cancellation, and premature EOF;
-- query service covers missing OpenAI, defaults, overrides, ordered deltas, one terminal event,
-  sanitized failure, and cancellation/backpressure;
-- route tests cover field cardinality, blank/oversized scalar fields, file count/type/name/size,
-  bodies above Axum's default limit, `text/event-stream`, keepalive-safe ordered events, HTTP 503
-  before streaming, and failure events after streaming begins;
-- architecture tests continue to prove handler/service/client dependency direction.
-
-Frontend coverage:
-
-- HTTP adapter field mapping, omitted defaults, files, non-2xx errors, content-type validation,
-  fragmented/multiple/CRLF SSE frames, malformed data, EOF rules, exact terminal behavior, Unicode,
-  and AbortController cancellation;
-- Tauri adapter multipart/base64 mapping, event parsing/filtering, concurrent subscription IDs,
-  error paths, and explicit cancellation;
-- activity-log tests prove prompt, system instructions, filenames/file contents, and generated
-  text are absent or redacted while safe counts and byte sizes remain observable.
-
-Tauri Rust coverage:
-
-- fixed route and identifier validation;
-- multipart field/file validation and 50 MB limits;
-- response status/content-type checks;
-- incremental SSE framing, keepalive comments, allowed event names, terminal cleanup, concurrent
-  subscription isolation, and cancellation;
-- ordinary JSON/PDF timeout behavior remains unchanged.
-
-Update `docs/ARCHITECTURE.md` in the implementation change because this feature alters:
-
-- the shared `QuarryApi` contract and web/desktop transport inventory;
-- the `/api/v1` route table and multipart/SSE behavior;
-- `AppState` and bootstrap service assembly;
-- the OpenAI configuration group and request flow;
-- query-stream cancellation, logging/redaction, and known production trust limitations;
-- the external-integration and verification coverage narrative.
-
-Also update `backend/.env.example` for `OPENAI_QUERY_MODEL`, while preserving the documented caveat
-that model-only OpenAI configuration activates a capability that still requires the API key.
+1. Run focused parser, adapter, service, route, cancellation, timeout, and redaction tests.
+2. Run the full backend, frontend, and Tauri gates.
+3. Use synthetic delayed loopback responses to prove first-delta-before-completion, no-delta
+   completion, post-start failure, malformed EOF, cancellation, and concurrent desktop isolation.
+4. Update `docs/ARCHITECTURE.md` from the final implementation, including assistant maturity and
+   the fact that this is a non-durable interaction rather than a conversation.
+5. Inspect final diff/status for generated output, dependency churn, secrets, or real user data.
 
 ## Verification commands for implementation
 
-Run focused checks first using the test filters/names actually added, then the repository gates.
+Use actual added test names/paths if they differ from the examples below.
 
 From `backend/`:
 
 ```sh
-cargo test openai
-cargo test query_service
-cargo test send_query
+cargo test query_model
+cargo test interaction_service
+cargo test openai_stream
 cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
@@ -416,9 +352,11 @@ cargo test --locked --all-targets
 From `frontend/`:
 
 ```sh
-npm test -- src/api/httpQuarryApi.test.ts
-npm test -- src/api/tauriQuarryApi.test.ts
-npm test -- src/lib/activityLog.test.ts
+npm test -- tests/api/querySse.test.ts
+npm test -- tests/api/httpQuarryApi.test.ts
+npm test -- tests/api/tauriQuarryApi.test.ts
+npm test -- tests/lib/activityLog.test.ts
+npm test -- tests/platform/runtime.contract.test.ts
 npm run typecheck
 npm run check:boundaries
 npm test
@@ -430,16 +368,15 @@ npm run build:desktop-ui
 From `frontend/src-tauri/`:
 
 ```sh
+cargo test query_stream
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 ```
 
-Use a loopback fake OpenAI server for an end-to-end runtime observation that deliberately delays
-two deltas and verifies that web and desktop callers display the first delta before the second and
-before completion. Also inspect cancellation, malformed upstream termination, browser console,
-network timing, activity logs, and concurrent desktop streams. Do not use live OpenAI in the
-routine test suite and do not use `cargo run` against valuable SQLite/Helix state as a build check.
+Do not use `cargo run` as a build check. A runtime smoke test requires disposable SQLite/Helix
+configuration and a loopback provider; otherwise route/service tests are the authoritative
+streaming evidence. Never call live OpenAI in routine verification.
 
 Before handoff:
 
@@ -448,57 +385,49 @@ git diff --check
 git status --short
 ```
 
-Inspect the final diff for unrelated user work, generated `dist`/`target` output, secrets, prompt
-or response fixtures copied from real users, and lockfile churn. A new dependency should not be
-necessary: Axum SSE, reqwest byte streams, `futures-util`, and Tokio channels already exist.
+## Security and operational requirements
 
-## Security and operational notes
-
-- The OpenAI key remains server-only. Never add it to `VITE_*`, IPC arguments, browser storage, or
-  logs.
-- User-selected model access can affect cost and availability. Provider rejection becomes a
-  sanitized `failed` event; the server should not silently substitute another model.
-- The 50 MB upload posture can create larger in-memory base64/JSON copies, especially through
-  Tauri IPC. Keep all copies request-scoped and bounded. Moving large files through OpenAI's Files
-  API would be a separate design.
-- Do not log prompts, instructions, filenames, file contents, generated text, or raw OpenAI errors.
-  Metrics may record counts, byte sizes, resolved model, latency, cancellation, and terminal class.
-- The endpoint is not durable or resumable. A disconnect cancels the request, and the caller must
-  explicitly submit again.
-- The current server has no identity, tenancy, authorization, rate limit, quota, or abuse control.
-  Before public production exposure, add those controls in Axum and bind file/query access to the
-  authenticated principal. CORS and Tauri origin validation are not authorization.
-- No SQLite schema, Helix graph, migration, ADR, or destructive rollout is required for this
-  feature.
+- OpenAI credentials and endpoints remain server-owned.
+- Do not log prompts, instructions, filenames, file contents, generated text, raw provider bodies,
+  or request IPC payloads. Synthetic tests must assert absence, not merely successful redaction.
+- Bound file count, decoded bytes, base64 amplification, queue capacity, frame/buffer size,
+  per-event size, total accumulated response size, idle time, and request lifetime deliberately.
+- Cancellation is best-effort at the provider transport after the reqwest body is dropped; never
+  claim provider-side erasure.
+- The route inherits Quarry's development-only lack of identity, tenant authorization, rate
+  limiting, quota, and abuse controls. It is not safe for public production exposure until Axum
+  adds those controls.
+- A caller-selected model can affect cost and availability. Do not silently substitute a model;
+  provider rejection becomes a sanitized failure. A server allowlist/policy is a separate product
+  decision unless added before implementation.
+- No migration, graph change, ADR, or destructive rollout is required.
 
 ## Out of scope
 
-- A chat page, composer, model picker, file-picker UI, or response rendering.
-- Multi-turn conversation state, `previous_response_id`, conversation persistence, replay, or
-  reconnect/resume.
-- OpenAI tools, web search, file search/vector stores, structured output, or function calling.
-- Arbitrary server paths, remote file URLs, or caller-supplied OpenAI file IDs.
-- Query/result persistence, audit history, billing, quotas, or production identity enforcement.
-- Changing defaults for existing deal extraction, embeddings, summaries, or image descriptions.
+- Chat/composer UI and response rendering.
+- Durable conversations, messages, interaction records, history, replay, reconnect, or resume.
+- Document search/context retrieval, citations, tools, web search, file search, structured output,
+  or function calling.
+- Caller-selected server paths, remote URLs, or provider file IDs.
+- Billing, quotas, production identity/tenancy, or a model catalog/picker.
+- Changing existing extraction, summary, embedding, or image-description defaults/behavior.
 
 ## Definition of done
 
-- A shared client can submit the required prompt plus optional overrides and user-selected files to
-  `POST /api/v1/query_model` from both web and desktop.
-- Omitted model and system instructions resolve only on the server; supplied values are preserved
-  and validated.
-- Every OpenAI text/refusal delta is delivered once, in order, as a Quarry `delta` SSE event before
-  the terminal event.
-- Success and failure each have exactly one documented terminal path, including malformed stream,
-  provider failure, cancellation, and premature EOF.
-- Browser and desktop cleanup stops upstream work and prevents late callbacks.
-- Uploads, memory, paths, MIME types, scalar fields, event parsing, timeouts, and logging are
-  bounded and tested.
-- No OpenAI key, raw provider error, or real user prompt/instructions/filename/file data/response
-  text appears in client activity logs, backend logs, or error responses; automated tests use only
-  synthetic content.
-- Focused tests and all affected backend/frontend/Tauri gates pass without a live provider.
-- `docs/ARCHITECTURE.md` and `backend/.env.example` reflect the implemented contract and runtime
-  behavior.
-- `git diff --check` is clean and the final status review distinguishes the user's pre-existing
-  work from this feature.
+- `QuarryApi.queryModel` works through both web and desktop against
+  `POST /api/v1/query_model`; compatibility `/api/query_model` is server-only.
+- `assistant::interactions` owns the use case through an already-state-bound feature router; no
+  global state or removed horizontal backend root returns.
+- Required prompt, optional overrides, file allowlist, counts, byte limits, and omission/default
+  semantics are validated and tested.
+- Provider text/refusal deltas arrive once and in order before exactly one completed/failed
+  terminal; corrupt or premature transport failure becomes exactly one connection error.
+- Browser and desktop cleanup cancel the active upstream read and suppress late callbacks.
+- Streaming compression, body limits, total/idle timeouts, buffer bounds, and Tauri base64 memory
+  amplification have explicit tested policies.
+- Logs, errors, fixtures, and generated artifacts contain no sensitive query/provider content.
+- Focused tests and all affected backend/frontend/Tauri gates pass without live external services.
+- `docs/ARCHITECTURE.md` documents the implemented contract, domain maturity, transport,
+  configuration, security limits, and verification coverage; no `.env.example` is added.
+- `git diff --check` is clean and final status review distinguishes implementation changes from
+  user-owned work.

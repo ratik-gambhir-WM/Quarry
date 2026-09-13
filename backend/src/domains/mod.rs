@@ -5,4 +5,5 @@ pub mod documents;
 pub mod research;
 pub mod summaries;
 pub mod system;
+pub mod templates;
 pub mod users;

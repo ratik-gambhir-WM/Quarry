@@ -2,7 +2,7 @@ import { Icon } from "../../ui/Icon";
 
 type SidebarStaticItemProps = {
   active?: boolean;
-  icon: "dashboard" | "folderOpen" | "graph" | "grid" | "listAlt" | "person" | "timeline";
+  icon: "briefcase" | "calendarDays" | "dashboard" | "fileStack" | "folderOpen" | "folderTree" | "graph" | "grid" | "listAlt" | "person" | "ship" | "timeline";
   label: string;
   onClick?: () => void;
 };

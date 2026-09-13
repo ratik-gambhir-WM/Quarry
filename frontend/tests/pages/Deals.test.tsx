@@ -40,7 +40,24 @@ describe("Deals", () => {
 
     const table = screen.getByRole("table");
     expect(table).toBeTruthy();
+    const pageHeader = screen.getByRole("heading", { name: "Deals" }).closest("header");
+    const portfolioCounts = screen.getByLabelText("Deal portfolio counts");
+    expect(pageHeader?.contains(portfolioCounts)).toBe(true);
+    expect(portfolioCounts.textContent).toBe("3 total2 current1 historic");
+    expect(screen.queryByRole("heading", { name: "All deals" })).toBeNull();
     expect(table.closest(".workspace-card")).toBeNull();
+    const tableFrame = table.closest('[data-slot="data-grid"]')?.parentElement;
+    const dealsContent = tableFrame?.parentElement;
+    expect(dealsContent?.classList.contains("w-full")).toBe(true);
+    expect(Array.from(dealsContent?.classList ?? []).some((className) => className.startsWith("max-w-"))).toBe(false);
+    expect(tableFrame?.classList.contains("border-y")).toBe(true);
+    expect(tableFrame?.classList.contains("-mx-8")).toBe(true);
+    expect(tableFrame?.classList.contains("-mt-8")).toBe(true);
+    expect(tableFrame?.classList.contains("w-[calc(100%+4rem)]")).toBe(true);
+    expect(tableFrame?.classList.contains("rounded-2xl")).toBe(false);
+    expect(tableFrame?.classList.contains("bg-surface-container-lowest")).toBe(false);
+    expect(table.classList.contains("bg-[var(--theme-workspace-surface)]")).toBe(true);
+    expect(table.classList.contains("text-center")).toBe(true);
     expect(table.querySelectorAll('tbody tr[aria-hidden="true"]')).toHaveLength(0);
     expect(screen.getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
     const tableViewButton = screen.getByRole("button", { name: "Table view", pressed: true });

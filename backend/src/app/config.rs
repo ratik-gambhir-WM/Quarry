@@ -96,6 +96,11 @@ pub struct DocumentConfig {
 }
 
 #[derive(Clone, Debug)]
+pub struct DiligenceStudioConfig {
+    pub base_url: reqwest::Url,
+}
+
+#[derive(Clone, Debug)]
 pub struct AppConfig {
     pub http: HttpConfig,
     pub sqlite: SqliteConfig,
@@ -104,6 +109,7 @@ pub struct AppConfig {
     pub wm_ai: Option<WmAiConfig>,
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
+    pub diligence_studio: Option<DiligenceStudioConfig>,
 }
 
 impl AppConfig {
@@ -133,6 +139,7 @@ impl AppConfig {
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
+            diligence_studio: parse_diligence_studio_config(&values)?,
         })
     }
 }
@@ -166,8 +173,43 @@ impl Default for AppConfig {
                     DEFAULT_COMPLETED_JOB_RETENTION_SECONDS,
                 ),
             },
+            diligence_studio: None,
         }
     }
+}
+
+fn parse_diligence_studio_config(
+    values: &HashMap<String, String>,
+) -> Result<Option<DiligenceStudioConfig>, String> {
+    let Some(value) = value(values, "DILIGENCE_STUDIO_API_BASE_URL") else {
+        return Ok(None);
+    };
+    let mut base_url = reqwest::Url::parse(value)
+        .map_err(|error| format!("invalid DILIGENCE_STUDIO_API_BASE_URL: {error}"))?;
+    let is_loopback_http = base_url.scheme() == "http"
+        && (base_url.host_str() == Some("localhost")
+            || base_url
+                .host_str()
+                .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
+                .is_some_and(|address| address.is_loopback()));
+    if base_url.scheme() != "https" && !is_loopback_http {
+        return Err("DILIGENCE_STUDIO_API_BASE_URL must use HTTPS or loopback HTTP".to_string());
+    }
+    if !base_url.username().is_empty()
+        || base_url.password().is_some()
+        || base_url.query().is_some()
+        || base_url.fragment().is_some()
+    {
+        return Err(
+            "DILIGENCE_STUDIO_API_BASE_URL must not contain credentials, a query, or a fragment"
+                .to_string(),
+        );
+    }
+    if base_url.path().trim_end_matches('/') != "/api/v1" {
+        return Err("DILIGENCE_STUDIO_API_BASE_URL must end with /api/v1".to_string());
+    }
+    base_url.set_path("/api/v1/");
+    Ok(Some(DiligenceStudioConfig { base_url }))
 }
 
 fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, String> {

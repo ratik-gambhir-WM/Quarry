@@ -14,6 +14,15 @@ import { quarryDataGridHeaderClassName, quarryDataGridTableClassNames } from "..
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { ViewTransition } from "../ui/ViewTransition";
 
+const dealsDataGridTableClassNames = {
+  ...quarryDataGridTableClassNames,
+  base: `${quarryDataGridTableClassNames.base} bg-[var(--theme-workspace-surface)] text-center`,
+  edgeCell: `${quarryDataGridTableClassNames.edgeCell} data-pinned:bg-[var(--theme-workspace-surface)]`,
+  header: `${quarryDataGridTableClassNames.header} bg-[var(--theme-workspace-surface)] [&_th>div]:ms-0 [&_th>div]:justify-center`,
+  headerRow: `${quarryDataGridTableClassNames.headerRow} bg-[var(--theme-workspace-surface)]`,
+  headerSticky: `${quarryDataGridTableClassNames.headerSticky} bg-[var(--theme-workspace-surface)]`,
+} as const;
+
 type DealsTableProps = {
   deals: DealPortfolioView[];
   navigationState?: WorkspaceLocationState;
@@ -57,16 +66,16 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
             </ViewTransition>
           );
         },
-        minSize: 200,
-        size: 270,
+        minSize: 180,
+        size: 200,
         meta: { headerTitle: "Deal" },
       },
-      textColumn("lifecycle", "Lifecycle", 130),
-      textColumn("status", "Status", 150),
-      textColumn("type", "Type", 190),
-      textColumn("sponsor", "Sponsor", 170, (value) => String(value ?? "—")),
-      textColumn("closeDate", "Target close", 150, (value) => formatShortUtcDate(typeof value === "string" ? value : undefined)),
-      textColumn("openQuestionCount", "Open questions", 150),
+      textColumn("lifecycle", "Lifecycle", 110),
+      textColumn("status", "Status", 125),
+      textColumn("type", "Type", 120),
+      textColumn("sponsor", "Sponsor", 110, (value) => String(value ?? "—")),
+      textColumn("closeDate", "Target close", 130, (value) => formatShortUtcDate(typeof value === "string" ? value : undefined)),
+      textColumn("openQuestionCount", "Open questions", 155),
     ],
     [navigationState],
   );
@@ -86,11 +95,11 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
   if (deals.length === 0) return <DealsEmptyState onReset={onReset} />;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-outline-variant/70 bg-surface-container-lowest">
+    <div className="-mx-8 -mt-8 w-[calc(100%+4rem)] border-y border-outline-variant/70">
       <DataGrid
         recordCount={deals.length}
         table={table}
-        tableClassNames={quarryDataGridTableClassNames}
+        tableClassNames={dealsDataGridTableClassNames}
         tableLayout={{ cellBorder: true, columnsPinnable: true, columnsResizable: true, dense: true, headerBackground: false, headerBorder: true, rowBorder: true }}
       >
         <DataGridContainer>
@@ -114,7 +123,7 @@ function textColumn(
     cell: ({ row }) => <span>{format(row.original[accessorKey])}</span>,
     minSize: 110,
     size,
-    meta: { headerTitle: title },
+    meta: { fillWidth: accessorKey === "type", headerTitle: title },
   };
 }
 

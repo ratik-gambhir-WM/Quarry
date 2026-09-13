@@ -117,18 +117,52 @@ export type FileChunkResult = {
 export type VectorFileChunkHit = FileChunkResult & { distance: number };
 export type KeywordFileChunkHit = FileChunkResult & { score: number };
 
+export type TemplatePreviewPage = {
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  previews: Array<{
+    templateId: string;
+    contentType: "image/png";
+    dataUrl: string;
+    previewUrl: string;
+    width: number;
+    height: number;
+  }>;
+};
+
+export type PptxTemplateImportMode = "single" | "batch";
+export const MAX_PPTX_TEMPLATE_IMPORT_BYTES = 25 * 1024 * 1024;
+
+export type PptxTemplateImportResult = {
+  importMode: PptxTemplateImportMode;
+  importedCount: number;
+  warningCount: number;
+};
+
 export interface QuarryApi {
   archiveDeal(dealId: string): Promise<SavedDeal>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
+  deleteTemplate(templateId: string): Promise<void>;
   saveDealMetadata(dealId: string, files: File[]): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
   getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
   getUserByEmail(email: string): Promise<WorkspaceAccountUser | null>;
+  importPptxTemplate(
+    file: File,
+    importMode: PptxTemplateImportMode,
+  ): Promise<PptxTemplateImportResult>;
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
   listDeals(): Promise<PersistedDeal[]>;
+  listTemplatePreviews(page: number): Promise<TemplatePreviewPage>;
   listSummaryFiles(path: string): Promise<SummarizableFile[]>;
   previewDealDocument(
     dealId: string,

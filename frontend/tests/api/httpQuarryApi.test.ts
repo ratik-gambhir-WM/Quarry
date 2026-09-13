@@ -20,6 +20,65 @@ describe("httpQuarryApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals", undefined);
   });
 
+  it("encodes and preserves template preview pages", async () => {
+    const payload = {
+      pagination: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        page: 1,
+        pageSize: 10,
+        totalItems: 1,
+        totalPages: 1,
+      },
+      previews: [{
+        contentType: "image/png",
+        dataUrl: "data:image/png;base64,dGVtcGxhdGU=",
+        height: 900,
+        previewUrl: "/templates/example/preview",
+        templateId: "example",
+        width: 1600,
+      }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(httpQuarryApi.listTemplatePreviews(1)).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/previews?page=1", undefined);
+  });
+
+  it("deletes an encoded template through the versioned API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(httpQuarryApi.deleteTemplate("template/one")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", {
+      method: "DELETE",
+    });
+  });
+
+  it.each(["single", "batch"] as const)(
+    "imports one PPTX through the explicit %s template mode",
+    async (importMode) => {
+      const result = { importMode, importedCount: importMode === "single" ? 1 : 3, warningCount: 0 };
+      const fetchMock = vi.fn().mockResolvedValue(Response.json(result, { status: 201 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const file = new File(["presentation"], "template.pptx", {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+
+      await expect(httpQuarryApi.importPptxTemplate(file, importMode)).resolves.toEqual(result);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/v1/templates/import?mode=${importMode}`,
+        expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
+      );
+      const request = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(request.headers).toBeUndefined();
+      const form = request.body as FormData;
+      expect(form.getAll("files")).toEqual([file]);
+    },
+  );
+
   it("saves the core deal and optional metadata through two separate requests", async () => {
     const input = {
       closeDate: "2026-05-01",

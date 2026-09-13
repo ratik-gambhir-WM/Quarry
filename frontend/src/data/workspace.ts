@@ -108,6 +108,14 @@ export function getDataRoomPath(dealId: string) {
   return `/hub/deals/${dealId}/data-room`;
 }
 
+export function getDeliverablesPath(dealId: string) {
+  return `/hub/deals/${dealId}/deliverables`;
+}
+
+export function getDeliverableTemplatesPath(dealId: string) {
+  return `${getDeliverablesPath(dealId)}/templates`;
+}
+
 export function getTeamLabel(email?: string) {
   const teamName = email?.split("@")[0]?.replace(/[._-]/g, " ") ?? "Analyst Team";
 

@@ -146,6 +146,11 @@ Do not use `cargo run` as a routine check: startup opens and may destructively m
 requires Helix, and initializes indexes. A runtime smoke test needs explicit disposable
 configuration and live dependencies.
 
+If an authorized smoke test starts Axum or another port-listening dependency, record its process
+identity and port before testing. Stop that exact process gracefully before handoff and verify the
+port is no longer listening, including after a failed test. Do not terminate a pre-existing or
+ambiguously owned listener.
+
 ## Architecture completion gate
 
 After implementation, re-read `docs/ARCHITECTURE.md`. Update it in the same change if endpoints,

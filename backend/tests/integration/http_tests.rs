@@ -63,6 +63,148 @@ async fn routes_outside_api_prefix_are_not_found() {
 }
 
 #[tokio::test]
+async fn template_preview_route_validates_page_and_degrades_when_unconfigured() {
+    let app = test_router();
+    let unavailable = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/templates/previews")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+    for query in ["page=0", "page=-1", "page=invalid", "page=101"] {
+        let invalid = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/v1/templates/previews?{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn template_delete_route_degrades_when_unconfigured() {
+    let response = test_router()
+        .oneshot(
+            Request::delete("/api/v1/templates/example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn template_import_route_validates_mode_and_upload_before_capability_lookup() {
+    let app = test_router();
+    for path in [
+        "/api/v1/templates/import?mode=single",
+        "/api/templates/import?mode=batch",
+    ] {
+        let (content_type, body) = template_multipart(&[("files", "template.pptx", b"pptx")]);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(path)
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    for path in [
+        "/api/v1/templates/import",
+        "/api/v1/templates/import?mode=unsupported",
+        "/api/v1/templates/import?mode=single&mode=batch",
+    ] {
+        let (content_type, body) = template_multipart(&[("files", "template.pptx", b"pptx")]);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(path)
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    for parts in [
+        vec![],
+        vec![("files", "template.txt", b"pptx".as_slice())],
+        vec![("files", "../template.pptx", b"pptx".as_slice())],
+        vec![("files", "template.pptx", b"".as_slice())],
+        vec![
+            ("files", "one.pptx", b"one".as_slice()),
+            ("files", "two.pptx", b"two".as_slice()),
+        ],
+        vec![("unexpected", "template.pptx", b"pptx".as_slice())],
+    ] {
+        let (content_type, body) = template_multipart(&parts);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/templates/import?mode=single")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn template_import_route_accepts_a_file_above_the_default_body_limit() {
+    let bytes = vec![1; 2 * 1024 * 1024 + 1];
+    let (content_type, body) = template_multipart(&[("files", "template.pptx", &bytes)]);
+    let response = test_router()
+        .oneshot(
+            Request::post("/api/v1/templates/import?mode=batch")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+fn template_multipart(parts: &[(&str, &str, &[u8])]) -> (String, Vec<u8>) {
+    const BOUNDARY: &str = "quarry-template-boundary";
+    let mut body = Vec::new();
+    for (field_name, filename, bytes) in parts {
+        body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Disposition: form-data; name=\"{field_name}\"; filename=\"{filename}\"\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={BOUNDARY}"), body)
+}
+
+#[tokio::test]
 async fn legacy_command_routes_are_not_exposed() {
     let app = test_router();
 

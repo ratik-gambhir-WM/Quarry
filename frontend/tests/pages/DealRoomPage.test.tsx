@@ -7,7 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 import { DealRoomPage } from "@/pages/DealRoomPage";
 
-const { useWorkspaceDealsMock } = vi.hoisted(() => ({ useWorkspaceDealsMock: vi.fn() }));
+const { listTemplatePreviews, useWorkspaceDealsMock } = vi.hoisted(() => ({
+  listTemplatePreviews: vi.fn(),
+  useWorkspaceDealsMock: vi.fn(),
+}));
+
+vi.mock("@quarry/runtime", () => ({
+  runtime: { api: { listTemplatePreviews } },
+}));
 
 vi.mock("@/hooks/useWorkspaceDeals", () => ({
   useWorkspaceDeals: useWorkspaceDealsMock,
@@ -21,11 +28,26 @@ vi.mock("@/components/hub/WorkspaceSidebar", () => ({
   WorkspaceSidebar: () => <aside>Deal room sidebar</aside>,
 }));
 
+vi.mock("@/components/deal-room/DeliverableTemplatesView", () => ({
+  DeliverableTemplatesView: () => <div>Template gallery</div>,
+}));
+
 afterEach(cleanup);
 
 describe("DealRoomPage", () => {
   beforeEach(() => {
     useWorkspaceDealsMock.mockReturnValue({ deals: workspaceDeals, loaded: true });
+    listTemplatePreviews.mockResolvedValue({
+      pagination: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        page: 1,
+        pageSize: 10,
+        totalItems: 0,
+        totalPages: 0,
+      },
+      previews: [],
+    });
   });
 
   it("renders the shared workspace skeleton while the deal request is pending", () => {
@@ -76,5 +98,33 @@ describe("DealRoomPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Project Alpha" })).not.toBeNull();
     expect(screen.queryByText(workspaceDeals[0]?.room.summary ?? "")).toBeNull();
     expect(document.querySelector('[data-slot="data-grid"]')).not.toBeNull();
+  });
+
+  it("navigates from the two-section Deliverables page to Templates and back", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/hub/deals/project-alpha/deliverables"]}>
+        <Routes>
+          <Route
+            element={<DealRoomPage initialView="deliverables" />}
+            path="/hub/deals/:dealId/deliverables"
+          />
+          <Route
+            element={<DealRoomPage initialView="deliverable-templates" />}
+            path="/hub/deals/:dealId/deliverables/templates"
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("region", { name: "Completed Slide(s)" })).not.toBeNull();
+    expect(screen.getByRole("region", { name: "In-progress slides" })).not.toBeNull();
+    expect(screen.queryByText("Start from templates")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "View Templates" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Templates" })).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Back to Deliverables" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Deliverables" })).not.toBeNull();
   });
 });

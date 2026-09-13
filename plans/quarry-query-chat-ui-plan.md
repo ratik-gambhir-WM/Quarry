@@ -2,13 +2,13 @@
 
 Status: proposed
 
+Baseline: live repository verified 2026-09-12, after the backend domain modularization,
+frontend test-tree move, shared View Transition work, and template-import changes
+
 Depends on: [Quarry send-query SSE plan](quarry-send-query-sse-plan.md)
 
-Scope: a new shared React chat page, assistant-ui standalone Elements-derived chat primitives,
-and consumption of the planned `QuarryApi.queryModel` stream
-
-Baseline: source strategy revised on 2026-09-01; preserve the pre-existing deletion of
-`frontend/src/components/deal-room/DiligenceGraphView.tsx`
+Scope: a shared React query page, a small Quarry-owned chat state machine, selected standalone
+assistant-ui Elements-derived presentation sources, and consumption of `QuarryApi.queryModel`
 
 Active route: `/hub/summarize`
 
@@ -16,178 +16,185 @@ Legacy page retained: [`frontend/src/pages/SummarizePage.tsx`](../frontend/src/p
 
 ## Outcome
 
-Add a Claude Code-inspired Quarry chat surface that can submit a text prompt and render one
-assistant response incrementally from the send-query SSE operation. Keep the existing workspace
-shell and sidebar exactly as they are.
+Replace the active Explore route's screen with an Ask Quarry chat surface that submits one prompt
+at a time and renders the assistant response incrementally. Preserve the existing workspace shell,
+sidebar hierarchy, route path, build-selected runtime boundary, and lazy View Transition behavior.
 
-The active route will move to a new `QueryChatPage`; it will not replace, delete, or refactor the
-existing `SummarizePage`. `SummarizePage`, `components/summarize/ChatPanel.tsx`, and
-`components/summarize/PanelTab.tsx` will remain in source, compile under both TypeScript targets,
-and have no route or application entrypoint. This keeps the current summarization UI isolated for
-possible later reuse while excluding it from the web and desktop bundles.
+The first UI release will:
 
-The first chat release will:
+- keep `/hub/summarize`, Research > Explore, `activeHomeSection="summarize"`, and the existing
+  sidebar order/labels;
+- lazy-load a new `QueryChatPage` through the existing `LazyPage`/View Transition composition;
+- call only `runtime.api.queryModel({ files: [], prompt }, handlers)`;
+- omit `model` and `systemInstructions`, leaving defaults server-owned;
+- show the user turn immediately, append ordered deltas, and replace partial text with the
+  authoritative `completed.response`;
+- allow one active request with visible connecting, streaming, stopped, failed, retry, and
+  completed states;
+- retain independent single-shot exchanges only for the current page mount without implying that
+  earlier turns are model context;
+- use safe Markdown rendering through the already-installed `react-markdown` and `remark-gfm`;
+- adapt only props-driven standalone assistant-ui Element source, without adopting its runtime,
+  provider, AI SDK, or transport;
+- work in web and desktop from the same React tree with no raw `fetch`, `EventSource`, or Tauri
+  import in page/component code.
 
-- keep `/hub/summarize`, the Research > Explore sidebar link, and
-  `activeHomeSection="summarize"` unchanged;
-- submit only `{ files: [], prompt }` through `runtime.api.queryModel`;
-- omit `model` and `systemInstructions` so Axum resolves the server-owned defaults;
-- show the user turn immediately and append each assistant `delta` in order;
-- treat `completed.response` as the authoritative final response, including completion without
-  prior deltas;
-- support one active request at a time with visible Send, Stop, failure, retry, and completion
-  states;
-- retain a page-local transcript of independent single-shot exchanges until route unmount, while
-  clearly not representing earlier turns as provider context;
-- compose the standalone assistant-ui Elements for Composer, Chat Panel, Scroll Anchor, Message
-  Pair, Error State, and Stopped Run into Quarry-owned chat components, adapted to Quarry's theme,
-  existing shared primitives, transport contract, and accessibility rules;
-- keep assistant-ui at the presentation layer: do not initialize its runtime, add an assistant-ui
-  provider, or replace Quarry's `runtime.api.queryModel` transport;
-- work through the same React tree in web and desktop without raw `fetch`, `EventSource`, or Tauri
-  imports;
-- avoid attachments, model selection, system-instruction editing, persistence, and server/API
-  changes in this slice.
+Attachments, a model picker, system-instruction editing, persistence, retrieval, citations, tools,
+and server changes are outside this follow-up.
 
 ## Prerequisite gate
 
-This plan is a consumer of `quarry-send-query-sse-plan.md`, not an alternative implementation of
-it. Do not start the page integration until that plan is complete and the live tree contains all
-of the following:
+Do not begin UI integration until the predecessor is implemented and the live tree proves:
 
-- `QueryModelInput`, `SendQueryEvent`, `SendQueryEventHandlers`, and
-  `QuarryApi.queryModel` in `frontend/src/contracts/quarryApi.ts`;
-- browser POST-SSE support and cancellation in `frontend/src/api/httpQuarryApi.ts`;
-- desktop TypeScript mapping plus the narrow Tauri send/cancel relay;
-- `POST /api/v1/query_model` with the documented multipart fields, event union, defaults, and
-  cancellation behavior;
-- focused web, desktop, Tauri, service, route, parsing, redaction, and cancellation tests;
-- the predecessor's `docs/ARCHITECTURE.md` and `backend/.env.example` updates.
+- `QueryModelInput`, `SendQueryEvent`, `SendQueryEventHandlers`, and `QuarryApi.queryModel` exist in
+  `frontend/src/contracts/quarryApi.ts`;
+- browser multipart POST-SSE parsing and cancellation are covered in `frontend/tests/api`;
+- desktop TypeScript and Tauri Rust send/cancel relay paths are covered and cancel upstream work;
+- `POST /api/v1/query_model` is owned by `backend/src/domains/assistant/interactions`, streams the
+  documented event union, and has explicit validation/body/timeout/buffering policies;
+- OpenAI parsing, backpressure, cancellation, no-delta completion, and sanitized failure tests run
+  without live OpenAI;
+- `docs/ARCHITECTURE.md` documents the implemented interaction contract and `OPENAI_QUERY_MODEL`.
 
-Run the predecessor's focused and broad gates first. If any item is missing, finish that plan
-instead of adding a page-local transport shim, mock production adapter, direct HTTP call, or
-desktop-only exception.
+Run the predecessor's focused and broad gates before changing page code. If a prerequisite is
+missing, finish the predecessor rather than adding a page-local fetch, mock production adapter,
+direct Tauri call, or alternate chat transport.
 
-## Decisions
+## Live baseline and revisions from the earlier plan
 
-### Route, shell, sidebar, and legacy summarize isolation
+| Area | Live repository on 2026-09-12 | Planning consequence |
+| --- | --- | --- |
+| Active route | `App.tsx` lazy-loads `SummarizePage` at `/hub/summarize` inside `LazyPage label="Loading Explore"`; the app keys a shared View Transition by pathname. | Change only the lazy page target. Preserve the path, loading label, transition wrapper, redirects, and other routes. |
+| Shell | `WorkspaceHomeShell` supplies the home sidebar and renders a fixed-height `WorkspaceLayout` header rail plus a padded, scrolling content surface. | Use `WorkspaceHomeShell` and `WorkspaceHeader`; prove a page-local `h-full min-h-0` layout works before adding any shared layout prop. |
+| Sidebar | Research > Explore targets `/hub/summarize`; `HomeWorkspaceSidebar.test.tsx` locks hierarchy and absence of Quick Chat. | Do not add, rename, reorder, or remove navigation items or change `ActiveHomeSection`. |
+| Legacy summarize | `SummarizePage` owns file/path selection, summary APIs, Markdown export, and Summary/Chat tabs. Its `ChatPanel` is inert presentation. | Keep the entire legacy page and summarize components unchanged and unregistered after cutover. Do not mine their state into the new feature. |
+| Query transport | No `queryModel`, query route, assistant interaction service, or query Tauri relay exists yet. | The SSE plan remains a hard dependency. |
+| Frontend tests | Tests now live under `frontend/tests`, and the boundary check rejects test files under `frontend/src`. | Add all query UI tests under `frontend/tests`, mirroring production paths. |
+| UI composition | Existing shared primitives include Button, Textarea, Avatar, Tooltip, Icon, semantic tokens, and shadcn aliases. `shadcn` is already a package dependency. | Inspect with the repository-installed CLI and never overwrite customized `components/ui` files. |
+| React/theme | React/React DOM are a 19 canary; route transitions have guarded behavior. The dark palette remains in CSS but the current feature flag forces the active `slate-frost` light mode and hides the picker. | Do not add a second canary dependency or re-enable dark mode. Use semantic tokens so the retained dark palette remains compatible. |
+| Markdown | `react-markdown` and `remark-gfm` are installed and used by summarize. | Reuse them without raw HTML; scope chat styling so `.vault-markdown` and other renderers are unaffected. |
 
-- Create `frontend/src/pages/QueryChatPage.tsx` and lazy-load it from `App.tsx` at the existing
-  `/hub/summarize` path.
-- Remove only the `App.tsx` lazy import of `SummarizePage`; do not rename or delete the old file.
-- Keep `WorkspaceHomeShell`, `WorkspaceLayout`, `WorkspaceSidebar`, sidebar labels, sidebar order,
-  workspace session state, and the `ActiveHomeSection` union unchanged.
-- Render the new page with
-  `WorkspaceHomeShell activeHomeSection="summarize"` and a `WorkspaceHeader` titled `Ask Quarry`.
-- Leave the old summary endpoints and `QuarryApi.summarizePath`, `summarizeSelected`, and
-  `summarizeUpload` methods in place. Removing their active UI caller is not authorization to
-  remove their contract, adapters, backend routes, or tests.
-- Keep `SummarizePage.tsx` and its summarize components unreachable from active application code.
-  Add focused route coverage so future route edits do not accidentally register both pages.
+The earlier plan's frontend test paths under `src`, dated dirty-tree note, generic dark-mode
+manual test, and `npx shadcn@latest` commands are obsolete.
 
-### Single-shot query semantics in a chat-shaped UI
+## Route and legacy-page decisions
 
-The backend operation has no conversation ID, prior-message input, `previous_response_id`, durable
-job, replay, or resume. The UI may keep completed exchanges visible for continuity, but each send
-contains only the new prompt. It must not concatenate or silently send earlier turns.
+- Add `frontend/src/pages/QueryChatPage.tsx` and lazy-load it from `App.tsx` at
+  `/hub/summarize`.
+- Preserve `LazyPage label="Loading Explore"` and the surrounding keyed View Transition.
+- Render `WorkspaceHomeShell activeHomeSection="summarize"` with
+  `header={<WorkspaceHeader title="Ask Quarry" />}`.
+- Remove only the active `App.tsx` lazy import of `SummarizePage`.
+- Keep `SummarizePage.tsx`, `components/summarize/ChatPanel.tsx`, and
+  `components/summarize/PanelTab.tsx` in source and compiling under both targets.
+- Keep `QuarryApi.summarizePath`, `summarizeSelected`, and `summarizeUpload`, their web/desktop
+  mappings, Axum summary routes, and tests. Removing one UI caller is not authorization to remove
+  those contracts.
+- Add route coverage so `/hub/summarize` cannot accidentally register both old and new pages.
+- Confirm the legacy page is absent from production chunks after it loses its only active import;
+  do not edit generated `dist` output.
 
-Use one in-flight exchange at a time:
+## Interaction model
+
+### Visible states
 
 | State | Visible behavior | Allowed action |
 | --- | --- | --- |
-| Empty | Compact Ask Quarry introduction and focused composer | Send a non-blank prompt |
-| Connecting | User turn plus empty assistant turn and progress text | Stop |
-| Streaming | Ordered partial assistant Markdown is visible | Stop; scrolling remains usable |
-| Completed | Authoritative final Markdown replaces the partial buffer | Send another independent prompt |
-| Server failed | Partial output, if any, plus the sanitized `failed` message | Retry or send a new prompt |
-| Connection failed | Partial output, if any, plus a distinct transport error | Retry or send a new prompt |
-| Stopped | Partial output remains and is marked stopped | Retry or send a new prompt |
+| Empty | Compact Ask Quarry introduction and focused multiline composer | Send a non-blank prompt |
+| Connecting | User turn, assistant placeholder, and progress text | Stop |
+| Streaming | Ordered partial assistant Markdown and unobtrusive progress | Stop; scroll/read remains usable |
+| Completed | Authoritative final Markdown | Send another independent prompt |
+| Server failed | Partial output remains with the sanitized server message | Retry the exchange or send a new prompt |
+| Connection failed | Partial output remains with a distinct transport message | Retry the exchange or send a new prompt |
+| Stopped | Partial output remains and is visibly marked stopped | Retry the exchange or send a new prompt |
 
-Do not show inactive attachment, model, or system-instruction controls. A minimal interface with no
-dead affordances is preferable to buttons that do nothing.
+Do not show disabled attachment, model, system-instruction, voice, feedback, or tool controls.
 
-### Query event mapping
+### State ownership
+
+Use a discriminated reducer rather than unrelated booleans. Suggested concepts:
+
+- a page-local ordered list of exchanges;
+- stable user/assistant turn IDs;
+- one active request token/generation or `null`;
+- per-assistant status (`connecting`, `streaming`, `completed`, `server-failed`,
+  `connection-failed`, or `stopped`);
+- original prompt retained for retry;
+- optional resolved model metadata from `started`;
+- draft input owned by the feature hook/component, not duplicated in effects.
+
+The transcript is ephemeral and presentation-local. It is not a conversation record and must not
+be stored in fixtures, `sessionStorage`, the activity log, SQLite, or Helix.
+
+### Submit and event mapping
 
 On submit:
 
-1. Validate with `prompt.trim()` and reject whitespace-only input, but preserve and send the
-   original string.
-2. Create stable user and assistant turn IDs before opening the stream.
-3. Add the user turn and an assistant placeholder in one reducer transition, clear the draft, and
-   mark the request active.
-4. Call `runtime.api.queryModel({ files: [], prompt }, handlers)`. Do not include `model` or
-   `systemInstructions` keys with empty strings.
-5. Store the returned cleanup function outside render state.
+1. Test `prompt.trim()` for blank input, but send and retain the original string.
+2. Create IDs and the request token before opening the stream.
+3. Add the user turn and assistant placeholder atomically, clear the draft, and mark the request
+   active.
+4. Call `runtime.api.queryModel({ files: [], prompt }, handlers)` with optional keys absent.
+5. Store the returned cleanup function in a ref, never render state.
 
-Map callbacks as follows:
-
-| Callback | Reducer behavior |
+| Callback | Reducer transition |
 | --- | --- |
-| `started` | Move connecting to streaming and retain the resolved model as optional metadata; do not add a new turn. |
-| `delta` | Append `event.delta` once, in arrival order, to the active assistant turn. |
-| `completed` | Replace the accumulated buffer with `event.response`, mark completed, and clear the active request. |
-| `failed` | Preserve any partial buffer, record the sanitized server error, mark failed, and clear the active request. |
-| `onConnectionError` | Preserve any partial buffer, record a transport error, mark connection-failed, and clear the active request. |
+| `started` | `connecting` to `streaming`; record optional resolved-model metadata; do not add a turn. |
+| `delta` | Append once and in arrival order to the active assistant turn. |
+| `completed` | Replace all partial text with `event.response`, mark completed, and clear the active request. |
+| `failed` | Preserve partial text, record the server-safe error, mark server-failed, and clear active state. |
+| `onConnectionError` | Preserve partial text, record a transport message, mark connection-failed, and clear active state. |
 
-Use a discriminated reducer instead of independent booleans that can express impossible states.
-Give each request a generation/token. Every callback must match the active token so late events
-from a stopped, failed, retried, or unmounted request are ignored.
+Every callback must carry/check the request token. Late callbacks from stopped, failed, retried,
+superseded, or unmounted work are no-ops.
 
-The cleanup contract must be exact:
+### Cleanup and retry contract
 
-- Stop calls cleanup once, marks the exchange stopped, and restores composer availability.
-- Route unmount calls cleanup once without creating user-visible state after unmount.
-- A retry reuses the original prompt and assistant slot rather than duplicating the user turn.
-- Terminal callbacks clear the active cleanup reference.
-- If a test adapter invokes a terminal callback synchronously before `queryModel` returns its
-  cleanup, immediately dispose the returned cleanup instead of retaining a settled stream.
-- Duplicate terminal callbacks and callbacks after cancellation do not change rendered state.
+- Stop invokes cleanup once, marks the current exchange stopped, and restores composer use.
+- Route unmount invokes cleanup once without dispatching visible state afterward.
+- Terminal callbacks clear the active cleanup ref.
+- If a test adapter invokes a terminal callback synchronously before `queryModel` returns, dispose
+  the returned cleanup immediately instead of retaining a settled stream.
+- If cleanup occurs while desktop file encoding/listener setup is still pending, the adapter owns
+  disposal of anything created later.
+- Duplicate terminal callbacks or callbacks after cancellation do not mutate the transcript.
+- Retry reuses the existing user turn and assistant slot, resets only that assistant result, and
+  resends the original prompt. It does not duplicate the user turn.
+- A later new prompt contains only that prompt. Earlier displayed exchanges are never concatenated
+  or sent as hidden context.
 
-### assistant-ui Elements source adoption and collision policy
+## assistant-ui source adoption
 
-Use the official assistant-ui Elements directory as the source of the chat presentation layer.
-The relevant official sources are:
+Use assistant-ui only as reviewed presentation source. Select the props-driven standalone
+Elements for Composer, Chat Panel, Scroll Anchor, Message Pair, Error State, and Stopped Run. Do
+not initialize an assistant-ui runtime/provider, add `@assistant-ui/react`, add an AI SDK, or
+create `/api/chat`.
 
-- [assistant-ui](https://www.assistant-ui.com/)
-- [Composer](https://www.assistant-ui.com/elements/composer)
-- [Chat Panel](https://www.assistant-ui.com/elements/chat-panel)
-- [Scroll Anchor](https://www.assistant-ui.com/elements/scroll-anchor)
-- [Message Pair](https://www.assistant-ui.com/elements/message-pair)
-- [Error State](https://www.assistant-ui.com/elements/error-state)
-- [Stopped Run](https://www.assistant-ui.com/elements/stopped-run)
-- [Model Selector](https://www.assistant-ui.com/elements/model-selector), retained as a future
-  source reference once Quarry defines an allowed model catalog and request policy;
-- [shadcn CLI](https://ui.shadcn.com/docs/cli).
-
-Choose only each component's props-driven standalone `@assistant-ui/elements-*` variant. Do not
-use the runtime-bound `@assistant-ui/*` variant, run `npx assistant-ui init`, add
-`@assistant-ui/react` or `@assistant-ui/ai-sdk`, introduce an `/api/chat` route, or put a second
-provider/transport around `runtime.api.queryModel`.
-
-The registry is mutable. On the implementation date, inspect every selected manifest and diff
-again before installing:
+The registry is mutable. On the implementation date, inspect proposals with the repository's
+installed `shadcn` CLI rather than requesting `@latest`:
 
 ```sh
 cd frontend
-npx shadcn@latest add "@assistant-ui/elements-composer" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-composer" --diff
-npx shadcn@latest add "@assistant-ui/elements-chat-panel" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-chat-panel" --diff
-npx shadcn@latest add "@assistant-ui/elements-scroll-anchor" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-scroll-anchor" --diff
-npx shadcn@latest add "@assistant-ui/elements-message-pair" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-message-pair" --diff
-npx shadcn@latest add "@assistant-ui/elements-error-state" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-error-state" --diff
-npx shadcn@latest add "@assistant-ui/elements-stopped-run" --dry-run
-npx shadcn@latest add "@assistant-ui/elements-stopped-run" --diff
+npm exec shadcn -- add "@assistant-ui/elements-composer" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-composer" --diff
+npm exec shadcn -- add "@assistant-ui/elements-chat-panel" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-chat-panel" --diff
+npm exec shadcn -- add "@assistant-ui/elements-scroll-anchor" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-scroll-anchor" --diff
+npm exec shadcn -- add "@assistant-ui/elements-message-pair" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-message-pair" --diff
+npm exec shadcn -- add "@assistant-ui/elements-error-state" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-error-state" --diff
+npm exec shadcn -- add "@assistant-ui/elements-stopped-run" --dry-run
+npm exec shadcn -- add "@assistant-ui/elements-stopped-run" --diff
 ```
 
-After reviewing the proposed files, dependencies, and CSS, install only that selected set:
+Proceed only if those names still resolve to standalone props-driven source. Review every proposed
+file, package, CSS rule, alias, and collision before installing the selected set:
 
 ```sh
 cd frontend
-npx shadcn@latest add \
+npm exec shadcn -- add \
   "@assistant-ui/elements-composer" \
   "@assistant-ui/elements-chat-panel" \
   "@assistant-ui/elements-scroll-anchor" \
@@ -196,323 +203,195 @@ npx shadcn@latest add \
   "@assistant-ui/elements-stopped-run"
 ```
 
-Never use `--overwrite`, install the full Elements directory, or accept a generated replacement
-for a customized Quarry primitive. Keep the generated standalone sources under
-`frontend/src/components/assistant-ui/elements/` as resolved by `components.json`, record the
-upstream page URL in each retained source, and compose them behind feature-facing files in
-`frontend/src/components/chat/`.
+Never use `--overwrite`. If the live registry attempts to replace a customized Quarry primitive,
+requires the assistant-ui runtime, or imports unrelated model/tool/attachment features, stop and
+adapt only the reviewed source manually behind Quarry-owned components; do not accept the broader
+dependency graph.
 
-The 2026-09-01 registry inspection found that this selected set generates Composer, Chat Panel,
-Scroll Anchor, Message Pair, Error State, and Stopped Run source plus shared standalone `surfaces`
-and `range` utilities. It declares only `lucide-react` as a package dependency, which Quarry
-already has. Reinspect rather than treating that snapshot as a permanent contract.
+Keep source provenance in comments and retain low-level adapted files under
+`frontend/src/components/assistant-ui/elements/`. Feature code imports only Chat-prefixed wrappers
+under `frontend/src/components/chat/`.
 
-Reconcile the standalone source deliberately:
-
-| assistant-ui proposal | Quarry decision |
+| Proposed source | Quarry adaptation |
 | --- | --- |
-| `components/assistant-ui/elements/surfaces.tsx` and `range.ts` | Retain only the utilities used by the selected Elements, retheme them with Quarry semantic tokens, and keep them out of generic `components/ui`. |
-| Composer shell, bar, toolbar, actions, and send affordance | Use as the structural source, but compose Quarry's existing `Button`, `Tooltip`, icons, and `cn` where equivalent instead of duplicating shared primitives. |
-| Standalone `ComposerInput` | Do not use its single-line `<input>` for this release. Keep a chat-scoped wrapper around Quarry's existing `Textarea` so multiline input, Shift+Enter, IME composition, labels, and focus behavior remain explicit. |
-| Chat Panel and Message Pair | Drive them from Quarry's reducer state and disable/remove any internal reveal behavior that would animate or duplicate already-streamed deltas. |
-| Scroll Anchor | Keep pin-to-bottom and unseen-content state page-local. Follow only while the reader is already at the bottom and expose an accessible jump control. |
-| Error State and Stopped Run | Map Quarry's server-failed, connection-failed, stopped, and retry states into props; do not introduce assistant-ui run state. |
-| Markdown Text | Do not add it because its published component is runtime-bound rather than standalone. Keep `react-markdown` and `remark-gfm` as the authoritative safe renderer. |
-| Model Selector | Do not install either `@assistant-ui/model-selector` or `@assistant-ui/elements-model-selector` in this slice. Quarry has no approved client model catalog yet, and the request intentionally omits `model`. |
+| Composer shell/actions | Reuse structure, Quarry Button/Tooltip/icons/`cn`, and existing Textarea. Do not use a single-line input. |
+| Chat Panel and Message Pair | Drive entirely from reducer props; remove internal runtime/reveal state that could replay streamed text. |
+| Scroll Anchor | Keep pinned/unseen state page-local; follow only while already at the bottom and provide an accessible jump-to-latest control. |
+| Error State and Stopped Run | Map Quarry server-failed, connection-failed, stopped, and retry props without assistant-ui run state. |
+| Shared standalone surfaces/range helpers | Retain only helpers actually imported by selected files; keep them out of generic `components/ui`. |
+| Markdown Text | Do not install; use `react-markdown`/`remark-gfm`. |
+| Model Selector | Do not install; Quarry has no approved client model catalog and this page omits `model`. |
 
-The selected standalone set should not require a new direct package. If the live manifest changes,
-add only packages directly imported by retained sources and inspect `package.json` and
-`package-lock.json` for focused churn. In particular, do not add Command/cmdk solely for the
-deferred Model Selector.
+No new direct package is expected. If a retained source imports one, justify it, inspect peer
+compatibility with the React canary, and keep `package.json`/lockfile churn focused. Do not add
+Command/cmdk solely for the excluded model selector.
 
-The project uses a React 19 canary and `legacy-peer-deps=true`. A successful registry install is
-not proof of compatibility. Verify runtime rendering, both TypeScript targets, and both production
-UI builds after source or dependency changes.
+## Layout, accessibility, and rendering
 
-### Styling and layout
-
-Aim for Claude Code's restrained conversation hierarchy, not a visual clone:
-
-- keep the Quarry workspace chrome, sidebar, inset main surface, theme tokens, and typography;
-- use a full-height page-local flex column with `min-h-0`, a scrollable thread, and a composer at
-  the bottom;
-- render user turns as compact, visually distinct blocks and assistant turns as open Markdown
-  content rather than matching speech bubbles;
-- use monospace only for code, not for the whole product surface;
-- show an unobtrusive streaming indicator without shifting the transcript;
-- show a jump-to-latest control only when the reader has scrolled away from the bottom;
-- preserve the reader's position while scrolled up instead of forcing every delta into view;
-- keep the composer comfortably usable at narrow and wide workspace widths;
-- avoid changing `WorkspaceLayout` unless runtime inspection proves a page-local layout cannot
-  prevent double scrolling. Any shared layout change needs its own focused regression tests.
-
-Retheme the retained assistant-ui Elements classes and standalone `surfaces` utilities with the
-semantic tokens in `frontend/src/index.css`. Do not import a parallel assistant-ui palette or
-hard-code a terminal-only dark theme. Preserve both Quarry themes.
-
-Keep `react-markdown` and `remark-gfm`; no assistant-ui Markdown runtime or additional Tailwind
-package source is required for this slice. Prefix/scope chat Markdown, code block, and scrollbar
-selectors under Chat data slots so they cannot alter legacy summary Markdown, the PDF viewer, or
-other code elements. Do not delete `.vault-markdown`; the isolated `SummarizePage` still depends
-on it.
-
-### Keyboard, focus, motion, and announcements
-
-- The textarea has a persistent visible label or accessible name of `Message`.
-- Enter sends; Shift+Enter inserts a newline.
-- Enter does not send while an IME composition is active.
-- Whitespace-only content and duplicate sends are blocked.
-- The send button is named `Send message`; while active it becomes a `Stop response` button.
-- Retry controls name the exchange they retry without exposing prompt text in the accessible name.
-- Keep focus in the composer after submit where practical; if it is disabled during streaming,
-  restore focus after completion, stop, or failure.
-- Message turns use semantic articles/labels, and the thread exposes a meaningful region name.
-- Mark the response region busy while active. Announce coarse state changes in a polite live
-  region; do not put the full delta-updated Markdown in a live region.
-- Give the jump-to-latest control an explicit accessible name.
-- Disable smooth scrolling/animated streaming indicators under `prefers-reduced-motion: reduce`.
-
-### Content and security posture
-
-- The chat feature obtains product API behavior only from `@quarry/runtime`; raw browser and Tauri
-  transport remain in their established adapters.
-- Do not store the transcript, draft, prompt, response, or model in localStorage, sessionStorage,
-  URLs, route state, analytics, or the activity log.
-- Do not log prompt text, response text, Markdown ASTs, or callback payloads to the console.
-- Keep prompt/response fixtures synthetic in tests.
-- Render assistant Markdown without enabling arbitrary raw HTML. Preserve the renderer's safe URL
-  behavior and validate any new link target behavior.
-- Display only the sanitized messages supplied by the Quarry contract. Do not surface raw provider
-  bodies or IPC error details.
-- The current server still lacks production identity, authorization, tenancy, quota, and abuse
-  controls. The new interface must not be described as public-production safe.
-
-## Current-state findings
-
-| Area | Current implementation | Consequence |
-| --- | --- | --- |
-| Active route | `App.tsx` lazy-loads `SummarizePage` at `/hub/summarize`. | Repoint only this lazy route to `QueryChatPage`; keep the path. |
-| Sidebar | Research > Explore links to `/hub/summarize`; sidebar tests lock hierarchy and exclude Quick Chat. | Do not add, rename, reorder, or remove sidebar items. |
-| Summary page | `SummarizePage.tsx` owns file/path selection, summary requests, Markdown/export, and Summary/Chat tabs. | Leave the entire page isolated and unchanged; do not mine it for active chat state. |
-| Existing chat panel | `components/summarize/ChatPanel.tsx` is an inert uncontrolled textarea with inactive add/send buttons. | Keep it only as a dependency of the isolated summary page; the new route uses the new chat feature. |
-| Query transport | No `queryModel`, query SSE contract, Axum query route/service, or Tauri query relay exists in the baseline. | The predecessor plan must land first. |
-| Shared UI | Quarry already has customized Button, Textarea, Avatar, Tooltip, Icon, theme tokens, and shadcn aliases. | Reuse them beneath assistant-ui Elements or add Chat-prefixed wrappers; do not overwrite them. |
-| Markdown | `react-markdown` and `remark-gfm` are already used; assistant-ui Markdown Text has no props-driven standalone variant. | Keep the existing renderer authoritative, add a chat-scoped wrapper, and do not adopt assistant-ui runtime only for Markdown. |
-| Scrolling | `WorkspaceLayout` owns the workspace content scroller; standalone Chat Panel and Scroll Anchor provide props-driven presentation. | Keep pin/unseen state page-local and verify there is no nested/double scroll before changing shared layout. |
-| Tests | There is no summarize or chat page test. | Add focused QueryChat lifecycle and route composition coverage. |
-
-## Target flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Page as QueryChatPage / QueryChat
-    participant Runtime as @quarry/runtime
-    participant Adapter as Web or desktop QuarryApi
-    participant API as Axum query service
-
-    User->>Page: Submit prompt
-    Page->>Page: Add user turn + assistant placeholder
-    Page->>Runtime: queryModel({ prompt, files: [] }, handlers)
-    Runtime->>Adapter: Selected web/desktop implementation
-    Adapter->>API: POST /api/v1/query_model
-    API-->>Adapter: SSE started
-    Adapter-->>Page: started
-    loop each ordered semantic text delta
-        API-->>Adapter: SSE delta
-        Adapter-->>Page: delta
-        Page->>Page: Append to active assistant turn
-    end
-    API-->>Adapter: SSE completed(response)
-    Adapter-->>Page: completed(response)
-    Page->>Page: Replace buffer with authoritative response
-```
-
-Stop or route unmount invokes the cleanup returned by `queryModel`; adapters remain responsible
-for aborting the browser Fetch reader or desktop Tauri upstream request.
+- Use a page-local full-height flex column with `h-full min-h-0`; give only the transcript its own
+  scroll area and keep the composer visible at the bottom.
+- First prove that this fits inside `WorkspaceLayout`'s current padded scrolling content surface.
+  Change `WorkspaceLayout`/`WorkspaceHomeShell` only if browser geometry demonstrates parent
+  scrolling or composer loss, and then add an explicit opt-in content mode plus regression tests.
+- Preserve workspace chrome, the 40-pixel header rail, sidebar, semantic tokens, typography, and
+  active `slate-frost` theme. Do not re-enable the currently disabled dark-theme feature.
+- Use semantic tokens rather than hard-coded assistant-ui colors so the retained dark palette is
+  not broken when restored.
+- Render user turns as compact distinct blocks and assistant turns as open Markdown content. Use
+  monospace only for code.
+- Keep scrolling stable while the reader is above the bottom; do not force every delta into view.
+- Scope chat Markdown, code, scrollbar, and Element selectors under chat data slots. Do not alter
+  `.vault-markdown`, PDF viewer styles, ReUI tables, or generic code elements.
+- Do not enable raw HTML. Preserve safe URL behavior and non-executable fenced code.
+- Enter submits; Shift+Enter inserts a newline; composition/IME Enter never submits. A click path
+  remains available.
+- Use a real label or accessible name for the Textarea and all icon-only actions.
+- Disable duplicate submission while active and expose a named Stop action.
+- Move focus back to the composer after completion, failure, stop, or retry only when doing so does
+  not steal focus from transcript selection or another intentional control.
+- Announce coarse states (`started`, `completed`, `failed`, `stopped`) through one polite live
+  region. Do not announce every delta.
+- Honor `prefers-reduced-motion`; streamed text must not depend on animation for visibility.
+- Validate narrow and wide layouts. The page must not create horizontal overflow or a second page
+  scrollbar.
 
 ## Planned file changes
 
 | Path | Change |
 | --- | --- |
-| `frontend/src/App.tsx` | Lazy-load `QueryChatPage` at the existing `/hub/summarize` route and remove the active import of `SummarizePage`. |
-| `frontend/src/pages/QueryChatPage.tsx` | New thin route page preserving `WorkspaceHomeShell`, active sidebar state, and header. |
-| `frontend/src/components/chat/QueryChat.tsx` | Own page-level chat composition and connect the reducer/hook to the Chat primitives. |
-| `frontend/src/components/chat/queryChatState.ts` | Typed reducer, turn model, event mapping, and retry/cancel transitions. |
-| `frontend/src/components/chat/useQueryChat.ts` | Own the runtime subscription, cleanup ref, request generations, unmount cleanup, and focus handoff. |
-| `frontend/src/components/assistant-ui/elements/{composer,chat-panel,scroll-anchor,message-pair,error-state,stopped-run,surfaces,range}.*` | Reviewed standalone assistant-ui Element sources and their small shared utilities, rethemed without assistant-ui runtime ownership. Exact generated extensions and paths follow the inspected registry. |
-| `frontend/src/components/chat/ChatComposer.tsx` | Compose assistant-ui's standalone Composer structure with Quarry's existing multiline `Textarea`, controls, and IME-safe submit behavior. |
-| `frontend/src/components/chat/ChatThread.tsx` | Compose standalone Chat Panel and Scroll Anchor with page-local bottom-following state and an accessible jump control. |
-| `frontend/src/components/chat/ChatMessage.tsx` | Compose standalone Message Pair with Quarry turn/status props and the safe Markdown renderer. |
-| `frontend/src/components/chat/ChatMarkdown.tsx` | Chat-scoped `react-markdown`/`remark-gfm` renderer; no assistant-ui Markdown runtime or raw HTML. |
-| `frontend/src/components/chat/queryChatState.test.ts` | Pure transition coverage. |
-| `frontend/src/pages/QueryChatPage.test.tsx` | Runtime/page interaction, event order, cleanup, keyboard, and accessibility coverage. |
-| `frontend/src/App.test.tsx` | Route coverage proving `/hub/summarize` resolves to `QueryChatPage` and not the dormant summarize page. |
-| `frontend/package.json` and `frontend/package-lock.json` | Expect no new direct package for the selected standalone set; change only if the re-inspected manifests prove a retained source needs one. |
-| `frontend/src/index.css` | Add scoped assistant-ui Element and Chat Markdown styling rules using existing semantic tokens. |
-| `docs/ARCHITECTURE.md` | Document the active chat page, dormant summarize page, local state, dependency/UI layer, limitations, and tests. |
+| `frontend/src/App.tsx` | Lazy-load `QueryChatPage` at `/hub/summarize`, preserving `LazyPage`, its loading label, and all route-transition behavior. |
+| `frontend/src/pages/QueryChatPage.tsx` | Thin route page with existing home shell/sidebar state and Ask Quarry header. |
+| `frontend/src/components/chat/QueryChat.tsx` | Compose empty/thread/composer/status views. |
+| `frontend/src/components/chat/queryChatState.ts` | Typed exchange model, reducer, request-token checks, and transitions. |
+| `frontend/src/components/chat/useQueryChat.ts` | Own runtime subscription, cleanup ref, synchronous-callback safety, retry, unmount, and focus handoff. |
+| `frontend/src/components/chat/{ChatComposer,ChatThread,ChatMessage,ChatMarkdown}.tsx` | Chat-prefixed wrappers around adapted Elements and existing Quarry primitives. Combine files when a smaller cohesive implementation is clearer. |
+| `frontend/src/components/assistant-ui/elements/*` | Only reviewed standalone source and necessary utilities from the six selected Elements. |
+| `frontend/src/index.css` | Chat-scoped Element/Markdown styling using current semantic tokens and reduced-motion rules. |
+| `frontend/tests/components/chat/queryChatState.test.ts` | Pure lifecycle/stale-token transition coverage. |
+| `frontend/tests/components/chat/QueryChat.test.tsx` | Interaction, keyboard, focus, announcement, streaming, error, stop, and retry coverage. |
+| `frontend/tests/pages/QueryChatPage.test.tsx` | Shell/header and runtime integration coverage. |
+| `frontend/tests/App.test.tsx` | Route/lazy composition coverage proving Explore selects the new page. |
+| `frontend/tests/components/hub/WorkspaceLayout.test.tsx` | Change only if a shared opt-in content mode proves necessary. |
+| `frontend/package.json`, `frontend/package-lock.json` | Expected unchanged except for a directly imported dependency proven necessary by live registry inspection. |
+| `docs/ARCHITECTURE.md` | Update route, feature maturity, state ownership, UI source boundary, transport consumer, limitations, and test coverage after implementation. |
 
 Explicitly unchanged:
 
 - `frontend/src/pages/SummarizePage.tsx`;
 - `frontend/src/components/summarize/ChatPanel.tsx`;
 - `frontend/src/components/summarize/PanelTab.tsx`;
-- sidebar components and labels;
-- `QuarryApi`/web/Tauri/Axum behavior already delivered by the predecessor;
-- old summary API operations and backend routes.
+- sidebar labels/order/types and workspace session behavior;
+- predecessor contract/transports/backend after its completion;
+- existing summary contracts and routes.
 
 ## Implementation sequence
 
-### Phase 0 — Prove the predecessor and preserve boundaries
+### Phase 0 — Prove the transport prerequisite
 
-1. Re-run `git status --short` and record user-owned changes.
-2. Verify every prerequisite symbol, route, adapter, command, and focused test listed above.
-3. Run the predecessor's web, desktop, Tauri, and backend focused gates before changing UI code.
-4. Confirm the route remains `/hub/summarize`, sidebar label remains Explore, and the page will use
-   only `runtime.api.queryModel`.
-5. Record the current assistant-ui standalone Element manifests, generated paths, registry
-   dependencies, package dependencies, and CSS additions without mutating existing shared
-   primitives.
+1. Record `git status --short` and preserve all user-owned work.
+2. Verify every prerequisite symbol, route, adapter, Tauri command, cancellation path, and focused
+   test from the SSE plan.
+3. Run the predecessor's broad backend/frontend/Tauri gates.
+4. Confirm `/hub/summarize`, Explore, `activeHomeSection="summarize"`, and
+   `LazyPage label="Loading Explore"` are still the live route contracts.
+5. Inspect the six live assistant-ui manifests with the installed CLI without mutating files.
 
-Exit criteria:
+Exit: a delayed synthetic stream already works in both adapters and the UI needs no transport
+workaround.
 
-- A delayed fake query stream already reaches both adapters with cancellation and terminal rules.
-- The UI needs no contract or transport invention.
-- The worktree baseline and dependency proposal are understood.
+### Phase 1 — Adopt the minimal presentation source
 
-### Phase 1 — Import and reconcile the minimal assistant-ui Elements source
+1. Dry-run/diff every selected Element and compare proposed files with existing Quarry primitives.
+2. Install/adapt only the six standalone Elements and the helpers they actually import.
+3. Keep low-level provenance under `components/assistant-ui/elements`; expose Chat-prefixed,
+   props-driven wrappers to the feature.
+4. Replace standalone single-line input behavior with the existing Quarry Textarea and explicit
+   multiline/IME semantics.
+5. Remove model, attachment, voice, suggestion, tool, runtime, and reveal branches not used by
+   this release.
+6. Add only chat-scoped CSS and run both TypeScript targets before page integration.
 
-1. Run the dry-run/diff commands and compare every proposed file with Quarry's existing shared
-   primitives.
-2. Install only the standalone Composer, Chat Panel, Scroll Anchor, Message Pair, Error State, and
-   Stopped Run sources after review; retain upstream source references.
-3. Keep those low-level sources in `components/assistant-ui/elements` and compose them behind
-   Chat-prefixed feature exports rather than moving assistant-ui state or transport into the page.
-4. Reuse existing Button, Textarea, Tooltip, Avatar, Icon/Lucide, `cn`, `radix-ui`, and semantic
-   tokens. Replace the standalone Composer's single-line input with the chat-scoped existing
-   Textarea composition needed for multiline and IME behavior.
-5. Remove or omit unused model, attachment, voice, suggestion, tool, and runtime-bound branches.
-   Do not install Model Selector, assistant-ui runtime packages, Command/cmdk, or an AI SDK.
-6. Add a direct package only if it is imported by retained source after the live manifest review.
-   Inspect peer warnings and lockfile churn; keep `react-markdown` and `remark-gfm`.
-7. Merge only chat-scoped Element/Markdown styles into `index.css`.
-8. Run both TypeScript targets before page work so registry adaptation errors are isolated.
+Exit: no customized shared primitive was overwritten, no assistant runtime/AI SDK/extra icon or
+theme system was added, and the retained source compiles for web and desktop.
 
-Exit criteria:
+### Phase 2 — Build the deterministic lifecycle
 
-- No existing `components/ui` file was overwritten or broadly reformatted.
-- All new feature-facing exports use `Chat...` names; assistant-ui paths remain low-level source
-  ownership markers.
-- No assistant-ui provider/runtime, second transport, unused attachment/model/tool component,
-  Command/cmdk dependency, second icon system, or Markdown plugin was added.
-- Light/dark tokens and reduced-motion rules apply to the primitives.
+1. Define exchange/turn types and a discriminated reducer.
+2. Implement submit, started, ordered delta, authoritative completion, both failure classes, stop,
+   retry, and stale/duplicate event no-ops.
+3. Implement `useQueryChat` around `runtime.api.queryModel`, including exactly-once cleanup,
+   synchronous terminal callbacks, unmount, and focus policy.
+4. Keep each payload single-shot with `files: []` and optional keys absent.
+5. Test the reducer/hook behavior before composing the route.
 
-### Phase 2 — Build the deterministic query lifecycle
+Exit: every terminal/cancellation path is deterministic, retry does not duplicate a user turn, and
+earlier exchanges never enter later payloads.
 
-1. Define the exchange/turn types and discriminated reducer.
-2. Implement submit, started, ordered delta, authoritative completion, server failure, connection
-   failure, stop, retry, and reset transitions as pure operations.
-3. Add request generation checks and make stale/duplicate terminal events no-ops.
-4. Implement `useQueryChat` around `runtime.api.queryModel`, including synchronous-callback safety,
-   exactly-once cleanup, and unmount behavior.
-5. Keep the transcript page-local and make each request payload contain only its own original
-   prompt plus `files: []`.
-6. Test the reducer before composing the page.
+### Phase 3 — Compose and register the page
 
-Exit criteria:
+1. Build the empty state, thread, messages, Markdown, coarse status/error/stopped views, retry,
+   scroll anchor, and composer from props.
+2. Create the thin `QueryChatPage` in the existing shell with the Ask Quarry header.
+3. Prove the page-local full-height layout inside current `WorkspaceLayout`; add a shared opt-in
+   layout mode only if measured behavior requires it.
+4. Repoint only the `/hub/summarize` lazy import to `QueryChatPage` while preserving the loading
+   label and View Transition structure.
+5. Prove no active source imports `SummarizePage` and production builds omit its chunk.
 
-- Partial text appears before completion and is replaced by the full authoritative response.
-- Stop and unmount cancel work; late events cannot resurrect or corrupt a turn.
-- Retry does not duplicate the user turn.
-- No state is persisted or logged.
+Exit: Explore opens Ask Quarry in both targets, the sidebar and other routes are unchanged, and no
+inert future control is visible.
 
-### Phase 3 — Add the active chat page and isolate summarize
+### Phase 4 — Interaction and accessibility coverage
 
-1. Compose the empty state, standalone Chat Panel/Scroll Anchor, Message Pair turns, Error State,
-   Stopped Run, retry action, and Composer shell in `QueryChat`, all driven by Quarry props and
-   reducer state.
-2. Create `QueryChatPage` with the unchanged workspace shell/sidebar selection and Ask Quarry
-   header.
-3. Repoint only the `/hub/summarize` lazy route from `SummarizePage` to `QueryChatPage`.
-4. Verify no active source imports `SummarizePage`; do not edit or delete it or its summarize
-   components.
-5. Confirm production builds omit the legacy page chunk and include the new lazy chat chunk.
-6. Keep the composer/text thread within the existing main surface without changing the sidebar or
-   adding a global layout mode unless runtime evidence requires it.
+Cover:
 
-Exit criteria:
+- blank/whitespace rejection and duplicate-submit prevention;
+- click, Enter, Shift+Enter, and IME composition;
+- exact `{ files: [], prompt: originalPrompt }` with optional keys absent;
+- immediate user/assistant placeholder rendering;
+- synchronous `started` and terminal callbacks;
+- multiple deltas before completion and authoritative replacement;
+- completion without deltas;
+- distinct retryable server and connection failures;
+- stop/unmount exactly-once cleanup;
+- ignored late callbacks and duplicate terminals;
+- retry without duplicate user turn and later-prompt context isolation;
+- composer disabled/enabled state, focus behavior, semantic labels, and coarse live updates;
+- raw HTML not rendering in Markdown;
+- `/hub/summarize` selecting `QueryChatPage`, not `SummarizePage`;
+- unchanged sidebar hierarchy and Explore target.
 
-- Research > Explore opens the new chat in web and desktop.
-- The sidebar looks and behaves exactly as before.
-- The legacy summarize page remains in source, unregistered, and absent from active bundles.
-- No inert add-file, model, or system-instruction control is visible.
-
-### Phase 4 — Cover interaction, accessibility, and regressions
-
-Add focused tests for:
-
-- blank/whitespace prompts and duplicate submission prevention;
-- click-to-send, Enter-to-send, Shift+Enter newline, and IME composition;
-- exact `{ files: [], prompt: originalPrompt }` mapping with optional fields absent;
-- immediate user rendering and assistant placeholder creation;
-- synchronous `started`/terminal callbacks from a test adapter;
-- multiple ordered deltas visible before completion;
-- completion with no deltas and authoritative response replacement;
-- distinct retryable `failed` and `onConnectionError` states;
-- Stop and route unmount invoking cleanup exactly once;
-- late callbacks and duplicate terminals being ignored;
-- retry reusing the exchange without duplicating the user turn;
-- a later prompt not including earlier transcript content;
-- composer disabled/enabled state and focus restoration;
-- semantic message labels, busy state, polite coarse announcements, and accessible control names;
-- no raw HTML rendering in assistant Markdown;
-- `App.tsx` registering `QueryChatPage`, not `SummarizePage`, for `/hub/summarize`;
-- the existing sidebar order and Explore link tests continuing to pass unchanged.
-
-Use synthetic content only. Manual/browser verification owns pixel layout, real scrolling geometry,
-and streamed timing that happy-dom cannot prove.
-
-Exit criteria:
-
-- Focused tests cover every reducer terminal and cancellation path.
-- Existing shared-layout/sidebar/adapter tests remain green.
-- No test depends on live OpenAI, Helix, SQLite, or a real Tauri process.
+Use synthetic content only. Happy DOM does not prove actual scrolling geometry, sticky layout,
+stream timing, View Transition appearance, or responsive rendering.
 
 ### Phase 5 — Runtime verification and architecture update
 
-1. Update `docs/ARCHITECTURE.md` after implementation, not before.
-2. Run the full frontend gates and inspect the final manifest/lockfile/diff.
-3. Use the predecessor's delayed loopback fake stream to observe web and desktop behavior.
-4. Verify first delta before terminal completion, Stop cancellation, retry, completion without
-   deltas, and a post-start failure.
-5. Inspect console, browser network, desktop IPC/activity logs, and bundles for prompt/response
-   leakage and legacy-page inclusion.
-6. Inspect narrow and wide viewports, light/dark themes, reduced motion, keyboard/focus behavior,
-   scrolled-up transcript behavior, and jump-to-latest behavior.
-7. Re-run `git status --short` and distinguish any pre-existing user work.
+1. Run full frontend gates and inspect manifest/lockfile/bundles.
+2. With the predecessor's delayed loopback provider and only disposable backend dependencies,
+   inspect first-delta-before-completion, stop, retry, no-delta completion, and post-start failure
+   in web and desktop.
+3. Inspect console/network/IPC/activity logs for content leakage.
+4. Inspect keyboard/focus, reduced motion, active light theme, semantic-token compatibility,
+   narrow/wide viewports, scrolled-up behavior, and jump-to-latest.
+5. Update `docs/ARCHITECTURE.md` from implemented behavior, then inspect final diff/status.
 
-Exit criteria:
-
-- Both distributions show genuine incremental rendering and cancellation.
-- The sidebar and other workspace routes are unaffected.
-- Architecture documentation describes current code rather than this plan.
-- Final diff/status contains no generated `dist`, accidental primitive overwrite, secret, real
-  prompt/response, or unrelated dependency churn.
+If disposable Helix/backend dependencies are unavailable, do not run `cargo run` against valuable
+local data; report runtime inspection as skipped and rely on synthetic adapter/page tests.
 
 ## Verification commands for implementation
 
-Run focused checks first using the exact files added.
-
-From `frontend/`:
+Use the exact test paths created under `frontend/tests`:
 
 ```sh
-npm test -- src/components/chat/queryChatState.test.ts
-npm test -- src/pages/QueryChatPage.test.tsx
-npm test -- src/App.test.tsx
-npm test -- src/api/httpQuarryApi.test.ts
-npm test -- src/api/tauriQuarryApi.test.ts
-npm test -- src/platform/runtime.contract.test.ts
-npm test -- src/components/hub/sidebar/HomeWorkspaceSidebar.test.tsx
+cd frontend
+npm test -- tests/components/chat/queryChatState.test.ts
+npm test -- tests/components/chat/QueryChat.test.tsx
+npm test -- tests/pages/QueryChatPage.test.tsx
+npm test -- tests/App.test.tsx
+npm test -- tests/api/httpQuarryApi.test.ts
+npm test -- tests/api/tauriQuarryApi.test.ts
+npm test -- tests/platform/runtime.contract.test.ts
+npm test -- tests/components/hub/sidebar/HomeWorkspaceSidebar.test.tsx
 npm run typecheck
 npm run check:boundaries
 npm test
@@ -521,17 +400,13 @@ npm run check:web-bundle
 npm run build:desktop-ui
 ```
 
-`check:web-bundle` must run after `build:web`. Inspect both production build manifests/chunks to
-confirm `QueryChatPage` is lazy-loaded and `SummarizePage` is absent.
+`check:web-bundle` must follow `build:web`. Inspect both production builds/chunks to confirm
+`QueryChatPage` remains lazy and `SummarizePage` is unreachable.
 
-The follow-up is frontend-only once the predecessor is complete, so backend and Tauri Rust gates
-do not need to be repeated solely for page composition. If implementation changes the shared
-query contract, adapter, native relay, or backend to fill a prerequisite gap, that work belongs to
-the predecessor and requires its complete frontend/Tauri/backend matrix.
-
-For runtime inspection, use `npm run dev:web` and `npm run dev:desktop` with only disposable test
-configuration and the delayed loopback provider seam established by the predecessor. Do not use a
-live OpenAI request as routine UI verification.
+This follow-up is frontend-only once the predecessor is complete. Do not rerun backend/Tauri Rust
+gates solely for page composition. If implementation changes the shared query contract, adapter,
+native relay, middleware, or backend to close a prerequisite gap, move that work back into the SSE
+plan and run its full cross-runtime matrix.
 
 Before handoff:
 
@@ -542,86 +417,74 @@ git status --short
 
 ## Architecture documentation impact during implementation
 
-Update the relevant sections of `docs/ARCHITECTURE.md` in the implementation change:
+Update the relevant `docs/ARCHITECTURE.md` sections after implementation:
 
-- route map: `/hub/summarize` now lazy-loads `QueryChatPage`;
-- feature inventory: Explore is an active single-shot streaming query UI;
-- frontend layer map: add standalone assistant-ui Elements-derived presentation sources,
-  Chat-prefixed feature composition, and local reducer/hook ownership;
-- state narrative: transcript and in-flight cleanup are page-local and ephemeral;
-- transport narrative: the page consumes the already-documented `queryModel` contract through
-  `@quarry/runtime`;
-- UI/styling narrative: standalone assistant-ui Element sources are adapted into Quarry's
-  component/token system without adopting assistant-ui runtime, transport, or a parallel theme;
-- verification narrative: add query chat reducer/page coverage;
-- known gaps: no provider conversation context, persistence, resume, attachments, model picker,
-  system-instruction UI, identity, authorization, rate limit, or quota;
-- legacy behavior: `SummarizePage` and old summary API operations remain in source but the page has
-  no active route.
+- route map: `/hub/summarize` lazy-loads `QueryChatPage` through the existing transition/skeleton;
+- feature inventory: Explore is a single-shot streaming assistant interaction UI;
+- frontend layers: adapted standalone Element source remains presentation-only beneath
+  Chat-prefixed feature components;
+- state: transcript, draft, request token, and cleanup are page-local and ephemeral;
+- transport: the page consumes `QuarryApi.queryModel` only through `@quarry/runtime`;
+- UI/styling: chat uses existing semantic tokens, active light-theme policy, reduced motion, and
+  safe Markdown;
+- verification: reducer/component/page/route coverage lives under `frontend/tests`;
+- known gaps: no conversation context/persistence/resume, attachments, model picker,
+  system-instruction UI, retrieval/citations/tools, identity/authorization/rate limits/quotas;
+- legacy behavior: `SummarizePage` and summary APIs remain in source but the page has no route.
 
-No ADR is required: the plan does not change the runtime split, trust boundary, data owner, public
-API version, or destructive rollout.
+No ADR is required because this UI plan does not change the runtime split, data owner, public API
+version, or destructive rollout.
 
 ## Risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Registry install overwrites customized shadcn primitives. | Dry-run/diff every assistant-ui Element first, never use `--overwrite`, and require a final diff review of all generated and shared component files. |
-| assistant-ui source accidentally brings its runtime or a second transport. | Select only props-driven `@assistant-ui/elements-*` variants, forbid runtime initialization and AI SDK packages, and assert all sends still call only `runtime.api.queryModel`. |
-| The standalone Composer input breaks multiline or IME behavior. | Use the Composer shell/actions but retain Quarry's existing `Textarea` behind a chat-scoped wrapper; cover Enter, Shift+Enter, composition, labels, and focus. |
-| Registry dependencies reject the React prerelease peer version or churn the lockfile. | Reinspect manifests and peers, expect no new package for the selected set, and require both target typechecks/builds plus runtime checks for any change. |
-| Streaming Markdown flickers or incomplete code fences render poorly. | Keep the existing safe `react-markdown`/`remark-gfm` renderer, replace partial content with authoritative completion, and test split Markdown/code input. |
-| Every delta steals scroll position or causes excessive announcements. | Use bottom-follow only while already at bottom and announce coarse state outside the changing Markdown. |
-| A cancelled/old stream mutates a new exchange. | Token every request, invoke cleanup exactly once, and ignore stale callbacks. |
-| The transcript implies conversational memory. | Send only the new prompt, document the single-shot limitation in the UI/architecture, and test payload isolation. |
-| Legacy summarize code accidentally returns to the route or enters bundles. | Assert the App import/route target and inspect web/desktop build output. |
-| Global copied CSS changes other product surfaces. | Prefix Chat exports/data slots and scope code/scrollbar rules; preserve existing theme and `.vault-markdown` rules. |
-| Prompt or response content reaches logs. | No page-level logging or persistence; retain predecessor redaction tests and inspect web/desktop activity logs. |
+| Registry source overwrites customized primitives or adds a runtime. | Use installed-CLI dry-run/diff, never `--overwrite`, retain only standalone props-driven source, and review every file/package/CSS change. |
+| React canary or peer requirements drift. | Do not request latest CLI/packages; inspect the live manifest, keep dependencies minimal, and run both targets/builds. |
+| Current `WorkspaceLayout` produces nested scroll or a disappearing composer. | Prove `h-full min-h-0` in the current content box; add only an explicit opt-in layout mode if measured behavior requires it. |
+| Streaming Markdown flickers or incomplete fences render oddly. | Reuse safe Markdown, render the partial buffer plainly, and replace it with the authoritative completion. |
+| Delta updates steal scroll/focus or flood assistive technology. | Follow only when already pinned, expose jump-to-latest, keep focus policy conditional, and announce coarse states only. |
+| Cancelled/old streams mutate a new exchange. | Token requests, make cleanup idempotent, and ignore stale/duplicate callbacks. |
+| Transcript looks multi-turn although requests are stateless. | Send only the current prompt, state the limitation in UI/architecture, and test payload isolation. |
+| Legacy summarize returns to the route or bundle. | Test the route target, search active imports, and inspect both build outputs. |
+| Copied CSS affects other screens or retained dark tokens. | Scope every rule under chat data slots and use existing semantic tokens. |
+| Prompt/response reaches diagnostics. | Add no page logging/persistence and retain predecessor redaction/log-content tests. |
 
 ## Out of scope
 
-- Deleting, moving, renaming, modernizing, or reusing `SummarizePage`.
-- Removing old summarize API methods, adapters, Axum routes, OpenAI calls, or tests.
-- Changing the route path or sidebar label/order.
-- File attachments, drag/drop, paste uploads, or attachment previews.
-- Model selection, system-instruction editing, or provider settings.
-- Sending earlier transcript turns as model context.
-- Conversation IDs, `previous_response_id`, persistence, search, history, replay, reconnect, or
-  resume.
-- Multiple simultaneous queries, branching, edit-and-resend, regenerate variants, or tool calls.
-- Feedback controls, citations, reasoning/tool panels, image generation, web search, or file
-  search.
-- Replacing `react-markdown`, importing the entire assistant-ui Elements directory, initializing
-  assistant-ui runtime, or adding a second chat transport/provider.
-- Installing the linked Model Selector before Quarry defines the allowed model catalog and
-  request/default policy.
-- Backend, Tauri, SQLite, Helix, configuration, or authentication changes beyond the completed
-  predecessor plan.
+- Editing, deleting, moving, renaming, or modernizing the legacy summarize page/components.
+- Removing or changing summary contracts, adapters, Axum routes, or tests.
+- Changing route path, loading label, sidebar label/order, or `ActiveHomeSection`.
+- Attachments, drag/drop, paste upload, or previews.
+- Model selection, system-instruction editing, provider settings, or a model catalog.
+- Sending prior displayed turns as provider context.
+- Conversations, persistence, history, replay, reconnect, resume, or multiple simultaneous runs.
+- Branching, edit-and-resend, variants, feedback, citations, reasoning/tool panels, image
+  generation, retrieval, web search, or file search.
+- Replacing safe Markdown, importing the full Elements directory, or adding assistant-ui runtime,
+  provider, AI SDK, or second theme/icon system.
+- Backend, Tauri, configuration, SQLite, Helix, or authentication work beyond the completed SSE
+  prerequisite.
 
 ## Definition of done
 
-- `/hub/summarize` loads the new `QueryChatPage` through the shared lazy route in web and desktop.
-- The existing sidebar is visually and behaviorally unchanged, with Explore still active on the
-  route.
-- `SummarizePage.tsx`, its `ChatPanel`, and `PanelTab` remain unchanged in source, have no active
-  route/import entrypoint, and are absent from production bundles.
-- A non-blank prompt is sent once as the original string with `files: []`; model and instructions
-  remain omitted and server-owned.
-- The user turn appears immediately, deltas appear once and in order before terminal completion,
-  and the final response is replaced by authoritative `completed.response`.
-- Stop, failure, connection failure, retry, completion-without-deltas, unmount, duplicate terminal,
-  and stale callback paths behave deterministically.
-- Only one request is active; prior displayed exchanges are never silently sent as context or
-  persisted.
-- The selected standalone assistant-ui Elements coexist with Quarry's existing shared primitives
-  without an overwrite, assistant-ui runtime/provider, second transport, or second theme/icon
-  system.
-- Keyboard, IME, focus, accessible names, busy/live feedback, scroll preservation, reduced motion,
-  light/dark themes, and responsive layouts are verified.
-- No prompt, response, raw provider error, secret, or real user content appears in logs, storage,
-  URLs, tests, or generated artifacts.
-- Focused tests, full frontend gates, both production UI builds, and delayed-stream runtime checks
-  pass.
-- `docs/ARCHITECTURE.md` reflects the active chat page and dormant summarize page.
-- `git diff --check` is clean and final status review distinguishes pre-existing work from the
-  implementation.
+- `/hub/summarize` lazy-loads `QueryChatPage` through the existing View Transition/LazyPage flow in
+  web and desktop; Explore and the sidebar are otherwise unchanged.
+- Legacy summarize source and APIs remain unchanged, unregistered, compiling, and absent from
+  active production chunks.
+- The page sends one original non-blank prompt with `files: []` and no model/instruction keys;
+  earlier exchanges never become provider context.
+- User turns appear immediately; deltas render once/in order; `completed.response` replaces the
+  partial buffer; all failure/stop/retry/no-delta/stale/unmount paths are deterministic.
+- Only one request is active and cleanup is exactly-once from the UI's perspective.
+- Selected standalone Element source coexists with Quarry primitives without overwrites, an
+  assistant runtime/provider, an AI SDK, dead affordances, or a parallel style system.
+- Keyboard, IME, accessible names, focus, live feedback, scroll preservation, jump-to-latest,
+  reduced motion, active theme, retained semantic tokens, and responsive layout are verified.
+- No query/provider content appears in logs, storage, URLs, fixtures, screenshots, or generated
+  artifacts.
+- Focused tests, full frontend gates, both UI builds, bundle inspection, and feasible delayed
+  runtime checks pass or any unavailable manual check is reported precisely.
+- `docs/ARCHITECTURE.md` reflects the active query page and dormant summarize page.
+- `git diff --check` is clean and final status review distinguishes implementation changes from
+  user-owned work.

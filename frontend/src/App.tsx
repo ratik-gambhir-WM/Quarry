@@ -66,6 +66,14 @@ function App() {
           />
           <Route element={<DealRoomPage />} path="/hub/deals/:dealId" />
           <Route
+            element={<DealRoomPage initialView="deliverables" />}
+            path="/hub/deals/:dealId/deliverables"
+          />
+          <Route
+            element={<DealRoomPage initialView="deliverable-templates" />}
+            path="/hub/deals/:dealId/deliverables/templates"
+          />
+          <Route
             element={<LazyPage label="Loading data room"><DataRoomPage /></LazyPage>}
             path="/hub/deals/:dealId/data-room"
           />

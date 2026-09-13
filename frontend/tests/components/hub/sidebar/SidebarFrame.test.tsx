@@ -10,7 +10,7 @@ import { SidebarFrame } from "@/components/hub/sidebar/SidebarFrame";
 describe("SidebarFrame", () => {
   afterEach(cleanup);
 
-  it("exposes the active sidebar as an in-place header switcher", () => {
+  it("renders the active sidebar identity without a mock switcher", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
         <SidebarFrame
@@ -24,7 +24,8 @@ describe("SidebarFrame", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain('aria-label="Switch sidebar. Current sidebar: Deal Hub"');
+    expect(markup).toContain("Deal Hub");
+    expect(markup).not.toContain("Switch sidebar");
     expect(markup).toContain("relative flex h-12 shrink-0 items-center gap-2");
     expect(markup).not.toContain("border-b border-outline-variant/70");
     expect(markup.indexOf("Deal Hub")).toBeLessThan(markup.indexOf("Current navigation"));

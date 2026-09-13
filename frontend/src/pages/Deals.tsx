@@ -30,12 +30,6 @@ const DealsKanban = lazy(() =>
   loadDealsKanban().then((module) => ({ default: module.DealsKanban })),
 );
 
-const scopeLabels: Record<DealScope, string> = {
-  all: "All deals",
-  current: "Current deals",
-  historic: "Historic deals",
-};
-
 export function Deals() {
   const { email, navigationState } = useWorkspaceSession();
   const [query, setQuery] = useState("");
@@ -58,6 +52,7 @@ export function Deals() {
         <WorkspaceHeader
           actions={
             <>
+              <DealsHeaderMetrics />
               <DealLifecycleFilter
                 onScopeChange={(nextScope) => startTransition(() => setScope(nextScope))}
                 scope={scope}
@@ -89,6 +84,23 @@ export function Deals() {
   );
 }
 
+function DealsHeaderMetrics() {
+  const deals = useWorkspaceHomeDeals();
+  const counts = useMemo(() => getDealCounts(deals), [deals]);
+
+  return (
+    <div
+      aria-label="Deal portfolio counts"
+      aria-live="polite"
+      className="mr-2 flex items-center gap-4 whitespace-nowrap text-[12px] font-normal text-muted"
+    >
+      <span><span className="font-medium tabular-nums text-text-main">{counts.total}</span> total</span>
+      <span><span className="font-medium tabular-nums text-text-main">{counts.current}</span> current</span>
+      <span><span className="font-medium tabular-nums text-text-main">{counts.historic}</span> historic</span>
+    </div>
+  );
+}
+
 type DealsContentProps = {
   navigationState?: WorkspaceLocationState;
   onQueryChange: (query: string) => void;
@@ -103,7 +115,6 @@ function DealsContent({ navigationState, onQueryChange, onScopeChange, query, sc
   const navigate = useNavigate();
   const deferredQuery = useDeferredValue(query);
 
-  const counts = useMemo(() => getDealCounts(deals), [deals]);
   const visibleDeals = useMemo(
     () => filterDealPortfolioViews(deals, deferredQuery, scope),
     [deals, deferredQuery, scope],
@@ -115,18 +126,7 @@ function DealsContent({ navigationState, onQueryChange, onScopeChange, query, sc
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 pb-10">
-      <div>
-        <h2 className="text-[22px] font-medium leading-7 tracking-[-0.015em] text-text-main [font-family:var(--font-heading)]">
-          {scopeLabels[scope]}
-        </h2>
-        <div aria-live="polite" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] font-normal text-muted">
-          <span><span className="font-medium tabular-nums text-text-main">{counts.total}</span> total</span>
-          <span><span className="font-medium tabular-nums text-text-main">{counts.current}</span> current</span>
-          <span><span className="font-medium tabular-nums text-text-main">{counts.historic}</span> historic</span>
-        </div>
-      </div>
-
+    <div className="flex w-full flex-col gap-5 pb-10">
       {visibleDeals.length === 0 ? (
         <DealsEmptyState onReset={resetFilters} />
       ) : view === "table" ? (

@@ -35,6 +35,22 @@ impl QuarryHttpClient {
         self.send_json(self.client.get(self.url(path)?)).await
     }
 
+    pub async fn delete(&self, path: &str) -> Result<(), String> {
+        let response = self
+            .client
+            .delete(self.url(path)?)
+            .send()
+            .await
+            .map_err(|error| format!("Quarry API request failed: {error}"))?;
+        if response.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(());
+        }
+        if !response.status().is_success() {
+            return Err(response_error(response).await);
+        }
+        Err("Quarry API returned an invalid delete response".to_string())
+    }
+
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         self.send_json(self.client.post(self.url(path)?).json(&body))
             .await
@@ -87,8 +103,11 @@ async fn response_error(response: reqwest::Response) -> String {
         .and_then(|value| {
             value
                 .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
+                .and_then(|error| {
+                    error
+                        .as_str()
+                        .or_else(|| error.get("message").and_then(Value::as_str))
+                })
                 .map(str::to_string)
         })
         .filter(|message| !message.trim().is_empty())
