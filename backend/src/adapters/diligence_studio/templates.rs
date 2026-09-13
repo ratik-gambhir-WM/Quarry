@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::Cursor, time::Duration};
+use std::{collections::HashSet, io::Cursor};
 
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::StreamExt;
@@ -7,7 +7,7 @@ use reqwest::{header::CONTENT_TYPE, Response, StatusCode};
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::client::{DiligenceStudioClient, APP_ID_HEADER, DILIGENCE_STUDIO_APP_ID};
+use super::client::{DiligenceStudioClient, DILIGENCE_STUDIO_APP_ID};
 
 pub const MAX_TEMPLATE_CATALOG_ITEMS: usize = 1_000;
 pub const MAX_TEMPLATE_PREVIEW_PAGES: usize = 100;
@@ -21,7 +21,6 @@ const MAX_DIMENSION: u32 = 8_192;
 const MAX_PAGE_PIXELS: u64 = 100_000_000;
 pub const MAX_TEMPLATE_ID_BYTES: usize = 256;
 const MAX_PREVIEW_URL_BYTES: usize = 2_048;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const PNG_DATA_URL_PREFIX: &str = "data:image/png;base64,";
 pub const POWERPOINT_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -123,11 +122,7 @@ impl DiligenceStudioClient {
             .query_pairs_mut()
             .append_pair("page", &requested_page.to_string());
         let response = self
-            .http
             .get(endpoint)
-            .header(APP_ID_HEADER, DILIGENCE_STUDIO_APP_ID)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
             .await
             .map_err(|error| SlideTemplateClientError::Request(error.to_string()))?;
         if !response.status().is_success() {
@@ -173,11 +168,7 @@ impl DiligenceStudioClient {
             .pop_if_empty()
             .push(template_id);
         let response = self
-            .http
             .delete(endpoint)
-            .header(APP_ID_HEADER, DILIGENCE_STUDIO_APP_ID)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
             .await
             .map_err(|error| SlideTemplateClientError::Request(error.to_string()))?;
         if response.status() == StatusCode::NO_CONTENT {
@@ -203,13 +194,11 @@ impl DiligenceStudioClient {
             .map_err(SlideTemplateClientError::RequestBuild)?;
         endpoint.query_pairs_mut().append_pair("kind", "diagram");
         let response = self
-            .http
-            .post(endpoint)
-            .header(APP_ID_HEADER, DILIGENCE_STUDIO_APP_ID)
-            .header(CONTENT_TYPE, POWERPOINT_CONTENT_TYPE)
-            .timeout(REQUEST_TIMEOUT)
-            .body(bytes)
-            .send()
+            .post(endpoint, |request| {
+                request
+                    .header(CONTENT_TYPE, POWERPOINT_CONTENT_TYPE)
+                    .body(bytes)
+            })
             .await
             .map_err(|error| {
                 SlideTemplateClientError::Request(if error.is_timeout() {

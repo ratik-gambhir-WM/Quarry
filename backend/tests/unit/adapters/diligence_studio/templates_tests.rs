@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::adapters::diligence_studio::client::APP_ID_HEADER;
+
 use axum::{
     body::{Body, Bytes},
     extract::Query,
