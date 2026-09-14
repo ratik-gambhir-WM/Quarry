@@ -1,9 +1,10 @@
 # Diligence Canvas template-editor integration plan
 
-Status: proposed
+Status: proposed; revalidated 2026-09-14
 
-Baseline: live Quarry, Diligence Canvas, and Diligence Studio source re-inspected 2026-09-13,
-including Quarry's active workspace-route, feature-orchestration, and bundle-budget refactor
+Baseline: live Quarry at `f195da7`, Diligence Studio `main` at `c1665ad`, and the standalone
+Diligence Canvas source re-inspected 2026-09-14. This includes Quarry's committed workspace-route,
+feature-orchestration, and bundle-budget refactor plus the later schema-v7 and Deals UI changes.
 
 Scope: copy the reusable Diligence Canvas source into Quarry, make it a transport-free controlled
 editor, open it after a template-preview selection, and retrieve the selected template's hydrated
@@ -46,6 +47,7 @@ practical.
 
 | Area | Live behavior | Planning consequence |
 | --- | --- | --- |
+| Post-plan Quarry changes | The workspace route split and bundle budgets are now committed. Later commits moved SQLite to schema version 7, refined the Deals/add-deal UI, renamed the `/hub/summarize` loading label to Assistant, and removed three completed plan files. | None changes this editor's target route, API slice, or state ownership. Preserve schema v7 and the current UI primitives/labels, do not revive removed plans, and keep this slice free of SQLite changes. |
 | Workspace routes | `App.tsx` keeps Login eager and lazy-loads one `WorkspaceRoutes` boundary for `/hub/*`. `WorkspaceRoutes.tsx` owns the lazy nested route manifest. | Register the editor as another lazy Deal Room child in `WorkspaceRoutes.tsx`; do not move workspace routes back into `App.tsx` or create another workspace provider. |
 | Deal Room composition | `DealRoomPage` is now a persistent parent shell with an `<Outlet>`. Lazy leaf pages under `pages/deal-room/` own their `WorkspaceMain`, header, and feature composition through `useDealRoom()`. | Add a `DeliverableTemplateEditorPage` leaf. The existing `/deliverables` prefix logic already keeps the Deliverable sidebar item active, so no `initialView` branch or new local view router belongs in `DealRoomPage`. |
 | Gallery route | `DeliverableTemplatesPage` owns `/hub/deals/:dealId/deliverables/templates`, its `WorkspaceMain` header, navigation callbacks, and the route-scoped `TemplatePreviewProvider`. | Put editor navigation in this route page and keep catalog state mounted only for the gallery. Direct links, refresh, Back, and Forward remain URL-driven on both routers. |
@@ -53,18 +55,18 @@ practical.
 | Gallery state | The route-scoped `TemplatePreviewProvider` owns paginated reads, imports, deletes, refresh, stale-result protection, and feedback through `useSyncExternalStore`. | Do not put editor-document state into this catalog store or the Deal Room outlet context. Use a separate request-scoped editor store with explicit release on unmount. |
 | Quarry frontend API | `QuarryApi` already has preview, delete, and PPTX-import methods with separate HTTP and Tauri mappings. | Add one typed `getTemplate` method to the same contract and both adapters. No raw `fetch` belongs in the copied library or feature components. |
 | Quarry backend | The templates vertical slice already owns route, handler, service, and the injected Diligence Studio adapter. | Extend this slice with a GET on the existing parameterized template path. Do not add another client, service locator, or generic upstream proxy. |
-| Diligence client seam | The committed shared client centralizes the fixed app header and 30-second timeout, and the current Quarry working tree has no template-backend edits. | Add the GET operation through the existing helper seam. Re-run status before implementation because the surrounding frontend refactor is still active and later backend work remains user-owned. |
+| Diligence client seam | The committed shared client centralizes the fixed app header and 30-second timeout, and the current Quarry working tree is clean at this revalidation baseline. | Add the GET operation through the existing helper seam. Re-run status before implementation and preserve any later user-owned work. |
 | Upstream JSON | Diligence Studio already serves a template through both `/api/v1/templates/:templateId` and `/api/v1/import/:templateId`. `find()` hydrates stored image references into data URIs. | Use `/templates/:templateId`, matching the catalog resource. Do not add an asset endpoint for the initial editor flow. |
-| Upstream ownership | The inspected Diligence Studio worktree has extensive uncommitted server changes. | Ship only against a committed/version-pinned upstream contract, or explicitly record the coordinated rollout dependency. Quarry should not silently depend on a transient local worktree. |
-| Canvas source | `/Users/rgambhir/slide-template-endpoints/web/src/lib/diligence-canvas` contains 52 files (~368 KiB), is not in a Git repository, and includes five colocated tests. | Copy the current source as a reviewed snapshot, retain provenance/adaptation notes, and move tests under Quarry's `frontend/tests` tree. Do not place `*.test.*` below `frontend/src`. |
+| Upstream ownership | Diligence Studio is now clean on `main` at `c1665ad`; the app-scoping/retrieval contract was committed in `84fef3b`. The later `c1665ad` commit adds a future classification/retrieval plan but does not change the implemented template API. | Record `84fef3b` as the minimum known-compatible upstream revision (or pin the coordinated deployment to the revalidated `c1665ad`). The editor must continue to use the existing full-template GET and must not depend on the proposed query/Agent surface. |
+| Canvas source | `/Users/rgambhir/slide-template-endpoints/web/src/lib/diligence-canvas` remains 52 files (~368 KiB), is not in a Git repository, includes five colocated tests, and has no file newer than the previous Quarry plan baseline. | Copy the current source as a reviewed snapshot, retain provenance/adaptation notes, and move tests under Quarry's `frontend/tests` tree. Do not place `*.test.*` below `frontend/src`. |
 | Canvas dependencies | The copy directly needs `platejs@53.3.11`, `@platejs/basic-nodes@53.0.0`, and `@platejs/basic-styles@53.0.0`; their React peers accept React 18+. | Add these exact direct dependencies with npm. Preserve Quarry's React 19 canary, `.npmrc`, and unrelated lockfile entries. |
 | Bundle shape | Login is eager; the workspace route tree, Deal Room parent, and every Deal Room leaf are lazy. Both builds now emit manifests and enforce a 350,000-byte entry budget plus a strict sub-500,000-byte limit for every application JavaScript chunk. | Preserve the route split and add a second lazy boundary around the heavy canvas implementation so opening the workspace or gallery does not fetch Plate. If the editor chunk is oversized, split it at source/dynamic-import boundaries instead of raising the new budget. |
 
-The older `plans/diligence-studio-template-import-plan.md` is no longer the live implementation
-baseline: its import behavior is now present in code. Treat current manifests, adapters, routes,
-tests, and active working-tree changes as authoritative. In particular, preserve the uncommitted
-`frontend/src/app/` and `frontend/src/pages/deal-room/` route split and the manifest-driven bundle
-checks rather than implementing against the older monolithic `App.tsx`/`DealRoomPage` shape.
+The completed template-import and bundle-size plans were removed from `plans/` after their behavior
+landed. Treat current manifests, adapters, routes, tests, and any later working-tree changes as
+authoritative. In particular, preserve the committed `frontend/src/app/` and
+`frontend/src/pages/deal-room/` route split and the manifest-driven bundle checks rather than
+implementing against the older monolithic `App.tsx`/`DealRoomPage` shape.
 
 ## Target request and state flow
 
@@ -195,9 +197,10 @@ unescaped caller-controlled path or log the full upstream URL/document body.
 
 ### Phase 0 — Revalidate the moving baseline
 
-1. Run `git status --short` in Quarry and preserve the active uncommitted workspace-route,
-   data-room, summarize, sidebar, and bundle-budget work plus any later user changes. Do not assume
-   the currently clean template-backend paths will still be clean.
+1. Run `git status --short` in Quarry. The 2026-09-14 baseline is clean at `f195da7`, with the route
+   split, bundle budgets, schema version 7, Deals UI refinements, and completed-plan removals already
+   committed. Preserve any later user changes and do not assume the template paths will remain
+   clean.
 2. Re-open the live `DiligenceStudioClient`, template adapter/service/routes, frontend contract,
    carousel, `WorkspaceRoutes`, Deal Room outlet pages, tests, manifests, and bundle-size scripts
    before editing.
@@ -205,13 +208,15 @@ unescaped caller-controlled path or log the full upstream URL/document body.
    Record the source name/date and the Quarry-specific removals in the copied README without
    committing an absolute developer-machine path.
 4. Confirm Diligence Studio's versioned `GET /api/v1/templates/:templateId` still returns the
-   hydrated `{ presentation: ... }` document for `Quarry_WestMonroe` and that its own contract is
-   committed or rollout-pinned.
+   hydrated `{ presentation: ... }` document for `Quarry_WestMonroe`. Require a deployment that
+   contains at least the committed app-scoping contract in `84fef3b`; the revalidated clean source
+   revision is `c1665ad`.
 5. Inspect the source Plate package peer requirements against the live Quarry React canary before
    installing; do not change React, Vite, TypeScript, or Tailwind versions to accommodate the copy.
 
-Exit: the plan still matches all three live codebases, the active frontend refactor remains intact,
-and any newly overlapping user-owned edits have a surgical integration point.
+Exit: the plan still matches all three live codebases, Quarry's committed route/bundle/schema-v7
+baseline remains intact, the compatible Diligence Studio revision is recorded, and any newly
+overlapping user-owned edits have a surgical integration point.
 
 ### Phase 1 — Add the Quarry template-document vertical slice
 
@@ -410,6 +415,8 @@ the full Tauri format, Clippy, tests, desktop typecheck, boundary check, and des
   Studio directly.
 - Axum sends the fixed `Quarry_WestMonroe` app identity upstream, bounds/validates the response,
   preserves 404, sanitizes other failures, and sets `private, no-store` on success.
+- The coordinated Diligence Studio deployment contains at least commit `84fef3b`; no editor code
+  depends on the later proposed template-query or Agent surface.
 - Hydrated image data renders without a separate asset request.
 - The canvas copy has no custom API/base-URL/brand-logo props, fetch override, import/export
   transport, or tests under `frontend/src`.
