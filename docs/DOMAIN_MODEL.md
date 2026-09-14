@@ -1,5 +1,7 @@
 # Quarry domain and data model
 
+# Version 1
+
 | Field | Value |
 | --- | --- |
 | Status | Current-state companion to `ARCHITECTURE.md` |
