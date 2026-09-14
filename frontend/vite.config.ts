@@ -7,7 +7,20 @@ export default defineConfig(({ mode }) => {
   const target = mode === "desktop" ? "desktop" : "web";
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: "quarry-bundle-target",
+        generateBundle() {
+          this.emitFile({
+            fileName: ".vite/bundle-target.json",
+            source: `${JSON.stringify({ target })}\n`,
+            type: "asset",
+          });
+        },
+      },
+    ],
     resolve: {
       alias: {
         "@": new URL("./src", import.meta.url).pathname,
@@ -16,6 +29,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     clearScreen: false,
+    build: {
+      manifest: true,
+    },
     server: {
       port: 1420,
       strictPort: true,

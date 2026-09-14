@@ -244,30 +244,35 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 
 ### 5.2 Route map
 
-[`frontend/src/App.tsx`](../frontend/src/App.tsx) declares the shared routes:
+[`frontend/src/App.tsx`](../frontend/src/App.tsx) declares the eager outer routes and lazy workspace
+boundary; [`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares
+the shared `/hub/*` route tree:
 
 | Route | Page | Loading |
 | --- | --- | --- |
 | `/` | Redirect to `/login` | eager |
 | `/login` | `LoginPage` | eager |
-| `/hub` | `HubPage` | eager |
-| `/hub/account` | `AccountPage` | eager |
+| `/hub` | `HubPage` | lazy workspace route and page |
+| `/hub/account` | `AccountPage` | lazy workspace route and page |
 | `/hub/vault` | `GlobalVaultPage` | lazy |
 | `/hub/initiatives/vault` | `VaultPage` | lazy |
 | `/hub/summarize` | `SummarizePage` | lazy |
 | `/hub/logs` | `LogsPage` | lazy |
 | `/hub/deals` | `Deals` | lazy; currently uncommitted |
-| `/hub/deals/:dealId` | `DealRoomPage` | eager |
-| `/hub/deals/:dealId/deliverables` | `DealRoomPage` | eager |
-| `/hub/deals/:dealId/deliverables/templates` | `DealRoomPage` | eager |
-| `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy |
+| `/hub/deals/:dealId` | `DealRoomPage` + `DealRoomOverviewPage` | lazy parent and nested leaf |
+| `/hub/deals/:dealId/activity` | `DealActivityPage` | lazy nested leaf |
+| `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy nested leaf |
+| `/hub/deals/:dealId/analysis` | `DealAnalysisPage` | lazy nested leaf |
+| `/hub/deals/:dealId/deliverables` | `DeliverablesPage` | lazy nested leaf |
+| `/hub/deals/:dealId/deliverables/templates` | `DeliverableTemplatesPage` | lazy nested leaf |
 | all other paths | Redirect to `/login` | eager |
 
-Both router targets opt into React transitions. `App.tsx` keys one shared React View Transition
-boundary by pathname, so web and desktop route changes cross-fade while unsupported browsers fall
-back to immediate navigation. Lazy route boundaries commit a shadcn-based workspace skeleton on
-the destination route and animate the later content reveal; deal and Data Room lookup waits use
-the same skeleton rather than holding the prior page. Reduced-motion CSS disables the animation.
+Both router targets opt into React transitions. `App.tsx` keeps Login eager and loads one
+`WorkspaceRoutes` boundary for `/hub/*`; the workspace provider remains mounted while nested routes
+change. Deal Room is a parent route whose shared sidebar and deal-scoped state wrap lazy child
+routes, so a URL, refresh, Back, or Forward action selects the same view without a second local
+view router. Lazy boundaries commit an accessible workspace or in-content skeleton while their
+module loads. Reduced-motion CSS disables transition animation.
 
 There is no authenticated route guard. Workspace email is carried in router state and mirrored to
 `sessionStorage` under `quarry.workspace.email`. These navigation conveniences are not identity or
@@ -279,7 +284,7 @@ authorization controls.
 | --- | --- | --- |
 | `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, summarize |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
-| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, popover, view transition, registry arc menu and floating panel |
+| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, registry arc menu and floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
@@ -298,24 +303,35 @@ global state or query-cache library.
   and updates the browser theme color. The dark palette remains defined for restoration, but the
   current feature flag normalizes stored or requested dark mode to `slate-frost` and hides the
   profile theme picker.
-- `WorkspaceHomeShell` loads deals and provides them through a context. The context currently
-  defaults to an empty array rather than failing outside the provider.
-- Workspace shells render their route-specific sidebar navigation directly. The Deal Hub,
-  Deal Room, and Data Room headers identify the active sidebar but do not offer fixture-backed
-  alternate sidebar spaces.
+- `WorkspaceProvider` owns workspace session and deal-resource state for `/hub/*`.
+  `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
+- Workspace shells render their route-specific sidebar navigation directly. The Deal Hub and
+  Deal Room headers identify the active sidebar but do not offer fixture-backed alternate sidebar
+  spaces. The home sidebar labels `/hub/summarize` as Assistant and uses an animated Twitch glyph.
+  An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
+  by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
+  with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
+  explorer's left-arrow back control returns to Deal Home.
 - `AccountPage` owns its profile request. Profile-menu navigation commits `/hub/account`
   immediately with the workspace email, and the destination page renders a skeleton until the
   request resolves to success, empty, or error content.
-- `useWorkspaceDeals` fetches once, maps persisted deals, merges server records with the explicit
-  `fixtures/workspace/portfolio.ts` records by ID, and silently falls back to those fixtures when
-  the request fails.
+- `useWorkspaceDeals` has explicit loading, success, and error states. Its default `api` mode maps
+  server records and exposes a retryable error without fixture fallback. Explicit `demo` mode
+  dynamically imports `fixtures/workspace/portfolio.ts` and the shell visibly labels the result
+  as demo data.
 - The PDF viewer uses an internal context plus focused hooks for document loading, zoom,
   virtualization, keyboard behavior, selection, page tracking, drop, and printing.
-- A Data Room file selection mounts that PDF viewer chrome before preview bytes resolve. The
-  filename and Close action remain available while document controls are disabled and a
-  page-shaped skeleton occupies the canvas; the resolved PDF replaces the skeleton in the same
-  viewer shell.
-- `DataRoomPage` owns document-search coordination independently of the selected preview. The
+- `useDataRoomContents` owns independent local-tree and stored-document resources, stale-request
+  protection, retry, and their derived explorer/review model. `useDocumentSession` owns one
+  selected document plus preview and raw-text request lifecycles; closing it invalidates pending
+  work and releases retained preview/text values.
+- A Data Room file selection lazy-loads the document-preview module. Its local Suspense fallback
+  preserves the filename and an accessible Close action; once loaded, the existing PDF viewer
+  chrome shows preview-byte loading and errors. The PDF worker remains a separate emitted asset
+  and is not requested by an unselected Data Room. The selected-document session also owns the
+  sidebar swap: the Data Room explorer exists only while the preview surface is open, and the
+  workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
+- `DataRoomWorkspace` owns document-search coordination independently of the selected preview. The
   enabled search action stays in the persistent arc menu across Data Room states, while the
   reusable search component accepts result-activation, focus, portal, and trigger contracts. A
   selected preview exposes only generic page-count, requested-page, and focus capabilities; this
@@ -323,9 +339,10 @@ global state or query-cache library.
 - `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
   panel is a frontend-local scaffold: its text survives panel close/reopen during the current
   Data Room route mount, but is neither persisted nor connected to an API.
-- `DealRoomPage` owns the sidebar-level Deal Room view, the route-backed Deliverables and template
-  gallery views, and a nested overview section. The Deliverables summary links to a dedicated
-  template route whose request-scoped external store exposes loading, empty, error/retry, and
+- `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
+  timeline state for URL-backed nested routes. Its keyed deal boundary initializes those local
+  values for a new deal without render-derived effects. The Deliverables summary links to a
+  dedicated template route whose request-scoped external store exposes loading, empty, error/retry, and
   populated states without page-level effect state. The store owns mutually exclusive template
   deletion, PPTX import, and catalog-refresh operations. It keeps the current carousel visible
   during writes, refreshes every preview page after a successful import, and distinguishes a
@@ -337,8 +354,8 @@ global state or query-cache library.
   and Deliverable under a Deal Artifacts section. Their animated
   folder-tree, file-stack, and ship icons respectively honor the operating system's reduced-motion
   preference.
-  Deal Room tabs and both Deliverables headers
-  occupy the same fixed-height `WorkspaceLayout` header rail and bottom divider. The overview
+  Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
+  rail and bottom divider inside the persistent `WorkspaceShell`. The overview
   section enables Overview and File Summary today; Evidence, Findings, Data Points, Open Items,
   and History remain explicitly disabled until typed backing data and view behavior exist. The
   page consumes already extracted/persisted key questions and does not trigger extraction. A
@@ -347,21 +364,26 @@ global state or query-cache library.
   external resource; neither behavior turns the dormant SharePoint client into an import
   integration.
 - A populated Data Room with no selected document renders a read-only ReUI file-review grid built
-  from the same explorer nodes. File identity and folder context remain runtime-derived, while the
-  displayed review findings are explicitly illustrative fixtures. Its compact search control is
-  left-aligned with the grid and expands in normal layout flow so the adjacent status filters move
-  with it; search, status, and file-type controls use a consistent 12-pixel text size. Selecting a
-  file from the grid enters the existing preview state; an empty Data Room continues to use the
-  upload-first state.
+  from the same explorer nodes inside one direct, full-size inset main surface. File identity and
+  folder context remain runtime-derived, while the displayed review findings are explicitly
+  illustrative fixtures. Its compact search control is left-aligned with the grid and expands in
+  normal layout flow so the adjacent status filters move with it; search, status, and file-type
+  controls use a consistent 12-pixel text size. Selecting a file from the grid enters the existing
+  preview state and swaps the Deal Room sidebar for the file explorer without nesting another main
+  container; an empty Data Room continues to use the upload-first state.
+- `useSummarizeWorkflow` owns picker normalization, file selection, API request state, and stale
+  completion protection. `SummarizePage` composes that model, while the Markdown renderer/export
+  panel is lazy-loaded only after a non-empty summary exists.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
 Runtime fixtures live under `frontend/src/fixtures/`, grouped by feature and imported directly by
 every consumer. This makes the fixture tree a removable development boundary: deleting it should
 surface every remaining fixture-backed product path as an import/type failure. Fixtures make
-development screens usable when the backend is unavailable, but they are not authoritative
-product data. New code must keep fallback data visibly distinct from successful server state and
-avoid masking operational failures.
+explicit demo and presentational screens usable without authoritative product data. Demo-backed
+state is visibly labelled; API failures remain failures and do not select fixtures implicitly.
+New code must keep fixture data distinct from successful server state and avoid masking
+operational failures.
 
 ### 5.5 Feature inventory and maturity
 
@@ -369,7 +391,7 @@ avoid masking operational failures.
 | --- | --- | --- |
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
-| Deals | Search/filter, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Current table/Kanban implementation is uncommitted |
+| Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; imported templates without an upstream-generated preview remain absent from the preview-only gallery; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
@@ -410,6 +432,9 @@ trigger.
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
 and primitives instead of adding hard-coded parallel color/spacing systems.
+The Deals add-deal flow composes the shared ReUI/shadcn dialog, field, input, select, and button
+primitives. Its portal overlay remains separate from the legacy named modal view transition so
+opening the dialog does not capture the page chrome as part of that transition.
 
 The live working tree includes React canary View Transition wrappers and CSS transition recipes.
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
@@ -611,7 +636,7 @@ result properties are currently snake_case because their Rust DTO lacks a rename
 flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
-    Bootstrap --> Sqlite[Open SQLite and run schema v6 migration]
+    Bootstrap --> Sqlite[Open SQLite and run schema v7 migration]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -723,7 +748,7 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 SQLite schema version 6
+### 9.1 SQLite schema version 7
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -734,7 +759,7 @@ schema currently contains:
 | `users` | Development user/profile records and API key | Used by user/deal services |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Core deal record and owner reference | Used |
-| `deal_metadata` | Key-question JSON and an optional local/SharePoint source | Used |
+| `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; the three document-link columns are not yet mapped by a service or route |
 | `quarry_files` | Logical file identity, deal/workspace, soft-delete metadata | Used |
 | `quarry_file_versions` | Immutable version identity/hash/current marker | Used |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
@@ -743,6 +768,7 @@ Key invariants include:
 
 - deals reference an existing user
 - deal metadata has at most one of local path or SharePoint link; both may be absent
+- SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
 - logical files belong to one deal/workspace
 - versions are unique by `(file_id, version_number)` and `(file_id, content_sha256)`
 - at most one current version exists per logical file
@@ -750,9 +776,11 @@ Key invariants include:
 - archiving a deal retains its file records
 
 There is no migrations directory. `PRAGMA user_version` is the migration marker. Databases below
-version 6 are upgraded by dropping all application tables and recreating the complete schema;
-databases above version 6 fail startup. This is deliberately documented as destructive behavior,
-not a production-safe incremental migration strategy.
+version 6 are upgraded by dropping all application tables and recreating the complete version 7
+schema. Version 6 databases are upgraded to version 7 in place by adding the nullable
+`sow_link`, `fact_sheet_link`, and `rl_link` columns to `deal_metadata`; existing rows are
+preserved. Databases above version 7 fail startup. The pre-version-6 rebuild remains deliberately
+destructive and is not a production-safe incremental migration strategy.
 
 ### 9.2 Helix versioned file graph
 
@@ -893,6 +921,7 @@ an expanded viewer contract.
 | Variable | Runtime | Meaning | Security classification |
 | --- | --- | --- | --- |
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
+| `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
 
 Local development has one live environment file per build root: `frontend/.env` for public Vite
@@ -1064,6 +1093,9 @@ Coverage currently includes:
   preservation, explicit single-slide/deck `.pptx` import controls in populated and empty states,
   local validation, duplicate-action prevention, full-catalog refresh, partial-success recovery,
   warning messaging, web/desktop transport mappings, and accessible pending feedback
+- workspace route lazy loading, Deal Room direct child-route entry and active navigation, explicit
+  API/demo deal resources, Data Room content/session staleness and cleanup, Summarize workflow and
+  lazy Markdown composition, and manifest-driven bundle-budget validation
 
 There is no browser end-to-end suite or visual regression suite.
 
@@ -1109,8 +1141,17 @@ npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
 ```
+
+Each Vite build emits a manifest and target stamp. The matching bundle-size check rejects missing
+or wrong-target output, enforces a 350,000-byte entry budget for both UI targets, and requires every
+application `.js` chunk to remain below 500,000 bytes. The separately emitted PDF worker `.mjs`
+asset is reported by Vite but is not classified as an application chunk. The budget was set from
+the completed route/interaction split: the September 2026 web and desktop entry measurements were
+323,746 and 322,559 minified bytes respectively, leaving roughly 26–27 kB of entry headroom.
 
 From `backend/`:
 

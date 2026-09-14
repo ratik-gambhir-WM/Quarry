@@ -1,20 +1,8 @@
-import { BookOpenIcon } from "./book-open";
-import { CalendarDaysIcon } from "./calendar-days";
-import { BoxesIcon } from "./icons/BoxesIcon";
-import { FileStackIcon } from "./file-stack";
-import { FolderTreeIcon } from "./folder-tree";
-import { HomeIcon } from "./icons/HomeIcon";
-import { LayersIcon } from "./layers";
-import { ShipIcon } from "./ship";
-import { TelescopeIcon } from "./telescope";
-
 type IconName =
+  | "arrowLeft"
   | "arrowRight"
   | "bookmark"
-  | "bookOpen"
-  | "boxes"
   | "briefcase"
-  | "calendarDays"
   | "chevronDown"
   | "chevronLeft"
   | "chevronRight"
@@ -24,17 +12,13 @@ type IconName =
   | "dataset"
   | "doc"
   | "filter"
-  | "fileStack"
-  | "folderTree"
   | "folderOpen"
   | "graph"
   | "grid"
   | "help"
-  | "home"
   | "image"
   | "info"
   | "key"
-  | "layers"
   | "listAlt"
   | "mail"
   | "more"
@@ -49,14 +33,12 @@ type IconName =
   | "send"
   | "sharepoint"
   | "sheet"
-  | "ship"
   | "sidebar"
   | "shield"
   | "sparkles"
   | "settings"
   | "terminal"
   | "timeline"
-  | "telescope"
   | "upload"
   | "alert";
 
@@ -69,20 +51,13 @@ const iconClassName = "fill-none stroke-current stroke-2";
 
 export function Icon({ className = "h-5 w-5", name }: IconProps) {
   switch (name) {
-    case "bookOpen":
-      return <BookOpenIcon className={className} size={20} />;
-    case "calendarDays":
-      return <CalendarDaysIcon aria-hidden="true" className={className} size={20} />;
-    case "ship":
-      return <ShipIcon aria-hidden="true" className={className} size={20} />;
-    case "fileStack":
-      return <FileStackIcon aria-hidden="true" className={className} size={20} />;
-    case "folderTree":
-      return <FolderTreeIcon aria-hidden="true" className={className} size={20} />;
-    case "boxes":
-      return <BoxesIcon className={className} size={20} />;
-    case "telescope":
-      return <TelescopeIcon className={className} size={20} />;
+    case "arrowLeft":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <path className={iconClassName} d="M19 12H6" />
+          <path className={iconClassName} d="m11 6-6 6 6 6" />
+        </svg>
+      );
     case "mail":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
@@ -145,10 +120,6 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
           <path className={iconClassName} d="M12 7h.01" />
         </svg>
       );
-    case "home":
-      return <HomeIcon className={className} />;
-    case "layers":
-      return <LayersIcon className={className} size={20} />;
     case "dataset":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">

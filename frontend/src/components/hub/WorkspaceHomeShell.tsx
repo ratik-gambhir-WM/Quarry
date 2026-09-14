@@ -1,9 +1,5 @@
-import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import type { WorkspaceDeal } from "../../data/workspace";
-import { workspaceInitiatives, workspaceTools } from "../../fixtures/workspace/navigation";
-import { useWorkspaceDeals } from "../../hooks/useWorkspaceDeals";
-import { useWorkspaceSession } from "../../hooks/useWorkspaceSession";
+import { useWorkspace } from "../../app/WorkspaceProvider";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import type { ActiveHomeSection } from "./sidebar/sidebarTypes";
@@ -14,33 +10,63 @@ type WorkspaceHomeShellProps = {
   header: ReactNode;
 };
 
-const WorkspaceDealsContext = createContext<WorkspaceDeal[]>([]);
-
 export function useWorkspaceHomeDeals() {
-  return useContext(WorkspaceDealsContext);
+  return useWorkspace().deals;
 }
 
 export function WorkspaceHomeShell({ activeHomeSection = "hub", children, header }: WorkspaceHomeShellProps) {
-  const { email, navigationState } = useWorkspaceSession();
-  const { deals } = useWorkspaceDeals();
+  const { deals, dealsResource, email, initiatives, navigationState, retryDeals, tools } = useWorkspace();
+  const hasDealsNotice = dealsResource.status === "error"
+    || (dealsResource.status === "success" && dealsResource.source === "demo");
 
   return (
-    <WorkspaceDealsContext.Provider value={deals}>
-      <WorkspaceLayout
-        header={header}
-        sidebar={
-          <WorkspaceSidebar
-            activeHomeSection={activeHomeSection}
-            deals={deals}
-            email={email}
-            initiatives={workspaceInitiatives}
-            navigationState={navigationState}
-            tools={workspaceTools}
-          />
-        }
-      >
-        {children}
-      </WorkspaceLayout>
-    </WorkspaceDealsContext.Provider>
+    <WorkspaceLayout
+      header={header}
+      sidebar={
+        <WorkspaceSidebar
+          activeHomeSection={activeHomeSection}
+          deals={deals}
+          email={email}
+          initiatives={initiatives}
+          navigationState={navigationState}
+          tools={tools}
+        />
+      }
+    >
+      {dealsResource.status === "error" ? (
+        <WorkspaceDealsNotice
+          actionLabel="Retry"
+          message={`Workspace deals could not be loaded. ${dealsResource.message}`}
+          onAction={retryDeals}
+          role="alert"
+        />
+      ) : dealsResource.status === "success" && dealsResource.source === "demo" ? (
+        <WorkspaceDealsNotice message="Demo data" role="status" />
+      ) : null}
+      {hasDealsNotice ? <div className="mt-4">{children}</div> : children}
+    </WorkspaceLayout>
+  );
+}
+
+function WorkspaceDealsNotice({
+  actionLabel,
+  message,
+  onAction,
+  role,
+}: {
+  actionLabel?: string;
+  message: string;
+  onAction?: () => void;
+  role: "alert" | "status";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[13px] text-text-main" role={role}>
+      <span>{message}</span>
+      {actionLabel && onAction ? (
+        <button className="font-semibold text-primary hover:underline" onClick={onAction} type="button">
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }

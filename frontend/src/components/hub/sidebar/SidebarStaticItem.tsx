@@ -1,8 +1,9 @@
-import { Icon } from "../../ui/Icon";
+import { SidebarIcon } from "./SidebarIcon";
+import type { SidebarIconName } from "./SidebarIcon";
 
 type SidebarStaticItemProps = {
   active?: boolean;
-  icon: "briefcase" | "calendarDays" | "dashboard" | "fileStack" | "folderOpen" | "folderTree" | "graph" | "grid" | "listAlt" | "person" | "ship" | "timeline";
+  icon: SidebarIconName;
   label: string;
   onClick?: () => void;
 };
@@ -20,7 +21,7 @@ export function SidebarStaticItem({ active = false, icon, label, onClick }: Side
       onClick={onClick}
       type="button"
     >
-      <Icon className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`} name={icon} />
+      <SidebarIcon className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`} name={icon} />
       <span className="text-[13px] font-medium leading-5">{label}</span>
     </button>
   );

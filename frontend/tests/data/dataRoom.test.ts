@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildStoredDocumentNodes,
   flattenDataRoomFiles,
   hasDataRoomFiles,
   isUnconfiguredDataRoomError,
   type DataRoomTreeNode,
 } from "@/data/dataRoom";
+
+describe("buildStoredDocumentNodes", () => {
+  it("groups stored documents and derives their explorer kinds", () => {
+    expect(
+      buildStoredDocumentNodes([
+        { displayName: "model.XLSX", fileId: "sheet-1" },
+        { displayName: "memo.pdf", fileId: "pdf-1" },
+        { displayName: "notes.docx", fileId: "doc-1" },
+      ]),
+    ).toMatchObject([
+      {
+        children: [
+          { kind: "sheet", storedFileId: "sheet-1" },
+          { kind: "pdf", storedFileId: "pdf-1" },
+          { kind: "doc", storedFileId: "doc-1" },
+        ],
+        defaultExpanded: true,
+        name: "Saved documents",
+      },
+    ]);
+    expect(buildStoredDocumentNodes([])).toEqual([]);
+  });
+});
 
 describe("hasDataRoomFiles", () => {
   it("reports an unconfigured or folder-only data room as empty", () => {

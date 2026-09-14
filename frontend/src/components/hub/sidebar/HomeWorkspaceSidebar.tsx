@@ -32,8 +32,8 @@ export function HomeWorkspaceSidebar({
         <SidebarLink
           homeSection={activeHomeSection}
           href="/hub/summarize"
-          icon="telescope"
-          label="Explore"
+          icon="twitch"
+          label="Assistant"
           navigationState={navigationState}
         />
         <SidebarLink icon="search" label="Topics" />

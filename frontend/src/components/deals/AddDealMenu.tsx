@@ -1,14 +1,15 @@
 import { useRef, useState } from "react";
+import { Plus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Icon } from "../ui/Icon";
-import { PlusIcon, type PlusIconHandle } from "../ui/plus";
+import { Button } from "../ui/button";
 import { AddDealModal } from "../hub/sidebar/AddDealModal";
-import { DealsToolbarButton } from "./DealsToolbarButton";
 
 type AddDealMenuProps = {
   email?: string;
@@ -18,7 +19,6 @@ export function AddDealMenu({ email }: AddDealMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const openingModalRef = useRef(false);
-  const plusIconRef = useRef<PlusIconHandle>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   function closeModal() {
@@ -30,37 +30,33 @@ export function AddDealMenu({ email }: AddDealMenuProps) {
     <>
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
-          <DealsToolbarButton
-            aria-label="Deal portfolio actions"
-            onBlur={() => plusIconRef.current?.stopAnimation()}
-            onFocus={() => plusIconRef.current?.startAnimation()}
-            onMouseEnter={() => plusIconRef.current?.startAnimation()}
-            onMouseLeave={() => plusIconRef.current?.stopAnimation()}
-            ref={triggerRef}
-          >
-            <PlusIcon className="h-4 w-4" ref={plusIconRef} size={16} />
-          </DealsToolbarButton>
+          <Button ref={triggerRef} size="sm">
+            <Plus aria-hidden="true" />
+            New
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="deals-add-menu w-40 rounded-xl border border-outline-variant bg-surface-container-lowest p-1.5 text-text-main"
+          className="deals-add-menu w-40"
           onCloseAutoFocus={(event) => {
             if (openingModalRef.current) event.preventDefault();
             openingModalRef.current = false;
           }}
-          sideOffset={8}
+          sideOffset={12}
         >
-          <DropdownMenuItem
-            className="rounded-lg px-3 py-2 text-[13px] font-medium"
-            onSelect={() => {
-              openingModalRef.current = true;
-              setMenuOpen(false);
-              window.requestAnimationFrame(() => setModalOpen(true));
-            }}
-          >
-            <Icon className="h-4 w-4 text-muted" name="plus" />
-            <span>Add deal</span>
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Create</DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => {
+                openingModalRef.current = true;
+                setMenuOpen(false);
+                window.requestAnimationFrame(() => setModalOpen(true));
+              }}
+            >
+              <Plus aria-hidden="true" className="size-4 text-muted" />
+              <span>Add deal</span>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 

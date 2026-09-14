@@ -1,10 +1,8 @@
 import { useRef, useState } from "react";
-import { XIcon } from "lucide-react";
-import type { DealScope } from "../../data/dealsView";
+import { Columns3Icon, ListIcon, XIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -14,8 +12,6 @@ import {
   type AdjustmentsHorizontalIconHandle,
 } from "../ui/adjustments-horizontal";
 import { Icon } from "../ui/Icon";
-import { TableCellsIcon, type TableCellsIconHandle } from "../ui/table-cells";
-import { ViewColumnsIcon, type ViewColumnsIconHandle } from "../ui/view-columns";
 import { DealsToolbarButton } from "./DealsToolbarButton";
 
 export type DealsView = "kanban" | "table";
@@ -91,25 +87,24 @@ export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
   );
 }
 
-type DealLifecycleFilterProps = {
-  onScopeChange: (scope: DealScope) => void;
-  scope: DealScope;
+type DealsViewMenuProps = {
+  onPreloadKanban: () => void;
+  onViewChange: (view: DealsView) => void;
+  view: DealsView;
 };
 
-const scopeOptions: Array<{ label: string; value: DealScope }> = [
-  { label: "All deals", value: "all" },
-  { label: "Current", value: "current" },
-  { label: "Historic", value: "historic" },
-];
-
-export function DealLifecycleFilter({ onScopeChange, scope }: DealLifecycleFilterProps) {
+export function DealsViewMenu({ onPreloadKanban, onViewChange, view }: DealsViewMenuProps) {
   const iconRef = useRef<AdjustmentsHorizontalIconHandle>(null);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) onPreloadKanban();
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <DealsToolbarButton
-          aria-label="Filter deals by lifecycle"
+          aria-label="Change deals view"
           onBlur={() => iconRef.current?.stopAnimation()}
           onFocus={() => iconRef.current?.startAnimation()}
           onMouseEnter={() => iconRef.current?.startAnimation()}
@@ -120,69 +115,32 @@ export function DealLifecycleFilter({ onScopeChange, scope }: DealLifecycleFilte
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-44 rounded-xl border border-outline-variant bg-surface-container-lowest p-1.5 text-text-main"
-        sideOffset={8}
+        className="w-72 rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 text-text-main shadow-lg"
+        sideOffset={12}
       >
-        <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
-          Deal lifecycle
-        </DropdownMenuLabel>
         <DropdownMenuRadioGroup
-          onValueChange={(value) => onScopeChange(value as DealScope)}
-          value={scope}
+          className="grid grid-cols-2 gap-2"
+          onValueChange={(value) => {
+            if (value === "table" || value === "kanban") onViewChange(value);
+          }}
+          value={view}
         >
-          {scopeOptions.map((option) => (
-            <DropdownMenuRadioItem
-              className="rounded-lg px-2.5 py-2 text-[13px] font-normal"
-              key={option.value}
-              value={option.value}
-            >
-              {option.label}
-            </DropdownMenuRadioItem>
-          ))}
+          <DropdownMenuRadioItem
+            className="justify-center rounded-full border border-outline-variant px-4 py-2.5 text-[14px] font-medium data-[state=checked]:bg-surface-container-high [&_[data-slot=dropdown-menu-radio-item-indicator]]:hidden"
+            value="table"
+          >
+            <ListIcon aria-hidden="true" className="size-4" />
+            List
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem
+            className="justify-center rounded-full border border-outline-variant px-4 py-2.5 text-[14px] font-medium data-[state=checked]:bg-surface-container-high [&_[data-slot=dropdown-menu-radio-item-indicator]]:hidden"
+            value="kanban"
+          >
+            <Columns3Icon aria-hidden="true" className="size-4" />
+            Kanban
+          </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-type DealsViewToggleProps = {
-  onPreloadKanban: () => void;
-  onViewChange: (view: DealsView) => void;
-  view: DealsView;
-};
-
-export function DealsViewToggle({ onPreloadKanban, onViewChange, view }: DealsViewToggleProps) {
-  const tableIconRef = useRef<TableCellsIconHandle>(null);
-  const kanbanIconRef = useRef<ViewColumnsIconHandle>(null);
-
-  return (
-    <div aria-label="Deals view" className="flex items-center gap-1" role="group">
-      <DealsToolbarButton
-        active={view === "table"}
-        aria-label="Table view"
-        aria-pressed={view === "table"}
-        onClick={() => onViewChange("table")}
-        onMouseEnter={() => tableIconRef.current?.startAnimation()}
-        onMouseLeave={() => tableIconRef.current?.stopAnimation()}
-        title="Table view"
-      >
-        <TableCellsIcon className="h-4 w-4" ref={tableIconRef} size={16} />
-      </DealsToolbarButton>
-      <DealsToolbarButton
-        active={view === "kanban"}
-        aria-label="Kanban view"
-        aria-pressed={view === "kanban"}
-        onClick={() => onViewChange("kanban")}
-        onFocus={onPreloadKanban}
-        onMouseEnter={() => {
-          onPreloadKanban();
-          kanbanIconRef.current?.startAnimation();
-        }}
-        onMouseLeave={() => kanbanIconRef.current?.stopAnimation()}
-        title="Kanban view"
-      >
-        <ViewColumnsIcon className="h-4 w-4" ref={kanbanIconRef} size={16} />
-      </DealsToolbarButton>
-    </div>
   );
 }

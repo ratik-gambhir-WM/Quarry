@@ -55,3 +55,34 @@ export function isUnconfiguredDataRoomError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("no local data-room root is configured");
 }
+
+export function buildStoredDocumentNodes(
+  documents: ReadonlyArray<{ displayName: string; fileId: string }>,
+): DataRoomTreeNode[] {
+  if (documents.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      children: documents.map((document) => ({
+        id: `stored-document:${document.fileId}`,
+        kind: getStoredDocumentKind(document.displayName),
+        name: document.displayName,
+        relativePath: `stored-document:${document.fileId}`,
+        storedFileId: document.fileId,
+      })),
+      defaultExpanded: true,
+      id: "stored-documents",
+      kind: "folder",
+      name: "Saved documents",
+    },
+  ];
+}
+
+function getStoredDocumentKind(displayName: string): DataRoomTreeNode["kind"] {
+  const extension = displayName.split(".").pop()?.toLowerCase();
+  if (extension === "pdf") return "pdf";
+  if (extension === "xls" || extension === "xlsx") return "sheet";
+  return "doc";
+}

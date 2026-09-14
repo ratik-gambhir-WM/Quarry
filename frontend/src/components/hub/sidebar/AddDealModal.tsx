@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { type ComponentProps, type FormEvent, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import type {
@@ -9,15 +10,26 @@ import type {
   SaveDealInput,
 } from "../../../data/dealExtraction";
 import { formatFileSize } from "../../../lib/formatters";
-import { DialogBackdrop } from "../../ui/DialogBackdrop";
-import { DialogHeader } from "../../ui/DialogHeader";
-import { Icon } from "../../ui/Icon";
+import { Button } from "../../ui/button";
 import {
-  ModalField,
-  ModalInput,
-  ModalTextField,
-  modalControlClassName,
-} from "../../ui/ModalField";
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../ui/dialog";
+import { Field, FieldError, FieldGroup, FieldLabel } from "../../ui/field";
+import { Icon } from "../../ui/Icon";
+import { Input } from "../../ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../ui/select";
 import { TransactionTypePicker } from "./DealTypePicker";
 
 type AddDealModalProps = {
@@ -67,7 +79,6 @@ const emptySourceFiles: SelectedSourceFiles = {
 
 export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const navigate = useNavigate();
-  const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState(emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
   const [createdDealId, setCreatedDealId] = useState<string | null>(null);
@@ -76,24 +87,6 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const [fieldError, setFieldError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const form = formRef.current;
-      const firstField = form?.querySelector<HTMLElement>("input:not([type='hidden']), select, textarea");
-      (firstField ?? form?.querySelector<HTMLElement>("button"))?.focus();
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !isSubmitting) onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isSubmitting, onClose]);
 
   function updateField(field: keyof AddDealFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -183,76 +176,99 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   }
 
   return (
-    <DialogBackdrop
-      className="z-50 px-6 py-0"
-      closeLabel="Close add deal dialog"
-      disabled={isSubmitting}
-      onClose={onClose}
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open && !isSubmitting) onClose();
+      }}
+      open
     >
-      <form
-        aria-labelledby="add-deal-dialog-title"
-        aria-modal="true"
-        className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-[720px] flex-col gap-5 overflow-y-auto rounded-[19px] border border-outline-variant bg-white p-6 shadow-[0_28px_70px_rgba(7,1,84,0.2)]"
-        onSubmit={handleSubmit}
-        ref={formRef}
-        role="dialog"
+      <DialogContent
+        className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+        onEscapeKeyDown={(event) => {
+          if (isSubmitting) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (isSubmitting) event.preventDefault();
+        }}
+        showCloseButton={false}
       >
-        <DialogHeader
-          className="gap-4"
-          closeLabel="Close add deal dialog"
-          eyebrow="Active Deals"
-          onClose={onClose}
-          title={step === "sources" ? "Add deal metadata" : "Add deal"}
-          titleId="add-deal-dialog-title"
-        />
+        <form className="flex min-h-0 flex-col" onSubmit={handleSubmit}>
+          <DialogHeader className="relative gap-1 border-b border-border px-6 py-5 pr-14">
+            <DialogDescription className="order-first text-xs font-medium uppercase tracking-[0.12em]">
+              Active Deals
+            </DialogDescription>
+            <DialogTitle className="text-xl font-semibold">
+              {step === "sources" ? "Add deal metadata" : "Add deal"}
+            </DialogTitle>
+          </DialogHeader>
 
-        {step === "details" ? (
-          <DealDetailsStep
-            error={fieldError}
-            form={form}
-            isSubmitting={isSubmitting}
-            onChooseLocalFolder={chooseLocalFolder}
-            onUpdateField={updateField}
-          />
-        ) : (
-          <SourceFilesStep
-            availableFiles={localDataRoom?.files ?? null}
-            onChange={(field, file) => {
-              setSelectedSourceFiles((current) => ({ ...current, [field]: file }));
-              setSubmitError("");
-            }}
-            selected={selectedSourceFiles}
-          />
-        )}
+          <div className="min-h-0 overflow-y-auto px-6 py-5">
+            {step === "details" ? (
+              <DealDetailsStep
+                error={fieldError}
+                form={form}
+                isSubmitting={isSubmitting}
+                onChooseLocalFolder={chooseLocalFolder}
+                onUpdateField={updateField}
+              />
+            ) : (
+              <SourceFilesStep
+                availableFiles={localDataRoom?.files ?? null}
+                onChange={(field, file) => {
+                  setSelectedSourceFiles((current) => ({ ...current, [field]: file }));
+                  setSubmitError("");
+                }}
+                selected={selectedSourceFiles}
+              />
+            )}
 
-        {submitError ? (
-          <p className="rounded-2xl border border-error/25 bg-error/8 px-4 py-3 text-[12px] font-medium text-error">
-            {submitError}
-          </p>
-        ) : null}
-
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            className="rounded-full px-5 py-3 text-[13px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:opacity-60"
-            disabled={isSubmitting}
-            onClick={step === "details" ? onClose : saveSources}
-            type="button"
-          >
-            {step === "details" ? "Cancel" : "Skip files"}
-          </button>
-          <button
-            className="inline-flex min-w-[148px] items-center justify-center gap-2 rounded-full bg-action px-6 py-3 text-[13px] font-semibold text-on-action shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
-            disabled={isSubmitting}
-            type="submit"
-          >
-            {isSubmitting ? (
-              <span className="h-4 w-4 rounded-full border-2 border-on-primary-container/30 border-t-on-primary-container motion-safe:animate-spin" />
+            {submitError ? (
+              <p
+                className="mt-4 rounded-lg border border-error/25 bg-error/8 px-3 py-2 text-sm font-medium text-error"
+                role="alert"
+              >
+                {submitError}
+              </p>
             ) : null}
-            {isSubmitting ? "Saving..." : step === "details" ? "Next" : "Finish deal"}
-          </button>
-        </div>
-      </form>
-    </DialogBackdrop>
+          </div>
+
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none rounded-b-xl border-border px-6 py-4">
+            {step === "details" ? (
+              <DialogClose asChild>
+                <Button disabled={isSubmitting} type="button" variant="outline">
+                  Cancel
+                </Button>
+              </DialogClose>
+            ) : (
+              <Button disabled={isSubmitting} onClick={saveSources} type="button" variant="outline">
+                Skip files
+              </Button>
+            )}
+            <Button className="min-w-28" disabled={isSubmitting} type="submit">
+              {isSubmitting ? (
+                <span
+                  aria-hidden="true"
+                  className="size-3.5 rounded-full border-2 border-on-action/30 border-t-on-action motion-safe:animate-spin"
+                />
+              ) : null}
+              {isSubmitting ? "Saving..." : step === "details" ? "Next" : "Finish deal"}
+            </Button>
+          </DialogFooter>
+        </form>
+        <DialogClose asChild>
+          <Button
+            aria-label="Close add deal dialog"
+            className="absolute right-4 top-4"
+            disabled={isSubmitting}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <X aria-hidden="true" />
+          </Button>
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -270,16 +286,16 @@ function DealDetailsStep({
   onUpdateField: (field: keyof AddDealFormState, value: string) => void;
 }) {
   return (
-    <div className="grid gap-4">
+    <FieldGroup className="gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <ModalTextField
+        <DealTextField
           id="add-deal-id"
           label="Deal ID"
           onValueChange={(value) => onUpdateField("dealId", value)}
           placeholder="DEAL-000184"
           value={form.dealId}
         />
-        <ModalTextField
+        <DealTextField
           id="add-deal-name"
           label="Deal name"
           onValueChange={(value) => onUpdateField("dealName", value)}
@@ -294,7 +310,7 @@ function DealDetailsStep({
           options={["Active", "Pipeline", "On Hold", "Closed"]}
           value={form.status}
         />
-        <ModalTextField
+        <DealTextField
           id="add-deal-start-date"
           label="Start date"
           onValueChange={(value) => onUpdateField("startDate", value)}
@@ -302,7 +318,7 @@ function DealDetailsStep({
           type="date"
           value={form.startDate}
         />
-        <ModalTextField
+        <DealTextField
           id="add-deal-close-date"
           label="Close date"
           onValueChange={(value) => onUpdateField("closeDate", value)}
@@ -317,7 +333,7 @@ function DealDetailsStep({
         value={form.transactionType}
       />
       <div className="grid gap-4 sm:grid-cols-3">
-        <ModalTextField
+        <DealTextField
           autoComplete="organization"
           id="add-deal-target-company"
           label="Target company"
@@ -325,7 +341,7 @@ function DealDetailsStep({
           placeholder="Target"
           value={form.targetCompany}
         />
-        <ModalTextField
+        <DealTextField
           autoComplete="organization"
           id="add-deal-primary-buyer"
           label="Primary buyer"
@@ -333,7 +349,7 @@ function DealDetailsStep({
           placeholder="CVS"
           value={form.primaryBuyer}
         />
-        <ModalTextField
+        <DealTextField
           autoComplete="organization"
           id="add-deal-sponsor"
           label="Deal sponsor"
@@ -345,17 +361,52 @@ function DealDetailsStep({
       {runtime.target === "desktop" ? (
         <LocalFolderField disabled={isSubmitting} error={error} onChoose={onChooseLocalFolder} value={form.localPath} />
       ) : (
-        <ModalTextField
+        <DealTextField
           id="add-deal-sharepoint-link"
           label="SharePoint link"
           onValueChange={(value) => onUpdateField("sharepointLink", value)}
           optional
-          placeholder="https://company.sharepoint.com/sites/deal-room"
+          placeholder="https://westmonroe.sharepoint.com/sites/ClientTeamYYYY-Project/Shared%20Documents/Forms/AllItems.aspx?FolderCTID=0x...&id=%2Fsites%2FClientTeamYYYY-Project%2FShared%20Documents"
           type="url"
           value={form.sharepointLink}
         />
       )}
-    </div>
+    </FieldGroup>
+  );
+}
+
+type DealTextFieldProps = Omit<ComponentProps<typeof Input>, "id" | "onChange"> & {
+  error?: string;
+  id: string;
+  label: string;
+  onValueChange: (value: string) => void;
+  optional?: boolean;
+};
+
+function DealTextField({
+  error,
+  id,
+  label,
+  onValueChange,
+  optional = false,
+  required = !optional,
+  ...props
+}: DealTextFieldProps) {
+  return (
+    <Field data-invalid={Boolean(error)}>
+      <div className="flex items-center justify-between">
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        {optional ? <span className="text-xs text-muted-foreground">Optional</span> : null}
+      </div>
+      <Input
+        aria-invalid={Boolean(error)}
+        id={id}
+        onChange={(event) => onValueChange(event.currentTarget.value)}
+        required={required}
+        {...props}
+      />
+      <FieldError>{error}</FieldError>
+    </Field>
   );
 }
 
@@ -372,17 +423,21 @@ function SelectField({
 }) {
   const id = `add-deal-${label.toLowerCase().replace(/\s+/g, "-")}`;
   return (
-    <ModalField htmlFor={id} label={label}>
-      <select
-        className={modalControlClassName}
-        id={id}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        required
-        value={value}
-      >
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-    </ModalField>
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Select onValueChange={onChange} required value={value}>
+        <SelectTrigger className="w-full" id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper">
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
   );
 }
 
@@ -398,9 +453,11 @@ function LocalFolderField({
   value: string;
 }) {
   return (
-    <ModalField error={error} htmlFor="add-deal-local-path" label="Local data room folder">
+    <Field data-invalid={Boolean(error)}>
+      <FieldLabel htmlFor="add-deal-local-path">Local data room folder</FieldLabel>
       <div className="flex gap-3">
-        <ModalInput
+        <Input
+          aria-invalid={Boolean(error)}
           className="min-w-0 flex-1"
           id="add-deal-local-path"
           placeholder="Choose a folder"
@@ -408,16 +465,17 @@ function LocalFolderField({
           required
           value={value}
         />
-        <button
-          className="flex items-center gap-2 rounded-2xl border border-outline-variant bg-white px-4 py-3 text-[13px] font-semibold text-primary"
+        <Button
           disabled={disabled}
           onClick={onChoose}
           type="button"
+          variant="outline"
         >
           <Icon className="h-4 w-4" name="folderOpen" /> Browse
-        </button>
+        </Button>
       </div>
-    </ModalField>
+      <FieldError>{error}</FieldError>
+    </Field>
   );
 }
 

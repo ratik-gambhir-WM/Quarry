@@ -101,15 +101,23 @@ export type WorkspaceInsight = {
 };
 
 export function getDealRoomPath(dealId: string) {
-  return `/hub/deals/${dealId}`;
+  return `/hub/deals/${encodeURIComponent(dealId)}`;
+}
+
+export function getDealActivityPath(dealId: string) {
+  return `${getDealRoomPath(dealId)}/activity`;
 }
 
 export function getDataRoomPath(dealId: string) {
-  return `/hub/deals/${dealId}/data-room`;
+  return `${getDealRoomPath(dealId)}/data-room`;
+}
+
+export function getDealAnalysisPath(dealId: string) {
+  return `${getDealRoomPath(dealId)}/analysis`;
 }
 
 export function getDeliverablesPath(dealId: string) {
-  return `/hub/deals/${dealId}/deliverables`;
+  return `${getDealRoomPath(dealId)}/deliverables`;
 }
 
 export function getDeliverableTemplatesPath(dealId: string) {

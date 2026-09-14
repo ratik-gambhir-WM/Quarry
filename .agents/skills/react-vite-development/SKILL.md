@@ -43,7 +43,11 @@ Before implementation, identify:
 
 Keep independent state local. When values form one workflow, prefer a reducer or discriminated
 state over flags that can form impossible combinations. Derive render data rather than syncing
-duplicate state with effects. Effects synchronize external systems and must be repeatable,
+duplicate state with effects. Never call a React state setter from a `useEffect` body or its
+cleanup. Reset prop- or identity-scoped state with a keyed owner, derive values during render, and
+perform ordinary transitions in event handlers or reducers. Effects may subscribe to or start an
+external system, but updates must arrive through that system's event/request callback or a
+purpose-built external store rather than an effect-body state write. Effects must be repeatable,
 cancel/clean up correctly, and retain complete dependencies.
 
 ## Data and transport rules

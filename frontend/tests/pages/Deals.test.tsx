@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceProvider } from "@/app/WorkspaceProvider";
 import { Deals } from "@/pages/Deals";
 
 const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
@@ -34,11 +35,11 @@ describe("Deals", () => {
     window.sessionStorage.clear();
   });
 
-  it("defaults to the portfolio table and combines lifecycle and search filters", async () => {
+  it("defaults to the portfolio table and keeps view choices in one focused menu", async () => {
     const user = userEvent.setup({ skipHover: true });
     renderDeals();
 
-    const table = screen.getByRole("table");
+    const table = await screen.findByRole("table");
     expect(table).toBeTruthy();
     const pageHeader = screen.getByRole("heading", { name: "Deals" }).closest("header");
     const portfolioCounts = screen.getByLabelText("Deal portfolio counts");
@@ -60,15 +61,25 @@ describe("Deals", () => {
     expect(table.classList.contains("text-center")).toBe(true);
     expect(table.querySelectorAll('tbody tr[aria-hidden="true"]')).toHaveLength(0);
     expect(screen.getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
-    const tableViewButton = screen.getByRole("button", { name: "Table view", pressed: true });
-    expect(tableViewButton.closest("header")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Kanban view", pressed: false })).toBeTruthy();
+    const viewMenuTrigger = screen.getByRole("button", { name: "Change deals view" });
+    expect(viewMenuTrigger.closest("header")).toBeTruthy();
+    expect(viewMenuTrigger.classList.contains("border-0")).toBe(true);
+    expect(viewMenuTrigger.classList.contains("shadow-none")).toBe(true);
+    expect(viewMenuTrigger.classList.contains("bg-transparent")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Table view" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Kanban view" })).toBeNull();
     expect(screen.queryByRole("searchbox", { name: "Search deals" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Filter deals by lifecycle" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Current" }));
-    expect(screen.queryByRole("link", { name: "Open Project Alpha" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Open Project Beta" })).toBeTruthy();
+    await user.click(viewMenuTrigger);
+    const listOption = await screen.findByRole("menuitemradio", { name: "List" });
+    const kanbanOption = screen.getByRole("menuitemradio", { name: "Kanban" });
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(2);
+    expect(listOption.getAttribute("aria-checked")).toBe("true");
+    expect(kanbanOption.getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByText("Grouping")).toBeNull();
+    expect(screen.queryByText("Ordering")).toBeNull();
+    expect(screen.queryByText("Show closed projects")).toBeNull();
+    await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "Search deals" }));
     const searchbox = screen.getByRole("searchbox", { name: "Search deals" });
@@ -82,16 +93,42 @@ describe("Deals", () => {
   it("moves the single add-deal control out of the sidebar and restores focus after Escape", async () => {
     const user = userEvent.setup({ skipHover: true });
     renderDeals();
-    const trigger = screen.getByRole("button", { name: "Deal portfolio actions" });
+    const trigger = screen.getByRole("button", { name: "New" });
 
     expect(trigger.closest("header")).toBeTruthy();
+    expect(trigger.textContent).toBe("New");
     expect(trigger.querySelector('path[d="M5 12h14"]')).toBeTruthy();
+    expect(trigger.closest("header")?.querySelector('[data-slot="avatar"]')).toBeNull();
     expect(screen.queryByRole("button", { name: "Active deals actions" })).toBeNull();
     await user.click(trigger);
-    await user.click(await screen.findByRole("menuitem", { name: "Add deal" }));
+    const addDealItem = await screen.findByRole("menuitem", { name: "Add deal" });
+    expect(screen.getByText("Create")).toBeTruthy();
+    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+    await user.click(addDealItem);
 
     const dialog = await screen.findByRole("dialog", { name: "Add deal" });
-    await waitFor(() => expect(within(dialog).getByLabelText("Deal ID")).toBe(document.activeElement));
+    const dealIdInput = within(dialog).getByLabelText("Deal ID");
+    expect(dialog.getAttribute("data-slot")).toBe("dialog-content");
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeTruthy();
+    expect(document.querySelector(".modal-backdrop")).toBeNull();
+    expect(dealIdInput.getAttribute("data-slot")).toBe("input");
+    expect(within(dialog).getByLabelText("Status").textContent).toContain("Active");
+    for (const label of [
+      "Deal name",
+      "Start date",
+      "Close date",
+      "Transaction type",
+      "Target company",
+      "Primary buyer",
+      "Deal sponsor",
+      "SharePoint link",
+    ]) {
+      expect(within(dialog).getByLabelText(label)).toBeTruthy();
+    }
+    expect(within(dialog).getByLabelText("SharePoint link").getAttribute("placeholder")).toBe(
+      "https://westmonroe.sharepoint.com/sites/ClientTeamYYYY-Project/Shared%20Documents/Forms/AllItems.aspx?FolderCTID=0x...&id=%2Fsites%2FClientTeamYYYY-Project%2FShared%20Documents",
+    );
+    await waitFor(() => expect(dealIdInput).toBe(document.activeElement));
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add deal" })).toBeNull());
@@ -124,11 +161,15 @@ describe("Deals", () => {
     const user = userEvent.setup({ skipHover: true });
     renderDeals();
 
-    await user.click(screen.getByRole("button", { name: "Kanban view" }));
-    expect(screen.getByRole("button", { name: "Table view", pressed: false })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Kanban view", pressed: true })).toBeTruthy();
+    const viewMenuTrigger = screen.getByRole("button", { name: "Change deals view" });
+    await user.click(viewMenuTrigger);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Kanban" }));
     expect(await screen.findByRole("region", { name: "Deals by status" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /add column/i })).toBeNull();
+
+    await user.click(viewMenuTrigger);
+    expect(screen.getByRole("menuitemradio", { name: "Kanban" }).getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{Escape}");
 
     const alphaCard = screen.getByRole("link", { name: /Project Alpha/i });
     alphaCard.focus();
@@ -140,8 +181,10 @@ describe("Deals", () => {
 function renderDeals() {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/hub/deals", state: { email: "analyst@example.com" } }]}>
-      <Deals />
-      <LocationProbe />
+      <WorkspaceProvider dataSource="demo">
+        <Deals />
+        <LocationProbe />
+      </WorkspaceProvider>
     </MemoryRouter>,
   );
 }
