@@ -124,6 +124,10 @@ export function getDeliverableTemplatesPath(dealId: string) {
   return `${getDeliverablesPath(dealId)}/templates`;
 }
 
+export function getDeliverableTemplatePath(dealId: string, templateId: string) {
+  return `${getDeliverableTemplatesPath(dealId)}/${encodeURIComponent(templateId)}`;
+}
+
 export function getTeamLabel(email?: string) {
   const teamName = email?.split("@")[0]?.replace(/[._-]/g, " ") ?? "Analyst Team";
 

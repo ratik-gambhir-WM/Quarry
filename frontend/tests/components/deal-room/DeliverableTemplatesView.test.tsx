@@ -98,7 +98,7 @@ describe("DeliverableTemplatesView", () => {
 
     view.rerender(
       <TemplatePreviewProvider requestKey="request-2">
-        <DeliverableTemplatesView onRetry={vi.fn()} />
+        <DeliverableTemplatesView onRetry={vi.fn()} onSelectSlide={vi.fn()} />
       </TemplatePreviewProvider>,
     );
 
@@ -122,6 +122,21 @@ describe("DeliverableTemplatesView", () => {
       expect(screen.queryByAltText("Template preview: first template")).toBeNull();
     });
     expect(screen.getByAltText("Template preview: second template")).not.toBeNull();
+  });
+
+  it("opens a selected template while keeping delete as an independent sibling action", async () => {
+    listTemplatePreviews.mockResolvedValue(page(1, 1, 1, ["first-template"]));
+    deleteTemplate.mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onSelectSlide = vi.fn();
+    renderView({ onSelectSlide });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open first template template" }));
+    expect(onSelectSlide).toHaveBeenCalledWith(expect.objectContaining({ id: "first-template" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete first template" }));
+    expect(deleteTemplate).toHaveBeenCalledWith("first-template");
+    expect(onSelectSlide).toHaveBeenCalledOnce();
   });
 
   it("keeps the template and shows a sanitized message when deletion fails", async () => {
@@ -264,10 +279,16 @@ describe("DeliverableTemplatesView", () => {
   });
 });
 
-function renderView({ onRetry = vi.fn() }: { onRetry?: () => void } = {}) {
+function renderView({
+  onRetry = vi.fn(),
+  onSelectSlide = vi.fn(),
+}: {
+  onRetry?: () => void;
+  onSelectSlide?: (slide: import("@/data/deliverables").DeliverableSlide) => void;
+} = {}) {
   return render(
     <TemplatePreviewProvider requestKey="request-1">
-      <DeliverableTemplatesView onRetry={onRetry} />
+      <DeliverableTemplatesView onRetry={onRetry} onSelectSlide={onSelectSlide} />
     </TemplatePreviewProvider>,
   );
 }
@@ -276,7 +297,7 @@ function renderHeaderAndView() {
   return render(
     <TemplatePreviewProvider requestKey="request-with-header">
       <DeliverablesHeader mode="templates" onBack={vi.fn()} />
-      <DeliverableTemplatesView onRetry={vi.fn()} />
+      <DeliverableTemplatesView onRetry={vi.fn()} onSelectSlide={vi.fn()} />
     </TemplatePreviewProvider>,
   );
 }

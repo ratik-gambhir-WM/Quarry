@@ -1,8 +1,13 @@
 use std::{path::Path as FilePath, sync::Arc};
 
 use axum::{
+    body::Body,
     extract::{rejection::QueryRejection, Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{
+        header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderValue, Response, StatusCode,
+    },
+    response::IntoResponse,
     Json,
 };
 use serde::Deserialize;
@@ -11,7 +16,7 @@ use crate::app::http::error::{AppError, AppResult};
 
 use super::service::{
     PptxTemplateImportMode, PptxTemplateImportResult, PptxTemplateUpload, TemplatePreviewPage,
-    TemplateService, MAX_PPTX_TEMPLATE_IMPORT_BYTES,
+    TemplateService, MAX_PPTX_TEMPLATE_IMPORT_BYTES, POWERPOINT_CONTENT_TYPE,
 };
 
 #[derive(Clone)]
@@ -64,6 +69,21 @@ pub(super) async fn delete_template_handler(
         .map_err(AppError::from)
 }
 
+pub(super) async fn get_template_handler(
+    State(state): State<TemplatesHttpState>,
+    Path(template_id): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    let document = state
+        .templates
+        .get(&template_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok((
+        [(CACHE_CONTROL, HeaderValue::from_static("private, no-store"))],
+        Json(document),
+    ))
+}
+
 pub(super) async fn import_pptx_template_handler(
     State(state): State<TemplatesHttpState>,
     query: Result<Query<PptxTemplateImportQuery>, QueryRejection>,
@@ -79,6 +99,33 @@ pub(super) async fn import_pptx_template_handler(
         .await
         .map(|result| (StatusCode::CREATED, Json(result)))
         .map_err(AppError::from)
+}
+
+pub(super) async fn export_powerpoint_handler(
+    State(state): State<TemplatesHttpState>,
+    Json(document): Json<serde_json::Value>,
+) -> AppResult<Response<Body>> {
+    let export = state
+        .templates
+        .export_powerpoint(document)
+        .await
+        .map_err(AppError::from)?;
+    let disposition =
+        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", export.file_name)).map_err(
+            |_| AppError::internal("validated PowerPoint filename could not be encoded"),
+        )?;
+    let warning_count = HeaderValue::from_str(&export.warning_count.to_string())
+        .map_err(|_| AppError::internal("PowerPoint warning count could not be encoded"))?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CACHE_CONTROL, "private, no-store")
+        .header(CONTENT_TYPE, POWERPOINT_CONTENT_TYPE)
+        .header(CONTENT_DISPOSITION, disposition)
+        .header("x-powerpoint-warning-count", warning_count)
+        .body(Body::from(export.bytes))
+        .map_err(|error| {
+            AppError::internal(format!("PowerPoint response could not be built: {error}"))
+        })
 }
 
 async fn collect_pptx_template_upload(mut multipart: Multipart) -> AppResult<PptxTemplateUpload> {

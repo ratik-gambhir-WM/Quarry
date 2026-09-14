@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createTauriQuarryApi, type TauriMultipartRequest } from "../api/tauriQuarryApi";
-import type { QuarryRuntime, SaveFileInput } from "../contracts/quarryApi";
+import type {
+  PowerPointExport,
+  QuarryRuntime,
+  SaveFileInput,
+  SavePowerPointInput,
+} from "../contracts/quarryApi";
 import type {
   LocalDealDataRoom,
   LocalDealFileContents,
@@ -28,6 +33,32 @@ async function saveFile(input: SaveFileInput) {
     return saved;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    finishIpcRequest(activityId, {
+      durationMs: performance.now() - startedAt,
+      message,
+      status: "error",
+    });
+    throw new Error(message);
+  }
+}
+
+async function savePowerPoint(input: SavePowerPointInput) {
+  const activityId = beginIpcRequest("save_powerpoint_file", {
+    suggestedName: input.suggestedName,
+    title: input.title,
+  });
+  const startedAt = performance.now();
+
+  try {
+    const saved = await invoke<boolean>("save_powerpoint_file", { input });
+    finishIpcRequest(activityId, {
+      details: { saved },
+      durationMs: performance.now() - startedAt,
+      status: "success",
+    });
+    return saved;
+  } catch (error) {
+    const message = ipcErrorMessage(error);
     finishIpcRequest(activityId, {
       durationMs: performance.now() - startedAt,
       message,
@@ -66,12 +97,35 @@ async function invokeWithActivity<TResult>(command: string, args?: Record<string
   }
 }
 
+async function invokePowerPointExport(path: string, body: unknown) {
+  const activityId = beginIpcRequest("quarry_api_post_powerpoint", { path });
+  const startedAt = performance.now();
+  try {
+    const result = await invoke<PowerPointExport>("quarry_api_post_powerpoint", { body, path });
+    finishIpcRequest(activityId, {
+      durationMs: performance.now() - startedAt,
+      status: "success",
+    });
+    return result;
+  } catch (error) {
+    const message = ipcErrorMessage(error);
+    finishIpcRequest(activityId, {
+      durationMs: performance.now() - startedAt,
+      message,
+      status: "error",
+    });
+    throw new Error(message);
+  }
+}
+
 const tauriQuarryApi = createTauriQuarryApi({
   delete: (path: string) => invokeWithActivity<void>("quarry_api_delete", { path }),
   get: <TResult>(path: string) => invokeWithActivity<TResult>("quarry_api_get", { path }),
   getPdf: (path: string) => invokeWithActivity<ArrayBuffer>("quarry_api_get_pdf", { path }),
   post: <TResult>(path: string, body: unknown) =>
     invokeWithActivity<TResult>("quarry_api_post", { body, path }),
+  postPowerPoint: (path: string, body: unknown) =>
+    invokePowerPointExport(path, body),
   postMultipart: <TResult>(request: TauriMultipartRequest) =>
     invokeWithActivity<TResult>("quarry_api_post_multipart", { request }),
   async subscribeJob(jobId, onEvent, onError) {
@@ -97,6 +151,6 @@ function ipcErrorMessage(error: unknown) {
 
 export const runtime: QuarryRuntime = {
   api: tauriQuarryApi,
-  platform: { readDealSourceFiles, saveFile, selectDealDataRoom },
+  platform: { readDealSourceFiles, saveFile, savePowerPoint, selectDealDataRoom },
   target: "desktop",
 };

@@ -56,6 +56,66 @@ describe("httpQuarryApi", () => {
     });
   });
 
+  it("loads and validates an encoded template document", async () => {
+    const payload = templateDocument();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(httpQuarryApi.getTemplate("template/one")).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", undefined);
+  });
+
+  it("exports the current presentation as a validated PowerPoint download", async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(bytes, {
+      headers: {
+        "content-disposition": "attachment; filename=\"Example.pptx\"",
+        "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "x-powerpoint-warning-count": "1",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const document = templateDocument();
+
+    await expect(httpQuarryApi.exportPowerPoint(document)).resolves.toEqual({
+      dataBase64: "UEsDBA==",
+      fileName: "Example.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      warningCount: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/export", {
+      body: JSON.stringify(document),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  it("rejects an export response with an unsafe filename", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      new Uint8Array([0x50, 0x4b]),
+      {
+        headers: {
+          "content-disposition": "attachment; filename=\"../escape.pptx\"",
+          "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "x-powerpoint-warning-count": "0",
+        },
+      },
+    )));
+
+    await expect(httpQuarryApi.exportPowerPoint(templateDocument())).rejects.toThrow(
+      "invalid PowerPoint filename",
+    );
+  });
+
+  it("rejects malformed template documents at the browser adapter boundary", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ presentation: {} })));
+
+    await expect(httpQuarryApi.getTemplate("example")).rejects.toThrow(
+      "presentation.title must be a string",
+    );
+  });
+
   it.each(["single", "batch"] as const)(
     "imports one PPTX through the explicit %s template mode",
     async (importMode) => {
@@ -197,3 +257,14 @@ describe("httpQuarryApi", () => {
     expect(rawText.text).toBe("Raw report text");
   });
 });
+
+function templateDocument() {
+  return {
+    presentation: {
+      preserveElementOrder: true,
+      showBranding: false,
+      slides: [],
+      title: "Example",
+    },
+  };
+}

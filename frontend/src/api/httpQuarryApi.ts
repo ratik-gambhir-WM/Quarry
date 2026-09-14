@@ -11,6 +11,7 @@ import type {
   ProcessFileJobEvent,
   ProcessFileJobEventHandlers,
   ProcessFileJobResponse,
+  PowerPointExport,
   QuarryApi,
   SummarizableFile,
   PptxTemplateImportMode,
@@ -18,6 +19,8 @@ import type {
   TemplatePreviewPage,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
+import { POWERPOINT_CONTENT_TYPE } from "../contracts/quarryApi";
+import type { DiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 import type {
   SaveDealInput,
   SaveDealMetadataResponse,
@@ -26,6 +29,7 @@ import type {
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
 import type { WorkspaceAccountUser } from "../data/workspace";
+import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 import {
   beginApiRequest,
   finishApiRequest,
@@ -74,7 +78,12 @@ function validateApiBaseUrl(baseUrl: string) {
   }
 }
 
-async function requestJson<TResponse>(path: string, init?: RequestInit, requestDetails?: unknown) {
+async function requestJson<TResponse>(
+  path: string,
+  init?: RequestInit,
+  requestDetails?: unknown,
+  logResponseBody = true,
+) {
   const url = apiUrl(path);
   const method = init?.method ?? "GET";
   const requestId = beginApiRequest({ method, request: requestDetails, url });
@@ -101,7 +110,7 @@ async function requestJson<TResponse>(path: string, init?: RequestInit, requestD
         `Request failed with status ${response.status}`;
 
       finishApiRequest(requestId, {
-        details: body,
+        details: logResponseBody ? body : undefined,
         durationMs: performance.now() - startedAt,
         httpStatus: response.status,
         message,
@@ -111,7 +120,7 @@ async function requestJson<TResponse>(path: string, init?: RequestInit, requestD
     }
 
     finishApiRequest(requestId, {
-      details: body,
+      details: logResponseBody ? body : undefined,
       durationMs: performance.now() - startedAt,
       httpStatus: response.status,
       status: "success",
@@ -183,6 +192,124 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
   }
 }
 
+const MAX_POWERPOINT_EXPORT_BYTES = 64 * 1024 * 1024;
+
+async function exportPowerPoint(
+  document: DiligenceCanvasDocument,
+): Promise<PowerPointExport> {
+  const path = "/api/v1/templates/export";
+  const url = apiUrl(path);
+  const requestId = beginApiRequest({
+    method: "POST",
+    request: {
+      slideCount: document.presentation.slides.length,
+    },
+    url,
+  });
+  const startedAt = performance.now();
+
+  try {
+    const response = await fetch(url, {
+      body: JSON.stringify(document),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    if (!response.ok) {
+      const bodyText = await response.text();
+      let body: { error?: string; message?: string } | undefined;
+      try {
+        body = JSON.parse(bodyText) as { error?: string; message?: string };
+      } catch {
+        body = undefined;
+      }
+      const message = body?.error || body?.message || bodyText || response.statusText
+        || `Request failed with status ${response.status}`;
+      finishApiRequest(requestId, {
+        durationMs: performance.now() - startedAt,
+        httpStatus: response.status,
+        message,
+        status: "error",
+      });
+      throw new BackendApiError(message, response.status);
+    }
+
+    const mimeType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+    if (mimeType !== POWERPOINT_CONTENT_TYPE) {
+      throw new Error("The export backend returned an invalid PowerPoint content type.");
+    }
+    const fileName = parsePowerPointFileName(response.headers.get("content-disposition"));
+    const warningCount = parsePowerPointWarningCount(
+      response.headers.get("x-powerpoint-warning-count"),
+    );
+    const declaredLength = response.headers.get("content-length");
+    if (declaredLength) {
+      const length = Number(declaredLength);
+      if (!/^\d+$/.test(declaredLength) || !Number.isSafeInteger(length)) {
+        throw new Error("The export backend returned an invalid PowerPoint size.");
+      }
+      if (length > MAX_POWERPOINT_EXPORT_BYTES) {
+        throw new Error("The export backend returned an oversized PowerPoint file.");
+      }
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (
+      bytes.byteLength === 0
+      || bytes.byteLength > MAX_POWERPOINT_EXPORT_BYTES
+      || bytes[0] !== 0x50
+      || bytes[1] !== 0x4b
+      || bytes[2] !== 0x03
+      || bytes[3] !== 0x04
+    ) {
+      throw new Error("The export backend returned invalid or oversized PowerPoint bytes.");
+    }
+    const dataBase64 = bytesToBase64(bytes);
+    finishApiRequest(requestId, {
+      details: { byteLength: bytes.byteLength, warningCount },
+      durationMs: performance.now() - startedAt,
+      httpStatus: response.status,
+      status: "success",
+    });
+    return { dataBase64, fileName, mimeType: POWERPOINT_CONTENT_TYPE, warningCount };
+  } catch (error) {
+    if (!(error instanceof BackendApiError)) {
+      finishApiRequest(requestId, {
+        durationMs: performance.now() - startedAt,
+        message: error instanceof Error ? error.message : "Network request failed",
+        status: "error",
+      });
+    }
+    throw error;
+  }
+}
+
+function parsePowerPointFileName(value: string | null) {
+  const match = value?.match(/^attachment; filename="([^"\\/\r\n]+\.pptx)"$/i);
+  if (!match || match[1].length > 255 || match[1].trim() !== match[1]) {
+    throw new Error("The export backend returned an invalid PowerPoint filename.");
+  }
+  return match[1];
+}
+
+function parsePowerPointWarningCount(value: string | null) {
+  if (!value || !/^\d+$/.test(value)) {
+    throw new Error("The export backend returned an invalid warning count.");
+  }
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count > 10_000) {
+    throw new Error("The export backend returned an invalid warning count.");
+  }
+  return count;
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function get<TResponse>(path: string): Promise<TResponse> {
   return requestJson<TResponse>(path);
 }
@@ -226,6 +353,16 @@ function listTemplatePreviews(page: number) {
   return get<TemplatePreviewPage>(
     `/api/v1/templates/previews?page=${encodeURIComponent(String(page))}`,
   );
+}
+
+async function getTemplate(templateId: string) {
+  const value = await requestJson<unknown>(
+    `/api/v1/templates/${encodeURIComponent(templateId)}`,
+    undefined,
+    undefined,
+    false,
+  );
+  return parseDiligenceCanvasDocument(value);
 }
 
 function importPptxTemplate(file: File, importMode: PptxTemplateImportMode) {
@@ -449,9 +586,11 @@ export const httpQuarryApi: QuarryApi = {
   createDeal,
   createUser,
   deleteTemplate,
+  exportPowerPoint,
   getDeal,
   getDealDocumentPdf,
   getDealDocumentText,
+  getTemplate,
   getUserByEmail,
   importPptxTemplate,
   listDealDataRoom,

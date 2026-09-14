@@ -56,6 +56,25 @@ impl QuarryHttpClient {
             .await
     }
 
+    pub async fn post_json_stream(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+    ) -> Result<reqwest::Response, String> {
+        let response = self
+            .client
+            .post(self.url(path)?)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|error| format!("Quarry API request failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(response_error(response).await);
+        }
+        Ok(response)
+    }
+
     pub async fn post_multipart(&self, path: &str, form: Form) -> Result<Value, String> {
         self.send_json(self.client.post(self.url(path)?).multipart(form))
             .await

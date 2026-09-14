@@ -9,6 +9,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use futures_util::stream;
 use image::{DynamicImage, ImageOutputFormat, RgbaImage};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -81,6 +82,93 @@ async fn deletes_an_encoded_template_for_the_quarry_app() {
 }
 
 #[tokio::test]
+async fn retrieves_an_encoded_template_for_the_quarry_app_and_preserves_unknown_fields() {
+    async fn template(headers: HeaderMap) -> Response<Body> {
+        assert_eq!(headers.get(APP_ID_HEADER).unwrap(), DILIGENCE_STUDIO_APP_ID);
+        Response::builder()
+            .header(CONTENT_TYPE, "application/json; charset=utf-8")
+            .body(Body::from(
+                json!({
+                    "presentation": { "slides": [], "futureField": { "kept": true } },
+                    "rootExtension": "kept"
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    }
+
+    let server =
+        spawn(Router::new().route("/api/v1/templates/template%2Fone", get(template))).await;
+    let document = client_for(&server)
+        .get_template("template/one")
+        .await
+        .unwrap();
+
+    assert_eq!(document["presentation"]["futureField"]["kept"], true);
+    assert_eq!(document["rootExtension"], "kept");
+}
+
+#[tokio::test]
+async fn template_document_rejects_invalid_content_type() {
+    async fn wrong_type() -> Response<Body> {
+        Response::builder()
+            .header(CONTENT_TYPE, "text/plain")
+            .body(Body::from(r#"{"presentation":{}}"#))
+            .unwrap()
+    }
+    let wrong_type_server =
+        spawn(Router::new().route("/api/v1/templates/example", get(wrong_type))).await;
+    assert!(matches!(
+        client_for(&wrong_type_server)
+            .get_template("example")
+            .await
+            .unwrap_err(),
+        SlideTemplateClientError::InvalidPayload(_)
+    ));
+}
+
+#[test]
+fn declared_template_document_size_is_bounded_before_streaming() {
+    assert!(validate_content_length(
+        Some(MAX_TEMPLATE_DOCUMENT_BYTES as u64),
+        MAX_TEMPLATE_DOCUMENT_BYTES
+    )
+    .is_ok());
+    assert!(matches!(
+        validate_content_length(
+            Some(MAX_TEMPLATE_DOCUMENT_BYTES as u64 + 1),
+            MAX_TEMPLATE_DOCUMENT_BYTES,
+        ),
+        Err(SlideTemplateClientError::ResponseTooLarge)
+    ));
+}
+
+#[tokio::test]
+async fn bounded_body_rejects_a_streamed_overrun_without_content_length() {
+    async fn streamed() -> Response<Body> {
+        let chunks = stream::iter([
+            Ok::<_, std::convert::Infallible>(Bytes::from_static(b"abc")),
+            Ok(Bytes::from_static(b"def")),
+        ]);
+        Response::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from_stream(chunks))
+            .unwrap()
+    }
+    let server = spawn(Router::new().route("/stream", get(streamed))).await;
+    let response = reqwest::Client::new()
+        .get(format!("http://{}/stream", server.address))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        read_bounded_body(response, 5).await.unwrap_err(),
+        SlideTemplateClientError::ResponseTooLarge
+    ));
+}
+
+#[tokio::test]
 async fn delete_requires_the_upstream_204_contract() {
     async fn invalid_response() -> StatusCode {
         StatusCode::OK
@@ -133,6 +221,45 @@ async fn imports_one_slide_with_raw_powerpoint_bytes_and_required_headers() {
             warning_count: 2,
         }
     );
+}
+
+#[tokio::test]
+async fn exports_presentation_json_with_the_quarry_app_identity() {
+    async fn export(headers: HeaderMap, Json(body): Json<Value>) -> Response<Body> {
+        assert_eq!(headers.get(APP_ID_HEADER).unwrap(), DILIGENCE_STUDIO_APP_ID);
+        assert_eq!(body["presentation"]["title"], "Export me");
+        Response::builder()
+            .header(CONTENT_TYPE, POWERPOINT_CONTENT_TYPE)
+            .header(
+                CONTENT_DISPOSITION,
+                "attachment; filename=\"Export me.pptx\"",
+            )
+            .header("x-powerpoint-warning-count", "2")
+            .body(Body::from(b"PK\x03\x04powerpoint".as_slice()))
+            .unwrap()
+    }
+
+    let server = spawn(Router::new().route("/api/v1/export", post(export))).await;
+    let result = client_for(&server)
+        .export_powerpoint(&json!({ "presentation": { "title": "Export me" } }))
+        .await
+        .unwrap();
+
+    assert_eq!(result.file_name, "Export me.pptx");
+    assert_eq!(result.warning_count, 2);
+    assert!(result.bytes.starts_with(b"PK"));
+}
+
+#[test]
+fn export_headers_reject_unsafe_or_non_powerpoint_filenames() {
+    for value in [
+        "attachment; filename=\"../escape.pptx\"",
+        "attachment; filename=\"presentation.pdf\"",
+        "inline; filename=\"presentation.pptx\"",
+    ] {
+        let headers = HeaderMap::from_iter([(CONTENT_DISPOSITION, value.parse().unwrap())]);
+        assert!(parse_export_file_name(&headers).is_err());
+    }
 }
 
 #[tokio::test]

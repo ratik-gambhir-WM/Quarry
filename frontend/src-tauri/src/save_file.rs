@@ -4,6 +4,7 @@ use std::{
     path::Path,
 };
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::Deserialize;
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
@@ -14,6 +15,7 @@ use crate::{
 };
 
 const MAX_EXPORT_BYTES: usize = 5 * 1024 * 1024;
+const MAX_POWERPOINT_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TITLE_CHARS: usize = 80;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -22,6 +24,14 @@ pub struct SaveFileInput {
     pub contents: String,
     pub extensions: Vec<String>,
     pub mime_type: String,
+    pub suggested_name: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavePowerPointInput {
+    pub data_base64: String,
     pub suggested_name: String,
     pub title: String,
 }
@@ -38,6 +48,88 @@ pub async fn save_text_file(
     tauri::async_runtime::spawn_blocking(move || save_text_file_blocking(&app, input))
         .await
         .map_err(AppError::internal)?
+}
+
+#[tauri::command]
+pub async fn save_powerpoint_file(
+    app: AppHandle,
+    window: WebviewWindow,
+    input: SavePowerPointInput,
+) -> AppResult<bool> {
+    verify_main_window_origin(&window)?;
+    validate_powerpoint_input(&input)?;
+    tauri::async_runtime::spawn_blocking(move || save_powerpoint_file_blocking(&app, input))
+        .await
+        .map_err(AppError::internal)?
+}
+
+fn save_powerpoint_file_blocking(app: &AppHandle, input: SavePowerPointInput) -> AppResult<bool> {
+    let bytes = general_purpose::STANDARD
+        .decode(&input.data_base64)
+        .map_err(|_| AppError::validation("The PowerPoint export data is invalid."))?;
+    if bytes.is_empty()
+        || bytes.len() > MAX_POWERPOINT_EXPORT_BYTES
+        || !bytes.starts_with(b"PK\x03\x04")
+    {
+        return Err(AppError::validation(
+            "The PowerPoint export data is invalid or too large.",
+        ));
+    }
+    let selection = app
+        .dialog()
+        .file()
+        .set_title(input.title)
+        .set_file_name(input.suggested_name)
+        .add_filter("PowerPoint presentation", &["pptx"])
+        .blocking_save_file();
+    let Some(file_path) = selection else {
+        return Ok(false);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|_| AppError::validation("The selected destination is invalid."))?;
+    let has_pptx_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pptx"));
+    if !has_pptx_extension {
+        return Err(AppError::validation(
+            "The selected filename needs a .pptx extension.",
+        ));
+    }
+    atomic_write(&path, &bytes).map_err(AppError::internal)?;
+    Ok(true)
+}
+
+fn validate_powerpoint_input(input: &SavePowerPointInput) -> AppResult<()> {
+    if input.data_base64.is_empty()
+        || input.data_base64.len() > (MAX_POWERPOINT_EXPORT_BYTES * 4 / 3) + 4
+    {
+        return Err(AppError::validation(
+            "The PowerPoint export data is empty or too large.",
+        ));
+    }
+    if input.title.trim().is_empty()
+        || input.title.chars().count() > MAX_TITLE_CHARS
+        || input.title.chars().any(char::is_control)
+    {
+        return Err(AppError::validation("The save-dialog title is invalid."));
+    }
+    let file_name = Path::new(&input.suggested_name);
+    let safe_name = file_name.file_name().and_then(|value| value.to_str())
+        == Some(input.suggested_name.as_str())
+        && input.suggested_name.trim() == input.suggested_name
+        && !input.suggested_name.chars().any(char::is_control)
+        && file_name
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pptx"));
+    if !safe_name {
+        return Err(AppError::validation(
+            "The suggested PowerPoint filename is invalid.",
+        ));
+    }
+    Ok(())
 }
 
 fn save_text_file_blocking(app: &AppHandle, input: SaveFileInput) -> AppResult<bool> {

@@ -20,6 +20,7 @@ describe("createTauriQuarryApi", () => {
       get,
       getPdf: vi.fn(),
       post: vi.fn(),
+      postPowerPoint: vi.fn(),
       postMultipart: vi.fn(),
       subscribeJob: vi.fn(),
     });
@@ -35,12 +36,69 @@ describe("createTauriQuarryApi", () => {
       get: vi.fn(),
       getPdf: vi.fn(),
       post: vi.fn(),
+      postPowerPoint: vi.fn(),
       postMultipart: vi.fn(),
       subscribeJob: vi.fn(),
     });
 
     await expect(api.deleteTemplate("template/one")).resolves.toBeUndefined();
     expect(deleteRequest).toHaveBeenCalledWith("/api/v1/templates/template%2Fone");
+  });
+
+  it("loads and validates an encoded template through the desktop relay", async () => {
+    const payload = templateDocument();
+    const get = vi.fn().mockResolvedValue(payload);
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get,
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart: vi.fn(),
+      subscribeJob: vi.fn(),
+    });
+
+    await expect(api.getTemplate("template/one")).resolves.toBe(payload);
+    expect(get).toHaveBeenCalledWith("/api/v1/templates/template%2Fone");
+  });
+
+  it("exports presentation JSON through the explicit desktop PowerPoint relay", async () => {
+    const result = {
+      dataBase64: "UEsDBA==",
+      fileName: "Example.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+      warningCount: 0,
+    };
+    const postPowerPoint = vi.fn().mockResolvedValue(result);
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      postPowerPoint,
+      subscribeJob: vi.fn(),
+    });
+    const document = templateDocument();
+
+    await expect(api.exportPowerPoint(document)).resolves.toEqual(result);
+    expect(postPowerPoint).toHaveBeenCalledWith("/api/v1/templates/export", document);
+  });
+
+  it("rejects malformed template documents returned by the desktop relay", async () => {
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get: vi.fn().mockResolvedValue({ presentation: {} }),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart: vi.fn(),
+      subscribeJob: vi.fn(),
+    });
+
+    await expect(api.getTemplate("example")).rejects.toThrow(
+      "presentation.title must be a string",
+    );
   });
 
   it.each(["single", "batch"] as const)(
@@ -53,6 +111,7 @@ describe("createTauriQuarryApi", () => {
         get: vi.fn(),
         getPdf: vi.fn(),
         post: vi.fn(),
+        postPowerPoint: vi.fn(),
         postMultipart,
         subscribeJob: vi.fn(),
       });
@@ -86,6 +145,7 @@ describe("createTauriQuarryApi", () => {
       get: vi.fn(),
       getPdf: vi.fn(),
       post: vi.fn(),
+      postPowerPoint: vi.fn(),
       postMultipart,
       subscribeJob: vi.fn(),
     });
@@ -114,6 +174,7 @@ describe("createTauriQuarryApi", () => {
       get,
       getPdf,
       post: vi.fn(),
+      postPowerPoint: vi.fn(),
       postMultipart: vi.fn(),
       subscribeJob: vi.fn(),
     });
@@ -134,3 +195,14 @@ describe("createTauriQuarryApi", () => {
     expect(rawText.text).toBe("Raw report text");
   });
 });
+
+function templateDocument() {
+  return {
+    presentation: {
+      preserveElementOrder: true,
+      showBranding: false,
+      slides: [],
+      title: "Example",
+    },
+  };
+}

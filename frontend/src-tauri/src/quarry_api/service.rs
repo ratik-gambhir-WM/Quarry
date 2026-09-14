@@ -1,17 +1,21 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::StreamExt;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
 
 use super::{
     client::QuarryHttpClient,
-    models::{DocumentJobEventPayload, MultipartRequest},
+    models::{DocumentJobEventPayload, MultipartRequest, PowerPointExportPayload},
 };
 
 const MAX_PROXY_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_PROXY_TOTAL_BYTES: usize = 50 * 1024 * 1024;
 const MAX_PROXY_PDF_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PROXY_POWERPOINT_BYTES: usize = 64 * 1024 * 1024;
+const POWERPOINT_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const POWERPOINT_EXPORT_PATH: &str = "/api/v1/templates/export";
 
 #[derive(Clone)]
 pub struct QuarryApiService {
@@ -60,6 +64,76 @@ impl QuarryApiService {
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         validate_api_path(path)?;
         self.client.post(path, body).await
+    }
+
+    pub async fn post_powerpoint(
+        &self,
+        path: &str,
+        body: Value,
+    ) -> Result<PowerPointExportPayload, String> {
+        validate_powerpoint_api_path(path)?;
+        if !body
+            .as_object()
+            .and_then(|root| root.get("presentation"))
+            .is_some_and(Value::is_object)
+        {
+            return Err("PowerPoint export body is missing a presentation object".to_string());
+        }
+        let body_bytes = tauri::async_runtime::spawn_blocking(move || serde_json::to_vec(&body))
+            .await
+            .map_err(|error| format!("PowerPoint export validation failed: {error}"))?
+            .map_err(|_| "PowerPoint export body is not valid JSON".to_string())?;
+        if body_bytes.is_empty() || body_bytes.len() > MAX_PROXY_FILE_BYTES {
+            return Err("PowerPoint export body exceeds the 50 MB limit".to_string());
+        }
+        let response = self.client.post_json_stream(path, body_bytes).await?;
+        let mime_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if mime_type != Some(POWERPOINT_CONTENT_TYPE) {
+            return Err("Quarry API returned a non-PowerPoint export response".to_string());
+        }
+        let file_name = parse_powerpoint_file_name(
+            response
+                .headers()
+                .get(CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok()),
+        )?;
+        let warning_count = parse_powerpoint_warning_count(
+            response
+                .headers()
+                .get("x-powerpoint-warning-count")
+                .and_then(|value| value.to_str().ok()),
+        )?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_PROXY_POWERPOINT_BYTES as u64)
+        {
+            return Err("Quarry API returned an oversized PowerPoint export".to_string());
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| format!("failed to read Quarry PowerPoint response: {error}"))?;
+        if bytes.is_empty()
+            || bytes.len() > MAX_PROXY_POWERPOINT_BYTES
+            || !bytes.starts_with(b"PK\x03\x04")
+        {
+            return Err("Quarry API returned invalid or oversized PowerPoint bytes".to_string());
+        }
+        let data_base64 =
+            tauri::async_runtime::spawn_blocking(move || general_purpose::STANDARD.encode(bytes))
+                .await
+                .map_err(|error| format!("PowerPoint export encoding failed: {error}"))?;
+        Ok(PowerPointExportPayload {
+            data_base64,
+            file_name,
+            mime_type: POWERPOINT_CONTENT_TYPE.to_string(),
+            warning_count,
+        })
     }
 
     pub async fn post_multipart(&self, request: MultipartRequest) -> Result<Value, String> {
@@ -166,6 +240,44 @@ fn validate_pdf_api_path(path: &str) -> Result<(), String> {
         return Err("Quarry PDF API path is not allowed".to_string());
     }
     Ok(())
+}
+
+fn validate_powerpoint_api_path(path: &str) -> Result<(), String> {
+    validate_api_path(path)?;
+    if path != POWERPOINT_EXPORT_PATH {
+        return Err("Quarry PowerPoint API path is not allowed".to_string());
+    }
+    Ok(())
+}
+
+fn parse_powerpoint_file_name(value: Option<&str>) -> Result<String, String> {
+    let file_name = value
+        .and_then(|value| value.strip_prefix("attachment; filename=\""))
+        .and_then(|value| value.strip_suffix('"'))
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 255
+                && value.trim() == *value
+                && !value.contains(['/', '\\'])
+                && !value.chars().any(char::is_control)
+                && std::path::Path::new(value)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("pptx"))
+        })
+        .ok_or_else(|| "Quarry API returned an invalid PowerPoint filename".to_string())?;
+    Ok(file_name.to_string())
+}
+
+fn parse_powerpoint_warning_count(value: Option<&str>) -> Result<usize, String> {
+    let count = value
+        .filter(|value| {
+            !value.is_empty() && value.chars().all(|character| character.is_ascii_digit())
+        })
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|count| *count <= 10_000)
+        .ok_or_else(|| "Quarry API returned an invalid PowerPoint warning count".to_string())?;
+    Ok(count)
 }
 
 fn validate_identifier(name: &str, value: &str) -> Result<(), String> {

@@ -11,6 +11,7 @@ import type {
   ProcessFileJobEvent,
   ProcessFileJobEventHandlers,
   ProcessFileJobResponse,
+  PowerPointExport,
   QuarryApi,
   SummarizableFile,
   PptxTemplateImportMode,
@@ -26,6 +27,7 @@ import type {
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
 import type { WorkspaceAccountUser } from "../data/workspace";
+import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 
 export type TauriMultipartRequest = {
   fields: { name: string; value: string }[];
@@ -43,6 +45,7 @@ type TauriTransport = {
   get<T>(path: string): Promise<T>;
   getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
+  postPowerPoint(path: string, body: unknown): Promise<PowerPointExport>;
   postMultipart<T>(request: TauriMultipartRequest): Promise<T>;
   subscribeJob(
     jobId: string,
@@ -74,6 +77,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.post<WorkspaceAccountUser>("/api/v1/users", input),
     deleteTemplate: (templateId) =>
       transport.delete(`/api/v1/templates/${encodeURIComponent(templateId)}`),
+    exportPowerPoint: (document) =>
+      transport.postPowerPoint("/api/v1/templates/export", document),
     getDeal: (dealId) =>
       transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
     async getDealDocumentPdf(dealId, fileId): Promise<DealDocumentPdf> {
@@ -86,6 +91,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.get<DealDocumentText>(
         `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
       ),
+    getTemplate: async (templateId) => parseDiligenceCanvasDocument(
+      await transport.get<unknown>(`/api/v1/templates/${encodeURIComponent(templateId)}`),
+    ),
     async getUserByEmail(email) {
       try {
         return await transport.get<WorkspaceAccountUser>(

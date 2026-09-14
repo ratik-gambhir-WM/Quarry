@@ -9,6 +9,7 @@ afterEach(cleanup);
 describe("DeliverablesCarousel", () => {
   it("renders API-backed images and accessible slide/navigation labels", () => {
     const onDeleteSlide = vi.fn();
+    const onSelectSlide = vi.fn();
     const slide = {
       id: "template-exact-id",
       thumbnailAlt: "Template preview: template exact id",
@@ -20,6 +21,7 @@ describe("DeliverablesCarousel", () => {
       <DeliverablesCarousel
         deletingSlideId={null}
         onDeleteSlide={onDeleteSlide}
+        onSelectSlide={onSelectSlide}
         sectionLabel="Start from templates slides"
         slides={[slide]}
       />,
@@ -37,6 +39,8 @@ describe("DeliverablesCarousel", () => {
     expect(slideGroup.classList.contains("lg:basis-1/2")).toBe(false);
     expect(slideGroup.querySelector<HTMLElement>('[data-slot="card"]')?.style.aspectRatio).toBe("1280 / 720");
     expect(carousel.classList.contains("max-w-[1440px]")).toBe(true);
+    fireEvent.click(within(carousel).getByRole("button", { name: "Open template exact id template" }));
+    expect(onSelectSlide).toHaveBeenCalledWith(slide);
     expect(within(carousel).getByRole("button", { name: "Previous slide" })).toHaveProperty(
       "disabled",
       true,
@@ -47,5 +51,6 @@ describe("DeliverablesCarousel", () => {
     );
     fireEvent.click(within(carousel).getByRole("button", { name: "Delete template exact id" }));
     expect(onDeleteSlide).toHaveBeenCalledWith(slide);
+    expect(onSelectSlide).toHaveBeenCalledOnce();
   });
 });

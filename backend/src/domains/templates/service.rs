@@ -17,6 +17,9 @@ use crate::{
 pub const PPTX_MULTI_SLIDE_IMPORT_MESSAGE: &str =
     "This PowerPoint contains multiple slides. Use Import Deck Template instead.";
 pub const MAX_PPTX_TEMPLATE_IMPORT_BYTES: usize = 25 * 1024 * 1024;
+pub const MAX_TEMPLATE_DOCUMENT_BYTES: usize = 50 * 1024 * 1024;
+pub const POWERPOINT_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,6 +38,13 @@ pub struct PptxTemplateUpload {
 pub struct PptxTemplateImportResult {
     pub import_mode: PptxTemplateImportMode,
     pub imported_count: usize,
+    pub warning_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PowerPointExport {
+    pub bytes: Vec<u8>,
+    pub file_name: String,
     pub warning_count: usize,
 }
 
@@ -110,6 +120,23 @@ impl TemplateService {
             .map_err(map_slide_template_delete_client_error)
     }
 
+    pub async fn get(&self, template_id: &str) -> ServiceResult<serde_json::Value> {
+        if template_id.trim().is_empty()
+            || template_id.len() > MAX_TEMPLATE_ID_BYTES
+            || template_id.chars().any(char::is_control)
+        {
+            return Err(ServiceError::validation("template ID is invalid"));
+        }
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| ServiceError::unavailable("template capability is not configured"))?;
+        client
+            .get_template(template_id)
+            .await
+            .map_err(map_template_document_client_error)
+    }
+
     pub async fn import_pptx_template(
         &self,
         upload: PptxTemplateUpload,
@@ -134,6 +161,56 @@ impl TemplateService {
             .map(|result| PptxTemplateImportResult::from_adapter(import_mode, result))
             .map_err(|error| map_pptx_import_client_error(error, import_mode))
     }
+
+    pub async fn export_powerpoint(
+        &self,
+        document: serde_json::Value,
+    ) -> ServiceResult<PowerPointExport> {
+        if !document
+            .as_object()
+            .and_then(|root| root.get("presentation"))
+            .is_some_and(serde_json::Value::is_object)
+        {
+            return Err(ServiceError::validation(
+                "presentation document is missing a presentation object",
+            ));
+        }
+        let client = self.client.as_ref().ok_or_else(|| {
+            ServiceError::unavailable("PowerPoint export capability is not configured")
+        })?;
+        client
+            .export_powerpoint(&document)
+            .await
+            .map(|result| PowerPointExport {
+                bytes: result.bytes,
+                file_name: result.file_name,
+                warning_count: result.warning_count,
+            })
+            .map_err(map_powerpoint_export_client_error)
+    }
+}
+
+fn map_powerpoint_export_client_error(error: SlideTemplateClientError) -> ServiceError {
+    match error {
+        SlideTemplateClientError::Status(status) if status.is_client_error() => {
+            ServiceError::validation("The presentation could not be exported.")
+        }
+        error => {
+            tracing::warn!(error = %error, "Diligence Studio PowerPoint export request failed");
+            ServiceError::unavailable("PowerPoint export is temporarily unavailable")
+        }
+    }
+}
+
+fn map_template_document_client_error(error: SlideTemplateClientError) -> ServiceError {
+    if matches!(
+        error,
+        SlideTemplateClientError::Status(reqwest::StatusCode::NOT_FOUND)
+    ) {
+        return ServiceError::not_found("template was not found");
+    }
+    tracing::warn!(error = %error, "Diligence Studio template document request failed");
+    ServiceError::unavailable("template is temporarily unavailable")
 }
 
 fn map_slide_template_preview_client_error(error: SlideTemplateClientError) -> ServiceError {

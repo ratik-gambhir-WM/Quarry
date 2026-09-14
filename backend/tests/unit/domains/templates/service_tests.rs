@@ -21,6 +21,26 @@ async fn unconfigured_delete_returns_a_sanitized_unavailable_error() {
 }
 
 #[tokio::test]
+async fn unconfigured_get_returns_a_sanitized_unavailable_error() {
+    let service = TemplateService::new(None);
+
+    assert_eq!(
+        service.get("example").await.unwrap_err(),
+        ServiceError::Unavailable("template capability is not configured".to_string())
+    );
+}
+
+#[tokio::test]
+async fn get_rejects_an_invalid_template_id_before_capability_lookup() {
+    let service = TemplateService::new(None);
+
+    assert_eq!(
+        service.get("\n").await.unwrap_err(),
+        ServiceError::Validation("template ID is invalid".to_string())
+    );
+}
+
+#[tokio::test]
 async fn unconfigured_import_returns_a_sanitized_unavailable_error() {
     let service = TemplateService::new(None);
 
@@ -33,6 +53,44 @@ async fn unconfigured_import_returns_a_sanitized_unavailable_error() {
             .await
             .unwrap_err(),
         ServiceError::Unavailable("template import is not configured".to_string())
+    );
+}
+
+#[tokio::test]
+async fn export_validates_the_document_before_capability_lookup() {
+    let service = TemplateService::new(None);
+
+    assert_eq!(
+        service
+            .export_powerpoint(serde_json::json!({ "notPresentation": {} }))
+            .await
+            .unwrap_err(),
+        ServiceError::Validation(
+            "presentation document is missing a presentation object".to_string()
+        )
+    );
+    assert_eq!(
+        service
+            .export_powerpoint(serde_json::json!({ "presentation": {} }))
+            .await
+            .unwrap_err(),
+        ServiceError::Unavailable("PowerPoint export capability is not configured".to_string())
+    );
+}
+
+#[test]
+fn export_client_errors_are_sanitized_by_failure_class() {
+    assert_eq!(
+        map_powerpoint_export_client_error(SlideTemplateClientError::Status(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        )),
+        ServiceError::Validation("The presentation could not be exported.".to_string())
+    );
+    assert_eq!(
+        map_powerpoint_export_client_error(SlideTemplateClientError::InvalidPayload(
+            "private upstream detail".to_string(),
+        )),
+        ServiceError::Unavailable("PowerPoint export is temporarily unavailable".to_string())
     );
 }
 
@@ -96,6 +154,26 @@ fn upstream_missing_template_maps_to_not_found() {
             reqwest::StatusCode::NOT_FOUND,
         )),
         ServiceError::NotFound("template was not found".to_string())
+    );
+}
+
+#[test]
+fn upstream_missing_template_document_maps_to_not_found() {
+    assert_eq!(
+        map_template_document_client_error(SlideTemplateClientError::Status(
+            reqwest::StatusCode::NOT_FOUND,
+        )),
+        ServiceError::NotFound("template was not found".to_string())
+    );
+}
+
+#[test]
+fn malformed_template_document_maps_to_sanitized_unavailable() {
+    assert_eq!(
+        map_template_document_client_error(SlideTemplateClientError::InvalidJson(
+            "private payload details".to_string(),
+        )),
+        ServiceError::Unavailable("template is temporarily unavailable".to_string())
     );
 }
 
