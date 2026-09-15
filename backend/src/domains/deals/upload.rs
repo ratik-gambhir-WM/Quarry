@@ -4,23 +4,49 @@ use axum::extract::Multipart;
 
 use crate::{
     app::http::error::{AppError, AppResult},
-    domains::deals::service::UploadedDealFile,
+    domains::deals::service::{SaveDealMetadataInput, UploadedDealFile},
     shared::file_policy::{
         infer_supported_mime_type, MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES,
     },
 };
 
-pub(crate) async fn collect_selected_deal_uploads(
+pub(crate) async fn collect_deal_metadata_input(
     mut multipart: Multipart,
-) -> AppResult<Vec<UploadedDealFile>> {
+) -> AppResult<SaveDealMetadataInput> {
     let mut files = Vec::new();
+    let mut sharepoint_link = None;
+    let mut sow_link = None;
+    let mut fact_sheet_link = None;
+    let mut rl_link = None;
     let mut total_bytes = 0usize;
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|err| AppError::bad_request(format!("failed to read multipart field: {err}")))?
     {
-        if field.name() != Some("files") {
+        let field_name = field.name().unwrap_or_default().to_string();
+        if field_name != "files" {
+            let target = match field_name.as_str() {
+                "sharepointLink" => &mut sharepoint_link,
+                "sowLink" => &mut sow_link,
+                "factSheetLink" => &mut fact_sheet_link,
+                "rlLink" => &mut rl_link,
+                _ => continue,
+            };
+            if target.is_some() {
+                return Err(AppError::bad_request(format!(
+                    "duplicate multipart field: {field_name}"
+                )));
+            }
+            let value = field.text().await.map_err(|err| {
+                AppError::bad_request(format!("failed to read {field_name}: {err}"))
+            })?;
+            if value.len() > 4096 {
+                return Err(AppError::bad_request(format!(
+                    "{field_name} exceeds the 4096 character limit"
+                )));
+            }
+            *target = Some(value);
             continue;
         }
         let relative_path = field.file_name().unwrap_or("upload").to_string();
@@ -43,7 +69,13 @@ pub(crate) async fn collect_selected_deal_uploads(
             bytes: bytes.to_vec(),
         });
     }
-    Ok(files)
+    Ok(SaveDealMetadataInput {
+        uploaded_files: files,
+        sharepoint_link,
+        sow_link,
+        fact_sheet_link,
+        rl_link,
+    })
 }
 
 fn validate_upload_size(filename: &str, size: usize, total_before: usize) -> AppResult<()> {

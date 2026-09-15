@@ -41,4 +41,21 @@ describe("activityLog", () => {
     expect(entry.details).toContain("[truncated 100 characters]");
     expect(entry.details?.length).toBeLessThan(70_000);
   });
+
+  it("redacts query content-shaped fields", () => {
+    beginIpcRequest("send_query_stream", {
+      context: [{ content: "prior secret", role: "user" }],
+      delta: "generated secret",
+      filename: "secret.pdf",
+      prompt: "current secret",
+      systemInstructions: "hidden policy",
+    });
+
+    const [entry] = getActivityLogEntries();
+    expect(entry.details).not.toContain("prior secret");
+    expect(entry.details).not.toContain("generated secret");
+    expect(entry.details).not.toContain("secret.pdf");
+    expect(entry.details).not.toContain("current secret");
+    expect(entry.details).not.toContain("hidden policy");
+  });
 });

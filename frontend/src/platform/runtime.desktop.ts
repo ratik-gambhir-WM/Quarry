@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { createTauriQuarryApi, type TauriMultipartRequest } from "../api/tauriQuarryApi";
+import {
+  createTauriQuarryApi,
+  type TauriMultipartRequest,
+  type TauriQueryPayload,
+  type TauriQueryRequest,
+} from "../api/tauriQuarryApi";
 import type {
   PowerPointExport,
   QuarryRuntime,
@@ -128,6 +133,45 @@ const tauriQuarryApi = createTauriQuarryApi({
     invokePowerPointExport(path, body),
   postMultipart: <TResult>(request: TauriMultipartRequest) =>
     invokeWithActivity<TResult>("quarry_api_post_multipart", { request }),
+  async startQuery(request: TauriQueryRequest, onPayload: (payload: TauriQueryPayload) => void) {
+    const subscriptionId = crypto.randomUUID();
+    const activityId = beginIpcRequest("send_query_stream", {
+      contextMessageCount: request.context.length,
+      fileBytes: request.files.reduce(
+        (total, file) => total + Math.floor(file.dataBase64.length * 0.75),
+        0,
+      ),
+      fileCount: request.files.length,
+      model: request.model,
+    });
+    const startedAt = performance.now();
+    let stopped = false;
+    const unlisten = await listen<TauriQueryPayload>("quarry-query-event", ({ payload }) => {
+      if (!stopped && payload.subscriptionId === subscriptionId) onPayload(payload);
+    });
+    try {
+      await invoke<void>("send_query_stream", { request, subscriptionId });
+      finishIpcRequest(activityId, {
+        durationMs: performance.now() - startedAt,
+        status: "success",
+      });
+    } catch (error) {
+      unlisten();
+      const message = ipcErrorMessage(error);
+      finishIpcRequest(activityId, {
+        durationMs: performance.now() - startedAt,
+        message,
+        status: "error",
+      });
+      throw new Error(message);
+    }
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      unlisten();
+      void invoke<void>("cancel_query_stream", { subscriptionId });
+    };
+  },
   async subscribeJob(jobId, onEvent, onError) {
     const subscriptionId = crypto.randomUUID();
     const unlisten = await listen<{

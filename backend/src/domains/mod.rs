@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod data_rooms;
 pub mod deals;
 pub mod dev_support;

@@ -7,8 +7,9 @@ import type {
 function unavailableDealResources(): DealResource[] {
   return [
     { availability: "unavailable", id: "sow", label: "SOW" },
-    { availability: "coming-soon", id: "fact-sheet", label: "Fact Sheet" },
+    { availability: "unavailable", id: "fact-sheet", label: "Fact Sheet" },
     { availability: "unavailable", id: "sharepoint", label: "SharePoint VDR" },
+    { availability: "unavailable", id: "request-list", label: "Request List" },
   ];
 }
 

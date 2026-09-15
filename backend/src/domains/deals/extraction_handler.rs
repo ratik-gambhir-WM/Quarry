@@ -4,8 +4,7 @@ use axum::{
 };
 
 use super::{
-    handler::DealsHttpState, service::SaveDealMetadataResponse,
-    upload::collect_selected_deal_uploads,
+    handler::DealsHttpState, service::SaveDealMetadataResponse, upload::collect_deal_metadata_input,
 };
 use crate::app::http::error::{AppError, AppResult};
 
@@ -14,10 +13,10 @@ pub(super) async fn save_deal_metadata_handler(
     Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<Json<SaveDealMetadataResponse>> {
-    let files = collect_selected_deal_uploads(multipart).await?;
+    let input = collect_deal_metadata_input(multipart).await?;
     state
         .deals
-        .save_metadata(&deal_id, files)
+        .save_metadata(&deal_id, input)
         .await
         .map(Json)
         .map_err(AppError::from)

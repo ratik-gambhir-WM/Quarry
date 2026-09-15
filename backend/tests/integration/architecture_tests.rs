@@ -208,6 +208,7 @@ fn domain_routers_bind_feature_state_before_composition() {
 #[test]
 fn cross_domain_imports_do_not_reach_private_layers() {
     let domain_names = [
+        "assistant",
         "data_rooms",
         "deals",
         "dev_support",

@@ -3,6 +3,8 @@ use futures_util::StreamExt;
 use reqwest::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
+use std::{collections::HashMap, sync::Mutex};
+use tokio::sync::oneshot;
 
 use super::{
     client::QuarryHttpClient,
@@ -19,7 +21,46 @@ const POWERPOINT_EXPORT_PATH: &str = "/api/v1/templates/export";
 
 #[derive(Clone)]
 pub struct QuarryApiService {
-    client: QuarryHttpClient,
+    pub(super) client: QuarryHttpClient,
+}
+
+#[derive(Default)]
+pub struct QuerySubscriptions {
+    senders: Mutex<HashMap<String, oneshot::Sender<()>>>,
+}
+
+impl QuerySubscriptions {
+    pub fn register(&self, id: String, sender: oneshot::Sender<()>) -> Result<(), String> {
+        validate_identifier("subscriptionId", &id)?;
+        let mut senders = self
+            .senders
+            .lock()
+            .map_err(|_| "query subscription registry failed".to_string())?;
+        if senders.contains_key(&id) {
+            return Err("query subscription already exists".to_string());
+        }
+        senders.insert(id, sender);
+        Ok(())
+    }
+
+    pub fn cancel(&self, id: &str) -> Result<(), String> {
+        validate_identifier("subscriptionId", id)?;
+        if let Some(sender) = self
+            .senders
+            .lock()
+            .map_err(|_| "query subscription registry failed".to_string())?
+            .remove(id)
+        {
+            let _ = sender.send(());
+        }
+        Ok(())
+    }
+
+    pub fn remove(&self, id: &str) {
+        if let Ok(mut senders) = self.senders.lock() {
+            senders.remove(id);
+        }
+    }
 }
 
 impl QuarryApiService {

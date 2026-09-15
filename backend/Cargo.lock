@@ -1917,6 +1917,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+ "zip 4.6.1",
 ]
 
 [[package]]

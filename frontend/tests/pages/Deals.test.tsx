@@ -121,13 +121,10 @@ describe("Deals", () => {
       "Target company",
       "Primary buyer",
       "Deal sponsor",
-      "SharePoint link",
     ]) {
       expect(within(dialog).getByLabelText(label)).toBeTruthy();
     }
-    expect(within(dialog).getByLabelText("SharePoint link").getAttribute("placeholder")).toBe(
-      "https://westmonroe.sharepoint.com/sites/ClientTeamYYYY-Project/Shared%20Documents/Forms/AllItems.aspx?FolderCTID=0x...&id=%2Fsites%2FClientTeamYYYY-Project%2FShared%20Documents",
-    );
+    expect(within(dialog).queryByLabelText("SharePoint link")).toBeNull();
     await waitFor(() => expect(dealIdInput).toBe(document.activeElement));
 
     await user.keyboard("{Escape}");

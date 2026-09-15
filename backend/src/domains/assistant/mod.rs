@@ -1,8 +1,6 @@
-//! Planned owner of assistant conversations and interaction orchestration.
+//! Assistant interaction ownership boundary.
 //!
-//! This comment-only module is a contribution marker, not an available assistant API. Provider
-//! clients remain adapters and must be injected through application bootstrap.
+//! `chat` owns ephemeral textual multi-turn chat. A future `agent` sibling will own tool and
+//! reasoning lifecycle; it must not widen the chat transport with provider-specific state.
 
-// TODO: Define conversation, message, citation, and tool-result models with clear ownership.
-// TODO: Add a service that coordinates injected model and retrieval capabilities without secrets.
-// TODO: Add authorized routes, streaming/error contracts, and tests before application registration.
+pub mod chat;

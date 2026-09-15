@@ -258,3 +258,62 @@ fn process_sse_events_handles_crlf_boundaries() {
     assert_eq!(deltas, vec!["Hi"]);
     assert_eq!(completed_text, None);
 }
+
+#[test]
+fn chat_request_replays_context_and_disables_provider_storage() {
+    let context = vec![
+        ChatMessageInput {
+            role: ChatRole::User,
+            content: "  first  ".to_string(),
+        },
+        ChatMessageInput {
+            role: ChatRole::Assistant,
+            content: "answer".to_string(),
+        },
+    ];
+    let files = [ResponsesFileInput::ImageData {
+        mime_type: "image/png",
+        data_base64: "YWJj",
+        detail: Some("auto"),
+    }];
+    let value = build_chat_request_body(&context, "next", "instructions", "model", &files).unwrap();
+    assert_eq!(value["input"][0]["content"], "  first  ");
+    assert_eq!(value["input"][2]["content"][0]["type"], "input_image");
+    assert_eq!(value["input"][2]["content"][1]["text"], "next");
+    assert_eq!(value["stream"], true);
+    assert_eq!(value["store"], false);
+    assert!(value.get("previous_response_id").is_none());
+    assert!(value.get("truncation").is_none());
+}
+
+#[test]
+fn chat_stream_completion_is_authoritative_and_chunk_safe() {
+    let mut stream = ProviderChatStream::default();
+    let bytes = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hé\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"authoritative\"}}\n\n".as_bytes();
+    let split = bytes.iter().position(|byte| *byte == 0xc3).unwrap() + 1;
+    assert!(stream.push(&bytes[..split]).unwrap().is_empty());
+    assert_eq!(stream.push(&bytes[split..]).unwrap(), vec!["hé"]);
+    assert_eq!(stream.finish().unwrap(), "authoritative");
+}
+
+#[test]
+fn chat_stream_rejects_failure_and_premature_eof() {
+    let mut failed = ProviderChatStream::default();
+    assert!(failed
+        .push(b"data: {\"type\":\"response.failed\"}\n\n")
+        .is_err());
+    assert!(ProviderChatStream::default().finish().is_err());
+}
+
+#[test]
+fn test_responses_url_seam_is_constructor_injected() {
+    let client = OpenAiClient::with_responses_url(
+        reqwest::Client::new(),
+        "test-key",
+        "http://127.0.0.1:1/v1/responses",
+    );
+    assert_eq!(
+        client.responses_url.as_ref(),
+        "http://127.0.0.1:1/v1/responses"
+    );
+}

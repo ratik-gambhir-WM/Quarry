@@ -17,6 +17,7 @@ const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
+const DEFAULT_CHAT_MODEL: &str = "gpt-5.5";
 const DEFAULT_DOCUMENT_CONCURRENCY: usize = 8;
 const DEFAULT_COMPLETED_JOB_RETENTION_SECONDS: u64 = 10 * 60;
 
@@ -60,6 +61,7 @@ pub struct HelixConfig {
 #[derive(Clone, Debug)]
 pub struct OpenAiConfig {
     pub api_key: SecretString,
+    pub chat_model: String,
     pub deal_extraction_model: String,
     pub embedding_model: String,
     pub document_summary_model: String,
@@ -273,6 +275,7 @@ fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, S
 fn parse_openai_config(values: &HashMap<String, String>) -> Result<Option<OpenAiConfig>, String> {
     let names = [
         "OPENAI_API_KEY",
+        "OPENAI_CHAT_MODEL",
         "OPENAI_DEAL_EXTRACTION_MODEL",
         "OPENAI_EMBEDDING_MODEL",
         "OPENAI_DOCUMENT_SUMMARY_MODEL",
@@ -284,6 +287,9 @@ fn parse_openai_config(values: &HashMap<String, String>) -> Result<Option<OpenAi
     let api_key = required(values, "OPENAI_API_KEY", "OpenAI capability")?;
     Ok(Some(OpenAiConfig {
         api_key: SecretString::new(api_key),
+        chat_model: value(values, "OPENAI_CHAT_MODEL")
+            .unwrap_or(DEFAULT_CHAT_MODEL)
+            .to_string(),
         deal_extraction_model: value(values, "OPENAI_DEAL_EXTRACTION_MODEL")
             .unwrap_or(DEFAULT_DEAL_EXTRACTION_MODEL)
             .to_string(),

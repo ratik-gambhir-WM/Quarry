@@ -3,6 +3,7 @@ import type {
   LocalDealFileContents,
   ReadDealSourceFilesInput,
   SaveDealInput,
+  SaveDealMetadataInput,
   SaveDealMetadataResponse,
   SaveDealResponse,
   SavedDeal,
@@ -67,6 +68,30 @@ export type ProcessFileJobEvent = {
 export type ProcessFileJobEventHandlers = {
   onConnectionError?: () => void;
   onEvent: (event: ProcessFileJobEvent) => void;
+};
+
+export type ChatContextMessage = {
+  content: string;
+  role: "user" | "assistant";
+};
+
+export type QueryModelInput = {
+  context: ChatContextMessage[];
+  files: File[];
+  model?: string;
+  prompt: string;
+  systemInstructions?: string;
+};
+
+export type SendQueryEvent =
+  | { model: string; type: "started" }
+  | { delta: string; type: "delta" }
+  | { response: string; type: "completed" }
+  | { error: string; type: "failed" };
+
+export type SendQueryEventHandlers = {
+  onConnectionError?: (message: string) => void;
+  onEvent: (event: SendQueryEvent) => void;
 };
 
 export type DealDocumentSummary = {
@@ -162,7 +187,10 @@ export interface QuarryApi {
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
   deleteTemplate(templateId: string): Promise<void>;
   exportPowerPoint(document: DiligenceCanvasDocument): Promise<PowerPointExport>;
-  saveDealMetadata(dealId: string, files: File[]): Promise<SaveDealMetadataResponse>;
+  saveDealMetadata(
+    dealId: string,
+    input: SaveDealMetadataInput,
+  ): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
   getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
@@ -186,6 +214,7 @@ export interface QuarryApi {
     userId: string,
     files: File[],
   ): Promise<ProcessDocumentsResponse>;
+  queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers): () => void;
   searchDocumentChunksByKeyword(
     search: FileChunkKeywordSearch,
   ): Promise<KeywordFileChunkHit[]>;

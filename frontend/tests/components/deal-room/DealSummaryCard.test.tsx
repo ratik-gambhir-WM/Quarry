@@ -14,13 +14,29 @@ const deal: DealRoomData = {
   pendingTasks: [],
   phaseLabel: "Phase 1",
   resources: [
-    { availability: "unavailable", id: "sow", label: "SOW" },
-    { availability: "coming-soon", id: "fact-sheet", label: "Fact Sheet" },
+    {
+      availability: "available",
+      href: "https://example.com/sow",
+      id: "sow",
+      label: "SOW",
+    },
+    {
+      availability: "available",
+      href: "https://example.com/fact-sheet",
+      id: "fact-sheet",
+      label: "Fact Sheet",
+    },
     {
       availability: "available",
       href: "https://northwind.sharepoint.com/sites/acme",
       id: "sharepoint",
       label: "SharePoint VDR",
+    },
+    {
+      availability: "available",
+      href: "https://example.com/request-list",
+      id: "request-list",
+      label: "Request List",
     },
   ],
   sectorLabel: "Industrials",
@@ -44,14 +60,17 @@ describe("DealSummaryCard", () => {
     expect(keyQuestionsHeading.parentElement?.parentElement?.querySelector("svg")).toBeNull();
     expect(screen.queryByText("No source is currently available")).toBeNull();
     expect(screen.queryByText("Source support coming soon")).toBeNull();
-    const sowRow = screen.getByText("SOW").closest('[role="listitem"]');
-    expect(sowRow).not.toBeNull();
-    expect(within(sowRow as HTMLElement).getByText("SOW").parentElement).toBe(
-      within(sowRow as HTMLElement).getByText("Unavailable").parentElement,
-    );
-    const sharepointLink = screen.getByRole("link", { name: "Open SharePoint VDR in a new tab" });
-    expect(sharepointLink.getAttribute("href")).toBe("https://northwind.sharepoint.com/sites/acme");
-    expect(sharepointLink.getAttribute("rel")).toBe("noopener noreferrer");
+    for (const [label, href] of [
+      ["SOW", "https://example.com/sow"],
+      ["Fact Sheet", "https://example.com/fact-sheet"],
+      ["SharePoint VDR", "https://northwind.sharepoint.com/sites/acme"],
+      ["Request List", "https://example.com/request-list"],
+    ]) {
+      const resourceLink = screen.getByRole("link", { name: `Open ${label} in a new tab` });
+      expect(resourceLink.getAttribute("href")).toBe(href);
+      expect(resourceLink.getAttribute("rel")).toBe("noopener noreferrer");
+      expect(within(resourceLink).getByText("Available")).not.toBeNull();
+    }
 
     const markup = container.textContent ?? "";
     expect(markup.indexOf("What drives growth?")).toBeLessThan(markup.indexOf("Which contracts can terminate?"));
@@ -71,7 +90,7 @@ describe("DealSummaryCard", () => {
     );
 
     expect(screen.getByText("No key questions were extracted from the submitted source files.")).not.toBeNull();
-    expect(screen.queryByRole("link", { name: /SOW|Fact Sheet|SharePoint VDR/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /SOW|Fact Sheet|SharePoint VDR|Request List/ })).toBeNull();
   });
 
   it("renders every extracted question without hidden grid pagination", () => {

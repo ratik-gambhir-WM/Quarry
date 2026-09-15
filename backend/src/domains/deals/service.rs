@@ -46,6 +46,15 @@ pub struct UploadedDealFile {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SaveDealMetadataInput {
+    pub uploaded_files: Vec<UploadedDealFile>,
+    pub sharepoint_link: Option<String>,
+    pub sow_link: Option<String>,
+    pub fact_sheet_link: Option<String>,
+    pub rl_link: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealSourceFile {
@@ -154,6 +163,9 @@ impl DealService {
                 key_questions_json: "[]".to_string(),
                 local_path: trim_optional_owned(input.local_path),
                 sharepoint_link: trim_optional_owned(input.sharepoint_link),
+                sow_link: None,
+                fact_sheet_link: None,
+                rl_link: None,
             })
             .await
             .map_err(|error| ServiceError::validation(error.to_string()))?;
@@ -163,7 +175,7 @@ impl DealService {
     pub async fn save_metadata(
         &self,
         deal_id: &str,
-        uploaded_files: Vec<UploadedDealFile>,
+        input: SaveDealMetadataInput,
     ) -> ServiceResult<SaveDealMetadataResponse> {
         let deal = self
             .deals
@@ -177,7 +189,36 @@ impl DealService {
                 .ok_or_else(|| {
                     ServiceError::not_found(format!("deal metadata not found for id `{deal_id}`"))
                 })?;
-        let files = uploaded_files
+        let sharepoint_link =
+            updated_optional_value(input.sharepoint_link, existing_metadata.sharepoint_link);
+        let sow_link = updated_optional_value(input.sow_link, existing_metadata.sow_link);
+        let fact_sheet_link =
+            updated_optional_value(input.fact_sheet_link, existing_metadata.fact_sheet_link);
+        let rl_link = updated_optional_value(input.rl_link, existing_metadata.rl_link);
+        validate_sharepoint_link(sharepoint_link.as_deref())?;
+        validate_https_link("sowLink", sow_link.as_deref())?;
+        validate_https_link("factSheetLink", fact_sheet_link.as_deref())?;
+        validate_https_link("rlLink", rl_link.as_deref())?;
+        if existing_metadata.local_path.is_some() && sharepoint_link.is_some() {
+            return Err(ServiceError::validation(
+                "localPath and sharepointLink cannot both be provided",
+            ));
+        }
+        let metadata = self
+            .deals
+            .upsert_metadata(UpsertDealMetadataRecord {
+                deal_id: deal.deal_id.clone(),
+                user_id: deal.user_id,
+                key_questions_json: existing_metadata.key_questions_json,
+                local_path: existing_metadata.local_path,
+                sharepoint_link,
+                sow_link,
+                fact_sheet_link,
+                rl_link,
+            })
+            .await?;
+        let files = input
+            .uploaded_files
             .into_iter()
             .map(|file| MatchedDealFile {
                 source_file: DealSourceFile {
@@ -190,6 +231,16 @@ impl DealService {
                 mime_type: file.mime_type,
             })
             .collect::<Vec<_>>();
+        if files.is_empty() {
+            return Ok(SaveDealMetadataResponse {
+                deal,
+                files: Vec::new(),
+                extraction: DealExtraction {
+                    key_questions: Vec::new(),
+                },
+                metadata,
+            });
+        }
         let extraction = self.extract_from_files(&deal, &files).await?;
         let key_questions_json =
             serde_json::to_string(&extraction.key_questions).map_err(|error| {
@@ -201,8 +252,11 @@ impl DealService {
                 deal_id: deal.deal_id.clone(),
                 user_id: deal.user_id,
                 key_questions_json,
-                local_path: existing_metadata.local_path,
-                sharepoint_link: existing_metadata.sharepoint_link,
+                local_path: metadata.local_path,
+                sharepoint_link: metadata.sharepoint_link,
+                sow_link: metadata.sow_link,
+                fact_sheet_link: metadata.fact_sheet_link,
+                rl_link: metadata.rl_link,
             })
             .await?;
         Ok(SaveDealMetadataResponse {
@@ -307,11 +361,43 @@ fn validate_deal_input(input: &SaveDealInput) -> ServiceResult<()> {
             "localPath and sharepointLink cannot both be provided",
         ));
     }
-    if let Some(link) = sharepoint_link {
-        if !link.starts_with("https://") || !link.contains(".sharepoint.com/") {
+    validate_sharepoint_link(sharepoint_link)?;
+    Ok(())
+}
+
+fn validate_sharepoint_link(link: Option<&str>) -> ServiceResult<()> {
+    if let Some(link) = link {
+        let parsed = reqwest::Url::parse(link).map_err(|_| {
+            ServiceError::validation("sharepointLink must be an HTTPS SharePoint URL")
+        })?;
+        let is_sharepoint = parsed
+            .host_str()
+            .is_some_and(|host| host.to_ascii_lowercase().ends_with(".sharepoint.com"));
+        if parsed.scheme() != "https"
+            || !is_sharepoint
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
             return Err(ServiceError::validation(
                 "sharepointLink must be an HTTPS SharePoint URL",
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_https_link(field: &str, link: Option<&str>) -> ServiceResult<()> {
+    if let Some(link) = link {
+        let parsed = reqwest::Url::parse(link)
+            .map_err(|_| ServiceError::validation(format!("{field} must be an HTTPS URL")))?;
+        if parsed.scheme() != "https"
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(ServiceError::validation(format!(
+                "{field} must be an HTTPS URL"
+            )));
         }
     }
     Ok(())
@@ -346,6 +432,13 @@ fn trim_optional_owned(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn updated_optional_value(submitted: Option<String>, existing: Option<String>) -> Option<String> {
+    match submitted {
+        Some(value) => trim_optional_owned(Some(value)),
+        None => existing,
+    }
 }
 
 #[cfg(test)]
