@@ -60,10 +60,21 @@ export type SavedDeal = {
 
 export type SavedDealMetadata = {
   dealId: string;
+  factSheetLink: string | null;
   keyQuestionsJson: string;
   localPath: string | null;
+  rlLink: string | null;
   sharepointLink: string | null;
+  sowLink: string | null;
   userId: number;
+};
+
+export type SaveDealMetadataInput = {
+  factSheetLink: string | null;
+  files: File[];
+  rlLink: string | null;
+  sharepointLink: string | null;
+  sowLink: string | null;
 };
 
 export type DealExtractionResult = {
@@ -158,17 +169,22 @@ export function buildDealResources(
   const sowFile = normalizedSowSourceName
     ? files.find((file) => file.filename === normalizedSowSourceName)
     : undefined;
+  const sowHref = getSafeHttpsHref(metadata?.sowLink);
+  const factSheetHref = getSafeHttpsHref(metadata?.factSheetLink);
   const sharepointHref = getSafeSharePointHref(metadata?.sharepointLink);
+  const requestListHref = getSafeHttpsHref(metadata?.rlLink);
 
   return [
     {
-      availability: sowFile ? "available" : "unavailable",
+      availability: sowFile || sowHref ? "available" : "unavailable",
+      href: sowHref,
       id: "sow",
       label: "SOW",
       sourceName: sowFile?.filename,
     },
     {
-      availability: "coming-soon",
+      availability: factSheetHref ? "available" : "unavailable",
+      href: factSheetHref,
       id: "fact-sheet",
       label: "Fact Sheet",
     },
@@ -178,16 +194,34 @@ export function buildDealResources(
       id: "sharepoint",
       label: "SharePoint VDR",
     },
+    {
+      availability: requestListHref ? "available" : "unavailable",
+      href: requestListHref,
+      id: "request-list",
+      label: "Request List",
+    },
   ];
 }
 
 function getSafeSharePointHref(value?: string | null) {
+  const href = getSafeHttpsHref(value);
+  if (!href) return undefined;
+
+  try {
+    const parsed = new URL(href);
+    const safeHost = parsed.hostname.toLowerCase().endsWith(".sharepoint.com");
+    return safeHost ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getSafeHttpsHref(value?: string | null) {
   if (!value?.trim()) return undefined;
 
   try {
     const parsed = new URL(value.trim());
-    const safeHost = parsed.hostname.toLowerCase().endsWith(".sharepoint.com");
-    if (parsed.protocol !== "https:" || !safeHost || parsed.username || parsed.password) {
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
       return undefined;
     }
     return parsed.href;

@@ -8,14 +8,15 @@ mod security;
 #[path = "../tests/test_layout.rs"]
 mod test_layout;
 
+use std::sync::Arc;
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 
 use crate::{
     deal_files::{read_deal_source_files, select_deal_data_room, LocalDealRoots},
     quarry_api::{
-        quarry_api_delete, quarry_api_get, quarry_api_get_pdf, quarry_api_post,
-        quarry_api_post_multipart, quarry_api_post_powerpoint, subscribe_document_job,
-        QuarryApiService,
+        cancel_query_stream, quarry_api_delete, quarry_api_get, quarry_api_get_pdf,
+        quarry_api_post, quarry_api_post_multipart, quarry_api_post_powerpoint, send_query_stream,
+        subscribe_document_job, QuarryApiService, QuerySubscriptions,
     },
     save_file::{save_powerpoint_file, save_text_file},
 };
@@ -73,6 +74,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LocalDealRoots::default())
         .manage(quarry_api)
+        .manage(Arc::new(QuerySubscriptions::default()))
         .setup(|app| {
             app.set_menu(build_app_menu(app.handle())?)?;
             Ok(())
@@ -80,6 +82,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_deal_source_files,
+            cancel_query_stream,
             quarry_api_delete,
             quarry_api_get,
             quarry_api_get_pdf,
@@ -88,6 +91,7 @@ pub fn run() {
             quarry_api_post_powerpoint,
             save_powerpoint_file,
             save_text_file,
+            send_query_stream,
             select_deal_data_room,
             subscribe_document_job
         ])

@@ -6,6 +6,7 @@ describe("selected Quarry runtime", () => {
     expect(runtime.target).toBe("web");
     expect(runtime.api.listDeals).toBeTypeOf("function");
     expect(runtime.api.startProcessFile).toBeTypeOf("function");
+    expect(runtime.api.queryModel).toBeTypeOf("function");
     expect(runtime.platform.saveFile).toBeTypeOf("function");
   });
 });

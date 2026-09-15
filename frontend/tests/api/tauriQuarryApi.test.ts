@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createTauriQuarryApi } from "@/api/tauriQuarryApi";
+import {
+  createTauriQuarryApi,
+  type TauriQueryPayload,
+} from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
   it("uses the versioned template preview path and preserves its response", async () => {
@@ -159,6 +162,38 @@ describe("createTauriQuarryApi", () => {
     });
   });
 
+  it("sends deal metadata links through the desktop multipart relay", async () => {
+    const postMultipart = vi.fn().mockResolvedValue({});
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart,
+      subscribeJob: vi.fn(),
+    });
+
+    await api.saveDealMetadata("DEAL / 1", {
+      factSheetLink: "https://example.com/fact-sheet",
+      files: [],
+      rlLink: "https://example.com/request-list",
+      sharepointLink: null,
+      sowLink: "https://example.com/sow",
+    });
+
+    expect(postMultipart).toHaveBeenCalledWith({
+      fields: [
+        { name: "sharepointLink", value: "" },
+        { name: "sowLink", value: "https://example.com/sow" },
+        { name: "factSheetLink", value: "https://example.com/fact-sheet" },
+        { name: "rlLink", value: "https://example.com/request-list" },
+      ],
+      files: [],
+      path: "/api/v1/deals/DEAL%20%2F%201/metadata",
+    });
+  });
+
   it("uses the deal-scoped document routes for lists, PDF bytes, and raw text", async () => {
     const get = vi
       .fn()
@@ -193,6 +228,99 @@ describe("createTauriQuarryApi", () => {
       "/api/v1/deals/DEAL%20%2F%201/documents/file%20%2F%201/text",
     );
     expect(rawText.text).toBe("Raw report text");
+  });
+
+  it("maps query files and isolates server events behind the desktop transport", async () => {
+    const startQuery = vi.fn(async (
+      _request: unknown,
+      onPayload: (payload: TauriQueryPayload) => void,
+    ) => {
+      onPayload({
+        event: { model: "gpt-5.5", type: "started" },
+        kind: "serverEvent",
+        subscriptionId: "subscription",
+      });
+      return vi.fn();
+    });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
+      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+    });
+    const events: string[] = [];
+    api.queryModel({
+      context: [],
+      files: [new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" })],
+      prompt: "hello",
+    }, { onEvent: (event) => events.push(event.type) });
+    await vi.waitFor(() => expect(events).toEqual(["started"]));
+    expect(startQuery.mock.calls[0][0]).toMatchObject({
+      context: [],
+      files: [{ dataBase64: "AQID", filename: "image.png", mimeType: "image/png" }],
+      prompt: "hello",
+    });
+  });
+
+  it("disposes a desktop query whose terminal callback fires before startup resolves", async () => {
+    const cleanup = vi.fn();
+    const startQuery = vi.fn(async (
+      _request: unknown,
+      onPayload: (payload: TauriQueryPayload) => void,
+    ) => {
+      onPayload({
+        event: { model: "gpt-5.5", type: "started" },
+        kind: "serverEvent",
+        subscriptionId: "subscription",
+      });
+      onPayload({
+        event: { response: "done", type: "completed" },
+        kind: "serverEvent",
+        subscriptionId: "subscription",
+      });
+      return cleanup;
+    });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
+      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+    });
+
+    const cancel = api.queryModel(
+      { context: [], files: [], prompt: "hello" },
+      { onEvent: vi.fn() },
+    );
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    cancel();
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("disposes an active desktop query after a connection error", async () => {
+    const cleanup = vi.fn();
+    let deliver: ((payload: TauriQueryPayload) => void) | undefined;
+    const startQuery = vi.fn(async (
+      _request: unknown,
+      onPayload: (payload: TauriQueryPayload) => void,
+    ) => {
+      deliver = onPayload;
+      return cleanup;
+    });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
+      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+    });
+    const onConnectionError = vi.fn();
+
+    api.queryModel(
+      { context: [], files: [], prompt: "hello" },
+      { onConnectionError, onEvent: vi.fn() },
+    );
+    await vi.waitFor(() => expect(deliver).toBeTypeOf("function"));
+    deliver?.({
+      kind: "connectionError",
+      message: "connection closed",
+      subscriptionId: "subscription",
+    });
+
+    expect(onConnectionError).toHaveBeenCalledWith("connection closed");
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 });
 

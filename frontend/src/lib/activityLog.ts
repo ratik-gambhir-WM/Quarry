@@ -54,7 +54,7 @@ const MAX_ARRAY_ITEMS = 30;
 const MAX_OBJECT_KEYS = 50;
 const MAX_STRING_LENGTH = 2_000;
 const REDACTED = "[REDACTED]";
-const sensitiveKeyPattern = /api[-_]?key|authorization|base64|content|cookie|email|file(name)?|folder|password|path|payload|question|secret|summary|text|token/i;
+const sensitiveKeyPattern = /api[-_]?key|authorization|base64|content|context|cookie|delta|email|file(name)?|folder|instruction|password|path|payload|prompt|question|secret|summary|text|token/i;
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const absolutePathPattern = /(?:\/Users\/|\/home\/|\/var\/|[A-Za-z]:[\\/]|\\\\)[^\s]*/g;
 

@@ -93,6 +93,20 @@ fn rejects_invalid_values_and_partial_optional_capabilities() {
 }
 
 #[test]
+fn chat_model_defaults_and_activates_the_openai_capability() {
+    let defaulted = AppConfig::from_values([("OPENAI_API_KEY", "secret")]).unwrap();
+    assert_eq!(defaulted.openai.unwrap().chat_model, "gpt-5.5");
+
+    let configured = AppConfig::from_values([
+        ("OPENAI_API_KEY", "secret"),
+        ("OPENAI_CHAT_MODEL", "chat-model"),
+    ])
+    .unwrap();
+    assert_eq!(configured.openai.unwrap().chat_model, "chat-model");
+    assert!(AppConfig::from_values([("OPENAI_CHAT_MODEL", "chat-model")]).is_err());
+}
+
+#[test]
 fn secrets_are_redacted_from_debug_output() {
     let config = AppConfig::from_values([("OPENAI_API_KEY", "super-secret")]).unwrap();
     let debug = format!("{config:?}");

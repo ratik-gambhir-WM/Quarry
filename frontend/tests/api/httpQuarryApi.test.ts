@@ -168,9 +168,12 @@ describe("httpQuarryApi", () => {
     };
     const metadata = {
       dealId: input.dealId,
+      factSheetLink: null,
       keyQuestionsJson: "[]",
       localPath: null,
+      rlLink: null,
       sharepointLink: input.sharepointLink,
+      sowLink: null,
       userId: 1,
     };
     const fetchMock = vi
@@ -182,7 +185,13 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await httpQuarryApi.createDeal(input);
-    await httpQuarryApi.saveDealMetadata(input.dealId, []);
+    await httpQuarryApi.saveDealMetadata(input.dealId, {
+      factSheetLink: "https://example.com/fact-sheet",
+      files: [],
+      rlLink: "https://example.com/request-list",
+      sharepointLink: "https://northwind.sharepoint.com/sites/acme",
+      sowLink: "https://example.com/sow",
+    });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -194,6 +203,13 @@ describe("httpQuarryApi", () => {
       "/api/v1/deals/DEAL-000184/metadata",
       expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
     );
+    const metadataForm = fetchMock.mock.calls[1][1]?.body as FormData;
+    expect(Object.fromEntries(metadataForm.entries())).toEqual({
+      factSheetLink: "https://example.com/fact-sheet",
+      rlLink: "https://example.com/request-list",
+      sharepointLink: "https://northwind.sharepoint.com/sites/acme",
+      sowLink: "https://example.com/sow",
+    });
   });
 
   it("uses the authoritative deal path for document uploads", async () => {
@@ -255,6 +271,63 @@ describe("httpQuarryApi", () => {
       undefined,
     );
     expect(rawText.text).toBe("Raw report text");
+  });
+
+  it("posts preserved chat context and delivers query events before completion", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("event: started\ndata: {\"type\":\"started\",\"model\":\"gpt-5.5\"}\n\nevent: delta\ndata: {\"type\":\"delta\",\"delta\":\"hi\"}\n\n"));
+        controller.enqueue(encoder.encode("event: completed\ndata: {\"type\":\"completed\",\"response\":\"hi\"}\n\n"));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, {
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const events: string[] = [];
+
+    httpQuarryApi.queryModel({
+      context: [
+        { content: "  question  ", role: "user" },
+        { content: "answer", role: "assistant" },
+      ],
+      files: [],
+      prompt: "  next  ",
+    }, { onEvent: (event) => events.push(event.type) });
+    await vi.waitFor(() => expect(events).toEqual(["started", "delta", "completed"]));
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const form = request.body as FormData;
+    expect(form.get("prompt")).toBe("  next  ");
+    expect(form.get("context")).toBe('[{"content":"  question  ","role":"user"},{"content":"answer","role":"assistant"}]');
+  });
+
+  it("closes the response stream as soon as a terminal query event arrives", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          "event: started\ndata: {\"type\":\"started\",\"model\":\"gpt-5.5\"}\n\n"
+          + "event: completed\ndata: {\"type\":\"completed\",\"response\":\"done\"}\n\n",
+        ));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream, {
+      headers: { "content-type": "text/event-stream" },
+    })));
+
+    httpQuarryApi.queryModel(
+      { context: [], files: [], prompt: "hello" },
+      { onEvent: vi.fn() },
+    );
+
+    await vi.waitFor(() => expect(cancelled).toBe(true));
   });
 });
 

@@ -12,17 +12,21 @@ import type {
   ProcessFileJobEventHandlers,
   ProcessFileJobResponse,
   PowerPointExport,
+  QueryModelInput,
   QuarryApi,
+  SendQueryEventHandlers,
   SummarizableFile,
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
+import { QuerySseParser } from "./querySse";
 import { POWERPOINT_CONTENT_TYPE } from "../contracts/quarryApi";
 import type { DiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 import type {
   SaveDealInput,
+  SaveDealMetadataInput,
   SaveDealMetadataResponse,
   SaveDealResponse,
   SavedDeal,
@@ -336,13 +340,21 @@ function createDeal(input: SaveDealInput) {
   return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
 }
 
-function saveDealMetadata(dealId: string, files: File[]) {
+function saveDealMetadata(dealId: string, input: SaveDealMetadataInput) {
   const form = new FormData();
-  appendFiles(form, files);
+  appendFiles(form, input.files);
+  appendDealMetadataLinks(form, input);
   return postForm<SaveDealMetadataResponse>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/metadata`,
     form,
   );
+}
+
+function appendDealMetadataLinks(form: FormData, input: SaveDealMetadataInput) {
+  form.append("sharepointLink", input.sharepointLink ?? "");
+  form.append("sowLink", input.sowLink ?? "");
+  form.append("factSheetLink", input.factSheetLink ?? "");
+  form.append("rlLink", input.rlLink ?? "");
 }
 
 function listDeals() {
@@ -574,6 +586,124 @@ function previewDealDocument(dealId: string, relativePath: string) {
   );
 }
 
+function queryModel(
+  input: QueryModelInput,
+  { onConnectionError, onEvent }: SendQueryEventHandlers,
+) {
+  const path = "/api/v1/query_model";
+  const url = apiUrl(path);
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  const requestId = beginApiRequest({
+    method: "POST",
+    request: {
+      contextMessageCount: input.context.length,
+      fileCount: input.files.length,
+      fileBytes: input.files.reduce((total, file) => total + file.size, 0),
+      model: input.model,
+    },
+    url,
+  });
+  let active = true;
+  let settled = false;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+  const stopStream = () => {
+    controller.abort();
+    void reader?.cancel().catch(() => undefined);
+  };
+
+  const failConnection = (message: string, httpStatus?: number) => {
+    if (!active || settled) return;
+    settled = true;
+    active = false;
+    stopStream();
+    finishApiRequest(requestId, {
+      durationMs: performance.now() - startedAt,
+      httpStatus,
+      message,
+      status: "error",
+    });
+    onConnectionError?.(message);
+  };
+
+  void (async () => {
+    try {
+      const form = new FormData();
+      form.append("prompt", input.prompt);
+      form.append("context", JSON.stringify(input.context));
+      if (input.model !== undefined) form.append("model", input.model);
+      if (input.systemInstructions !== undefined) {
+        form.append("systemInstructions", input.systemInstructions);
+      }
+      for (const file of input.files) form.append("files", file, file.name);
+
+      const response = await fetch(url, {
+        body: form,
+        headers: { Accept: "text/event-stream" },
+        method: "POST",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        failConnection(`The query request failed with status ${response.status}.`, response.status);
+        return;
+      }
+      const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+      if (contentType !== "text/event-stream" || !response.body) {
+        failConnection("The query backend returned an invalid streaming response.", response.status);
+        return;
+      }
+      const parser = new QuerySseParser((event) => {
+        if (!active || settled) return;
+        logSseEvent({
+          data: event.type === "delta"
+            ? { characterCount: [...event.delta].length }
+            : { type: event.type },
+          eventName: event.type,
+          status: event.type === "failed" ? "error" : "success",
+          title: `Query ${event.type} event`,
+          url,
+        });
+        onEvent(event);
+        if (event.type === "completed" || event.type === "failed") {
+          settled = true;
+          active = false;
+          stopStream();
+          finishApiRequest(requestId, {
+            durationMs: performance.now() - startedAt,
+            httpStatus: response.status,
+            status: event.type === "completed" ? "success" : "error",
+          });
+        }
+      });
+      reader = response.body.getReader();
+      while (active) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parser.push(value);
+      }
+      if (active) parser.finish();
+    } catch (error) {
+      if (!active && error instanceof DOMException && error.name === "AbortError") return;
+      failConnection(error instanceof Error ? error.message : "The query connection failed.");
+    }
+  })();
+
+  return () => {
+    if (!active) return;
+    active = false;
+    stopStream();
+    if (!settled) {
+      settled = true;
+      finishApiRequest(requestId, {
+        durationMs: performance.now() - startedAt,
+        message: "Query cancelled",
+        status: "success",
+      });
+    }
+  };
+}
+
 function appendFiles(form: FormData, files: File[]) {
   for (const file of files) {
     const relativeFile = file as File & { webkitRelativePath?: string };
@@ -600,6 +730,7 @@ export const httpQuarryApi: QuarryApi = {
   listSummaryFiles,
   previewDealDocument,
   processDocuments,
+  queryModel,
   saveDealMetadata,
   searchDocumentChunksByKeyword,
   searchDocumentChunksByVector,

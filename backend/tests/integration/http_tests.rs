@@ -53,6 +53,112 @@ async fn versioned_health_and_capabilities_routes_are_available() {
 }
 
 #[tokio::test]
+async fn query_model_is_available_under_both_prefixes_and_fails_before_stream_when_unconfigured() {
+    let app = test_router();
+    for path in ["/api/v1/query_model", "/api/query_model"] {
+        let (content_type, body) = query_multipart("hello", "[]");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(path)
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}
+
+#[tokio::test]
+async fn query_model_rejects_invalid_context_before_capability_lookup() {
+    let app = test_router();
+    for context in [
+        r#"[{"role":"user","content":"unpaired"}]"#,
+        r#"[{"role":"assistant","content":"wrong"},{"role":"user","content":"order"}]"#,
+        r#"[{"role":"user","content":"question","extra":true},{"role":"assistant","content":"answer"}]"#,
+    ] {
+        let (content_type, body) = query_multipart("hello", context);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/query_model")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn query_model_streams_the_typed_lifecycle_without_buffering() {
+    async fn upstream(Json(body): Json<Value>) -> axum::response::Response {
+        assert_eq!(body["input"][0]["role"], "user");
+        assert_eq!(body["input"][1]["role"], "assistant");
+        assert_eq!(body["input"][2]["content"][0]["text"], "next");
+        assert_eq!(body["store"], false);
+        axum::response::Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"complete\"}}\n\n",
+            ))
+            .unwrap()
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route("/v1/responses", axum::routing::post(upstream)),
+        )
+        .await
+        .unwrap();
+    });
+    let client = crate::adapters::openai::client::OpenAiClient::with_responses_url(
+        reqwest::Client::new(),
+        "test-key",
+        format!("http://{address}/v1/responses"),
+    );
+    let service = crate::domains::assistant::chat::service::AssistantChatService::new(
+        Some(Arc::new(client)),
+        "gpt-5.5".to_string(),
+    );
+    let api = crate::domains::assistant::chat::route::routes(Arc::new(service));
+    let app = crate::app::http::create_router(api, &crate::AppConfig::default().http);
+    let context = r#"[{"role":"user","content":"first"},{"role":"assistant","content":"answer"}]"#;
+    let (content_type, body) = query_multipart("next", context);
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/query_model")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert_eq!(response.headers()["x-accel-buffering"], "no");
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("event: started"));
+    assert!(body.contains("event: delta"));
+    assert!(body.contains("\"response\":\"complete\""));
+    upstream_task.abort();
+}
+
+#[tokio::test]
 async fn routes_outside_api_prefix_are_not_found() {
     let app = test_router();
 
@@ -378,6 +484,17 @@ fn template_multipart(parts: &[(&str, &str, &[u8])]) -> (String, Vec<u8>) {
     (format!("multipart/form-data; boundary={BOUNDARY}"), body)
 }
 
+fn query_multipart(prompt: &str, context: &str) -> (String, Vec<u8>) {
+    const BOUNDARY: &str = "quarry-query-boundary";
+    let body = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n{prompt}\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{context}\r\n--{BOUNDARY}--\r\n"
+    );
+    (
+        format!("multipart/form-data; boundary={BOUNDARY}"),
+        body.into_bytes(),
+    )
+}
+
 #[tokio::test]
 async fn legacy_command_routes_are_not_exposed() {
     let app = test_router();
@@ -602,7 +719,13 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
                 )
-                .body(Body::from(format!("--{BOUNDARY}--\r\n")))
+                .body(Body::from(format!(
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointLink\"\r\n\r\n https://northwind.sharepoint.com/sites/acme \r\n\
+                     --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sowLink\"\r\n\r\n https://example.com/sow \r\n\
+                     --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"factSheetLink\"\r\n\r\nhttps://example.com/fact-sheet\r\n\
+                     --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"rlLink\"\r\n\r\nhttps://example.com/request-list\r\n\
+                     --{BOUNDARY}--\r\n"
+                )))
                 .unwrap(),
         )
         .await
@@ -618,8 +741,71 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     assert_eq!(saved["deal"]["userId"], user_id);
     assert_eq!(saved["metadata"]["userId"], user_id);
     assert_eq!(saved["metadata"]["keyQuestionsJson"], "[]");
-    assert_eq!(saved["metadata"]["sharepointLink"], Value::Null);
+    assert_eq!(
+        saved["metadata"]["sharepointLink"],
+        "https://northwind.sharepoint.com/sites/acme"
+    );
+    assert_eq!(saved["metadata"]["sowLink"], "https://example.com/sow");
+    assert_eq!(
+        saved["metadata"]["factSheetLink"],
+        "https://example.com/fact-sheet"
+    );
+    assert_eq!(
+        saved["metadata"]["rlLink"],
+        "https://example.com/request-list"
+    );
     assert_eq!(saved["files"], serde_json::json!([]));
+
+    let persisted_metadata = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/deals/DEAL-000184")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(persisted_metadata.status(), StatusCode::OK);
+    let persisted_metadata: Value = serde_json::from_slice(
+        &to_bytes(persisted_metadata.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        persisted_metadata["metadata"]["sharepointLink"],
+        "https://northwind.sharepoint.com/sites/acme"
+    );
+    assert_eq!(
+        persisted_metadata["metadata"]["sowLink"],
+        "https://example.com/sow"
+    );
+    assert_eq!(
+        persisted_metadata["metadata"]["factSheetLink"],
+        "https://example.com/fact-sheet"
+    );
+    assert_eq!(
+        persisted_metadata["metadata"]["rlLink"],
+        "https://example.com/request-list"
+    );
+
+    let invalid_metadata = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-000184/metadata")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(format!(
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointUrl\"\r\n\r\nhttps://northwind.sharepoint.com/sites/acme\r\n\
+                     --{BOUNDARY}--\r\n"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_metadata.status(), StatusCode::BAD_REQUEST);
 
     let archive_deal = app
         .oneshot(

@@ -1,4 +1,9 @@
-use std::{fs, path::Path, sync::Arc, time::Instant};
+use std::{
+    fmt, fs,
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
@@ -16,11 +21,54 @@ const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
 const OPENAI_EMBEDDINGS_API: &str = "openai.embeddings";
 const OPENAI_RESPONSES_API: &str = "openai.responses";
 const MAX_LOGGED_ERROR_REASON_CHARS: usize = 1_000;
+const CHAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const CHAT_MAX_DURATION: Duration = Duration::from_secs(10 * 60);
+const MAX_PROVIDER_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_CHAT_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct OpenAiClient {
     http_client: reqwest::Client,
     api_key: Arc<str>,
+    responses_url: Arc<str>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChatMessageInput {
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ChatRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug)]
+pub struct ChatStreamError {
+    category: &'static str,
+    detail: String,
+}
+
+impl ChatStreamError {
+    pub fn category(&self) -> &'static str {
+        self.category
+    }
+
+    fn new(category: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            category,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl fmt::Display for ChatStreamError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.detail)
+    }
 }
 
 pub enum ResponsesFileInput<'a> {
@@ -44,6 +92,20 @@ impl OpenAiClient {
         Self {
             http_client,
             api_key: Arc::from(api_key.into()),
+            responses_url: Arc::from(OPENAI_RESPONSES_URL),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_responses_url(
+        http_client: reqwest::Client,
+        api_key: impl Into<String>,
+        responses_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            http_client,
+            api_key: Arc::from(api_key.into()),
+            responses_url: Arc::from(responses_url.into()),
         }
     }
 
@@ -92,7 +154,7 @@ impl OpenAiClient {
 
         let response = match self
             .http_client
-            .post(OPENAI_RESPONSES_URL)
+            .post(self.responses_url.as_ref())
             .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
@@ -171,7 +233,7 @@ impl OpenAiClient {
 
         let mut response = match self
             .http_client
-            .post(OPENAI_RESPONSES_URL)
+            .post(self.responses_url.as_ref())
             .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
@@ -262,6 +324,89 @@ impl OpenAiClient {
         };
         log_openai_response(OPENAI_RESPONSES_API, None, None, status, None, started_at);
         Ok(response_text)
+    }
+
+    pub async fn gen_chat_response_streaming(
+        &self,
+        context: &[ChatMessageInput],
+        prompt: &str,
+        system_instructions: &str,
+        model: &str,
+        file_inputs: &[ResponsesFileInput<'_>],
+        delta_sender: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<String, ChatStreamError> {
+        if prompt.trim().is_empty()
+            || system_instructions.trim().is_empty()
+            || model.trim().is_empty()
+        {
+            return Err(ChatStreamError::new("validation", "chat input is invalid"));
+        }
+        let request_body =
+            build_chat_request_body(context, prompt, system_instructions, model, file_inputs)
+                .map_err(|error| ChatStreamError::new("validation", error))?;
+        let started_at = Instant::now();
+        let response = tokio::time::timeout(
+            CHAT_CONNECT_TIMEOUT,
+            self.http_client
+                .post(self.responses_url.as_ref())
+                .bearer_auth(self.api_key.as_ref())
+                .json(&request_body)
+                .send(),
+        )
+        .await
+        .map_err(|_| ChatStreamError::new("connect_timeout", "OpenAI chat connection timed out"))?
+        .map_err(|error| {
+            ChatStreamError::new("transport", format!("OpenAI chat request failed: {error}"))
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            tracing::error!(api = OPENAI_RESPONSES_API, status = %status, "OpenAI chat request failed");
+            return Err(ChatStreamError::new(
+                "provider_status",
+                format!("OpenAI chat returned {status}"),
+            ));
+        }
+
+        let deadline = tokio::time::Instant::now() + CHAT_MAX_DURATION;
+        let mut response = response;
+        let mut state = ProviderChatStream::default();
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(ChatStreamError::new(
+                    "max_duration",
+                    "OpenAI chat stream exceeded its maximum duration",
+                ));
+            }
+            let chunk_timeout = CHAT_IDLE_TIMEOUT.min(remaining);
+            let chunk = tokio::time::timeout(chunk_timeout, response.chunk())
+                .await
+                .map_err(|_| {
+                    ChatStreamError::new("idle_timeout", "OpenAI chat stream was idle for too long")
+                })?
+                .map_err(|error| {
+                    ChatStreamError::new("transport", format!("OpenAI chat stream failed: {error}"))
+                })?;
+            let Some(chunk) = chunk else { break };
+            for delta in state
+                .push(&chunk)
+                .map_err(|error| ChatStreamError::new("provider_stream", error))?
+            {
+                if delta_sender.send(delta).await.is_err() {
+                    return Err(ChatStreamError::new("cancelled", "chat receiver closed"));
+                }
+            }
+        }
+        let result = state
+            .finish()
+            .map_err(|error| ChatStreamError::new("provider_stream", error))?;
+        tracing::info!(
+            api = OPENAI_RESPONSES_API,
+            elapsed_seconds = started_at.elapsed().as_secs_f64(),
+            "OpenAI chat completed"
+        );
+        Ok(result)
     }
 
     pub async fn gen_file_embeddings(&self, content: &str) -> Result<(), String> {
@@ -514,6 +659,38 @@ fn build_responses_request_body(
     }))
 }
 
+fn build_chat_request_body(
+    context: &[ChatMessageInput],
+    prompt: &str,
+    system_instructions: &str,
+    model: &str,
+    file_inputs: &[ResponsesFileInput<'_>],
+) -> Result<Value, String> {
+    let mut input = context
+        .iter()
+        .map(|message| {
+            json!({
+                "role": match message.role {
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                },
+                "content": message.content,
+            })
+        })
+        .collect::<Vec<_>>();
+    input.push(json!({
+        "role": "user",
+        "content": build_user_input_content(prompt, Some(file_inputs))?,
+    }));
+    Ok(json!({
+        "model": model,
+        "instructions": system_instructions,
+        "input": input,
+        "stream": true,
+        "store": false,
+    }))
+}
+
 fn build_user_input_content(
     prompt: &str,
     file_inputs: Option<&[ResponsesFileInput<'_>]>,
@@ -634,6 +811,161 @@ fn build_input_item(file_input: &ResponsesFileInput<'_>) -> Result<Value, String
 
 fn build_base64_data_url(mime_type: &str, data_base64: &str) -> String {
     format!("data:{mime_type};base64,{data_base64}")
+}
+
+#[derive(Default)]
+struct ProviderChatStream {
+    accumulated: String,
+    completed: Option<String>,
+    pending: Vec<u8>,
+    saw_completed: bool,
+}
+
+impl ProviderChatStream {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, String> {
+        self.pending.extend_from_slice(bytes);
+        let mut deltas = Vec::new();
+        while let Some((end, separator_len)) = find_sse_bytes_boundary(&self.pending) {
+            if end > MAX_PROVIDER_EVENT_BYTES {
+                return Err("OpenAI chat stream event exceeded its size limit".to_string());
+            }
+            let frame = self.pending[..end].to_vec();
+            self.pending.drain(..end + separator_len);
+            if let Some(delta) = self.process_frame(&frame)? {
+                deltas.push(delta);
+            }
+        }
+        if self.pending.len() > MAX_PROVIDER_EVENT_BYTES {
+            return Err("OpenAI chat stream event exceeded its size limit".to_string());
+        }
+        Ok(deltas)
+    }
+
+    fn finish(mut self) -> Result<String, String> {
+        if !self.pending.iter().all(u8::is_ascii_whitespace) {
+            return Err("OpenAI chat stream ended with an incomplete event".to_string());
+        }
+        if !self.saw_completed {
+            return Err("OpenAI chat stream ended before completion".to_string());
+        }
+        if let Some(completed) = self.completed.take() {
+            if !completed.trim().is_empty() {
+                return Ok(completed);
+            }
+        }
+        if self.accumulated.trim().is_empty() {
+            Err("OpenAI chat stream completed without output text".to_string())
+        } else {
+            Ok(self.accumulated)
+        }
+    }
+
+    fn process_frame(&mut self, frame: &[u8]) -> Result<Option<String>, String> {
+        let frame = std::str::from_utf8(frame)
+            .map_err(|_| "OpenAI chat stream contained invalid UTF-8".to_string())?;
+        let mut event_name = None;
+        let mut data_lines = Vec::new();
+        for line in frame.lines() {
+            let line = line.trim_end_matches('\r');
+            if line.starts_with(':') {
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("event:") {
+                event_name = Some(value.trim());
+            } else if let Some(value) = line.strip_prefix("data:") {
+                data_lines.push(value.strip_prefix(' ').unwrap_or(value));
+            }
+        }
+        let data = data_lines.join("\n");
+        if data.trim().is_empty() || data.trim() == "[DONE]" {
+            return Ok(None);
+        }
+        let value: Value = serde_json::from_str(&data)
+            .map_err(|_| "OpenAI chat stream contained malformed JSON".to_string())?;
+        let kind = value
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "OpenAI chat stream event omitted its type".to_string())?;
+        if event_name.is_some_and(|name| name != kind) {
+            return Err("OpenAI chat stream event name did not match its payload".to_string());
+        }
+        match kind {
+            "response.output_text.delta" | "response.refusal.delta" => {
+                if self.saw_completed {
+                    return Err("OpenAI chat stream sent text after completion".to_string());
+                }
+                let delta = value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "OpenAI chat delta omitted text".to_string())?;
+                if self.accumulated.len().saturating_add(delta.len()) > MAX_CHAT_RESPONSE_BYTES {
+                    return Err("OpenAI chat response exceeded its size limit".to_string());
+                }
+                self.accumulated.push_str(delta);
+                Ok(Some(delta.to_string()))
+            }
+            "response.completed" => {
+                if self.saw_completed {
+                    return Err("OpenAI chat stream completed more than once".to_string());
+                }
+                self.saw_completed = true;
+                self.completed = value
+                    .get("response")
+                    .and_then(extract_response_text_preserved);
+                if self
+                    .completed
+                    .as_ref()
+                    .is_some_and(|text| text.len() > MAX_CHAT_RESPONSE_BYTES)
+                {
+                    return Err("OpenAI chat response exceeded its size limit".to_string());
+                }
+                Ok(None)
+            }
+            "error" | "response.failed" | "response.incomplete" => {
+                Err("OpenAI chat stream reported a provider failure".to_string())
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+fn find_sse_bytes_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| (index, 2));
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| (index, 4));
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn extract_response_text_preserved(response: &Value) -> Option<String> {
+    if let Some(text) = response.get("output_text").and_then(Value::as_str) {
+        return (!text.trim().is_empty()).then(|| text.to_string());
+    }
+    let mut result = String::new();
+    for item in response.get("output")?.as_array()? {
+        let Some(content) = item.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for part in content {
+            if matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("output_text") | Some("text")
+            ) {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    result.push_str(text);
+                }
+            }
+        }
+    }
+    (!result.trim().is_empty()).then_some(result)
 }
 
 fn process_sse_events<F>(

@@ -18,6 +18,7 @@ use crate::{
         migrations::{self, MigrationError},
     },
     domains::{
+        assistant::{self, chat::service::AssistantChatService},
         data_rooms::{self, service::DataRoomService},
         deals::{self, repository::DealRepository, service::DealService, DataRoomSourceReader},
         dev_support,
@@ -163,7 +164,7 @@ pub(crate) fn assemble_api(
     ));
     let document_search = Arc::new(DocumentSearchService::new(document_search_index));
     let document_summaries = Arc::new(SummaryService::new(
-        openai,
+        openai.clone(),
         config
             .openai
             .as_ref()
@@ -173,6 +174,14 @@ pub(crate) fn assemble_api(
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
     let templates = Arc::new(TemplateService::new(diligence_studio));
+    let assistant_chat = Arc::new(AssistantChatService::new(
+        openai,
+        config
+            .openai
+            .as_ref()
+            .map(|config| config.chat_model.clone())
+            .unwrap_or_else(|| "gpt-5.5".to_string()),
+    ));
 
     Router::new()
         .merge(system::route::routes(database))
@@ -186,6 +195,7 @@ pub(crate) fn assemble_api(
         .merge(summaries::route::routes(document_summaries))
         .merge(research::route::routes(research))
         .merge(templates::route::routes(templates))
+        .merge(assistant::chat::route::routes(assistant_chat))
 }
 
 fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {

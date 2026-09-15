@@ -50,7 +50,7 @@ export type DealTask = {
 export type DealResource = {
   availability: "available" | "unavailable" | "coming-soon";
   href?: string;
-  id: "sow" | "fact-sheet" | "sharepoint";
+  id: "sow" | "fact-sheet" | "sharepoint" | "request-list";
   label: string;
   sourceName?: string;
 };

@@ -23,9 +23,12 @@ const savedDeal: SavedDeal = {
 
 const savedMetadata: SavedDealMetadata = {
   dealId: savedDeal.dealId,
+  factSheetLink: "https://example.com/fact-sheet",
   keyQuestionsJson: '["First question?","Second question?","Second question?"]',
   localPath: null,
+  rlLink: "https://example.com/request-list",
   sharepointLink: "https://northwind.sharepoint.com/sites/acme",
+  sowLink: "https://example.com/sow",
   userId: savedDeal.userId,
 };
 
@@ -84,21 +87,33 @@ describe("buildWorkspaceDealFromPersisted", () => {
     expect(workspaceDeal.room.resources).toEqual([
       {
         availability: "available",
+        href: "https://example.com/sow",
         id: "sow",
         label: "SOW",
         sourceName: "Acme SOW.pdf",
       },
-      { availability: "coming-soon", id: "fact-sheet", label: "Fact Sheet" },
+      {
+        availability: "available",
+        href: "https://example.com/fact-sheet",
+        id: "fact-sheet",
+        label: "Fact Sheet",
+      },
       {
         availability: "available",
         href: "https://northwind.sharepoint.com/sites/acme",
         id: "sharepoint",
         label: "SharePoint VDR",
       },
+      {
+        availability: "available",
+        href: "https://example.com/request-list",
+        id: "request-list",
+        label: "Request List",
+      },
     ]);
   });
 
-  it("maps persisted questions identically without claiming a reload-safe SOW", () => {
+  it("maps persisted questions and saved resource links after reload", () => {
     const workspaceDeal = buildWorkspaceDealFromPersisted(savedDeal, savedMetadata);
 
     expect(workspaceDeal.room.keyQuestions).toEqual([
@@ -107,16 +122,24 @@ describe("buildWorkspaceDealFromPersisted", () => {
       "Second question?",
     ]);
     expect(workspaceDeal.room.resources[0]).toEqual({
-      availability: "unavailable",
+      availability: "available",
+      href: "https://example.com/sow",
       id: "sow",
       label: "SOW",
+    });
+    expect(workspaceDeal.room.resources[3]).toEqual({
+      availability: "available",
+      href: "https://example.com/request-list",
+      id: "request-list",
+      label: "Request List",
     });
   });
 
   it("keeps missing or unsafe optional resource values inactive", () => {
     expect(buildDealResources(null).map((resource) => resource.availability)).toEqual([
       "unavailable",
-      "coming-soon",
+      "unavailable",
+      "unavailable",
       "unavailable",
     ]);
 
@@ -132,6 +155,23 @@ describe("buildWorkspaceDealFromPersisted", () => {
         id: "sharepoint",
         label: "SharePoint VDR",
       });
+    }
+
+    for (const unsafeLink of [
+      "http://example.com/resource",
+      "javascript:alert(1)",
+      "https://user:password@example.com/resource",
+      "not a URL",
+    ]) {
+      const resources = buildDealResources({
+        ...savedMetadata,
+        factSheetLink: unsafeLink,
+        rlLink: unsafeLink,
+        sowLink: unsafeLink,
+      });
+      expect(resources[0].availability).toBe("unavailable");
+      expect(resources[1].availability).toBe("unavailable");
+      expect(resources[3].availability).toBe("unavailable");
     }
   });
 });

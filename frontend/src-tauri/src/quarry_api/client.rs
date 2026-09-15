@@ -9,6 +9,7 @@ const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:3001";
 pub struct QuarryHttpClient {
     base_url: Url,
     client: Client,
+    stream_client: Client,
 }
 
 impl QuarryHttpClient {
@@ -28,7 +29,16 @@ impl QuarryHttpClient {
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|error| format!("failed to initialize Quarry HTTP client: {error}"))?;
-        Ok(Self { base_url, client })
+        let stream_client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(45))
+            .build()
+            .map_err(|error| format!("failed to initialize Quarry stream client: {error}"))?;
+        Ok(Self {
+            base_url,
+            client,
+            stream_client,
+        })
     }
 
     pub async fn get(&self, path: &str) -> Result<Value, String> {
@@ -89,6 +99,30 @@ impl QuarryHttpClient {
             .map_err(|error| format!("Quarry API request failed: {error}"))?;
         if !response.status().is_success() {
             return Err(response_error(response).await);
+        }
+        Ok(response)
+    }
+
+    pub async fn post_query_stream(&self, form: Form) -> Result<reqwest::Response, String> {
+        let response = self
+            .stream_client
+            .post(self.url("/api/v1/query_model")?)
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|error| format!("Quarry query request failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(response_error(response).await);
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if content_type != Some("text/event-stream") {
+            return Err("Quarry API returned an invalid query stream".to_string());
         }
         Ok(response)
     }

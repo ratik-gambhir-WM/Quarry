@@ -405,7 +405,7 @@ operational failures.
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -424,8 +424,11 @@ buttons share the light-gray hover surface; filled primary actions share the dee
 tokens. The retained dark palette changes tokens rather than component structure, but is currently
 disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
 
-Deal Resources keeps each resource icon, title, and availability badge on one horizontal row;
-only an actual source filename adds secondary text beneath the title. The Key Questions header
+Deal Resources maps persisted HTTPS SOW, fact-sheet, SharePoint, and request-list URLs to external
+links and keeps each resource icon, title, and availability badge on one horizontal row; only an
+actual source filename adds secondary text beneath the title. Missing or unsafe URLs remain
+non-clickable and unavailable. The API accepts only credential-free HTTPS resource links and also
+requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions header
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
 Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
 data-grid implementation on TanStack React Table. The Data Room view
@@ -470,6 +473,7 @@ The contract covers:
 - stored document list/PDF/text
 - synchronous and job-based document processing
 - document job subscriptions
+- ephemeral multi-turn assistant query streaming with current-turn attachments
 - keyword/vector document search
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
@@ -490,8 +494,10 @@ React feature
 
 The HTTP adapter validates `VITE_API_BASE_URL`, permits HTTPS outside development and loopback HTTP
 in development, serializes JSON/multipart, validates PDF content type, reads bytes, normalizes
-non-success responses into `BackendApiError`, and logs HTTP/SSE activity. No authentication header
-or token is currently attached.
+non-success responses into `BackendApiError`, and logs HTTP/SSE activity. Query chat uses a
+strict incremental UTF-8 POST-SSE parser and `AbortController`; its activity records contain only
+counts, event classes, timing, and other non-content metadata. No authentication header or token
+is currently attached.
 
 The web platform adapter implements JSON, Markdown, and validated PowerPoint export with Blob
 downloads, has no native folder chooser, and rejects local source-file reads.
@@ -528,6 +534,8 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
 | `quarry_api_post_powerpoint` | Relay a presentation export and return bounded base64 PPTX data | exact template-export route; MIME/ZIP signature/filename/warning checks; 64 MB cap |
 | `subscribe_document_job` | Consume Axum SSE and emit Tauri event | validated identifiers; scoped event payload |
+| `send_query_stream` | Start fixed-path query POST-SSE relay | main window/origin; bounded validated context/files; scoped events; 45 s idle and 10 minute maximum |
+| `cancel_query_stream` | Cancel one query relay | main window/origin; validated subscription ID; request-scoped sender |
 | `select_deal_data_room` | User-mediated folder selection and source scan | canonical root stored as process-local grant |
 | `read_deal_source_files` | Read one or two selected source files | authorized-root containment; type and 50 MB total cap |
 | `save_text_file` | Native JSON/Markdown export | MIME/extension/title/name checks; 5 MB cap; atomic sibling-temp write |
@@ -542,7 +550,8 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 - Base64 multipart and PowerPoint export/save payloads add roughly one-third encoding overhead and
   hold complete copies in the webview and Rust process. They are bounded but are not streaming
   designs.
-- Removing the TypeScript listener does not explicitly cancel the Rust upstream SSE request.
+- Query-stream cleanup explicitly signals and removes its matching Rust worker. The older document-job
+  subscription still does not explicitly cancel its upstream SSE request.
 - The desktop client currently converts many server failures to validation-shaped IPC errors and
   does not preserve a stable HTTP status/retry/operation-ID envelope.
 - The desktop relay accepts both Quarry's flat `{ "error": "..." }` response and nested
@@ -579,7 +588,7 @@ method allowlist.
 | GET | `/deals` | List persisted deals | Includes metadata when present |
 | POST | `/deals` | Create deal and empty metadata | Validates `DEAL-` ID, dates, user, and source choice |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
-| POST | `/deals/{deal_id}/metadata` | Upload/extract deal metadata | Multipart; OpenAI required when files are present |
+| POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
 | POST | `/deals/{deal_id}/archive` | Mark a deal archived | Retains associated files |
 | GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
@@ -605,8 +614,28 @@ Axum's default 2 MB body limit first; this mismatch remains a known contract gap
 
 ### 7.4 Research and summarization
 
+`POST /query_model` is the assistant chat contract. It accepts multipart `prompt`, required JSON
+`context`, optional `model` and `systemInstructions`, and up to 20 current-turn `files`. Context is
+an empty array or at most 64 messages (32 complete alternating user/assistant pairs), with 100,000
+Unicode scalar values per message and 400,000 total; prompts allow 100,000 and instructions 50,000. File bytes are
+limited to 50 MiB each and in aggregate and are validated by extension, MIME consistency, and file
+signature. Accepted images are PNG, JPEG, WebP, and single-frame GIF; accepted document inputs are
+PDF, UTF-8 TXT/Markdown/JSON/HTML/CSV, OLE DOC, and bounded inspected DOCX/PPTX/XLSX ZIPs. The route
+has a scoped 54 MiB body limit.
+
+The response is SSE with `started`, ordered `delta`, and exactly one `completed` or `failed` event,
+a 15-second keepalive, `Content-Encoding: identity`, and proxy buffering disabled. Pre-stream
+validation failures are 400 and missing OpenAI capability is 503. Once HTTP 200 begins, failures
+are sanitized terminal events. The OpenAI adapter manually replays the client-managed textual
+context followed by current-turn files and prompt, repeats instructions, and sends Responses API
+requests with `stream: true` and `store: false`; it carries no provider conversation/response ID.
+Streams have a 45-second provider/desktop idle bound, a 10-minute maximum, bounded event/response
+buffers, and bounded channels for backpressure. Cancellation drops the upstream response but is
+best effort and is not provider-side erasure.
+
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
+| POST | `/query_model` | Stream an ephemeral assistant answer over SSE | OpenAI |
 | POST | `/files/extract` | WM file extraction/upload | WM AI group |
 | POST | `/indexes` | Create WM index | WM AI group |
 | GET | `/indexes/{index_id}/status` | Read WM index status | WM AI group |
@@ -700,6 +729,7 @@ state.
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
+| `domains/assistant::chat` | Ephemeral textual context validation, query defaults, streaming lifecycle, and cancellation propagation | Durable conversations, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
 | `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
@@ -728,7 +758,8 @@ service, model, table, or product capability.
 | `system`, `dev_support` | Implemented operations and explicitly development-oriented routes |
 | `user_settings` | Partial client-only preferences; backend scaffold only |
 | `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
-| `assistant` | Planned interaction/conversation owner; backend scaffold only |
+| `assistant::chat` | Implemented ephemeral OpenAI-backed text chat transport when configured; client-managed context and no UI yet |
+| `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
 | `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
 | `templates` | Implemented upstream-backed template-preview reads, app-scoped deletion, current-document PPTX export, and explicit single/deck PPTX import; no local persistence |
@@ -740,7 +771,7 @@ service, model, table, or product capability.
 Each active domain exposes a route builder that binds only its required service state.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, development
 support, user, deal, data-room, document-ingestion, document-viewing, document-search, summary,
-research, and template routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
+research, template, and assistant-chat routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
 same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
 layers provide:
 
@@ -793,7 +824,7 @@ schema currently contains:
 | `users` | Development user/profile records and API key | Used by user/deal services |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Core deal record and owner reference | Used |
-| `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; the three document-link columns are not yet mapped by a service or route |
+| `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
 | `quarry_files` | Logical file identity, deal/workspace, soft-delete metadata | Used |
 | `quarry_file_versions` | Immutable version identity/hash/current marker | Used |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
@@ -885,15 +916,19 @@ None of these mechanisms supports multi-instance coordination or durable recover
 Login/profile creates or resolves user
   -> POST /deals validates deal and owner email
   -> SQLite inserts deal + initial metadata
-  -> optional POST /deals/{id}/metadata uploads selected source files
+  -> optional POST /deals/{id}/metadata saves source links and uploads selected source files
   -> DealService sends files and extraction prompt to OpenAI
   -> parsed key questions update deal_metadata
 ```
 
-The desktop add-deal flow can authorize a local folder and read one or two SOW/timeline files,
-then sends them through the same multipart Axum endpoint. The web flow uses browser-selected files
-or stores a SharePoint link as metadata. A stored SharePoint URL does not currently trigger a live
-SharePoint import.
+After core deal creation, the shared add-deal modal collects optional SharePoint, SOW, fact-sheet,
+and RL links alongside one or two SOW/timeline files. The desktop flow can authorize an optional
+local folder during the first step; selecting one disables the mutually exclusive SharePoint field.
+Both transports send the link fields and files through the same multipart Axum endpoint. A stored
+SharePoint URL does not currently trigger a live SharePoint import. Link metadata is committed
+before optional OpenAI extraction, so an extraction failure does not discard the submitted URLs.
+Choosing **Skip metadata** completes the UI flow from the initial deal response without submitting
+links or files entered in the optional metadata step.
 
 ### 10.2 Document ingestion
 
@@ -948,6 +983,21 @@ targets in the already selected PDF and highlights terms only in result text. Cr
 activation and programmatic text highlighting inside the PDF require stable result identities and
 an expanded viewer contract.
 
+### 10.5 Assistant chat
+
+```text
+Caller-owned completed text pairs + current prompt/files
+  -> web fetch parser or fixed-path Tauri relay
+  -> assistant::chat validates multipart/context/file bytes
+  -> AssistantChatService::ask resolves server defaults and opens bounded event channels
+  -> OpenAiClient replays text plus current files to Responses API with store=false
+  -> started, ordered deltas, and one completed/failed terminal
+```
+
+The transcript is not stored in Quarry or identified as a durable conversation. Callers must send
+the completed textual context snapshot on every request; failed, stopped, or partial turns and prior
+file bytes are not implicitly available to later turns.
+
 ## 11. Configuration
 
 ### 11.1 Frontend and desktop configuration
@@ -997,12 +1047,15 @@ configuration and must not be exposed through a `VITE_*` variable.
 If any OpenAI setting is present, `OPENAI_API_KEY` is required:
 
 - `OPENAI_API_KEY`
+- `OPENAI_CHAT_MODEL`
 - `OPENAI_DEAL_EXTRACTION_MODEL`
 - `OPENAI_EMBEDDING_MODEL`
 - `OPENAI_DOCUMENT_SUMMARY_MODEL`
 - `OPENAI_IMAGE_DESCRIPTION_MODEL`
 
-The assembled services currently use deal extraction, embedding, and document summary settings.
+The assembled services currently use chat, deal extraction, embedding, and document summary settings.
+Assistant chat defaults `OPENAI_CHAT_MODEL` to `gpt-5.5` and defaults instructions to
+`You are a helpful assistant.` when the request omits its override.
 The image-description model is parsed but not injected into an assembled service.
 
 The “OpenAI API key” collected during profile creation is a separate, development-era user field.
@@ -1085,6 +1138,8 @@ and deployment TLS/rate limits/observability established.
 - `x-request-id` is generated and returned.
 - Internal application errors log contextual detail while returning a generic message.
 - Parser and AI-client paths record selected timing/failure context.
+- Assistant query logs contain provider status/category and timing only; prompts, context,
+  instructions, filenames, file contents, deltas, completed text, and raw provider bodies are omitted.
 - Diligence Studio failures log internal context and surface only stable sanitized responses;
   preview data is read through on each template gallery request and is not persisted or cached.
   PPTX import transport failures are surfaced as uncertain because the upstream write has no
@@ -1096,7 +1151,8 @@ telemetry in the repository.
 ### 13.2 Frontend and desktop
 
 The activity log records browser API, SSE, and desktop IPC events for the Logs page. It is bounded
-and redacted but not durable. The Tauri error type adds process-local operation IDs; the generic
+and redacted but not durable. Query activity uses a metadata-only path and explicitly redacts
+prompt/context/instruction/delta-shaped fields. The Tauri error type adds process-local operation IDs; the generic
 API relay does not yet preserve an end-to-end server request/error identity.
 
 ## 14. Verification architecture
@@ -1230,6 +1286,7 @@ configuration. Never use `clear_helix` as verification.
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
+| Assistant chat | Ephemeral client-replayed text context; no persistence, identity, rate limits, moderation, resume, or attachment reuse | Not safe for public production exposure; each turn resends and rebills included context |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
 | API mapping | Handwritten in web and desktop adapters | Drift risk without shared descriptors/generation |

@@ -22,12 +22,15 @@ const DEAL_COLUMNS: [&str; 10] = [
     "deal_sponsor",
 ];
 
-const DEAL_METADATA_COLUMNS: [&str; 5] = [
+const DEAL_METADATA_COLUMNS: [&str; 8] = [
     "deal_id",
     "user_id",
     "key_questions_json",
     "local_path",
     "sharepoint_link",
+    "sow_link",
+    "fact_sheet_link",
+    "rl_link",
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +56,9 @@ pub struct DealMetadata {
     pub key_questions_json: String,
     pub local_path: Option<String>,
     pub sharepoint_link: Option<String>,
+    pub sow_link: Option<String>,
+    pub fact_sheet_link: Option<String>,
+    pub rl_link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +88,9 @@ pub struct UpsertDealMetadataRecord {
     pub key_questions_json: String,
     pub local_path: Option<String>,
     pub sharepoint_link: Option<String>,
+    pub sow_link: Option<String>,
+    pub fact_sheet_link: Option<String>,
+    pub rl_link: Option<String>,
 }
 
 #[derive(Clone)]
@@ -232,12 +241,18 @@ fn upsert_deal_metadata(
             .value("key_questions_json", &record.key_questions_json)
             .value("local_path", record.local_path.as_deref())
             .value("sharepoint_link", record.sharepoint_link.as_deref())
+            .value("sow_link", record.sow_link.as_deref())
+            .value("fact_sheet_link", record.fact_sheet_link.as_deref())
+            .value("rl_link", record.rl_link.as_deref())
             .on_conflict_update(
                 ConflictUpdate::new(["deal_id"])
                     .set_excluded("user_id")
                     .set_excluded("key_questions_json")
                     .set_excluded("local_path")
-                    .set_excluded("sharepoint_link"),
+                    .set_excluded("sharepoint_link")
+                    .set_excluded("sow_link")
+                    .set_excluded("fact_sheet_link")
+                    .set_excluded("rl_link"),
             )
             .build(),
         "deal metadata upsert",
@@ -312,5 +327,8 @@ fn deal_metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
         key_questions_json: row.get("key_questions_json")?,
         local_path: row.get("local_path")?,
         sharepoint_link: row.get("sharepoint_link")?,
+        sow_link: row.get("sow_link")?,
+        fact_sheet_link: row.get("fact_sheet_link")?,
+        rl_link: row.get("rl_link")?,
     })
 }

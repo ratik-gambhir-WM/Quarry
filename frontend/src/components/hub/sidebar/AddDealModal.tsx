@@ -8,6 +8,7 @@ import type {
   LocalDealFileContents,
   LocalDealSourceFile,
   SaveDealInput,
+  SaveDealResponse,
 } from "../../../data/dealExtraction";
 import { formatFileSize } from "../../../lib/formatters";
 import { Button } from "../../ui/button";
@@ -42,9 +43,12 @@ type AddDealFormState = {
   dealId: string;
   dealName: string;
   dealSponsor: string;
+  factSheetLink: string;
   localPath: string;
   primaryBuyer: string;
+  rlLink: string;
   sharepointLink: string;
+  sowLink: string;
   startDate: string;
   status: string;
   targetCompany: string;
@@ -63,9 +67,12 @@ const emptyForm: AddDealFormState = {
   dealId: "",
   dealName: "",
   dealSponsor: "",
+  factSheetLink: "",
   localPath: "",
   primaryBuyer: "",
+  rlLink: "",
   sharepointLink: "",
+  sowLink: "",
   startDate: "",
   status: "Active",
   targetCompany: "",
@@ -81,7 +88,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const navigate = useNavigate();
   const [form, setForm] = useState(emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
-  const [createdDealId, setCreatedDealId] = useState<string | null>(null);
+  const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] = useState(emptySourceFiles);
   const [step, setStep] = useState<"details" | "sources">("details");
   const [fieldError, setFieldError] = useState("");
@@ -126,15 +133,11 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
       setFieldError("Select a transaction type.");
       return;
     }
-    if (runtime.target === "desktop" && !form.localPath) {
-      setFieldError("Choose a local data room folder.");
-      return;
-    }
     setIsSubmitting(true);
     setSubmitError("");
     try {
       const response = await runtime.api.createDeal(buildSaveDealInput(form, email));
-      setCreatedDealId(response.deal.dealId);
+      setCreatedDeal(response);
       setStep("sources");
     } catch (error) {
       setSubmitError(errorMessage(error));
@@ -144,7 +147,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   }
 
   async function saveSources() {
-    if (!createdDealId) return;
+    if (!createdDeal) return;
     setIsSubmitting(true);
     setSubmitError("");
     try {
@@ -160,7 +163,13 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
             })
           ).map(localFileContentsToFile)
         : selections.filter((file): file is File => file instanceof File);
-      const response = await runtime.api.saveDealMetadata(createdDealId, uploads);
+      const response = await runtime.api.saveDealMetadata(createdDeal.deal.dealId, {
+        factSheetLink: optionalLink(form.factSheetLink),
+        files: uploads,
+        rlLink: optionalLink(form.rlLink),
+        sharepointLink: optionalLink(form.sharepointLink),
+        sowLink: optionalLink(form.sowLink),
+      });
       navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
         state: {
           email,
@@ -173,6 +182,20 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function skipMetadata() {
+    if (!createdDeal) return;
+    navigate(`/hub/deals/${encodeURIComponent(createdDeal.deal.dealId)}`, {
+      state: {
+        email,
+        result: {
+          ...createdDeal,
+          extraction: { keyQuestions: [] },
+          files: [],
+        },
+      } satisfies DealExtractionLocationState,
+    });
   }
 
   return (
@@ -214,10 +237,12 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
             ) : (
               <SourceFilesStep
                 availableFiles={localDataRoom?.files ?? null}
+                form={form}
                 onChange={(field, file) => {
                   setSelectedSourceFiles((current) => ({ ...current, [field]: file }));
                   setSubmitError("");
                 }}
+                onUpdateField={updateField}
                 selected={selectedSourceFiles}
               />
             )}
@@ -240,8 +265,8 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
                 </Button>
               </DialogClose>
             ) : (
-              <Button disabled={isSubmitting} onClick={saveSources} type="button" variant="outline">
-                Skip files
+              <Button disabled={isSubmitting} onClick={skipMetadata} type="button" variant="outline">
+                Skip metadata
               </Button>
             )}
             <Button className="min-w-28" disabled={isSubmitting} type="submit">
@@ -360,17 +385,7 @@ function DealDetailsStep({
       </div>
       {runtime.target === "desktop" ? (
         <LocalFolderField disabled={isSubmitting} error={error} onChoose={onChooseLocalFolder} value={form.localPath} />
-      ) : (
-        <DealTextField
-          id="add-deal-sharepoint-link"
-          label="SharePoint link"
-          onValueChange={(value) => onUpdateField("sharepointLink", value)}
-          optional
-          placeholder="https://westmonroe.sharepoint.com/sites/ClientTeamYYYY-Project/Shared%20Documents/Forms/AllItems.aspx?FolderCTID=0x...&id=%2Fsites%2FClientTeamYYYY-Project%2FShared%20Documents"
-          type="url"
-          value={form.sharepointLink}
-        />
-      )}
+      ) : null}
     </FieldGroup>
   );
 }
@@ -454,7 +469,10 @@ function LocalFolderField({
 }) {
   return (
     <Field data-invalid={Boolean(error)}>
-      <FieldLabel htmlFor="add-deal-local-path">Local data room folder</FieldLabel>
+      <div className="flex items-center justify-between">
+        <FieldLabel htmlFor="add-deal-local-path">Local data room folder</FieldLabel>
+        <span className="text-xs text-muted-foreground">Optional</span>
+      </div>
       <div className="flex gap-3">
         <Input
           aria-invalid={Boolean(error)}
@@ -462,7 +480,6 @@ function LocalFolderField({
           id="add-deal-local-path"
           placeholder="Choose a folder"
           readOnly
-          required
           value={value}
         />
         <Button
@@ -479,12 +496,52 @@ function LocalFolderField({
   );
 }
 
-function SourceFilesStep({ availableFiles, onChange, selected }: { availableFiles: LocalDealSourceFile[] | null; onChange: (field: keyof SelectedSourceFiles, file: SourceFileSelection | null) => void; selected: SelectedSourceFiles }) {
+function SourceFilesStep({ availableFiles, form, onChange, onUpdateField, selected }: { availableFiles: LocalDealSourceFile[] | null; form: AddDealFormState; onChange: (field: keyof SelectedSourceFiles, file: SourceFileSelection | null) => void; onUpdateField: (field: keyof AddDealFormState, value: string) => void; selected: SelectedSourceFiles }) {
   return (
     <div className="grid gap-5">
       <p className="rounded-2xl bg-surface-container-low px-4 py-3 text-[13px] leading-5 text-muted">
-        Add an SOW and project timeline if available. Both are optional; key questions are extracted from the submitted documents.
+        Add source links and files if available. All fields are optional; key questions are extracted from the submitted documents.
       </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <DealTextField
+          disabled={Boolean(form.localPath)}
+          id="add-deal-sharepoint-link"
+          label="SharePoint link"
+          onValueChange={(value) => onUpdateField("sharepointLink", value)}
+          optional
+          placeholder="https://company.sharepoint.com/sites/deal-room"
+          title={form.localPath ? "A local data room is already selected for this deal." : undefined}
+          type="url"
+          value={form.sharepointLink}
+        />
+        <DealTextField
+          id="add-deal-sow-link"
+          label="SOW link"
+          onValueChange={(value) => onUpdateField("sowLink", value)}
+          optional
+          placeholder="https://example.com/sow"
+          type="url"
+          value={form.sowLink}
+        />
+        <DealTextField
+          id="add-deal-fact-sheet-link"
+          label="Fact sheet link"
+          onValueChange={(value) => onUpdateField("factSheetLink", value)}
+          optional
+          placeholder="https://example.com/fact-sheet"
+          type="url"
+          value={form.factSheetLink}
+        />
+        <DealTextField
+          id="add-deal-rl-link"
+          label="RL link"
+          onValueChange={(value) => onUpdateField("rlLink", value)}
+          optional
+          placeholder="https://example.com/request-list"
+          type="url"
+          value={form.rlLink}
+        />
+      </div>
       <SourceFilePicker availableFiles={availableFiles?.filter((file) => file.matchedOn.includes("SOW")) ?? null} file={selected.sowFile} label="SOW file" onChange={(file) => onChange("sowFile", file)} />
       <SourceFilePicker availableFiles={availableFiles?.filter((file) => file.matchedOn.includes("Project Timeline")) ?? null} file={selected.projectTimelineFile} label="Project timeline" onChange={(file) => onChange("projectTimelineFile", file)} />
     </div>
@@ -511,7 +568,6 @@ function SourceFileOption({ file }: { file: SourceFileSelection }) {
 }
 
 function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDealInput {
-  const sharepointLink = form.sharepointLink.trim();
   return {
     closeDate: form.closeDate,
     dealId: form.dealId.trim(),
@@ -519,13 +575,17 @@ function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDeal
     dealSponsor: form.dealSponsor.trim(),
     localPath: runtime.target === "desktop" ? form.localPath.trim() : null,
     primaryBuyer: form.primaryBuyer.trim(),
-    sharepointLink: runtime.target === "web" && sharepointLink ? sharepointLink : null,
+    sharepointLink: null,
     startDate: form.startDate,
     status: form.status,
     targetCompany: form.targetCompany.trim(),
     transactionType: form.transactionType,
     userEmail,
   };
+}
+
+function optionalLink(value: string) {
+  return value.trim() || null;
 }
 
 function isLocalDealSourceFile(file: SourceFileSelection | null): file is LocalDealSourceFile {
