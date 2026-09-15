@@ -29,4 +29,11 @@ describe("QuerySseParser", () => {
 
     expect(() => parser.push(new TextEncoder().encode(oversized))).toThrow("oversized event");
   });
+
+  it("rejects an oversized event that includes its terminating blank line", () => {
+    const parser = new QuerySseParser(vi.fn());
+    const oversized = `event: started\ndata: {"type":"started","model":"${"x".repeat(1_048_576)}"}\n\n`;
+
+    expect(() => parser.push(new TextEncoder().encode(oversized))).toThrow("oversized event");
+  });
 });

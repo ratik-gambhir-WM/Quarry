@@ -5,7 +5,6 @@ const MAX_EVENT_BYTES = 1_048_576;
 export class QuerySseParser {
   private buffer = "";
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
-  private readonly encoder = new TextEncoder();
   private started = false;
   private terminal = false;
 
@@ -14,7 +13,7 @@ export class QuerySseParser {
   push(bytes: Uint8Array) {
     this.buffer += this.decoder.decode(bytes, { stream: true });
     this.drain();
-    if (this.encoder.encode(this.buffer).byteLength > MAX_EVENT_BYTES) {
+    if (utf8ByteLength(this.buffer) > MAX_EVENT_BYTES) {
       throw new Error("The query stream returned an oversized event.");
     }
   }
@@ -34,6 +33,9 @@ export class QuerySseParser {
     for (;;) {
       const boundary = findBoundary(this.buffer);
       if (!boundary) return;
+      if (utf8ByteLength(this.buffer, boundary.index) > MAX_EVENT_BYTES) {
+        throw new Error("The query stream returned an oversized event.");
+      }
       const frame = this.buffer.slice(0, boundary.index);
       this.buffer = this.buffer.slice(boundary.index + boundary.length);
       this.processFrame(frame);
@@ -109,6 +111,30 @@ function findBoundary(value: string) {
   if (lf < 0 && crlf < 0) return undefined;
   if (crlf >= 0 && (lf < 0 || crlf < lf)) return { index: crlf, length: 4 };
   return { index: lf, length: 2 };
+}
+
+function utf8ByteLength(value: string, end = value.length) {
+  let bytes = 0;
+  for (let index = 0; index < end; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      bytes += 1;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else if (
+      codeUnit >= 0xd800
+      && codeUnit <= 0xdbff
+      && index + 1 < end
+      && value.charCodeAt(index + 1) >= 0xdc00
+      && value.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

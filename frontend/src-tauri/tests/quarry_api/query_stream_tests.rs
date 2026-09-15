@@ -32,6 +32,20 @@ fn parser_requires_started_and_one_terminal() {
 }
 
 #[test]
+fn parser_rejects_a_terminated_oversized_event() {
+    let mut parser = QueryRelayParser::default();
+    let event = format!(
+        "event: started\ndata: {{\"type\":\"started\",\"model\":\"{}\"}}\n\n",
+        "x".repeat(MAX_EVENT_BYTES)
+    );
+
+    assert_eq!(
+        parser.push(event.as_bytes()).unwrap_err(),
+        "Quarry query stream event is too large"
+    );
+}
+
+#[test]
 fn query_request_has_no_caller_controlled_path() {
     let value = serde_json::json!({
         "context": [],

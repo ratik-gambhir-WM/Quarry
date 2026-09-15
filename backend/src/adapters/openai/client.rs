@@ -826,6 +826,9 @@ impl ProviderChatStream {
         self.pending.extend_from_slice(bytes);
         let mut deltas = Vec::new();
         while let Some((end, separator_len)) = find_sse_bytes_boundary(&self.pending) {
+            if end > MAX_PROVIDER_EVENT_BYTES {
+                return Err("OpenAI chat stream event exceeded its size limit".to_string());
+            }
             let frame = self.pending[..end].to_vec();
             self.pending.drain(..end + separator_len);
             if let Some(delta) = self.process_frame(&frame)? {

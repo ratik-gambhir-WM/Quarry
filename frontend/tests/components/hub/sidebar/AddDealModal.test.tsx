@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
 
@@ -42,18 +42,8 @@ describe("AddDealModal", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
-    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
-    fireEvent.change(screen.getByLabelText("Start date"), { target: { value: savedDeal.startDate } });
-    fireEvent.change(screen.getByLabelText("Close date"), { target: { value: savedDeal.closeDate } });
-    fireEvent.change(screen.getByLabelText("Target company"), { target: { value: savedDeal.targetCompany } });
-    fireEvent.change(screen.getByLabelText("Primary buyer"), { target: { value: savedDeal.primaryBuyer } });
-    fireEvent.change(screen.getByLabelText("Deal sponsor"), { target: { value: savedDeal.dealSponsor } });
-    await user.click(screen.getByRole("combobox", { name: "Transaction type" }));
-    await user.click(screen.getByRole("option", { name: savedDeal.transactionType }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
+    await completeDealDetails(user);
 
-    expect(await screen.findByRole("heading", { name: "Add deal metadata" })).toBeTruthy();
     expect(createDeal).toHaveBeenCalledWith(expect.objectContaining({
       dealId: savedDeal.dealId,
       sharepointLink: null,
@@ -81,7 +71,48 @@ describe("AddDealModal", () => {
       });
     });
   });
+
+  it("skips metadata without saving populated links or selected files", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AddDealModal email="analyst@example.com" onClose={vi.fn()} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await completeDealDetails(user);
+    await user.type(screen.getByLabelText("SOW link"), "https://example.com/sow");
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("expected the source file input to be rendered");
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["source"], "scope.pdf", { type: "application/pdf" })] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Skip metadata" }));
+
+    expect(saveDealMetadata).not.toHaveBeenCalled();
+    expect(screen.getByTestId("location").textContent).toBe(`/hub/deals/${savedDeal.dealId}`);
+  });
 });
+
+async function completeDealDetails(user: ReturnType<typeof userEvent.setup>) {
+  fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
+  fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
+  fireEvent.change(screen.getByLabelText("Start date"), { target: { value: savedDeal.startDate } });
+  fireEvent.change(screen.getByLabelText("Close date"), { target: { value: savedDeal.closeDate } });
+  fireEvent.change(screen.getByLabelText("Target company"), { target: { value: savedDeal.targetCompany } });
+  fireEvent.change(screen.getByLabelText("Primary buyer"), { target: { value: savedDeal.primaryBuyer } });
+  fireEvent.change(screen.getByLabelText("Deal sponsor"), { target: { value: savedDeal.dealSponsor } });
+  await user.click(screen.getByRole("combobox", { name: "Transaction type" }));
+  await user.click(screen.getByRole("option", { name: savedDeal.transactionType }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByRole("heading", { name: "Add deal metadata" });
+}
+
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
+}
 
 const savedDeal = {
   closeDate: "2026-12-31",

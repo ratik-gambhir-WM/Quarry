@@ -588,7 +588,7 @@ method allowlist.
 | GET | `/deals` | List persisted deals | Includes metadata when present |
 | POST | `/deals` | Create deal and empty metadata | Validates `DEAL-` ID, dates, user, and source choice |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
-| POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
+| POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
 | POST | `/deals/{deal_id}/archive` | Mark a deal archived | Retains associated files |
 | GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
@@ -927,6 +927,8 @@ local folder during the first step; selecting one disables the mutually exclusiv
 Both transports send the link fields and files through the same multipart Axum endpoint. A stored
 SharePoint URL does not currently trigger a live SharePoint import. Link metadata is committed
 before optional OpenAI extraction, so an extraction failure does not discard the submitted URLs.
+Choosing **Skip metadata** completes the UI flow from the initial deal response without submitting
+links or files entered in the optional metadata step.
 
 ### 10.2 Document ingestion
 

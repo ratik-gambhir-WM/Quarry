@@ -196,6 +196,9 @@ impl QueryRelayParser {
         self.buffer.extend_from_slice(bytes);
         let mut events = Vec::new();
         while let Some((end, separator)) = boundary(&self.buffer) {
+            if end > MAX_EVENT_BYTES {
+                return Err("Quarry query stream event is too large".to_string());
+            }
             let frame = self.buffer[..end].to_vec();
             self.buffer.drain(..end + separator);
             if let Some(event) = self.frame(&frame)? {

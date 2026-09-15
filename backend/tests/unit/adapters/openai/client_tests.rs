@@ -306,6 +306,20 @@ fn chat_stream_rejects_failure_and_premature_eof() {
 }
 
 #[test]
+fn chat_stream_rejects_a_terminated_oversized_event() {
+    let mut stream = ProviderChatStream::default();
+    let event = format!(
+        "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"{}\"}}\n\n",
+        "x".repeat(MAX_PROVIDER_EVENT_BYTES)
+    );
+
+    assert_eq!(
+        stream.push(event.as_bytes()).unwrap_err(),
+        "OpenAI chat stream event exceeded its size limit"
+    );
+}
+
+#[test]
 fn test_responses_url_seam_is_constructor_injected() {
     let client = OpenAiClient::with_responses_url(
         reqwest::Client::new(),

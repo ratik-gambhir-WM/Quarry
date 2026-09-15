@@ -31,7 +31,11 @@ pub(crate) async fn collect_deal_metadata_input(
                 "sowLink" => &mut sow_link,
                 "factSheetLink" => &mut fact_sheet_link,
                 "rlLink" => &mut rl_link,
-                _ => continue,
+                _ => {
+                    return Err(AppError::bad_request(format!(
+                        "unsupported multipart field: {field_name}"
+                    )))
+                }
             };
             if target.is_some() {
                 return Err(AppError::bad_request(format!(

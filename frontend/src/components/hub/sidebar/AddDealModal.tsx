@@ -8,6 +8,7 @@ import type {
   LocalDealFileContents,
   LocalDealSourceFile,
   SaveDealInput,
+  SaveDealResponse,
 } from "../../../data/dealExtraction";
 import { formatFileSize } from "../../../lib/formatters";
 import { Button } from "../../ui/button";
@@ -87,7 +88,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   const navigate = useNavigate();
   const [form, setForm] = useState(emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
-  const [createdDealId, setCreatedDealId] = useState<string | null>(null);
+  const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] = useState(emptySourceFiles);
   const [step, setStep] = useState<"details" | "sources">("details");
   const [fieldError, setFieldError] = useState("");
@@ -136,7 +137,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
     setSubmitError("");
     try {
       const response = await runtime.api.createDeal(buildSaveDealInput(form, email));
-      setCreatedDealId(response.deal.dealId);
+      setCreatedDeal(response);
       setStep("sources");
     } catch (error) {
       setSubmitError(errorMessage(error));
@@ -146,7 +147,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
   }
 
   async function saveSources() {
-    if (!createdDealId) return;
+    if (!createdDeal) return;
     setIsSubmitting(true);
     setSubmitError("");
     try {
@@ -162,7 +163,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
             })
           ).map(localFileContentsToFile)
         : selections.filter((file): file is File => file instanceof File);
-      const response = await runtime.api.saveDealMetadata(createdDealId, {
+      const response = await runtime.api.saveDealMetadata(createdDeal.deal.dealId, {
         factSheetLink: optionalLink(form.factSheetLink),
         files: uploads,
         rlLink: optionalLink(form.rlLink),
@@ -181,6 +182,20 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function skipMetadata() {
+    if (!createdDeal) return;
+    navigate(`/hub/deals/${encodeURIComponent(createdDeal.deal.dealId)}`, {
+      state: {
+        email,
+        result: {
+          ...createdDeal,
+          extraction: { keyQuestions: [] },
+          files: [],
+        },
+      } satisfies DealExtractionLocationState,
+    });
   }
 
   return (
@@ -250,7 +265,7 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
                 </Button>
               </DialogClose>
             ) : (
-              <Button disabled={isSubmitting} onClick={saveSources} type="button" variant="outline">
+              <Button disabled={isSubmitting} onClick={skipMetadata} type="button" variant="outline">
                 Skip metadata
               </Button>
             )}

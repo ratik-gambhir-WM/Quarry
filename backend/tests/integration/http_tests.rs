@@ -789,6 +789,24 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
         "https://example.com/request-list"
     );
 
+    let invalid_metadata = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-000184/metadata")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(format!(
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointUrl\"\r\n\r\nhttps://northwind.sharepoint.com/sites/acme\r\n\
+                     --{BOUNDARY}--\r\n"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_metadata.status(), StatusCode::BAD_REQUEST);
+
     let archive_deal = app
         .oneshot(
             Request::post("/api/v1/deals/DEAL-000184/archive")
