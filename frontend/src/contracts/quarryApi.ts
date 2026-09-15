@@ -10,6 +10,7 @@ import type {
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
 import type { WorkspaceAccountUser } from "../data/workspace";
+import type { DiligenceCanvasDocument } from "./diligenceCanvas";
 
 export type PersistedDeal = SavedDeal & {
   metadata: SavedDealMetadata | null;
@@ -145,15 +146,27 @@ export type PptxTemplateImportResult = {
   warningCount: number;
 };
 
+export const POWERPOINT_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const;
+
+export type PowerPointExport = {
+  dataBase64: string;
+  fileName: string;
+  mimeType: typeof POWERPOINT_CONTENT_TYPE;
+  warningCount: number;
+};
+
 export interface QuarryApi {
   archiveDeal(dealId: string): Promise<SavedDeal>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
   deleteTemplate(templateId: string): Promise<void>;
+  exportPowerPoint(document: DiligenceCanvasDocument): Promise<PowerPointExport>;
   saveDealMetadata(dealId: string, files: File[]): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
   getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
+  getTemplate(templateId: string): Promise<DiligenceCanvasDocument>;
   getUserByEmail(email: string): Promise<WorkspaceAccountUser | null>;
   importPptxTemplate(
     file: File,
@@ -202,9 +215,16 @@ export type SaveFileInput = {
   title: string;
 };
 
+export type SavePowerPointInput = {
+  dataBase64: string;
+  suggestedName: string;
+  title: string;
+};
+
 export interface PlatformCapabilities {
   readDealSourceFiles(input: ReadDealSourceFilesInput): Promise<LocalDealFileContents[]>;
   saveFile(input: SaveFileInput): Promise<boolean>;
+  savePowerPoint(input: SavePowerPointInput): Promise<boolean>;
   selectDealDataRoom(): Promise<LocalDealDataRoom | null>;
 }
 

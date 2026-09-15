@@ -20,3 +20,21 @@ fn restricts_pdf_proxy_to_deal_document_preview_routes() {
     assert!(validate_pdf_api_path("/api/v1/deals/DEAL-1/documents/file-1").is_err());
     assert!(validate_pdf_api_path("/api/v1/users/example/pdf").is_err());
 }
+
+#[test]
+fn restricts_powerpoint_proxy_to_the_template_export_route() {
+    assert!(validate_powerpoint_api_path("/api/v1/templates/export").is_ok());
+    assert!(validate_powerpoint_api_path("/api/v1/templates/example").is_err());
+    assert!(validate_powerpoint_api_path("/api/v1/deals/export").is_err());
+}
+
+#[test]
+fn validates_powerpoint_download_metadata() {
+    assert_eq!(
+        parse_powerpoint_file_name(Some("attachment; filename=\"Example.pptx\"")).unwrap(),
+        "Example.pptx"
+    );
+    assert!(parse_powerpoint_file_name(Some("attachment; filename=\"../escape.pptx\"")).is_err());
+    assert_eq!(parse_powerpoint_warning_count(Some("0")).unwrap(), 0);
+    assert!(parse_powerpoint_warning_count(Some("10001")).is_err());
+}

@@ -14,9 +14,10 @@ use crate::{
     deal_files::{read_deal_source_files, select_deal_data_room, LocalDealRoots},
     quarry_api::{
         quarry_api_delete, quarry_api_get, quarry_api_get_pdf, quarry_api_post,
-        quarry_api_post_multipart, subscribe_document_job, QuarryApiService,
+        quarry_api_post_multipart, quarry_api_post_powerpoint, subscribe_document_job,
+        QuarryApiService,
     },
-    save_file::save_text_file,
+    save_file::{save_powerpoint_file, save_text_file},
 };
 
 const APP_NAME: &str = "Quarry";
@@ -84,6 +85,8 @@ pub fn run() {
             quarry_api_get_pdf,
             quarry_api_post,
             quarry_api_post_multipart,
+            quarry_api_post_powerpoint,
+            save_powerpoint_file,
             save_text_file,
             select_deal_data_room,
             subscribe_document_job

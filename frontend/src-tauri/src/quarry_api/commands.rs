@@ -6,7 +6,10 @@ use crate::{
     security::verify_main_window_origin,
 };
 
-use super::{models::MultipartRequest, service::QuarryApiService};
+use super::{
+    models::{MultipartRequest, PowerPointExportPayload},
+    service::QuarryApiService,
+};
 
 #[tauri::command]
 pub async fn quarry_api_delete(
@@ -51,6 +54,20 @@ pub async fn quarry_api_post(
 ) -> AppResult<Value> {
     verify_main_window_origin(&window)?;
     service.post(&path, body).await.map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn quarry_api_post_powerpoint(
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    path: String,
+    body: Value,
+) -> AppResult<PowerPointExportPayload> {
+    verify_main_window_origin(&window)?;
+    service
+        .post_powerpoint(&path, body)
+        .await
+        .map_err(api_error)
 }
 
 #[tauri::command]

@@ -18,6 +18,7 @@ const DealAnalysisPage = lazy(() => import("../pages/deal-room/DealAnalysisPage"
 const DataRoomPage = lazy(() => import("../pages/DataRoomPage").then((module) => ({ default: module.DataRoomPage })));
 const DeliverablesPage = lazy(() => import("../pages/deal-room/DeliverablesPage").then((module) => ({ default: module.DeliverablesPage })));
 const DeliverableTemplatesPage = lazy(() => import("../pages/deal-room/DeliverableTemplatesPage").then((module) => ({ default: module.DeliverableTemplatesPage })));
+const DeliverableTemplateEditorPage = lazy(() => import("../pages/deal-room/DeliverableTemplateEditorPage").then((module) => ({ default: module.DeliverableTemplateEditorPage })));
 
 function page(label: string, child: ReactNode) {
   return <LazyPage label={label}>{child}</LazyPage>;
@@ -45,6 +46,7 @@ export function WorkspaceRoutes() {
           <Route element={dealPage("Loading analysis", <DealAnalysisPage />)} path="analysis" />
           <Route element={dealPage("Loading deliverables", <DeliverablesPage />)} path="deliverables" />
           <Route element={dealPage("Loading templates", <DeliverableTemplatesPage />)} path="deliverables/templates" />
+          <Route element={dealPage("Loading template editor", <DeliverableTemplateEditorPage />)} path="deliverables/templates/:templateId" />
         </Route>
         <Route element={<Navigate replace to="/login" />} path="*" />
       </Routes>

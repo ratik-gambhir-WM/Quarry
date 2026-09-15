@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 import { DealRoomPage } from "@/pages/DealRoomPage";
@@ -28,7 +28,29 @@ vi.mock("@/components/hub/WorkspaceSidebar", () => ({
 }));
 
 vi.mock("@/components/deal-room/DeliverableTemplatesView", () => ({
-  DeliverableTemplatesView: () => <div>Template gallery</div>,
+  DeliverableTemplatesView: ({ onSelectSlide }: { onSelectSlide?: (slide: {
+    id: string;
+    thumbnailAlt: string;
+    thumbnailHeight: number;
+    thumbnailSrc: string;
+    thumbnailWidth: number;
+  }) => void }) => (
+    <div>
+      Template gallery
+      <button
+        onClick={() => onSelectSlide?.({
+          id: "template/one",
+          thumbnailAlt: "Template preview",
+          thumbnailHeight: 720,
+          thumbnailSrc: "data:image/png;base64,",
+          thumbnailWidth: 1280,
+        })}
+        type="button"
+      >
+        Open template
+      </button>
+    </div>
+  ),
 }));
 
 afterEach(cleanup);
@@ -139,4 +161,26 @@ describe("DealRoomPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Deliverables" })).not.toBeNull();
   });
 
+  it("navigates from a selected gallery preview to the encoded editor route", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/hub/deals/project-alpha/deliverables/templates"]}>
+        <Routes>
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route element={<DeliverableTemplatesPage />} path="deliverables/templates" />
+            <Route element={<LocationProbe />} path="deliverables/templates/:templateId" />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open template" }));
+    expect(screen.getByText("/hub/deals/project-alpha/deliverables/templates/template%2Fone"))
+      .not.toBeNull();
+  });
+
 });
+
+function LocationProbe() {
+  return <p>{useLocation().pathname}</p>;
+}

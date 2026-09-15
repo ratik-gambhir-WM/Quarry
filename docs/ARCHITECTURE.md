@@ -265,6 +265,7 @@ the shared `/hub/*` route tree:
 | `/hub/deals/:dealId/analysis` | `DealAnalysisPage` | lazy nested leaf |
 | `/hub/deals/:dealId/deliverables` | `DeliverablesPage` | lazy nested leaf |
 | `/hub/deals/:dealId/deliverables/templates` | `DeliverableTemplatesPage` | lazy nested leaf |
+| `/hub/deals/:dealId/deliverables/templates/:templateId` | `DeliverableTemplateEditorPage` | lazy nested leaf; canvas and Plate editor load through additional on-demand boundaries |
 | all other paths | Redirect to `/login` | eager |
 
 Both router targets opt into React transitions. `App.tsx` keeps Login eager and loads one
@@ -292,7 +293,7 @@ authorization controls.
 | `contracts/` | Transport-neutral application contract | `QuarryApi`, runtime and platform capabilities |
 | `api/` | Browser and Tauri transport adapters | HTTP, multipart, binary, SSE, IPC mapping |
 | `platform/` | Build-selected router/runtime composition | web and desktop adapters |
-| `lib/` | Shared utilities and activity logging | class merging, bounded/redacted activity log |
+| `lib/` | Shared utilities, activity logging, and transport-free reusable UI libraries | class merging, bounded/redacted activity log, controlled Diligence Canvas snapshot |
 
 ### 5.4 State and data ownership
 
@@ -349,9 +350,21 @@ global state or query-cache library.
   failed write from a completed write whose preview refresh failed. The template header and
   gallery subscribe to that same store: a populated catalog exposes explicit single-slide and
   deck import actions, while an empty catalog provides the same actions plus a single-slide PPTX
-  drop zone. The Deal Room sidebar keeps Deal Room and Deal Activity as its primary navigation
-  and uses an animated calendar-days icon for Deal Activity. It then groups Data Room, Analysis,
-  and Deliverable under a Deal Artifacts section. Their animated
+  drop zone. Selecting a preview opens a nested editor route. A separate request-scoped external
+  store loads and validates that hydrated template document, suppresses stale completions, owns
+  the in-memory replacement document and dirty flag, and releases document data when its final
+  subscriber unmounts. Edits are local to the current route view and are discarded on exit; save,
+  autosave, and deliverable creation are not implemented. PowerPoint export creates a new file
+  from the current in-memory document without persisting those edits. The route module, canvas, and
+  Plate text editor are independently lazy-loaded so ordinary workspace, Deal Room, Deliverables,
+  and gallery navigation does not fetch the heavy editor graph. The editor uses the shared header
+  rail for template identity and its JSON-panel toggle; the presentation canvas renders without a
+  second title panel and fills the remaining inset surface. Entering text edit mode preserves the
+  canvas's SVG-rendered glyph layout until the user changes the draft, at which point the Plate
+  editor becomes the visible layout owner. The Deal Room sidebar keeps Deal
+  Room and Deal Activity as its primary navigation and uses an animated calendar-days icon for
+  Deal Activity. It then groups Data Room, Analysis, and Deliverable under a Deal Artifacts
+  section. Their animated
   folder-tree, file-stack, and ship icons respectively honor the operating system's reduced-motion
   preference.
   Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
@@ -392,7 +405,7 @@ operational failures.
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; imported templates without an upstream-generated preview remain absent from the preview-only gallery; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; SOW display is not reload-safe; Fact Sheet has no source; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -459,6 +472,7 @@ The contract covers:
 - document job subscriptions
 - keyword/vector document search
 - paginated template previews through `listTemplatePreviews`
+- validated hydrated template retrieval through `getTemplate`
 - app-scoped template deletion through `deleteTemplate`
 - explicit single-slide or deck PPTX import through `importPptxTemplate`
 - path, selection, and upload summarization
@@ -479,8 +493,8 @@ in development, serializes JSON/multipart, validates PDF content type, reads byt
 non-success responses into `BackendApiError`, and logs HTTP/SSE activity. No authentication header
 or token is currently attached.
 
-The web platform adapter implements export with a Blob download, has no native folder chooser, and
-rejects local source-file reads.
+The web platform adapter implements JSON, Markdown, and validated PowerPoint export with Blob
+downloads, has no native folder chooser, and rejects local source-file reads.
 
 ### 6.3 Desktop path
 
@@ -512,10 +526,12 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `quarry_api_delete` | Relay versioned DELETE with a required 204 response | Main window/origin; path policy; safe base URL |
 | `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy |
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
+| `quarry_api_post_powerpoint` | Relay a presentation export and return bounded base64 PPTX data | exact template-export route; MIME/ZIP signature/filename/warning checks; 64 MB cap |
 | `subscribe_document_job` | Consume Axum SSE and emit Tauri event | validated identifiers; scoped event payload |
 | `select_deal_data_room` | User-mediated folder selection and source scan | canonical root stored as process-local grant |
 | `read_deal_source_files` | Read one or two selected source files | authorized-root containment; type and 50 MB total cap |
 | `save_text_file` | Native JSON/Markdown export | MIME/extension/title/name checks; 5 MB cap; atomic sibling-temp write |
+| `save_powerpoint_file` | Native PowerPoint export | base64/ZIP signature/title/name/`.pptx` checks; 64 MB cap; atomic sibling-temp write |
 
 Every command validates that the caller is the `main` window and originates from the bundled Tauri
 origin or the approved debug origin. The capability file currently grants only `core:default`, and
@@ -523,8 +539,9 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 
 ### 6.5 Desktop transport constraints
 
-- Base64 multipart adds roughly one-third encoding overhead and holds complete copies in the
-  webview and Rust process. It is bounded but not a streaming design.
+- Base64 multipart and PowerPoint export/save payloads add roughly one-third encoding overhead and
+  hold complete copies in the webview and Rust process. They are bounded but are not streaming
+  designs.
 - Removing the TypeScript listener does not explicitly cancel the Rust upstream SSE request.
 - The desktop client currently converts many server failures to validation-shaped IPC errors and
   does not preserve a stable HTTP status/retry/operation-ID envelope.
@@ -583,7 +600,7 @@ method allowlist.
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
-at 25 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
+at 25 MB. The presentation-export route raises its scoped JSON body limit to 50 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
 Axum's default 2 MB body limit first; this mismatch remains a known contract gap.
 
 ### 7.4 Research and summarization
@@ -605,6 +622,8 @@ Axum's default 2 MB body limit first; this mismatch remains a known contract gap
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
 | GET | `/templates/previews?page=N` | Read one validated page of rendered template previews | Optional Diligence Studio capability |
+| GET | `/templates/{template_id}` | Read one bounded hydrated presentation document | Optional Diligence Studio capability |
+| POST | `/templates/export` | Convert current presentation JSON into a downloadable PPTX | Optional Diligence Studio capability |
 | POST | `/templates/import?mode=single\|batch` | Import one PPTX as one slide template or as one template per deck slide | Optional Diligence Studio capability |
 | DELETE | `/templates/{template_id}` | Delete one template from Quarry's upstream app catalog | Optional Diligence Studio capability |
 
@@ -621,7 +640,22 @@ splitting, preview generation, and persistence; Quarry keeps no imported templat
 single-mode multi-slide rejection directs the user to the deck action without an automatic retry.
 Because the upstream writes are not idempotent, timeouts and connection failures are not retried
 and are reported as uncertain outcomes. The fixed `X-App-Id` segregates the upstream catalog but
-is not authentication or authorization. Deletes require the upstream 204 contract; an upstream
+is not authentication or authorization. `GET /templates/{template_id}` validates the decoded ID,
+requests the encoded upstream template path, requires JSON, and bounds both declared and streamed
+response size at 50 MiB before deserialization. Quarry validates the top-level `presentation`
+object while preserving unknown JSON fields; the frontend's transport-neutral
+`parseDiligenceCanvasDocument` requires at least one slide and performs the stricter finite
+geometry and renderer-discriminant validation. `POST /templates/export` forwards the current
+in-memory document to Diligence Studio `POST /export`, including the fixed app ID, and bounds JSON
+input at 50 MiB. The upstream adapter bounds the response while reading it, and `TemplateService`
+rejects any final result above 64 MiB before the handler constructs the response. Quarry also
+requires a ZIP signature, the PowerPoint MIME type, a safe quoted `.pptx` attachment filename, and
+a bounded warning count. The web downloads that result through a Blob;
+desktop uses an exact-path binary relay and a user-mediated, atomic native `.pptx` save. Successful
+hydrated and export responses use `Cache-Control: private, no-store`, are not logged
+as browser activity payloads, and are not persisted in SQLite, Helix, browser storage, or a global
+cache. Upstream 404 remains 404; malformed, oversized, unavailable, and timeout failures become a
+sanitized 503. Deletes require the upstream 204 contract; an upstream
 404 remains a 404, while other upstream failures return a sanitized 503. The browser and Tauri
 webview call these Quarry routes; they never connect to Diligence Studio directly.
 
@@ -697,7 +731,7 @@ service, model, table, or product capability.
 | `assistant` | Planned interaction/conversation owner; backend scaffold only |
 | `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
-| `templates` | Implemented upstream-backed template-preview reads, app-scoped deletion, and explicit single/deck PPTX import; no local persistence |
+| `templates` | Implemented upstream-backed template-preview reads, app-scoped deletion, current-document PPTX export, and explicit single/deck PPTX import; no local persistence |
 | `vaults`, `notebooks`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
 
@@ -1018,7 +1052,9 @@ All fields are required if any one is present:
 - Diligence Studio responses are streamed under a response cap and validated for pagination,
   catalog size, Quarry-app-scoped relative preview URLs, PNG base64 bytes, decoded dimensions,
   and pixel budgets. PPTX imports validate compact success headers and inspect only a bounded
-  error body; hydrated template JSON is neither buffered nor relayed by Quarry.
+  error body. Hydrated template JSON is relayed only through the bounded, validated, private
+  no-store template-document endpoint and remains protected only by deployment/network controls;
+  the fixed app ID is catalog scoping, not inbound authorization.
 
 ### 12.2 Development-only or missing controls
 
@@ -1093,6 +1129,11 @@ Coverage currently includes:
   preservation, explicit single-slide/deck `.pptx` import controls in populated and empty states,
   local validation, duplicate-action prevention, full-catalog refresh, partial-success recovery,
   warning messaging, web/desktop transport mappings, and accessible pending feedback
+- gallery-to-editor navigation, direct template-editor entry and Back behavior, controlled local
+  edits, template-document loading/error/retry/stale cleanup, frontend runtime document parsing,
+  lazy canvas/Plate boundaries, selection/delete separation, stable pristine text-edit rendering,
+  current-document PowerPoint export, bounded web/desktop binary mappings, native save validation,
+  and export feedback
 - workspace route lazy loading, Deal Room direct child-route entry and active navigation, explicit
   API/demo deal resources, Data Room content/session staleness and cleanup, Summarize workflow and
   lazy Markdown composition, and manifest-driven bundle-budget validation
@@ -1117,7 +1158,9 @@ Coverage includes configuration, secret redaction, modular dependency boundaries
 router composition, schema migration and constraints, SQLite transactions/concurrency,
 repositories, services, router contracts,
 multipart boundaries, parsing/chunking, Helix query construction, OpenAI/WM mapping, stored
-previews, Diligence Studio URL/payload/delete/import validation, and isolated SharePoint behavior.
+previews, Diligence Studio URL/payload/delete/import/template-document validation, bounded declared
+and streamed template bodies, template service error mapping, template HTTP headers/status/body,
+and isolated SharePoint behavior.
 
 There is no live integration suite for Helix, OpenAI, WM AI, Microsoft Graph, or LibreOffice.
 

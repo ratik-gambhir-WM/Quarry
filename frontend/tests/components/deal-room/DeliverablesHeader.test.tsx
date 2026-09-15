@@ -93,7 +93,7 @@ describe("DeliverablesHeader", () => {
     render(
       <TemplatePreviewProvider requestKey="request-1">
         <DeliverablesHeader mode="templates" onBack={vi.fn()} />
-        <DeliverableTemplatesView onRetry={vi.fn()} />
+        <DeliverableTemplatesView onRetry={vi.fn()} onSelectSlide={vi.fn()} />
       </TemplatePreviewProvider>,
     );
 
@@ -101,6 +101,86 @@ describe("DeliverablesHeader", () => {
     expect(screen.getAllByRole("button", { name: "Import Slide Template" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Import Deck Template" })).toHaveLength(1);
     expect(listTemplatePreviews).toHaveBeenCalledOnce();
+  });
+
+  it("places the editor JSON action in the header with the template action style", async () => {
+    const user = userEvent.setup();
+    const onDeliverableNameChange = vi.fn();
+    const onJsonOpenChange = vi.fn();
+    const onExport = vi.fn();
+    render(
+      <DeliverablesHeader
+        deliverableName="Unnamed"
+        exportDisabled={false}
+        exportLabel="Export"
+        isJsonOpen={false}
+        jsonPanelId="template-json"
+        mode="editor"
+        onBack={vi.fn()}
+        onDeliverableNameChange={onDeliverableNameChange}
+        onExport={onExport}
+        onJsonOpenChange={onJsonOpenChange}
+      />,
+    );
+
+    expect(screen.queryByRole("textbox", { name: "Deliverable name" })).toBeNull();
+    const nameText = screen.getByRole("button", { name: "Edit deliverable name: Unnamed" });
+    expect(nameText.textContent).toBe("Unnamed");
+    await user.dblClick(nameText);
+
+    const nameInput = screen.getByRole("textbox", { name: "Deliverable name" });
+    expect(nameInput.getAttribute("value")).toBe("Unnamed");
+    expect(document.activeElement).toBe(nameInput);
+    await user.clear(nameInput);
+    await user.type(nameInput, "Technology diligence{Enter}");
+    expect(onDeliverableNameChange).toHaveBeenCalledWith("Technology diligence");
+    expect(screen.queryByRole("textbox", { name: "Deliverable name" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit deliverable name: Unnamed" })).not.toBeNull();
+
+    const button = screen.getByRole("button", { name: "Show JSON" });
+    expect(button.dataset.variant).toBe("default");
+    expect(button.dataset.size).toBe("sm");
+    expect(button.getAttribute("aria-controls")).toBe("template-json");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(button);
+    expect(onJsonOpenChange).toHaveBeenCalledWith(true);
+
+    const exportButton = screen.getByRole("button", { name: "Export" });
+    expect(exportButton.dataset.variant).toBe("default");
+    expect(exportButton.dataset.size).toBe("sm");
+    await user.click(exportButton);
+    expect(onExport).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a deliverable-name edit with Escape", async () => {
+    const user = userEvent.setup();
+    const onDeliverableNameChange = vi.fn();
+    render(
+      <DeliverablesHeader
+        deliverableName="Original name"
+        exportDisabled={false}
+        exportLabel="Export"
+        isJsonOpen={false}
+        jsonPanelId="template-json"
+        mode="editor"
+        onBack={vi.fn()}
+        onDeliverableNameChange={onDeliverableNameChange}
+        onExport={vi.fn()}
+        onJsonOpenChange={vi.fn()}
+      />,
+    );
+
+    const nameText = screen.getByRole("button", { name: "Edit deliverable name: Original name" });
+    nameText.focus();
+    await user.keyboard("{F2}");
+    const nameInput = screen.getByRole("textbox", { name: "Deliverable name" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Discard me{Escape}");
+
+    expect(onDeliverableNameChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Edit deliverable name: Original name" }).textContent)
+      .toBe("Original name");
   });
 });
 

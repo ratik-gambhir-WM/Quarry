@@ -15,6 +15,7 @@ type DeliverablesCarouselProps = {
   actionsDisabled?: boolean;
   deletingSlideId: string | null;
   onDeleteSlide: (slide: DeliverableSlide) => void;
+  onSelectSlide: (slide: DeliverableSlide) => void;
   sectionLabel: string;
   slides: readonly DeliverableSlide[];
 };
@@ -23,6 +24,7 @@ export function DeliverablesCarousel({
   actionsDisabled = false,
   deletingSlideId,
   onDeleteSlide,
+  onSelectSlide,
   sectionLabel,
   slides,
 }: DeliverablesCarouselProps) {
@@ -43,15 +45,23 @@ export function DeliverablesCarousel({
               className="relative w-full overflow-hidden bg-surface-container-low p-0 shadow-sm"
               style={{ aspectRatio: `${slide.thumbnailWidth} / ${slide.thumbnailHeight}` }}
             >
-              <img
-                alt={slide.thumbnailAlt}
-                className="h-full w-full object-contain"
-                decoding="async"
-                height={slide.thumbnailHeight}
-                loading="lazy"
-                src={slide.thumbnailSrc}
-                width={slide.thumbnailWidth}
-              />
+              <button
+                aria-label={`Open ${templateDisplayName(slide.id)} template`}
+                className="absolute inset-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-action disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={actionsDisabled}
+                onClick={() => onSelectSlide(slide)}
+                type="button"
+              >
+                <img
+                  alt={slide.thumbnailAlt}
+                  className="h-full w-full object-contain"
+                  decoding="async"
+                  height={slide.thumbnailHeight}
+                  loading="lazy"
+                  src={slide.thumbnailSrc}
+                  width={slide.thumbnailWidth}
+                />
+              </button>
               <Button
                 aria-label={
                   deletingSlideId === slide.id

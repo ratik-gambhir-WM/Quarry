@@ -39,3 +39,20 @@ fn writes_contents_via_a_sibling_temporary_file() {
     atomic_write(&path, b"# Saved").unwrap();
     assert_eq!(fs::read_to_string(path).unwrap(), "# Saved");
 }
+
+#[test]
+fn validates_bounded_powerpoint_save_input() {
+    let input = SavePowerPointInput {
+        data_base64: general_purpose::STANDARD.encode(b"PK\x03\x04powerpoint"),
+        suggested_name: "Presentation.pptx".to_string(),
+        title: "Save PowerPoint presentation".to_string(),
+    };
+    assert!(validate_powerpoint_input(&input).is_ok());
+
+    let mut unsafe_name = input.clone();
+    unsafe_name.suggested_name = "../Presentation.pptx".to_string();
+    assert_eq!(
+        validate_powerpoint_input(&unsafe_name).unwrap_err().code,
+        crate::errors::ErrorCode::Validation
+    );
+}

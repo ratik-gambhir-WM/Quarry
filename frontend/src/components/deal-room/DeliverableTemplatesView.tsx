@@ -10,10 +10,11 @@ import {
 } from "./TemplatePreviewStore";
 
 type DeliverableTemplatesViewProps = {
+  onSelectSlide: (slide: DeliverableSlide) => void;
   onRetry: () => void;
 };
 
-export function DeliverableTemplatesView({ onRetry }: DeliverableTemplatesViewProps) {
+export function DeliverableTemplatesView({ onRetry, onSelectSlide }: DeliverableTemplatesViewProps) {
   const previewState = useTemplatePreviewState();
   const {
     deleteTemplate,
@@ -87,6 +88,7 @@ export function DeliverableTemplatesView({ onRetry }: DeliverableTemplatesViewPr
                 actionsDisabled={activeOperation !== null}
                 deletingSlideId={activeOperation?.type === "delete" ? activeOperation.templateId : null}
                 onDeleteSlide={handleDelete}
+                onSelectSlide={onSelectSlide}
                 sectionLabel="Template preview carousel"
                 slides={previewState.slides}
               />

@@ -3,7 +3,10 @@ use std::{collections::HashSet, io::Cursor};
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::StreamExt;
 use image::{io::Reader as ImageReader, ImageFormat};
-use reqwest::{header::CONTENT_TYPE, Response, StatusCode};
+use reqwest::{
+    header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+    Response, StatusCode,
+};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -11,11 +14,14 @@ use super::client::{DiligenceStudioClient, DILIGENCE_STUDIO_APP_ID};
 
 pub const MAX_TEMPLATE_CATALOG_ITEMS: usize = 1_000;
 pub const MAX_TEMPLATE_PREVIEW_PAGES: usize = 100;
+pub const MAX_TEMPLATE_DOCUMENT_BYTES: usize = 50 * 1024 * 1024;
 const MAX_PREVIEWS_PER_PAGE: usize = 10;
 const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_IMPORT_ERROR_BYTES: usize = 16 * 1024;
 const MAX_IMPORTED_TEMPLATE_COUNT: usize = 1_000;
 const MAX_IMPORT_WARNING_COUNT: usize = 10_000;
+const MAX_EXPORT_WARNING_COUNT: usize = 10_000;
+pub const MAX_POWERPOINT_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DIMENSION: u32 = 8_192;
 const MAX_PAGE_PIXELS: u64 = 100_000_000;
@@ -34,6 +40,13 @@ pub enum PptxTemplateImportMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PptxTemplateImportResult {
     pub imported_count: usize,
+    pub warning_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PowerPointExport {
+    pub bytes: Vec<u8>,
+    pub file_name: String,
     pub warning_count: usize,
 }
 
@@ -111,6 +124,92 @@ struct UpstreamPreview {
 }
 
 impl DiligenceStudioClient {
+    pub async fn export_powerpoint(
+        &self,
+        document: &serde_json::Value,
+    ) -> Result<PowerPointExport, SlideTemplateClientError> {
+        let endpoint = self
+            .endpoint("export")
+            .map_err(SlideTemplateClientError::RequestBuild)?;
+        let response = self
+            .post(endpoint, |request| request.json(document))
+            .await
+            .map_err(|error| {
+                SlideTemplateClientError::Request(if error.is_timeout() {
+                    "request timed out".to_string()
+                } else {
+                    "request transport failed".to_string()
+                })
+            })?;
+        if !response.status().is_success() {
+            return Err(SlideTemplateClientError::Status(response.status()));
+        }
+        if response_content_type(&response) != Some(POWERPOINT_CONTENT_TYPE) {
+            return invalid("export response content type is not PowerPoint");
+        }
+        let file_name = parse_export_file_name(response.headers())?;
+        let warning_count = parse_count_header(
+            response.headers(),
+            "x-powerpoint-warning-count",
+            true,
+            MAX_EXPORT_WARNING_COUNT,
+        )?;
+        let bytes = read_bounded_body(response, MAX_POWERPOINT_EXPORT_BYTES).await?;
+        if bytes.is_empty() || !bytes.starts_with(b"PK\x03\x04") {
+            return invalid("export response is not a PowerPoint package");
+        }
+        Ok(PowerPointExport {
+            bytes,
+            file_name,
+            warning_count,
+        })
+    }
+
+    pub async fn get_template(
+        &self,
+        template_id: &str,
+    ) -> Result<serde_json::Value, SlideTemplateClientError> {
+        if !valid_template_id(template_id) {
+            return invalid("template ID is invalid");
+        }
+        let mut endpoint = self
+            .endpoint("templates/")
+            .map_err(SlideTemplateClientError::RequestBuild)?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| {
+                SlideTemplateClientError::RequestBuild(
+                    "Diligence Studio base URL cannot accept path segments".to_string(),
+                )
+            })?
+            .pop_if_empty()
+            .push(template_id);
+        let response = self.get(endpoint).await.map_err(|error| {
+            SlideTemplateClientError::Request(if error.is_timeout() {
+                "request timed out".to_string()
+            } else {
+                "request transport failed".to_string()
+            })
+        })?;
+        if !response.status().is_success() {
+            return Err(SlideTemplateClientError::Status(response.status()));
+        }
+        if response_content_type(&response) != Some("application/json") {
+            return invalid("template response content type is not application/json");
+        }
+        let bytes = read_bounded_body(response, MAX_TEMPLATE_DOCUMENT_BYTES).await?;
+        let payload = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|error| SlideTemplateClientError::InvalidJson(error.to_string()))?;
+        if !payload
+            .as_object()
+            .and_then(|root| root.get("presentation"))
+            .is_some_and(serde_json::Value::is_object)
+        {
+            return invalid("template response is missing a presentation object");
+        }
+        Ok(payload)
+    }
+
     pub async fn list_template_previews(
         &self,
         requested_page: usize,
@@ -227,6 +326,35 @@ impl DiligenceStudioClient {
     }
 }
 
+async fn read_bounded_body(
+    response: Response,
+    limit: usize,
+) -> Result<Vec<u8>, SlideTemplateClientError> {
+    validate_content_length(response.content_length(), limit)?;
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| {
+            SlideTemplateClientError::Request("response body read failed".to_string())
+        })?;
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(SlideTemplateClientError::ResponseTooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+fn validate_content_length(
+    content_length: Option<u64>,
+    limit: usize,
+) -> Result<(), SlideTemplateClientError> {
+    if content_length.is_some_and(|length| length > limit as u64) {
+        return Err(SlideTemplateClientError::ResponseTooLarge);
+    }
+    Ok(())
+}
+
 fn validate_pptx_import_headers(
     headers: &reqwest::header::HeaderMap,
     mode: PptxTemplateImportMode,
@@ -274,6 +402,29 @@ fn validate_pptx_import_headers(
             })
         }
     }
+}
+
+fn parse_export_file_name(
+    headers: &reqwest::header::HeaderMap,
+) -> Result<String, SlideTemplateClientError> {
+    let value = required_header(headers, "content-disposition")?;
+    let file_name = value
+        .strip_prefix("attachment; filename=\"")
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or_else(|| invalid_error("export response filename is invalid"))?;
+    let is_safe = !file_name.is_empty()
+        && file_name.len() <= 255
+        && file_name.trim() == file_name
+        && !file_name.contains(['/', '\\'])
+        && !file_name.chars().any(char::is_control)
+        && std::path::Path::new(file_name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pptx"));
+    if !is_safe || !headers.contains_key(CONTENT_DISPOSITION) {
+        return invalid("export response filename is invalid");
+    }
+    Ok(file_name.to_string())
 }
 
 fn parse_count_header(

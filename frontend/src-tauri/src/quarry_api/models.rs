@@ -31,3 +31,12 @@ pub struct DocumentJobEventPayload {
     pub event_name: String,
     pub subscription_id: String,
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerPointExportPayload {
+    pub data_base64: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub warning_count: usize,
+}
