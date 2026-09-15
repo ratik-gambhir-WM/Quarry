@@ -9,4 +9,3 @@ export function toSvgColor(color: string) {
 export function sanitizeSvgId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
 }
-

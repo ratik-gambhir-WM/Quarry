@@ -68,7 +68,6 @@ export function DiligenceCanvas({
   const slideCount = value.presentation.slides.length
   const requestedSlideIndex = slideIndex ?? internalSlideIndex
   const activeSlideIndex = clampSlideIndex(requestedSlideIndex, slideCount)
-  const json = useMemo(() => JSON.stringify(value, null, 2), [value])
 
   function updateJsonOpen(nextIsOpen: boolean) {
     if (controlledIsJsonOpen === undefined) {
@@ -147,25 +146,11 @@ export function DiligenceCanvas({
         </div>
 
         {isJsonOpen ? (
-          <aside
-            aria-label="Presentation JSON"
-            className="flex w-[min(32rem,42%)] min-w-[19rem] flex-col border-l border-white/10 bg-[#0b0f24] max-[760px]:max-h-96 max-[760px]:w-full max-[760px]:min-w-0 max-[760px]:border-t max-[760px]:border-l-0"
+          <PresentationJsonPanel
             id={jsonPanelId}
-          >
-            <div className="flex items-center justify-between gap-2 px-4 py-[0.85rem]">
-              <h2 className="m-0 text-[0.95rem] font-bold">Current JSON</h2>
-              <button
-                className={BUTTON_CLASSES}
-                onClick={() => updateJsonOpen(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
-            <pre className="m-0 min-h-0 flex-1 overflow-auto border-t border-[rgba(255,255,255,0.08)] bg-[#080c1c] p-4 font-mono text-[0.72rem] leading-[1.45] whitespace-pre text-[#d9e4ff]">
-              {json}
-            </pre>
-          </aside>
+            onClose={() => updateJsonOpen(false)}
+            value={value}
+          />
         ) : null}
       </div>
 
@@ -204,6 +189,36 @@ export function DiligenceCanvas({
         </footer>
       ) : null}
     </section>
+  )
+}
+
+function PresentationJsonPanel({
+  id,
+  onClose,
+  value,
+}: {
+  id: string
+  onClose: () => void
+  value: DiligenceCanvasDocument
+}) {
+  const json = useMemo(() => JSON.stringify(value, null, 2), [value])
+
+  return (
+    <aside
+      aria-label="Presentation JSON"
+      className="flex w-[min(32rem,42%)] min-w-[19rem] flex-col border-l border-white/10 bg-[#0b0f24] max-[760px]:max-h-96 max-[760px]:w-full max-[760px]:min-w-0 max-[760px]:border-t max-[760px]:border-l-0"
+      id={id}
+    >
+      <div className="flex items-center justify-between gap-2 px-4 py-[0.85rem]">
+        <h2 className="m-0 text-[0.95rem] font-bold">Current JSON</h2>
+        <button className={BUTTON_CLASSES} onClick={onClose} type="button">
+          Close
+        </button>
+      </div>
+      <pre className="m-0 min-h-0 flex-1 overflow-auto border-t border-[rgba(255,255,255,0.08)] bg-[#080c1c] p-4 font-mono text-[0.72rem] leading-[1.45] whitespace-pre text-[#d9e4ff]">
+        {json}
+      </pre>
+    </aside>
   )
 }
 

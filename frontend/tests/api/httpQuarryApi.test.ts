@@ -263,7 +263,14 @@ function templateDocument() {
     presentation: {
       preserveElementOrder: true,
       showBranding: false,
-      slides: [],
+      slides: [{
+        backgroundColor: "FFFFFF",
+        elements: [],
+        height: 720,
+        id: "slide-1",
+        name: "Slide 1",
+        width: 1280,
+      }],
       title: "Example",
     },
   };

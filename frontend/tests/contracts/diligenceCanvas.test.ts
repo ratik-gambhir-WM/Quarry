@@ -20,6 +20,13 @@ describe("parseDiligenceCanvasDocument", () => {
     const nonFinite = documentValue([], Number.POSITIVE_INFINITY);
     expect(() => parseDiligenceCanvasDocument(nonFinite)).toThrow("finite number");
   });
+
+  it("rejects presentations without a renderable slide", () => {
+    const input = documentValue();
+    input.presentation.slides = [];
+
+    expect(() => parseDiligenceCanvasDocument(input)).toThrow("at least one slide");
+  });
 });
 
 function documentValue(elements: unknown[] = [], width = 1280) {

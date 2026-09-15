@@ -354,7 +354,8 @@ global state or query-cache library.
   store loads and validates that hydrated template document, suppresses stale completions, owns
   the in-memory replacement document and dirty flag, and releases document data when its final
   subscriber unmounts. Edits are local to the current route view and are discarded on exit; save,
-  export, autosave, and deliverable creation are not implemented. The route module, canvas, and
+  autosave, and deliverable creation are not implemented. PowerPoint export creates a new file
+  from the current in-memory document without persisting those edits. The route module, canvas, and
   Plate text editor are independently lazy-loaded so ordinary workspace, Deal Room, Deliverables,
   and gallery navigation does not fetch the heavy editor graph. The editor uses the shared header
   rail for template identity and its JSON-panel toggle; the presentation canvas renders without a
@@ -643,11 +644,13 @@ is not authentication or authorization. `GET /templates/{template_id}` validates
 requests the encoded upstream template path, requires JSON, and bounds both declared and streamed
 response size at 50 MiB before deserialization. Quarry validates the top-level `presentation`
 object while preserving unknown JSON fields; the frontend's transport-neutral
-`parseDiligenceCanvasDocument` performs the stricter finite geometry and renderer-discriminant
-validation. `POST /templates/export` forwards the current in-memory document to Diligence Studio
-`POST /export`, including the fixed app ID, and bounds JSON input at 50 MiB. Quarry accepts only a
-64 MiB-or-smaller ZIP-signature body with the PowerPoint MIME type, a safe quoted `.pptx`
-attachment filename, and a bounded warning count. The web downloads that result through a Blob;
+`parseDiligenceCanvasDocument` requires at least one slide and performs the stricter finite
+geometry and renderer-discriminant validation. `POST /templates/export` forwards the current
+in-memory document to Diligence Studio `POST /export`, including the fixed app ID, and bounds JSON
+input at 50 MiB. The upstream adapter bounds the response while reading it, and `TemplateService`
+rejects any final result above 64 MiB before the handler constructs the response. Quarry also
+requires a ZIP signature, the PowerPoint MIME type, a safe quoted `.pptx` attachment filename, and
+a bounded warning count. The web downloads that result through a Blob;
 desktop uses an exact-path binary relay and a user-mediated, atomic native `.pptx` save. Successful
 hydrated and export responses use `Cache-Control: private, no-store`, are not logged
 as browser activity payloads, and are not persisted in SQLite, Helix, browser storage, or a global

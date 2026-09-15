@@ -128,6 +128,9 @@ export function parseDiligenceCanvasDocument(value: unknown): DiligenceCanvasDoc
   if (!Array.isArray(presentation.slides)) {
     throw new TypeError('presentation.slides must be an array.')
   }
+  if (presentation.slides.length === 0) {
+    throw new TypeError('presentation.slides must contain at least one slide.')
+  }
   presentation.slides.forEach(validateSlide)
 
   return root as DiligenceCanvasDocument

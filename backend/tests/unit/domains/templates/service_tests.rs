@@ -94,6 +94,20 @@ fn export_client_errors_are_sanitized_by_failure_class() {
     );
 }
 
+#[test]
+fn service_rejects_a_powerpoint_result_above_the_response_limit() {
+    assert_eq!(
+        validate_powerpoint_export_size(MAX_POWERPOINT_EXPORT_BYTES),
+        Ok(())
+    );
+    assert_eq!(
+        validate_powerpoint_export_size(MAX_POWERPOINT_EXPORT_BYTES + 1),
+        Err(ServiceError::Unavailable(
+            "PowerPoint export exceeded the 64 MB limit".to_string()
+        ))
+    );
+}
+
 #[tokio::test]
 async fn pptx_import_rejects_empty_bytes_before_capability_lookup() {
     let service = TemplateService::new(None);

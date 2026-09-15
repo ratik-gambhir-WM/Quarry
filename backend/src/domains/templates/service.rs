@@ -8,7 +8,8 @@ use crate::{
         templates::{
             PptxTemplateImportMode as AdapterImportMode,
             PptxTemplateImportResult as AdapterImportResult, SlideTemplateClientError,
-            TemplatePreviewPage as AdapterPage, MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES,
+            TemplatePreviewPage as AdapterPage, MAX_POWERPOINT_EXPORT_BYTES, MAX_TEMPLATE_ID_BYTES,
+            MAX_TEMPLATE_PREVIEW_PAGES,
         },
     },
     shared::error::{ServiceError, ServiceResult},
@@ -178,16 +179,27 @@ impl TemplateService {
         let client = self.client.as_ref().ok_or_else(|| {
             ServiceError::unavailable("PowerPoint export capability is not configured")
         })?;
-        client
+        let result = client
             .export_powerpoint(&document)
             .await
-            .map(|result| PowerPointExport {
-                bytes: result.bytes,
-                file_name: result.file_name,
-                warning_count: result.warning_count,
-            })
-            .map_err(map_powerpoint_export_client_error)
+            .map_err(map_powerpoint_export_client_error)?;
+        validate_powerpoint_export_size(result.bytes.len())?;
+        Ok(PowerPointExport {
+            bytes: result.bytes,
+            file_name: result.file_name,
+            warning_count: result.warning_count,
+        })
     }
+}
+
+fn validate_powerpoint_export_size(byte_length: usize) -> ServiceResult<()> {
+    if byte_length > MAX_POWERPOINT_EXPORT_BYTES {
+        tracing::warn!(byte_length, "PowerPoint export exceeded the response limit");
+        return Err(ServiceError::unavailable(
+            "PowerPoint export exceeded the 64 MB limit",
+        ));
+    }
+    Ok(())
 }
 
 fn map_powerpoint_export_client_error(error: SlideTemplateClientError) -> ServiceError {

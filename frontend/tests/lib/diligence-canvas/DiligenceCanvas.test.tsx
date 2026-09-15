@@ -62,6 +62,26 @@ describe("DiligenceCanvas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onJsonOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("does not serialize the presentation until the JSON panel opens", () => {
+    const document = makeDocument();
+    let extensionReads = 0;
+    Object.defineProperty(document, "serializationSentinel", {
+      enumerable: true,
+      get() {
+        extensionReads += 1;
+        return "included";
+      },
+    });
+
+    render(<DiligenceCanvas onChange={vi.fn()} value={document} />);
+
+    expect(extensionReads).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Show JSON" }));
+    expect(extensionReads).toBe(1);
+    expect(screen.getByRole("complementary", { name: "Presentation JSON" }).textContent)
+      .toContain('"serializationSentinel": "included"');
+  });
 });
 
 function makeDocument(): DiligenceCanvasDocument {

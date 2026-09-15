@@ -10,4 +10,3 @@ export {
   type SvgTextSegment,
   type TextMeasure,
 } from './textLayout'
-
