@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import type { PersistedDeal } from "@/contracts/quarryApi";
 
-const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
+const { listDeals, queryModel } = vi.hoisted(() => ({ listDeals: vi.fn(), queryModel: vi.fn() }));
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
-    api: { listDeals },
+    api: { listDeals, queryModel },
     platform: {},
     target: "web",
   },
@@ -22,6 +22,8 @@ describe("App routes", () => {
   beforeEach(() => {
     listDeals.mockReset();
     listDeals.mockResolvedValue([persistedDeal]);
+    queryModel.mockReset();
+    queryModel.mockReturnValue(() => undefined);
     window.localStorage.clear();
     window.sessionStorage.clear();
   });
@@ -57,6 +59,27 @@ describe("App routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
     expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" })).toBeTruthy();
     expect(listDeals).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers Assistant at its new route and removes the former summarize leaf", async () => {
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/hub/assistant"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "How can I help you today?" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Assistant", current: "page" })).toBeTruthy();
+    expect(listDeals).toHaveBeenCalledTimes(1);
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/hub/summarize"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Quarry" })).toBeTruthy();
   });
 });
 
