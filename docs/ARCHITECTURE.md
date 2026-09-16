@@ -234,7 +234,7 @@ The live frontend is an npm package using:
 - Vite 7 and TypeScript 6.0 with strict/no-unused/no-emit checks
 - React Router DOM 7
 - Tailwind CSS 4's CSS-first Vite integration
-- Radix/shadcn primitives, Lucide icons, Motion, and dnd-kit
+- Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and assistant-ui LocalRuntime/primitives
 - react-pdf/pdf.js for document preview
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
@@ -256,7 +256,7 @@ the shared `/hub/*` route tree:
 | `/hub/account` | `AccountPage` | lazy workspace route and page |
 | `/hub/vault` | `GlobalVaultPage` | lazy |
 | `/hub/initiatives/vault` | `VaultPage` | lazy |
-| `/hub/summarize` | `SummarizePage` | lazy |
+| `/hub/assistant` | `Assistant` | lazy |
 | `/hub/logs` | `LogsPage` | lazy |
 | `/hub/deals` | `Deals` | lazy; currently uncommitted |
 | `/hub/deals/:dealId` | `DealRoomPage` + `DealRoomOverviewPage` | lazy parent and nested leaf |
@@ -283,7 +283,7 @@ authorization controls.
 
 | Frontend area | Responsibility | Examples |
 | --- | --- | --- |
-| `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, summarize |
+| `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, assistant |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
 | `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, registry arc menu and floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
@@ -308,7 +308,7 @@ global state or query-cache library.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The Deal Hub and
   Deal Room headers identify the active sidebar but do not offer fixture-backed alternate sidebar
-  spaces. The home sidebar labels `/hub/summarize` as Assistant and uses an animated Twitch glyph.
+  spaces. The home sidebar labels `/hub/assistant` as Assistant and uses an animated Twitch glyph.
   An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
@@ -384,9 +384,17 @@ global state or query-cache library.
   controls use a consistent 12-pixel text size. Selecting a file from the grid enters the existing
   preview state and swaps the Deal Room sidebar for the file explorer without nesting another main
   container; an empty Data Room continues to use the upload-first state.
-- `useSummarizeWorkflow` owns picker normalization, file selection, API request state, and stale
-  completion protection. `SummarizePage` composes that model, while the Markdown renderer/export
-  panel is lazy-loaded only after a non-empty summary exists.
+- The Assistant page uses assistant-ui's `LocalRuntime` as the sole owner of its ephemeral
+  transcript, composer draft, running/cancel/error state, retry actions, and pinned thread scroll.
+  A narrow `ChatModelAdapter` converts the callback-based `QuarryApi.queryModel` stream into
+  cumulative assistant-ui text snapshots, treats completion as authoritative, and cancels the
+  matching transport exactly once. Each turn sends the current prompt plus a bounded immutable
+  snapshot of completed prior text-only user/assistant pairs; incomplete, failed, and stopped
+  turns are excluded. The transcript is page-local and is not written to fixtures, browser
+  storage, the activity log, SQLite, or Helix.
+- Legacy summarize components, `useSummarizeWorkflow`, data modules, and summary API methods remain
+  available to the codebase, but the former `SummarizePage` route module and summary screen are no
+  longer registered in the product route tree.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
@@ -407,7 +415,8 @@ operational failures.
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Summarize | Manual path, browser file/folder selection, API summary, Markdown render/export | Relies on server filesystem paths for some flows; production policy unresolved |
+| Assistant | Ephemeral multi-turn text chat with starter prompts, incremental Markdown, stop/retry/copy actions, bounded completed-pair context replay, and shared web/desktop streaming transport | No persistence/resume, multiple threads, attachments, voice, model picker, tools, retrieval, citations, identity, authorization, rate limits, moderation, or quotas; each included context turn is resent and rebilled |
+| Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
 | Logs | View/export/clear bounded activity log | Session-local only |
@@ -455,6 +464,16 @@ opening the dialog does not capture the page chrome as part of that transition.
 The live working tree includes React canary View Transition wrappers and CSS transition recipes.
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
 `prefers-reduced-motion` behavior.
+
+The Assistant keeps the existing Deal Hub sidebar and 40-pixel `WorkspaceHeader` rail with its
+current `Summarize` title. `WorkspaceLayout` has a default-preserving fill mode for this route:
+workspace Demo/error notices remain shrinking-safe siblings above one assistant-ui Thread
+viewport, and only that viewport scrolls. One mounted composer moves from the centered empty view
+to the measured sticky `ThreadPrimitive.ViewportFooter`; Motion interpolates the layout change and
+switches immediately under reduced motion. Adapted assistant-ui registry Thread, Composer,
+Markdown, and typing-indicator sources use Quarry's existing primitives and semantic tokens and
+omit unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
+controls.
 
 ## 6. Web and desktop transports
 
@@ -758,7 +777,7 @@ service, model, table, or product capability.
 | `system`, `dev_support` | Implemented operations and explicitly development-oriented routes |
 | `user_settings` | Partial client-only preferences; backend scaffold only |
 | `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
-| `assistant::chat` | Implemented ephemeral OpenAI-backed text chat transport when configured; client-managed context and no UI yet |
+| `assistant::chat` | Implemented ephemeral OpenAI-backed text chat transport when configured; the shared Assistant UI replays bounded completed text context through it |
 | `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
 | `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
@@ -986,7 +1005,8 @@ an expanded viewer contract.
 ### 10.5 Assistant chat
 
 ```text
-Caller-owned completed text pairs + current prompt/files
+Assistant UI LocalRuntime + bounded completed text pairs + current prompt
+  -> ChatModelAdapter emits cumulative assistant-ui snapshots
   -> web fetch parser or fixed-path Tauri relay
   -> assistant::chat validates multipart/context/file bytes
   -> AssistantChatService::ask resolves server defaults and opens bounded event channels
@@ -1191,8 +1211,12 @@ Coverage currently includes:
   current-document PowerPoint export, bounded web/desktop binary mappings, native save validation,
   and export feedback
 - workspace route lazy loading, Deal Room direct child-route entry and active navigation, explicit
-  API/demo deal resources, Data Room content/session staleness and cleanup, Summarize workflow and
-  lazy Markdown composition, and manifest-driven bundle-budget validation
+  API/demo deal resources, Data Room content/session staleness and cleanup, Assistant route
+  migration/provider lifetime, legacy Summarize workflow coverage, and manifest-driven
+  bundle-budget validation
+- Assistant stream-adapter ordering, authoritative completion, sanitized failures, synchronous
+  terminal cleanup, cancellation, completed-pair context bounds, composer/suggestion behavior,
+  incremental Markdown, retry/stop states, reduced motion, and fill-layout notice composition
 
 There is no browser end-to-end suite or visual regression suite.
 

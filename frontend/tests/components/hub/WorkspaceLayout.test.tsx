@@ -18,4 +18,22 @@ describe("WorkspaceLayout", () => {
     expect(markup.indexOf("Sidebar")).toBeLessThan(markup.indexOf("workspace-main-surface"));
     expect(markup.indexOf("Header")).toBeLessThan(markup.indexOf("Content"));
   });
+
+  it("keeps default scrolling intact and offers a route-body fill mode", () => {
+    const scrolling = renderToStaticMarkup(
+      <WorkspaceLayout header={null} sidebar={<aside>Sidebar</aside>}>
+        Content
+      </WorkspaceLayout>,
+    );
+    const fill = renderToStaticMarkup(
+      <WorkspaceLayout contentMode="fill" header={null} sidebar={<aside>Sidebar</aside>}>
+        Content
+      </WorkspaceLayout>,
+    );
+
+    expect(scrolling).toContain("overflow-y-auto");
+    expect(scrolling).toContain("px-8 py-8");
+    expect(fill).toContain("min-h-0 flex-1 overflow-hidden p-0");
+    expect(fill).not.toContain("overflow-y-auto");
+  });
 });

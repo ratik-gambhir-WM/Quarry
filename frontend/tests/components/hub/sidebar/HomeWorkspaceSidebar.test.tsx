@@ -26,7 +26,7 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).toContain('href="/hub/deals"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('href="/hub/logs"');
-    expect(markup).toContain('href="/hub/summarize"');
+    expect(markup).toContain('href="/hub/assistant"');
     expect(markup).toContain('d="M21 2H3v16h5v4l4-4h5l4-4V2z"');
     expect(markup).toContain("Deal Hub");
     expect(markup).not.toContain("Switch sidebar");
@@ -35,5 +35,22 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).not.toContain("Active deals actions");
     expect(markup).not.toContain('href="/hub/deals/project-alpha"');
     expect(markup).not.toContain("Quick Chat");
+  });
+
+  it("selects the Assistant link with the assistant home-section key", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/hub/assistant"]}>
+        <HomeWorkspaceSidebar
+          activeHomeSection="assistant"
+          deals={workspaceDeals}
+          initiatives={[]}
+          tools={workspaceTools}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/hub/assistant"');
+    expect(markup).toContain('aria-current="page"');
+    expect(markup).not.toContain('href="/hub/summarize"');
   });
 });

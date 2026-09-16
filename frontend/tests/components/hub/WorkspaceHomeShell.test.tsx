@@ -48,4 +48,16 @@ describe("WorkspaceHomeShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retryDeals).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps notices above a shrinking-safe fill child", () => {
+    const { container } = render(
+      <WorkspaceHomeShell contentMode="fill" header={null}>
+        <div>Assistant thread</div>
+      </WorkspaceHomeShell>,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("Demo data");
+    expect(screen.getByText("Assistant thread").parentElement?.className).toContain("min-h-0 flex-1");
+    expect(container.querySelector(".overflow-hidden.p-0")).toBeTruthy();
+  });
 });
