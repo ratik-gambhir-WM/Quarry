@@ -146,7 +146,7 @@ describe("QueryChat", () => {
     expect(cleanupStream).toHaveBeenCalledTimes(1);
   });
 
-  it("shows sanitized failures and retries through the assistant-ui runtime", async () => {
+  it("shows sanitized failures and retries through the custom AgentRuntime", async () => {
     const user = userEvent.setup();
     const handlerRuns: SendQueryEventHandlers[] = [];
     queryModel.mockImplementation((_input: QueryModelInput, handlers: SendQueryEventHandlers) => {

@@ -1,4 +1,3 @@
-import { ThreadListItemPrimitive, ThreadListPrimitive } from "@assistant-ui/react";
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { HomeSidebarProps } from "./sidebarTypes";
@@ -6,6 +5,7 @@ import { Icon } from "../../ui/Icon";
 import { HomeWorkspaceSidebarNavigation } from "./HomeWorkspaceSidebar";
 import { SidebarFrame } from "./SidebarFrame";
 import { SidebarIcon } from "./SidebarIcon";
+import { useAgentRuntimeContext, useThreadRuntimeState } from "../../chat/AgentRuntime";
 
 type AssistantWorkspaceSidebarProps = Pick<
   HomeSidebarProps,
@@ -137,13 +137,24 @@ function AssistantTab({
 }
 
 function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
+  const runtime = useAgentRuntimeContext();
+  const {
+    isPreparingThread,
+    isThreadListLoading,
+    selectedThreadId,
+    threadListError,
+    threads,
+  } = useThreadRuntimeState((state) => state);
   return (
     <div className="space-y-3">
-      <ThreadListPrimitive.New
+      <button
         aria-label="New chat"
         className={`group flex w-full items-center rounded-xl py-2.5 text-left text-[14px] font-medium text-sidebar-active transition hover:bg-sidebar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
           collapsed ? "justify-center px-0" : "gap-3 px-3"
         }`}
+        onClick={() => runtime.newChat()}
+        disabled={isPreparingThread}
+        type="button"
       >
         <Icon className="h-5 w-5 shrink-0 text-sidebar-muted" name="editSquare" />
         {collapsed ? null : (
@@ -155,24 +166,50 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
             />
           </>
         )}
-      </ThreadListPrimitive.New>
+      </button>
       {collapsed ? null : (
         <ul aria-label="Previous chats" className="space-y-1">
-          <ThreadListPrimitive.Items components={{ ThreadListItem: AssistantThreadListItem }} />
+          {threads.map((thread) => (
+            <AssistantThreadListItem
+              active={selectedThreadId === thread.threadId}
+              key={thread.threadId}
+              onSelect={() => void runtime.selectThread(thread.threadId)}
+              title={thread.title}
+            />
+          ))}
+          {isThreadListLoading ? (
+            <li className="px-3 py-2 text-xs text-sidebar-muted" role="status">Loading chats…</li>
+          ) : null}
+          {threadListError ? (
+            <li className="px-3 py-2 text-xs text-error" role="status">Couldn’t load previous chats.</li>
+          ) : null}
         </ul>
       )}
     </div>
   );
 }
 
-function AssistantThreadListItem() {
+function AssistantThreadListItem({
+  active,
+  onSelect,
+  title,
+}: {
+  active: boolean;
+  onSelect: () => void;
+  title: string;
+}) {
   return (
-    <ThreadListItemPrimitive.Root asChild>
-      <li>
-        <ThreadListItemPrimitive.Trigger className="w-full truncate rounded-xl px-3 py-2 text-left text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed data-[active=true]:bg-sidebar-selected data-[active=true]:text-sidebar-active">
-          <ThreadListItemPrimitive.Title fallback="New chat" />
-        </ThreadListItemPrimitive.Trigger>
-      </li>
-    </ThreadListItemPrimitive.Root>
+    <li>
+      <button
+        aria-current={active ? "page" : undefined}
+        className={`w-full truncate rounded-xl px-3 py-2 text-left text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
+          active ? "bg-sidebar-selected text-sidebar-active" : ""
+        }`}
+        onClick={onSelect}
+        type="button"
+      >
+        {title || "New chat"}
+      </button>
+    </li>
   );
 }

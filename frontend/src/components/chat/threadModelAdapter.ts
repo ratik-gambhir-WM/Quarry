@@ -1,12 +1,9 @@
 import type {
-  ChatModelAdapter,
-  ThreadMessage,
-} from "@assistant-ui/react";
-import type {
   ChatContextMessage,
   QuarryApi,
   SendQueryEventHandlers,
 } from "../../contracts/quarryApi";
+import type { Message, ModelAdapter } from "./chatModel";
 
 const MAX_CONTEXT_MESSAGES = 64;
 const MAX_CONTEXT_CHARS = 400_000;
@@ -27,10 +24,10 @@ type QueueItem =
 
 type CompletedPair = readonly [ChatContextMessage, ChatContextMessage];
 
-export function createQueryModelAdapter(
+export function createModelAdapter(
   api: Pick<QuarryApi, "queryModel"> & Partial<Pick<QuarryApi, "runAssistantThread">>,
   options: QueryModelAdapterOptions = {},
-): ChatModelAdapter {
+): ModelAdapter {
   return {
     async *run(runOptions) {
       const prompt = readCurrentPrompt(runOptions.messages);
@@ -66,10 +63,15 @@ export function createQueryModelAdapter(
       try {
         try {
           const currentUser = findCurrentUserMessage(runOptions.messages);
+          const currentUserIndex = findCurrentUserIndex(runOptions.messages);
+          const previousMessage = runOptions.messages[currentUserIndex - 1];
+          const parentMessageId = previousMessage?.role === "assistant"
+            ? previousMessage.id
+            : undefined;
           const usePersistedRun = Boolean(
             options.userEmail
-              && runOptions.unstable_threadId
-              && runOptions.unstable_assistantMessageId
+              && runOptions.threadId
+              && runOptions.assistantMessageId
               && api.runAssistantThread,
           );
           const handlers: SendQueryEventHandlers = {
@@ -102,12 +104,12 @@ export function createQueryModelAdapter(
             };
           cleanup = usePersistedRun
             ? api.runAssistantThread!({
-                assistantMessageId: runOptions.unstable_assistantMessageId!,
+                assistantMessageId: runOptions.assistantMessageId!,
                 files: [],
-                parentMessageId: runOptions.unstable_parentId ?? undefined,
+                parentMessageId,
                 prompt,
-                requestId: runOptions.unstable_assistantMessageId!,
-                threadId: runOptions.unstable_threadId!,
+                requestId: runOptions.assistantMessageId!,
+                threadId: runOptions.threadId!,
                 userEmail: options.userEmail!,
                 userMessageId: currentUser.id,
               }, handlers)
@@ -132,7 +134,7 @@ export function createQueryModelAdapter(
   };
 }
 
-function readCurrentPrompt(messages: readonly ThreadMessage[]) {
+function readCurrentPrompt(messages: readonly Message[]) {
   const current = findCurrentUserMessage(messages);
   const text = textOnlyContent(current);
   if (text === null || text.trim().length === 0 || current.attachments.length > 0) {
@@ -141,7 +143,7 @@ function readCurrentPrompt(messages: readonly ThreadMessage[]) {
   return text;
 }
 
-function buildContext(messages: readonly ThreadMessage[]) {
+function buildContext(messages: readonly Message[]) {
   const currentUserIndex = findCurrentUserIndex(messages);
   const pairs: CompletedPair[] = [];
 
@@ -199,14 +201,14 @@ function buildContext(messages: readonly ThreadMessage[]) {
   };
 }
 
-function findCurrentUserIndex(messages: readonly ThreadMessage[]) {
+function findCurrentUserIndex(messages: readonly Message[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === "user") return index;
   }
   throw new Error("A user message is required to run the assistant.");
 }
 
-function findCurrentUserMessage(messages: readonly ThreadMessage[]) {
+function findCurrentUserMessage(messages: readonly Message[]) {
   const message = messages[findCurrentUserIndex(messages)];
   if (!message || message.role !== "user") {
     throw new Error("A user message is required to run the assistant.");
@@ -214,7 +216,7 @@ function findCurrentUserMessage(messages: readonly ThreadMessage[]) {
   return message;
 }
 
-function textOnlyContent(message: ThreadMessage) {
+function textOnlyContent(message: Message) {
   if (message.content.length === 0 || message.content.some((part) => part.type !== "text")) {
     return null;
   }

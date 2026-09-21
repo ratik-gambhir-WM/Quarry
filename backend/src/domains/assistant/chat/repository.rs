@@ -84,6 +84,7 @@ pub enum StartRunResult {
         prior_messages: Vec<AssistantMessage>,
     },
     Existing(AssistantMessage),
+    Conflict,
 }
 
 #[derive(Clone)]
@@ -195,10 +196,11 @@ impl AssistantChatRepository {
             .read_async(query)
             .await
             .map_err(storage("load assistant messages"))?;
-        let messages = rows
+        let mut messages = rows
             .into_iter()
             .map(message_from_row)
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
+        normalize_legacy_user_parents(&mut messages);
         Ok(Some(AssistantThreadDetail { thread, messages }))
     }
 
@@ -293,6 +295,67 @@ impl AssistantChatRepository {
                 if let Some(row) = transaction.read_one(&existing_query)? {
                     return Ok(StartRunResult::Existing(transaction_message(row)?));
                 }
+                if input.assistant_message_id == input.user_message_id {
+                    return Ok(StartRunResult::Conflict);
+                }
+                let assistant_message_query = transaction_query(
+                    SqlBuilder::select("assistant_messages")
+                        .columns(["message_id"])
+                        .and_where(Condition::equal("message_id", &input.assistant_message_id))
+                        .build(),
+                    "assistant message id select",
+                )?;
+                if transaction.read_one(&assistant_message_query)?.is_some() {
+                    return Ok(StartRunResult::Conflict);
+                }
+                let user_message_query = transaction_query(
+                    SqlBuilder::select("assistant_messages")
+                        .columns(MESSAGE_COLUMNS)
+                        .and_where(Condition::equal("message_id", &input.user_message_id))
+                        .build(),
+                    "assistant user message id select",
+                )?;
+                let existing_user_sequence = match transaction.read_one(&user_message_query)? {
+                    Some(row) => {
+                        let message = transaction_message(row)?;
+                        let parent_matches = if message.parent_message_id.as_deref()
+                            == Some(message.message_id.as_str())
+                        {
+                            let previous_assistant_query = transaction_query(
+                                SqlBuilder::select("assistant_messages")
+                                    .columns(["message_id"])
+                                    .and_where(Condition::equal("thread_id", &input.thread_id))
+                                    .and_where(Condition::equal("role", "assistant"))
+                                    .and_where(Condition::compare(
+                                        "sequence",
+                                        ComparisonOperator::LessThan,
+                                        message.sequence,
+                                    ))
+                                    .order_by("sequence", SortDirection::Descending)
+                                    .limit(1)
+                                    .build(),
+                                "assistant previous message select",
+                            )?;
+                            let expected_parent = transaction
+                                .read_one(&previous_assistant_query)?
+                                .map(|row| transaction_text(&row, "message_id"))
+                                .transpose()?;
+                            expected_parent == input.parent_message_id
+                        } else {
+                            message.parent_message_id == input.parent_message_id
+                        };
+                        if message.thread_id != input.thread_id
+                            || !parent_matches
+                            || message.role != "user"
+                            || message.content != input.prompt
+                            || message.status != "completed"
+                        {
+                            return Ok(StartRunResult::Conflict);
+                        }
+                        Some(message.sequence)
+                    }
+                    None => None,
+                };
                 let latest_query = transaction_query(
                     SqlBuilder::select("assistant_messages")
                         .columns(["sequence"])
@@ -306,12 +369,28 @@ impl AssistantChatRepository {
                     .read_one(&latest_query)?
                     .map(|row| transaction_integer(&row, "sequence"))
                     .transpose()?
-                    .map_or(0, |sequence| sequence + 1);
+                    .map(|sequence| {
+                        sequence.checked_add(1).ok_or_else(|| {
+                            SqliteClientError::transaction_aborted(
+                                "assistant message sequence overflow",
+                            )
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(0);
+                let mut history_builder = SqlBuilder::select("assistant_messages")
+                    .columns(MESSAGE_COLUMNS)
+                    .and_where(Condition::equal("thread_id", &input.thread_id))
+                    .and_where(Condition::equal("status", "completed"));
+                if let Some(sequence) = existing_user_sequence {
+                    history_builder = history_builder.and_where(Condition::compare(
+                        "sequence",
+                        ComparisonOperator::LessThan,
+                        sequence,
+                    ));
+                }
                 let history_query = transaction_query(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(MESSAGE_COLUMNS)
-                        .and_where(Condition::equal("thread_id", &input.thread_id))
-                        .and_where(Condition::equal("status", "completed"))
+                    history_builder
                         .order_by("sequence", SortDirection::Descending)
                         .limit(64)
                         .build(),
@@ -323,25 +402,36 @@ impl AssistantChatRepository {
                     .map(transaction_message)
                     .collect::<Result<Vec<_>, _>>()?;
                 prior_messages.reverse();
-                let user_insert = transaction_query(
-                    SqlBuilder::insert_into("assistant_messages")
-                        .value("message_id", &input.user_message_id)
-                        .value("thread_id", &input.thread_id)
-                        .value("parent_message_id", input.parent_message_id.as_deref())
-                        .value("sequence", next_sequence)
-                        .value("role", "user")
-                        .value("content", &input.prompt)
-                        .value("status", "completed")
-                        .build(),
-                    "assistant user message insert",
-                )?;
-                transaction.write(&user_insert)?;
+                if existing_user_sequence.is_none() {
+                    let user_insert = transaction_query(
+                        SqlBuilder::insert_into("assistant_messages")
+                            .value("message_id", &input.user_message_id)
+                            .value("thread_id", &input.thread_id)
+                            .value("parent_message_id", input.parent_message_id.as_deref())
+                            .value("sequence", next_sequence)
+                            .value("role", "user")
+                            .value("content", &input.prompt)
+                            .value("status", "completed")
+                            .build(),
+                        "assistant user message insert",
+                    )?;
+                    transaction.write(&user_insert)?;
+                }
+                let assistant_sequence = if existing_user_sequence.is_some() {
+                    next_sequence
+                } else {
+                    next_sequence.checked_add(1).ok_or_else(|| {
+                        SqliteClientError::transaction_aborted(
+                            "assistant message sequence overflow",
+                        )
+                    })?
+                };
                 let assistant_insert = transaction_query(
                     SqlBuilder::insert_into("assistant_messages")
                         .value("message_id", &input.assistant_message_id)
                         .value("thread_id", &input.thread_id)
                         .value("parent_message_id", &input.user_message_id)
-                        .value("sequence", next_sequence + 1)
+                        .value("sequence", assistant_sequence)
                         .value("role", "assistant")
                         .value("content", "")
                         .value("status", "streaming")
@@ -480,6 +570,20 @@ fn message_from_row(row: SqlRow) -> Result<AssistantMessage, RepositoryError> {
 
 fn transaction_message(row: SqlRow) -> Result<AssistantMessage, SqliteClientError> {
     message_from_row(row).map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))
+}
+
+fn normalize_legacy_user_parents(messages: &mut [AssistantMessage]) {
+    let mut previous_assistant_id = None;
+    for message in messages {
+        if message.role == "user"
+            && message.parent_message_id.as_deref() == Some(message.message_id.as_str())
+        {
+            message.parent_message_id = previous_assistant_id.clone();
+        }
+        if message.role == "assistant" {
+            previous_assistant_id = Some(message.message_id.clone());
+        }
+    }
 }
 
 fn text(row: &SqlRow, column: &str) -> Result<String, RepositoryError> {

@@ -1,20 +1,20 @@
-import type {
-  ChatModelAdapter,
-  ChatModelRunOptions,
-  ChatModelRunResult,
-  ThreadAssistantMessage,
-  ThreadMessage,
-  ThreadUserMessage,
-} from "@assistant-ui/react";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  AssistantMessage,
+  Message,
+  ModelAdapter,
+  ModelRunOptions,
+  ModelRunResult,
+  UserMessage,
+} from "@/components/chat/chatModel";
 import type {
   QueryModelInput,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
 } from "@/contracts/quarryApi";
-import { createQueryModelAdapter } from "@/components/chat/queryModelAdapter";
+import { createModelAdapter } from "@/components/chat/threadModelAdapter";
 
-describe("createQueryModelAdapter", () => {
+describe("createModelAdapter", () => {
   it("converts ordered deltas to cumulative snapshots and makes completion authoritative", async () => {
     let handlers: SendQueryEventHandlers | undefined;
     const cleanup = vi.fn();
@@ -22,7 +22,7 @@ describe("createQueryModelAdapter", () => {
       handlers = nextHandlers;
       return cleanup;
     });
-    const iterator = stream(createQueryModelAdapter({ queryModel }), runOptions([user("Draft a brief")]));
+    const iterator = stream(createModelAdapter({ queryModel }), runOptions([user("Draft a brief")]));
 
     const first = iterator.next();
     handlers?.onEvent({ model: "server-default", type: "started" });
@@ -52,7 +52,7 @@ describe("createQueryModelAdapter", () => {
     });
 
     const output = await collect(
-      createQueryModelAdapter({ queryModel }),
+      createModelAdapter({ queryModel }),
       runOptions([user("Answer now")]),
     );
 
@@ -61,13 +61,13 @@ describe("createQueryModelAdapter", () => {
   });
 
   it("maps server and connection failures to distinct sanitized errors", async () => {
-    const serverAdapter = createQueryModelAdapter({
+    const serverAdapter = createModelAdapter({
       queryModel: (_input, handlers) => {
         handlers.onEvent({ error: "provider body that must not leak", type: "failed" });
         return () => undefined;
       },
     });
-    const connectionAdapter = createQueryModelAdapter({
+    const connectionAdapter = createModelAdapter({
       queryModel: (_input, handlers) => {
         handlers.onConnectionError?.("raw transport detail");
         return () => undefined;
@@ -80,7 +80,7 @@ describe("createQueryModelAdapter", () => {
     await expect(collect(connectionAdapter, runOptions([user("Question")]))).rejects.toThrow(
       "The assistant connection was interrupted. Please try again.",
     );
-    await expect(collect(createQueryModelAdapter({
+    await expect(collect(createModelAdapter({
       queryModel: () => {
         throw new Error("raw synchronous transport detail");
       },
@@ -93,7 +93,7 @@ describe("createQueryModelAdapter", () => {
     let handlers: SendQueryEventHandlers | undefined;
     const cleanup = vi.fn();
     const controller = new AbortController();
-    const adapter = createQueryModelAdapter({
+    const adapter = createModelAdapter({
       queryModel: (_input, nextHandlers) => {
         handlers = nextHandlers;
         return cleanup;
@@ -121,7 +121,7 @@ describe("createQueryModelAdapter", () => {
       handlers.onEvent({ response: "Next", type: "completed" });
       return () => undefined;
     });
-    const messages: ThreadMessage[] = [
+    const messages: Message[] = [
       user("First", "u1"),
       assistant("First answer", { type: "complete", reason: "stop" }, "a1"),
       user("Failed question", "u2"),
@@ -129,7 +129,7 @@ describe("createQueryModelAdapter", () => {
       user("Current prompt", "u3"),
     ];
 
-    await collect(createQueryModelAdapter({ queryModel }), runOptions(messages));
+    await collect(createModelAdapter({ queryModel }), runOptions(messages));
 
     expect(captured).toEqual({
       context: [
@@ -151,20 +151,20 @@ describe("createQueryModelAdapter", () => {
       },
     );
     const queryModel = vi.fn();
-    const messages: ThreadMessage[] = [
+    const messages: Message[] = [
       user("Earlier", "u1"),
       assistant("Earlier answer", { type: "complete", reason: "stop" }, "a1"),
       user("Current", "u2"),
     ];
 
     await collect(
-      createQueryModelAdapter(
+      createModelAdapter(
         { queryModel, runAssistantThread },
         { userEmail: "analyst@example.com" },
       ),
       runOptions(messages, undefined, {
         assistantMessageId: "a2",
-        parentId: "a1",
+        parentId: "u2",
         threadId: "thread-1",
       }),
     );
@@ -182,10 +182,37 @@ describe("createQueryModelAdapter", () => {
     }, expect.any(Object));
   });
 
+  it("stores a first user message at the root instead of parenting it to itself", async () => {
+    const runAssistantThread = vi.fn(
+      (_input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
+        handlers.onEvent({ response: "Persisted", type: "completed" });
+        return () => undefined;
+      },
+    );
+    const messages: Message[] = [user("First question", "u1")];
+
+    await collect(
+      createModelAdapter(
+        { queryModel: vi.fn(), runAssistantThread },
+        { userEmail: "analyst@example.com" },
+      ),
+      runOptions(messages, undefined, {
+        assistantMessageId: "a1",
+        parentId: "u1",
+        threadId: "thread-1",
+      }),
+    );
+
+    expect(runAssistantThread).toHaveBeenCalledWith(
+      expect.objectContaining({ parentMessageId: undefined, userMessageId: "u1" }),
+      expect.any(Object),
+    );
+  });
+
   it("keeps the newest 32 whole pairs and reports omitted older context", async () => {
     let captured: QueryModelInput | undefined;
     const onContextTruncated = vi.fn();
-    const history: ThreadMessage[] = [];
+    const history: Message[] = [];
     for (let index = 0; index < 33; index += 1) {
       history.push(user(`Question ${index}`, `u${index}`));
       history.push(
@@ -195,7 +222,7 @@ describe("createQueryModelAdapter", () => {
     history.push(user("Current", "current"));
 
     await collect(
-      createQueryModelAdapter({
+      createModelAdapter({
         queryModel: (input, handlers) => {
           captured = input;
           handlers.onEvent({ response: "Done", type: "completed" });
@@ -216,7 +243,7 @@ describe("createQueryModelAdapter", () => {
 
   it("rejects blank and non-text current messages before starting transport", async () => {
     const queryModel = vi.fn();
-    const adapter = createQueryModelAdapter({ queryModel });
+    const adapter = createModelAdapter({ queryModel });
 
     await expect(collect(adapter, runOptions([user("   ")]))).rejects.toThrow(
       "Messages must contain non-empty text only.",
@@ -232,62 +259,48 @@ describe("createQueryModelAdapter", () => {
 });
 
 function runOptions(
-  messages: readonly ThreadMessage[],
+  messages: readonly Message[],
   abortSignal = new AbortController().signal,
   ids?: { assistantMessageId: string; parentId: string | null; threadId: string },
-): ChatModelRunOptions {
+): ModelRunOptions {
   return {
     abortSignal,
-    context: {},
+    assistantMessageId: ids?.assistantMessageId,
     messages,
-    runConfig: {},
-    unstable_assistantMessageId: ids?.assistantMessageId,
-    unstable_getMessage: () => messages[messages.length - 1] ?? user("fallback"),
-    unstable_parentId: ids?.parentId,
-    unstable_threadId: ids?.threadId,
+    threadId: ids?.threadId,
   };
 }
 
-function user(text: string, id = "user"): ThreadUserMessage {
+function user(text: string, id = "user"): UserMessage {
   return {
     attachments: [],
     content: [{ text, type: "text" }],
-    createdAt: new Date(0),
     id,
-    metadata: { custom: {} },
     role: "user",
   };
 }
 
 function assistant(
   text: string,
-  status: ThreadAssistantMessage["status"],
+  status: AssistantMessage["status"],
   id = "assistant",
-): ThreadAssistantMessage {
+): AssistantMessage {
   return {
     content: [{ text, type: "text" }],
-    createdAt: new Date(0),
     id,
-    metadata: {
-      custom: {},
-      steps: [],
-      unstable_annotations: [],
-      unstable_data: [],
-      unstable_state: null,
-    },
     role: "assistant",
     status,
   };
 }
 
-function stream(adapter: ChatModelAdapter, options: ChatModelRunOptions) {
+function stream(adapter: ModelAdapter, options: ModelRunOptions) {
   const result = adapter.run(options);
   if (!(Symbol.asyncIterator in result)) throw new Error("Expected a streaming adapter.");
   return result;
 }
 
-async function collect(adapter: ChatModelAdapter, options: ChatModelRunOptions) {
-  const output: ChatModelRunResult["content"][] = [];
+async function collect(adapter: ModelAdapter, options: ModelRunOptions) {
+  const output: ModelRunResult["content"][] = [];
   for await (const result of stream(adapter, options)) output.push(result.content);
   return output;
 }

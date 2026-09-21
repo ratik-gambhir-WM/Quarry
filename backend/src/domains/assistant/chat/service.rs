@@ -291,6 +291,11 @@ impl AssistantChatService {
                 }
                 other => other.into(),
             })?;
+        if matches!(&start, StartRunResult::Conflict) {
+            return Err(ServiceError::Conflict(
+                "assistant run message ids conflict with existing messages".to_string(),
+            ));
+        }
         let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         event_tx
             .try_send(SendQueryEvent::Started {

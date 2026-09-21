@@ -234,7 +234,8 @@ The live frontend is an npm package using:
 - Vite 7 and TypeScript 6.0 with strict/no-unused/no-emit checks
 - React Router DOM 7
 - Tailwind CSS 4's CSS-first Vite integration
-- Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and assistant-ui LocalRuntime/primitives
+- Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and the custom Assistant `AgentRuntime`
+  and thread primitives
 - react-pdf/pdf.js for document preview
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
@@ -388,14 +389,14 @@ global state or query-cache library.
   controls use a consistent 12-pixel text size. Selecting a file from the grid enters the existing
   preview state and swaps the Deal Room sidebar for the file explorer without nesting another main
   container; an empty Data Room continues to use the upload-first state.
-- The Assistant page uses assistant-ui's remote thread-list runtime around one local thread
-  runtime per selected conversation. Axum/SQLite own thread metadata and normalized messages;
-  the runtime owns the composer, active streaming state, retry actions, and pinned scroll. The
-  provider wraps both the route-specific sidebar and conversation, so New chat and persisted
-  previous-chat selection share one runtime owner. The provider is keyed by the workspace email
-  to prevent one development profile's client cache from surviving an identity change.
-  A narrow `ChatModelAdapter` converts the callback-based stream into cumulative assistant-ui text
-  snapshots, treats completion as authoritative, and cancels the matching transport exactly once.
+- The Assistant page uses the custom `AgentRuntime` for its selected conversation and remote
+  thread list. Axum/SQLite own thread metadata and normalized messages; the runtime owns the
+  composer, active streaming state, retry actions, and pinned scroll. The provider wraps both the
+  route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
+  one runtime owner. The provider is keyed by the workspace email to prevent one development
+  profile's client cache from surviving an identity change. A narrow `ModelAdapter` converts
+  the callback-based stream into cumulative custom thread-message snapshots, treats completion as
+  authoritative, and cancels the matching transport exactly once.
   Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
   Axum loads bounded canonical completed pairs from SQLite. The legacy `/query_model` adapter path
   still sends bounded client context for compatibility.
@@ -474,15 +475,16 @@ Any canary API use must retain feature/fallback behavior, keyboard/focus semanti
 
 The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its current `Summarize` title, but
 uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains the
-persisted previous-chat list plus a New chat action backed by the remote thread runtime. Deal
+persisted previous-chat list plus a New chat action backed by the remote thread runtime; selecting
+a previous chat shows a message-history skeleton until its stored messages load. Deal
 Hub swaps the same sidebar body to the normal home navigation without changing the Assistant URL
 or conversation. `WorkspaceLayout` has a default-preserving fill mode for this route:
-workspace Demo/error notices remain shrinking-safe siblings above one assistant-ui Thread
+workspace Demo/error notices remain shrinking-safe siblings above one custom thread
 viewport, and only that viewport scrolls. One mounted composer moves from the centered empty view
-to the measured sticky `ThreadPrimitive.ViewportFooter`; Motion interpolates the layout change and
-switches immediately under reduced motion. Adapted assistant-ui registry Thread, Composer,
-Markdown, and typing-indicator sources use Quarry's existing primitives and semantic tokens and
-omit unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
+to the measured sticky custom thread footer; Motion interpolates the layout change and
+switches immediately under reduced motion. Custom Thread, Composer, Markdown, and
+typing-indicator components use Quarry's existing primitives and semantic tokens and omit
+unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
 controls.
 
 ## 6. Web and desktop transports
@@ -667,10 +669,14 @@ unarchive/delete operations resolve the caller-supplied workspace email to `user
 that owner in SQLite. This is useful development isolation, not authentication. A thread-scoped
 `POST /assistant/threads/{thread_id}/runs` accepts stable user/assistant message IDs, uses the
 assistant message ID as its idempotency key, atomically inserts the prompt and pending assistant
-row, loads bounded completed history server-side, and persists `completed`, `failed`, or
-`cancelled` terminal content. Observed failures and disconnects retain buffered partial text;
-process termination can still leave a `streaming` row because schema v8 has no checkpoint/recovery
-worker. The legacy route remains mounted under both API prefixes for compatibility.
+row with the preceding assistant as the user's parent, reuses the existing user row when retrying
+that prompt with a new assistant response branch, loads bounded completed history before the
+retried prompt, and persists `completed`, `failed`, or `cancelled` terminal content. Thread reads
+normalize the earlier client bug that stored a user message as its own parent, allowing those
+transcripts to load without rewriting local data. Conflicting message-ID reuse is rejected before
+insertion. Observed failures and disconnects retain buffered partial text; process termination can
+still leave a `streaming` row because schema v8 has no checkpoint/recovery worker. The legacy route
+remains mounted under both API prefixes for compatibility.
 
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
@@ -1034,8 +1040,8 @@ an expanded viewer contract.
 ### 10.5 Assistant chat
 
 ```text
-Assistant UI remote thread list + per-thread LocalRuntime + current prompt and stable IDs
-  -> ChatModelAdapter emits cumulative assistant-ui snapshots
+Custom AgentRuntime remote thread list + current prompt and stable IDs
+  -> ModelAdapter emits cumulative thread-message snapshots
   -> web fetch parser or allowlisted Tauri thread-run relay
   -> assistant::chat resolves the development user and atomically inserts the pending turn
   -> SQLite supplies bounded completed prior pairs
@@ -1247,8 +1253,9 @@ Coverage currently includes:
   migration/provider lifetime, legacy Summarize workflow coverage, and manifest-driven
   bundle-budget validation
 - Assistant stream-adapter ordering, authoritative completion, sanitized failures, synchronous
-  terminal cleanup, cancellation, completed-pair context bounds, composer/suggestion behavior,
-  incremental Markdown, retry/stop states, reduced motion, and fill-layout notice composition
+  terminal cleanup, cancellation, completed-pair context bounds, previous-chat history loading
+  skeletons, composer/suggestion behavior, incremental Markdown, retry/stop states, reduced motion,
+  and fill-layout notice composition
 
 There is no browser end-to-end suite or visual regression suite.
 

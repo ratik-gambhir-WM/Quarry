@@ -1,5 +1,3 @@
-import type { SuggestionConfig } from "@assistant-ui/react";
-
 export const queryChatSuggestions = [
   {
     title: "Summarize deal risks",
@@ -21,4 +19,4 @@ export const queryChatSuggestions = [
     label: "with counterarguments",
     prompt: "Challenge the investment thesis and identify the strongest counterarguments.",
   },
-] satisfies SuggestionConfig[];
+] satisfies Array<{ label: string; prompt: string; title: string }>;
