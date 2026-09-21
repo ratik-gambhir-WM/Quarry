@@ -31,6 +31,24 @@ describe("SidebarFrame", () => {
     expect(markup.indexOf("Deal Hub")).toBeLessThan(markup.indexOf("Current navigation"));
   });
 
+  it("allows a route-specific header to replace the standard sidebar identity", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SidebarFrame
+          alignedHeader
+          headerContent={<nav>Deal Hub and Chat tabs</nav>}
+          showHeaderBackButton={false}
+        >
+          <nav>Current navigation</nav>
+        </SidebarFrame>
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Deal Hub and Chat tabs");
+    expect(markup).not.toContain(">Workspace<");
+    expect(markup.indexOf("Deal Hub and Chat tabs")).toBeLessThan(markup.indexOf("Current navigation"));
+  });
+
   it("centers the collapsed header and navigation controls on one rail", async () => {
     const user = userEvent.setup();
 

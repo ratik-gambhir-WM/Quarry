@@ -18,6 +18,22 @@ export function HomeWorkspaceSidebar({
       sidebarLabel="Deal Hub"
       showHeaderBackButton={false}
     >
+      <HomeWorkspaceSidebarNavigation
+        activeHomeSection={activeHomeSection}
+        navigationState={navigationState}
+        tools={tools}
+      />
+    </SidebarFrame>
+  );
+}
+
+export function HomeWorkspaceSidebarNavigation({
+  activeHomeSection,
+  navigationState,
+  tools,
+}: Pick<HomeSidebarProps, "activeHomeSection" | "navigationState" | "tools">) {
+  return (
+    <>
       <nav className="space-y-1">
         <SidebarLink
           homeSection={activeHomeSection}
@@ -31,7 +47,7 @@ export function HomeWorkspaceSidebar({
       <SidebarSection title="Research">
         <SidebarLink
           homeSection={activeHomeSection}
-          href="/hub/summarize"
+          href="/hub/assistant"
           icon="twitch"
           label="Assistant"
           navigationState={navigationState}
@@ -65,6 +81,6 @@ export function HomeWorkspaceSidebar({
           ))}
         </nav>
       </div>
-    </SidebarFrame>
+    </>
   );
 }

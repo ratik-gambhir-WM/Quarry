@@ -11,6 +11,7 @@ type IconName =
   | "dashboard"
   | "dataset"
   | "doc"
+  | "editSquare"
   | "filter"
   | "folderOpen"
   | "graph"
@@ -28,6 +29,7 @@ type IconName =
   | "person"
   | "personSearch"
   | "plus"
+  | "plusCircle"
   | "refresh"
   | "search"
   | "send"
@@ -212,6 +214,20 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M12 5v14M5 12h14" />
+        </svg>
+      );
+    case "plusCircle":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <circle className={iconClassName} cx="12" cy="12" r="8.5" />
+          <path className={iconClassName} d="M12 8v8M8 12h8" />
+        </svg>
+      );
+    case "editSquare":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <path className={iconClassName} d="M12 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V12" />
+          <path className={iconClassName} d="m10 14 .5-3 7-7a1.8 1.8 0 0 1 2.5 2.5l-7 7zM16.5 5.5l2 2" />
         </svg>
       );
     case "refresh":

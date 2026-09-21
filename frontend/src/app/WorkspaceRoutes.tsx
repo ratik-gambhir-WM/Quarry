@@ -8,7 +8,7 @@ const HubPage = lazy(() => import("../pages/HubPage").then((module) => ({ defaul
 const AccountPage = lazy(() => import("../pages/AccountPage").then((module) => ({ default: module.AccountPage })));
 const GlobalVaultPage = lazy(() => import("../pages/GlobalVaultPage").then((module) => ({ default: module.GlobalVaultPage })));
 const VaultPage = lazy(() => import("../pages/VaultPage").then((module) => ({ default: module.VaultPage })));
-const SummarizePage = lazy(() => import("../pages/SummarizePage").then((module) => ({ default: module.SummarizePage })));
+const Assistant = lazy(() => import("../pages/Assistant").then((module) => ({ default: module.Assistant })));
 const LogsPage = lazy(() => import("../pages/LogsPage").then((module) => ({ default: module.LogsPage })));
 const Deals = lazy(() => import("../pages/Deals").then((module) => ({ default: module.Deals })));
 const DealRoomPage = lazy(() => import("../pages/DealRoomPage").then((module) => ({ default: module.DealRoomPage })));
@@ -36,7 +36,7 @@ export function WorkspaceRoutes() {
         <Route element={page("Loading Account", <AccountPage />)} path="account" />
         <Route element={page("Loading Global Vault", <GlobalVaultPage />)} path="vault" />
         <Route element={page("Loading Vault", <VaultPage />)} path="initiatives/vault" />
-        <Route element={page("Loading Assistant", <SummarizePage />)} path="summarize" />
+        <Route element={page("Loading Assistant", <Assistant />)} path="assistant" />
         <Route element={page("Loading logs", <LogsPage />)} path="logs" />
         <Route element={page("Loading deals", <Deals />)} path="deals" />
         <Route element={page("Loading deal", <DealRoomPage />)} path="deals/:dealId">
