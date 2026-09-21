@@ -1,5 +1,8 @@
 import type {
   AddUserInput,
+  AssistantThread,
+  AssistantThreadDetail,
+  AssistantThreadPage,
   DealDocumentPdf,
   DealDocumentSummary,
   DealDocumentText,
@@ -14,6 +17,7 @@ import type {
   PowerPointExport,
   QueryModelInput,
   QuarryApi,
+  RunAssistantThreadInput,
   SendQueryEventHandlers,
   SummarizableFile,
   PptxTemplateImportMode,
@@ -586,22 +590,64 @@ function previewDealDocument(dealId: string, relativePath: string) {
   );
 }
 
-function queryModel(
-  input: QueryModelInput,
+function queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
+  const form = new FormData();
+  form.append("prompt", input.prompt);
+  form.append("context", JSON.stringify(input.context));
+  if (input.model !== undefined) form.append("model", input.model);
+  if (input.systemInstructions !== undefined) {
+    form.append("systemInstructions", input.systemInstructions);
+  }
+  for (const file of input.files) form.append("files", file, file.name);
+  return streamQuery("/api/v1/query_model", form, {
+    contextMessageCount: input.context.length,
+    fileCount: input.files.length,
+    fileBytes: input.files.reduce((total, file) => total + file.size, 0),
+    model: input.model,
+  }, handlers);
+}
+
+function runAssistantThread(
+  input: RunAssistantThreadInput,
+  handlers: SendQueryEventHandlers,
+) {
+  const form = new FormData();
+  form.append("prompt", input.prompt);
+  form.append("userEmail", input.userEmail);
+  form.append("userMessageId", input.userMessageId);
+  form.append("assistantMessageId", input.assistantMessageId);
+  form.append("requestId", input.requestId);
+  if (input.parentMessageId !== undefined) form.append("parentMessageId", input.parentMessageId);
+  if (input.model !== undefined) form.append("model", input.model);
+  if (input.systemInstructions !== undefined) {
+    form.append("systemInstructions", input.systemInstructions);
+  }
+  for (const file of input.files) form.append("files", file, file.name);
+  return streamQuery(
+    `/api/v1/assistant/threads/${encodeURIComponent(input.threadId)}/runs`,
+    form,
+    {
+      fileCount: input.files.length,
+      fileBytes: input.files.reduce((total, file) => total + file.size, 0),
+      model: input.model,
+      threadId: input.threadId,
+    },
+    handlers,
+  );
+}
+
+function streamQuery(
+  path: string,
+  form: FormData,
+  requestDetails: Record<string, unknown>,
   { onConnectionError, onEvent }: SendQueryEventHandlers,
 ) {
-  const path = "/api/v1/query_model";
   const url = apiUrl(path);
   const controller = new AbortController();
   const startedAt = performance.now();
   const requestId = beginApiRequest({
     method: "POST",
-    request: {
-      contextMessageCount: input.context.length,
-      fileCount: input.files.length,
-      fileBytes: input.files.reduce((total, file) => total + file.size, 0),
-      model: input.model,
-    },
+    request: requestDetails,
     url,
   });
   let active = true;
@@ -629,15 +675,6 @@ function queryModel(
 
   void (async () => {
     try {
-      const form = new FormData();
-      form.append("prompt", input.prompt);
-      form.append("context", JSON.stringify(input.context));
-      if (input.model !== undefined) form.append("model", input.model);
-      if (input.systemInstructions !== undefined) {
-        form.append("systemInstructions", input.systemInstructions);
-      }
-      for (const file of input.files) form.append("files", file, file.name);
-
       const response = await fetch(url, {
         body: form,
         headers: { Accept: "text/event-stream" },
@@ -704,6 +741,54 @@ function queryModel(
   };
 }
 
+function assistantThreadPath(threadId: string, suffix = "") {
+  return `/api/v1/assistant/threads/${encodeURIComponent(threadId)}${suffix}`;
+}
+
+function listAssistantThreads(
+  userEmail: string,
+  options: { after?: string; archived?: boolean } = {},
+) {
+  const parameters = new URLSearchParams({ userEmail });
+  if (options.after) parameters.set("before", options.after);
+  if (options.archived) parameters.set("archived", "true");
+  return get<AssistantThreadPage>(`/api/v1/assistant/threads?${parameters.toString()}`);
+}
+
+function createAssistantThread(userEmail: string, threadId?: string) {
+  return post<AssistantThread, { threadId?: string; userEmail: string }>(
+    "/api/v1/assistant/threads",
+    { userEmail, ...(threadId ? { threadId } : {}) },
+  );
+}
+
+function getAssistantThread(threadId: string, userEmail: string) {
+  return get<AssistantThreadDetail>(
+    `${assistantThreadPath(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+  );
+}
+
+function renameAssistantThread(threadId: string, userEmail: string, title: string) {
+  return post<void, { title: string; userEmail: string }>(
+    assistantThreadPath(threadId, "/rename"),
+    { title, userEmail },
+  );
+}
+
+function setAssistantThreadArchived(threadId: string, userEmail: string, archived: boolean) {
+  return post<void, { userEmail: string }>(
+    assistantThreadPath(threadId, archived ? "/archive" : "/unarchive"),
+    { userEmail },
+  );
+}
+
+function deleteAssistantThread(threadId: string, userEmail: string) {
+  return requestJson<void>(
+    `${assistantThreadPath(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+    { method: "DELETE" },
+  );
+}
+
 function appendFiles(form: FormData, files: File[]) {
   for (const file of files) {
     const relativeFile = file as File & { webkitRelativePath?: string };
@@ -712,18 +797,24 @@ function appendFiles(form: FormData, files: File[]) {
 }
 
 export const httpQuarryApi: QuarryApi = {
+  archiveAssistantThread: (threadId, userEmail) =>
+    setAssistantThreadArchived(threadId, userEmail, true),
   archiveDeal,
+  createAssistantThread,
   createDeal,
   createUser,
+  deleteAssistantThread,
   deleteTemplate,
   exportPowerPoint,
   getDeal,
+  getAssistantThread,
   getDealDocumentPdf,
   getDealDocumentText,
   getTemplate,
   getUserByEmail,
   importPptxTemplate,
   listDealDataRoom,
+  listAssistantThreads,
   listDealDocuments,
   listDeals,
   listTemplatePreviews,
@@ -731,6 +822,8 @@ export const httpQuarryApi: QuarryApi = {
   previewDealDocument,
   processDocuments,
   queryModel,
+  renameAssistantThread,
+  runAssistantThread,
   saveDealMetadata,
   searchDocumentChunksByKeyword,
   searchDocumentChunksByVector,
@@ -739,5 +832,7 @@ export const httpQuarryApi: QuarryApi = {
   summarizePath,
   summarizeSelected,
   summarizeUpload,
+  unarchiveAssistantThread: (threadId, userEmail) =>
+    setAssistantThreadArchived(threadId, userEmail, false),
   userExistsByEmail,
 };

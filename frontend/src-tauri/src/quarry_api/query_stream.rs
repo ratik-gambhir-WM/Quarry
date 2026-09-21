@@ -31,13 +31,15 @@ impl QuarryApiService {
         mut emit: impl FnMut(QueryEventPayload) -> Result<(), String>,
     ) -> Result<(), String> {
         validate_subscription_id(subscription_id)?;
+        validate_query_path(&request.path)?;
+        let path = request.path.clone();
         let form = tokio::select! {
             _ = &mut cancelled => return Ok(()),
             result = build_query_form(request) => result?,
         };
         let response = tokio::select! {
             _ = &mut cancelled => return Ok(()),
-            result = self.client.post_query_stream(form) => result?,
+            result = self.client.post_query_stream(&path, form) => result?,
         };
         let mut stream = response.bytes_stream();
         let mut parser = QueryRelayParser::default();
@@ -75,7 +77,24 @@ async fn build_query_form(request: QueryStreamRequest) -> Result<Form, String> {
 
 fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     validate_text("prompt", &request.prompt, MAX_MESSAGE_CHARS)?;
-    validate_context(&request.context)?;
+    let persistent = request.path.starts_with("/api/v1/assistant/threads/");
+    if persistent {
+        if !request.context.is_empty() {
+            return Err("persisted assistant requests cannot include context".to_string());
+        }
+        validate_identifier_field("userEmail", request.user_email.as_deref())?;
+        validate_identifier_field("userMessageId", request.user_message_id.as_deref())?;
+        validate_identifier_field(
+            "assistantMessageId",
+            request.assistant_message_id.as_deref(),
+        )?;
+        validate_identifier_field("requestId", request.request_id.as_deref())?;
+        if let Some(parent) = request.parent_message_id.as_deref() {
+            validate_identifier("parentMessageId", parent)?;
+        }
+    } else {
+        validate_context(&request.context)?;
+    }
     if let Some(model) = request.model.as_deref() {
         let trimmed = model.trim();
         if trimmed.is_empty()
@@ -91,11 +110,24 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     if request.files.len() > MAX_FILES {
         return Err("at most 20 files are allowed".to_string());
     }
-    let context =
-        serde_json::to_string(&request.context).map_err(|_| "context is invalid".to_string())?;
-    let mut form = Form::new()
-        .text("prompt", request.prompt)
-        .text("context", context);
+    let mut form = Form::new().text("prompt", request.prompt);
+    if persistent {
+        form = form
+            .text("userEmail", request.user_email.unwrap_or_default())
+            .text("userMessageId", request.user_message_id.unwrap_or_default())
+            .text(
+                "assistantMessageId",
+                request.assistant_message_id.unwrap_or_default(),
+            )
+            .text("requestId", request.request_id.unwrap_or_default());
+        if let Some(parent) = request.parent_message_id {
+            form = form.text("parentMessageId", parent);
+        }
+    } else {
+        let context = serde_json::to_string(&request.context)
+            .map_err(|_| "context is invalid".to_string())?;
+        form = form.text("context", context);
+    }
     if let Some(model) = request.model {
         form = form.text("model", model);
     }
@@ -184,6 +216,46 @@ fn validate_subscription_id(value: &str) -> Result<(), String> {
     }
 }
 
+fn validate_query_path(path: &str) -> Result<(), String> {
+    if path == "/api/v1/query_model" {
+        return Ok(());
+    }
+    let segments = path.split('/').collect::<Vec<_>>();
+    if segments.len() == 7
+        && segments[1..4] == ["api", "v1", "assistant"]
+        && segments[4] == "threads"
+        && validate_identifier("threadId", segments[5]).is_ok()
+        && segments[6] == "runs"
+    {
+        return Ok(());
+    }
+    Err("query stream path is not allowed".to_string())
+}
+
+fn validate_identifier_field(name: &str, value: Option<&str>) -> Result<(), String> {
+    let value = value.ok_or_else(|| format!("{name} is required"))?;
+    if name == "userEmail" {
+        if value.trim().is_empty() || value.chars().count() > 320 {
+            return Err("userEmail is invalid".to_string());
+        }
+        return Ok(());
+    }
+    validate_identifier(name, value)
+}
+
+fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        Err(format!("{name} is invalid"))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct QueryRelayParser {
     buffer: Vec<u8>,
@@ -248,7 +320,7 @@ impl QueryRelayParser {
         let event: QueryServerEvent = serde_json::from_str(&data.join("\n"))
             .map_err(|_| "Quarry query stream returned an invalid event".to_string())?;
         match &event {
-            QueryServerEvent::Started { model } if model.is_empty() => {
+            QueryServerEvent::Started { model, .. } if model.is_empty() => {
                 return Err("Quarry query stream returned an invalid started event".to_string());
             }
             QueryServerEvent::Completed { response } if response.trim().is_empty() => {

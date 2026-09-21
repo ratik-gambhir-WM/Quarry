@@ -6,7 +6,7 @@ export function QueryChat() {
   const [contextTruncated, setContextTruncated] = useState(false);
 
   return (
-    <QueryChatRuntimeProvider onContextTruncated={setContextTruncated}>
+    <QueryChatRuntimeProvider onContextTruncated={setContextTruncated} userEmail="">
       <QueryChatThread contextTruncated={contextTruncated} />
     </QueryChatRuntimeProvider>
   );

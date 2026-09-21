@@ -10,7 +10,15 @@ import { AssistantWorkspaceSidebar } from "@/components/hub/sidebar/AssistantWor
 const { startNewChat } = vi.hoisted(() => ({ startNewChat: vi.fn() }));
 
 vi.mock("@assistant-ui/react", () => ({
+  ThreadListItemPrimitive: {
+    Root: ({ children }: { children: ReactNode }) => children,
+    Title: () => <span>Previous chat</span>,
+    Trigger: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) => (
+      <button {...props}>{children}</button>
+    ),
+  },
   ThreadListPrimitive: {
+    Items: () => null,
     New: ({ children, onClick, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) => (
       <button
         {...props}

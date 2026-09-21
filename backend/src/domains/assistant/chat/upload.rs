@@ -9,7 +9,8 @@ use crate::{
 };
 
 use super::model::{
-    parse_context, validate_model, validate_prompt, validate_system_instructions, QueryModelInput,
+    parse_context, validate_model, validate_prompt, validate_system_instructions,
+    PersistentQueryInput, QueryModelInput,
 };
 
 const MAX_FILES: usize = 20;
@@ -39,10 +40,72 @@ struct RawUpload {
 }
 
 pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryModelInput> {
+    let fields = collect_fields(&mut multipart, false).await?;
+    Ok(QueryModelInput {
+        context: parse_context(&required(fields.context, "context")?)?,
+        files: fields.files,
+        model: validate_model(fields.model)?,
+        prompt: validate_prompt(required(fields.prompt, "prompt")?)?,
+        system_instructions: validate_system_instructions(fields.system_instructions)?,
+    })
+}
+
+pub async fn collect_persistent_query_upload(
+    mut multipart: Multipart,
+    thread_id: String,
+) -> AppResult<PersistentQueryInput> {
+    let fields = collect_fields(&mut multipart, true).await?;
+    validate_identifier("threadId", &thread_id)?;
+    let user_email = required(fields.user_email, "userEmail")?;
+    if user_email.trim().is_empty() || user_email.chars().count() > 320 {
+        return Err(AppError::bad_request("userEmail is invalid"));
+    }
+    let user_message_id = required(fields.user_message_id, "userMessageId")?;
+    let assistant_message_id = required(fields.assistant_message_id, "assistantMessageId")?;
+    let request_id = required(fields.request_id, "requestId")?;
+    validate_identifier("userMessageId", &user_message_id)?;
+    validate_identifier("assistantMessageId", &assistant_message_id)?;
+    validate_identifier("requestId", &request_id)?;
+    if let Some(parent) = fields.parent_message_id.as_deref() {
+        validate_identifier("parentMessageId", parent)?;
+    }
+    Ok(PersistentQueryInput {
+        assistant_message_id,
+        files: fields.files,
+        model: validate_model(fields.model)?,
+        parent_message_id: fields.parent_message_id,
+        prompt: validate_prompt(required(fields.prompt, "prompt")?)?,
+        request_id,
+        system_instructions: validate_system_instructions(fields.system_instructions)?,
+        thread_id,
+        user_email: user_email.trim().to_string(),
+        user_message_id,
+    })
+}
+
+struct CollectedFields {
+    assistant_message_id: Option<String>,
+    context: Option<String>,
+    files: Vec<ChatUpload>,
+    model: Option<String>,
+    parent_message_id: Option<String>,
+    prompt: Option<String>,
+    request_id: Option<String>,
+    system_instructions: Option<String>,
+    user_email: Option<String>,
+    user_message_id: Option<String>,
+}
+
+async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResult<CollectedFields> {
     let mut prompt = None;
     let mut context = None;
     let mut model = None;
     let mut system_instructions = None;
+    let mut user_email = None;
+    let mut user_message_id = None;
+    let mut assistant_message_id = None;
+    let mut parent_message_id = None;
+    let mut request_id = None;
     let mut raw_files = Vec::new();
     let mut total_bytes = 0usize;
 
@@ -64,6 +127,25 @@ pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryMo
                 field.text().await,
                 "systemInstructions",
             )?,
+            "userEmail" if persistent => {
+                set_once(&mut user_email, field.text().await, "userEmail")?
+            }
+            "userMessageId" if persistent => {
+                set_once(&mut user_message_id, field.text().await, "userMessageId")?
+            }
+            "assistantMessageId" if persistent => set_once(
+                &mut assistant_message_id,
+                field.text().await,
+                "assistantMessageId",
+            )?,
+            "parentMessageId" if persistent => set_once(
+                &mut parent_message_id,
+                field.text().await,
+                "parentMessageId",
+            )?,
+            "requestId" if persistent => {
+                set_once(&mut request_id, field.text().await, "requestId")?
+            }
             "files" => {
                 if raw_files.len() >= MAX_FILES {
                     return Err(AppError::bad_request("at most 20 files are allowed"));
@@ -100,10 +182,11 @@ pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryMo
         }
     }
 
-    let prompt = validate_prompt(required(prompt, "prompt")?)?;
-    let context = parse_context(&required(context, "context")?)?;
-    let model = validate_model(model)?;
-    let system_instructions = validate_system_instructions(system_instructions)?;
+    if persistent && context.is_some() {
+        return Err(AppError::bad_request(
+            "context is not accepted for persisted threads",
+        ));
+    }
     let files = tokio::task::spawn_blocking(move || {
         raw_files
             .into_iter()
@@ -113,13 +196,30 @@ pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryMo
     .await
     .map_err(|error| AppError::internal(format!("file validation worker failed: {error}")))??;
 
-    Ok(QueryModelInput {
+    Ok(CollectedFields {
+        assistant_message_id,
         context,
         files,
         model,
+        parent_message_id,
         prompt,
+        request_id,
         system_instructions,
+        user_email,
+        user_message_id,
     })
+}
+
+fn validate_identifier(name: &str, value: &str) -> AppResult<()> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err(AppError::bad_request(format!("{name} is invalid")));
+    }
+    Ok(())
 }
 
 fn set_once(

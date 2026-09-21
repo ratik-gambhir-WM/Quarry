@@ -7,7 +7,11 @@ import type {
   ThreadUserMessage,
 } from "@assistant-ui/react";
 import { describe, expect, it, vi } from "vitest";
-import type { QueryModelInput, SendQueryEventHandlers } from "@/contracts/quarryApi";
+import type {
+  QueryModelInput,
+  RunAssistantThreadInput,
+  SendQueryEventHandlers,
+} from "@/contracts/quarryApi";
 import { createQueryModelAdapter } from "@/components/chat/queryModelAdapter";
 
 describe("createQueryModelAdapter", () => {
@@ -139,6 +143,45 @@ describe("createQueryModelAdapter", () => {
     expect(captured).not.toHaveProperty("systemInstructions");
   });
 
+  it("uses the thread-scoped run contract without replaying client context", async () => {
+    const runAssistantThread = vi.fn(
+      (_input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
+        handlers.onEvent({ response: "Persisted", type: "completed" });
+        return () => undefined;
+      },
+    );
+    const queryModel = vi.fn();
+    const messages: ThreadMessage[] = [
+      user("Earlier", "u1"),
+      assistant("Earlier answer", { type: "complete", reason: "stop" }, "a1"),
+      user("Current", "u2"),
+    ];
+
+    await collect(
+      createQueryModelAdapter(
+        { queryModel, runAssistantThread },
+        { userEmail: "analyst@example.com" },
+      ),
+      runOptions(messages, undefined, {
+        assistantMessageId: "a2",
+        parentId: "a1",
+        threadId: "thread-1",
+      }),
+    );
+
+    expect(queryModel).not.toHaveBeenCalled();
+    expect(runAssistantThread).toHaveBeenCalledWith({
+      assistantMessageId: "a2",
+      files: [],
+      parentMessageId: "a1",
+      prompt: "Current",
+      requestId: "a2",
+      threadId: "thread-1",
+      userEmail: "analyst@example.com",
+      userMessageId: "u2",
+    }, expect.any(Object));
+  });
+
   it("keeps the newest 32 whole pairs and reports omitted older context", async () => {
     let captured: QueryModelInput | undefined;
     const onContextTruncated = vi.fn();
@@ -191,13 +234,17 @@ describe("createQueryModelAdapter", () => {
 function runOptions(
   messages: readonly ThreadMessage[],
   abortSignal = new AbortController().signal,
+  ids?: { assistantMessageId: string; parentId: string | null; threadId: string },
 ): ChatModelRunOptions {
   return {
     abortSignal,
     context: {},
     messages,
     runConfig: {},
+    unstable_assistantMessageId: ids?.assistantMessageId,
     unstable_getMessage: () => messages[messages.length - 1] ?? user("fallback"),
+    unstable_parentId: ids?.parentId,
+    unstable_threadId: ids?.threadId,
   };
 }
 

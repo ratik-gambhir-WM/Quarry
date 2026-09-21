@@ -1,4 +1,4 @@
-import { ThreadListPrimitive } from "@assistant-ui/react";
+import { ThreadListItemPrimitive, ThreadListPrimitive } from "@assistant-ui/react";
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { HomeSidebarProps } from "./sidebarTypes";
@@ -156,7 +156,23 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
           </>
         )}
       </ThreadListPrimitive.New>
-      <ul aria-label="Previous chats" className="space-y-1" />
+      {collapsed ? null : (
+        <ul aria-label="Previous chats" className="space-y-1">
+          <ThreadListPrimitive.Items components={{ ThreadListItem: AssistantThreadListItem }} />
+        </ul>
+      )}
     </div>
+  );
+}
+
+function AssistantThreadListItem() {
+  return (
+    <ThreadListItemPrimitive.Root asChild>
+      <li>
+        <ThreadListItemPrimitive.Trigger className="w-full truncate rounded-xl px-3 py-2 text-left text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed data-[active=true]:bg-sidebar-selected data-[active=true]:text-sidebar-active">
+          <ThreadListItemPrimitive.Title fallback="New chat" />
+        </ThreadListItemPrimitive.Trigger>
+      </li>
+    </ThreadListItemPrimitive.Root>
   );
 }

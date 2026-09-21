@@ -2,7 +2,11 @@ import type {
   ChatModelAdapter,
   ThreadMessage,
 } from "@assistant-ui/react";
-import type { ChatContextMessage, QuarryApi } from "../../contracts/quarryApi";
+import type {
+  ChatContextMessage,
+  QuarryApi,
+  SendQueryEventHandlers,
+} from "../../contracts/quarryApi";
 
 const MAX_CONTEXT_MESSAGES = 64;
 const MAX_CONTEXT_CHARS = 400_000;
@@ -13,6 +17,7 @@ const CONNECTION_ERROR_MESSAGE = "The assistant connection was interrupted. Plea
 
 type QueryModelAdapterOptions = {
   onContextTruncated?: (truncated: boolean) => void;
+  userEmail?: string;
 };
 
 type QueueItem =
@@ -23,7 +28,7 @@ type QueueItem =
 type CompletedPair = readonly [ChatContextMessage, ChatContextMessage];
 
 export function createQueryModelAdapter(
-  api: Pick<QuarryApi, "queryModel">,
+  api: Pick<QuarryApi, "queryModel"> & Partial<Pick<QuarryApi, "runAssistantThread">>,
   options: QueryModelAdapterOptions = {},
 ): ChatModelAdapter {
   return {
@@ -60,9 +65,14 @@ export function createQueryModelAdapter(
 
       try {
         try {
-          cleanup = api.queryModel(
-            { context, files: [], prompt },
-            {
+          const currentUser = findCurrentUserMessage(runOptions.messages);
+          const usePersistedRun = Boolean(
+            options.userEmail
+              && runOptions.unstable_threadId
+              && runOptions.unstable_assistantMessageId
+              && api.runAssistantThread,
+          );
+          const handlers: SendQueryEventHandlers = {
               onConnectionError: () => {
                 queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
                 dispose();
@@ -85,12 +95,23 @@ export function createQueryModelAdapter(
                     dispose();
                     return;
                   case "failed":
-                    queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
-                    dispose();
+                  queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
+                  dispose();
                 }
               },
-            },
-          );
+            };
+          cleanup = usePersistedRun
+            ? api.runAssistantThread!({
+                assistantMessageId: runOptions.unstable_assistantMessageId!,
+                files: [],
+                parentMessageId: runOptions.unstable_parentId ?? undefined,
+                prompt,
+                requestId: runOptions.unstable_assistantMessageId!,
+                threadId: runOptions.unstable_threadId!,
+                userEmail: options.userEmail!,
+                userMessageId: currentUser.id,
+              }, handlers)
+            : api.queryModel({ context, files: [], prompt }, handlers);
         } catch {
           queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
         }

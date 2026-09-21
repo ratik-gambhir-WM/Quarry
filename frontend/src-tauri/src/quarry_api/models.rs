@@ -58,20 +58,41 @@ pub enum ChatContextRole {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QueryStreamRequest {
+    pub assistant_message_id: Option<String>,
+    #[serde(default)]
     pub context: Vec<ChatContextMessage>,
     pub files: Vec<MultipartFile>,
     pub model: Option<String>,
+    pub parent_message_id: Option<String>,
+    pub path: String,
     pub prompt: String,
+    pub request_id: Option<String>,
     pub system_instructions: Option<String>,
+    pub user_email: Option<String>,
+    pub user_message_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum QueryServerEvent {
-    Started { model: String },
-    Delta { delta: String },
-    Completed { response: String },
-    Failed { error: String },
+    Started {
+        model: String,
+        #[serde(default)]
+        thread_id: Option<String>,
+        #[serde(default)]
+        user_message_id: Option<String>,
+        #[serde(default)]
+        assistant_message_id: Option<String>,
+    },
+    Delta {
+        delta: String,
+    },
+    Completed {
+        response: String,
+    },
+    Failed {
+        error: String,
+    },
 }
 
 impl QueryServerEvent {

@@ -46,12 +46,9 @@ fn parser_rejects_a_terminated_oversized_event() {
 }
 
 #[test]
-fn query_request_has_no_caller_controlled_path() {
-    let value = serde_json::json!({
-        "context": [],
-        "files": [],
-        "path": "https://example.com",
-        "prompt": "hello"
-    });
-    assert!(serde_json::from_value::<QueryStreamRequest>(value).is_err());
+fn query_request_path_is_restricted_to_the_two_assistant_contracts() {
+    assert!(validate_query_path("/api/v1/query_model").is_ok());
+    assert!(validate_query_path("/api/v1/assistant/threads/thread-1/runs").is_ok());
+    assert!(validate_query_path("https://example.com").is_err());
+    assert!(validate_query_path("/api/v1/assistant/threads/thread-1/runs/extra").is_err());
 }

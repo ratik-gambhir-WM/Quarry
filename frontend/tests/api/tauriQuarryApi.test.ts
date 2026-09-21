@@ -256,8 +256,48 @@ describe("createTauriQuarryApi", () => {
     expect(startQuery.mock.calls[0][0]).toMatchObject({
       context: [],
       files: [{ dataBase64: "AQID", filename: "image.png", mimeType: "image/png" }],
+      path: "/api/v1/query_model",
       prompt: "hello",
     });
+  });
+
+  it("maps persisted assistant identifiers to the thread-scoped desktop stream", async () => {
+    const startQuery = vi.fn(async (
+      _request: unknown,
+      onPayload: (payload: TauriQueryPayload) => void,
+    ) => {
+      onPayload({
+        event: { response: "done", type: "completed" },
+        kind: "serverEvent",
+        subscriptionId: "subscription",
+      });
+      return vi.fn();
+    });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
+      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+    });
+
+    api.runAssistantThread({
+      assistantMessageId: "assistant-1",
+      files: [],
+      prompt: "hello",
+      requestId: "assistant-1",
+      threadId: "thread-1",
+      userEmail: "analyst@example.com",
+      userMessageId: "user-1",
+    }, { onEvent: vi.fn() });
+
+    await vi.waitFor(() => expect(startQuery).toHaveBeenCalledOnce());
+    expect(startQuery.mock.calls[0][0]).toMatchObject({
+      assistantMessageId: "assistant-1",
+      files: [],
+      path: "/api/v1/assistant/threads/thread-1/runs",
+      requestId: "assistant-1",
+      userEmail: "analyst@example.com",
+      userMessageId: "user-1",
+    });
+    expect(startQuery.mock.calls[0][0]).not.toHaveProperty("context");
   });
 
   it("disposes a desktop query whose terminal callback fires before startup resolves", async () => {
