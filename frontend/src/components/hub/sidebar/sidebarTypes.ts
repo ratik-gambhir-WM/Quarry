@@ -9,7 +9,7 @@ export type ActiveDealSection =
   | "deal-room"
   | "deliverables";
 
-export type SidebarMode = "deal-room" | "home";
+export type SidebarMode = "assistant" | "deal-room" | "home";
 
 export type SidebarBaseProps = {
   deals: WorkspaceDeal[];

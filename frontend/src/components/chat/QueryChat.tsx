@@ -7,7 +7,11 @@ export function QueryChat() {
 
   return (
     <QueryChatRuntimeProvider onContextTruncated={setContextTruncated}>
-      <QueryThread contextTruncated={contextTruncated} />
+      <QueryChatThread contextTruncated={contextTruncated} />
     </QueryChatRuntimeProvider>
   );
+}
+
+export function QueryChatThread({ contextTruncated }: { contextTruncated: boolean }) {
+  return <QueryThread contextTruncated={contextTruncated} />;
 }

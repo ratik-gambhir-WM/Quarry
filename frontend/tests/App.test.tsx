@@ -69,7 +69,7 @@ describe("App routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "How can I help you today?" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Assistant", current: "page" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Chat", selected: true })).toBeTruthy();
     expect(listDeals).toHaveBeenCalledTimes(1);
     unmount();
 

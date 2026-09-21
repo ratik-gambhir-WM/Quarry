@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import { useWorkspace } from "../../app/WorkspaceProvider";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
-import type { ActiveHomeSection } from "./sidebar/sidebarTypes";
+import type { ActiveHomeSection, SidebarMode } from "./sidebar/sidebarTypes";
 
 type WorkspaceHomeShellProps = {
   activeHomeSection?: ActiveHomeSection;
   children: ReactNode;
   contentMode?: "fill" | "scroll";
   header: ReactNode;
+  sidebarMode?: Extract<SidebarMode, "assistant" | "home">;
 };
 
 export function useWorkspaceHomeDeals() {
@@ -20,6 +21,7 @@ export function WorkspaceHomeShell({
   children,
   contentMode = "scroll",
   header,
+  sidebarMode = "home",
 }: WorkspaceHomeShellProps) {
   const { deals, dealsResource, email, initiatives, navigationState, retryDeals, tools } = useWorkspace();
   const hasDealsNotice = dealsResource.status === "error"
@@ -35,6 +37,7 @@ export function WorkspaceHomeShell({
           deals={deals}
           email={email}
           initiatives={initiatives}
+          mode={sidebarMode}
           navigationState={navigationState}
           tools={tools}
         />

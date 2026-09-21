@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Canonical current-state architecture reference |
-| Last verified | 2026-09-10 |
+| Last verified | 2026-09-16 |
 | Repository snapshot | Live working tree after the backend domain modularization |
 | Audience | Quarry developers, reviewers, operators, and coding agents |
 | Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, persistence, integrations, and verification |
@@ -306,9 +306,13 @@ global state or query-cache library.
   profile theme picker.
 - `WorkspaceProvider` owns workspace session and deal-resource state for `/hub/*`.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
-- Workspace shells render their route-specific sidebar navigation directly. The Deal Hub and
-  Deal Room headers identify the active sidebar but do not offer fixture-backed alternate sidebar
-  spaces. The home sidebar labels `/hub/assistant` as Assistant and uses an animated Twitch glyph.
+- Workspace shells render their route-specific sidebar navigation directly. The Deal Room and
+  non-Assistant Deal Hub headers identify the active sidebar without fixture-backed alternate
+  spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
+  initially selects Chat. Deal Hub restores the normal home navigation in the same sidebar without
+  leaving the Assistant route or unmounting its conversation; Chat shows an empty previous-chat
+  list plus a New chat action. The normal home sidebar still labels `/hub/assistant` as Assistant
+  and uses an animated Twitch glyph.
   An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
@@ -386,6 +390,9 @@ global state or query-cache library.
   container; an empty Data Room continues to use the upload-first state.
 - The Assistant page uses assistant-ui's `LocalRuntime` as the sole owner of its ephemeral
   transcript, composer draft, running/cancel/error state, retry actions, and pinned thread scroll.
+  The provider wraps both the route-specific sidebar and conversation so the sidebar's New chat
+  action can switch to a fresh local thread without introducing a second state owner. Previous
+  chats are intentionally not listed or persisted.
   A narrow `ChatModelAdapter` converts the callback-based `QuarryApi.queryModel` stream into
   cumulative assistant-ui text snapshots, treats completion as authoritative, and cancels the
   matching transport exactly once. Each turn sends the current prompt plus a bounded immutable
@@ -415,7 +422,7 @@ operational failures.
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | Ephemeral multi-turn text chat with starter prompts, incremental Markdown, stop/retry/copy actions, bounded completed-pair context replay, and shared web/desktop streaming transport | No persistence/resume, multiple threads, attachments, voice, model picker, tools, retrieval, citations, identity, authorization, rate limits, moderation, or quotas; each included context turn is resent and rebilled |
+| Assistant | Ephemeral multi-turn text chat with starter prompts, incremental Markdown, stop/retry/copy actions, bounded completed-pair context replay, shared web/desktop streaming transport, and Assistant-only Deal Hub/Chat sidebar views whose New chat action starts a fresh local thread | No persistence/resume or visible previous-chat history, attachments, voice, model picker, tools, retrieval, citations, identity, authorization, rate limits, moderation, or quotas; each included context turn is resent and rebilled |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
@@ -465,8 +472,11 @@ The live working tree includes React canary View Transition wrappers and CSS tra
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
 `prefers-reduced-motion` behavior.
 
-The Assistant keeps the existing Deal Hub sidebar and 40-pixel `WorkspaceHeader` rail with its
-current `Summarize` title. `WorkspaceLayout` has a default-preserving fill mode for this route:
+The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its current `Summarize` title, but
+uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains an
+empty previous-chat list plus a New chat action backed by the same local assistant runtime. Deal
+Hub swaps the same sidebar body to the normal home navigation without changing the Assistant URL
+or conversation. `WorkspaceLayout` has a default-preserving fill mode for this route:
 workspace Demo/error notices remain shrinking-safe siblings above one assistant-ui Thread
 viewport, and only that viewport scrolls. One mounted composer moves from the centered empty view
 to the measured sticky `ThreadPrimitive.ViewportFooter`; Motion interpolates the layout change and

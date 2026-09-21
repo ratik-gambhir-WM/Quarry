@@ -1,4 +1,5 @@
 import type { WorkspaceSidebarTool } from "../../data/workspace";
+import { AssistantWorkspaceSidebar } from "./sidebar/AssistantWorkspaceSidebar";
 import { DealRoomWorkspaceSidebar } from "./sidebar/DealRoomWorkspaceSidebar";
 import { HomeWorkspaceSidebar } from "./sidebar/HomeWorkspaceSidebar";
 import type { ActiveDealSection, ActiveHomeSection, SidebarBaseProps, SidebarMode } from "./sidebar/sidebarTypes";
@@ -31,6 +32,17 @@ export function WorkspaceSidebar({
         deals={deals}
         email={email}
         navigationState={navigationState}
+      />
+    );
+  }
+
+  if (mode === "assistant") {
+    return (
+      <AssistantWorkspaceSidebar
+        activeHomeSection={activeHomeSection}
+        email={email}
+        navigationState={navigationState}
+        tools={tools}
       />
     );
   }

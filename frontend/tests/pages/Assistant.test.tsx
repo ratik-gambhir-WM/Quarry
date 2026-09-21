@@ -7,13 +7,19 @@ import { Assistant } from "@/pages/Assistant";
 
 const { shellProps } = vi.hoisted(() => ({ shellProps: vi.fn() }));
 
-vi.mock("@/components/chat/QueryChat", () => ({ QueryChat: () => <div>Assistant chat</div> }));
+vi.mock("@/components/chat/QueryChat", () => ({
+  QueryChatThread: () => <div>Assistant chat</div>,
+}));
+vi.mock("@/components/chat/QueryChatRuntimeProvider", () => ({
+  QueryChatRuntimeProvider: ({ children }: { children: ReactNode }) => children,
+}));
 vi.mock("@/components/hub/WorkspaceHomeShell", () => ({
   WorkspaceHomeShell: ({ children, ...props }: {
     activeHomeSection?: string;
     children: ReactNode;
     contentMode?: string;
     header?: ReactNode;
+    sidebarMode?: string;
   }) => {
     shellProps(props);
     return <>{props.header}{children}</>;
@@ -23,7 +29,7 @@ vi.mock("@/components/hub/WorkspaceHomeShell", () => ({
 afterEach(cleanup);
 
 describe("Assistant", () => {
-  it("uses the Assistant navigation key, fill layout, and unchanged header title", () => {
+  it("uses the Assistant chat sidebar, fill layout, and unchanged header title", () => {
     render(<Assistant />);
 
     expect(screen.getByText("Assistant chat")).toBeTruthy();
@@ -31,6 +37,7 @@ describe("Assistant", () => {
     expect(shellProps).toHaveBeenCalledWith(expect.objectContaining({
       activeHomeSection: "assistant",
       contentMode: "fill",
+      sidebarMode: "assistant",
     }));
   });
 });

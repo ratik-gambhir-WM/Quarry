@@ -12,6 +12,7 @@ type SidebarFrameProps = {
   alignedHeader?: boolean;
   children: ReactNode | ((state: { collapsed: boolean }) => ReactNode);
   email?: string;
+  headerContent?: ReactNode;
   headerBackLabel?: string;
   headerBackTo?: string;
   showHeaderBackButton?: boolean;
@@ -26,6 +27,7 @@ export function SidebarFrame({
   alignedHeader = false,
   children,
   email,
+  headerContent,
   headerBackLabel = "Back to home page",
   headerBackTo = "/hub",
   navigationState,
@@ -56,31 +58,37 @@ export function SidebarFrame({
               : `flex shrink-0 items-center gap-2 pt-4 ${collapsed ? "px-2" : "px-4"}`
           }
         >
-          {showHeaderBackButton ? (
-            <NavLink
-              aria-label={headerBackLabel}
-              className="group flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-              end
-              state={navigationState}
-              title={headerBackLabel}
-              to={headerBackTo}
-            >
-              <Icon
-                className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
-                name="arrowLeft"
-              />
-            </NavLink>
-          ) : null}
+          {headerContent ? (
+            collapsed ? null : <div className="min-w-0 flex-1">{headerContent}</div>
+          ) : (
+            <>
+              {showHeaderBackButton ? (
+                <NavLink
+                  aria-label={headerBackLabel}
+                  className="group flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
+                  end
+                  state={navigationState}
+                  title={headerBackLabel}
+                  to={headerBackTo}
+                >
+                  <Icon
+                    className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
+                    name="arrowLeft"
+                  />
+                </NavLink>
+              ) : null}
 
-          {collapsed ? null : (
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
-                <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
-                {sidebarLabel}
-              </span>
-            </div>
+              {collapsed ? null : (
+                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
+                    <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
+                    {sidebarLabel}
+                  </span>
+                </div>
+              )}
+            </>
           )}
 
           <button
