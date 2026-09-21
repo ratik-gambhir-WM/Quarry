@@ -21,10 +21,10 @@ planned domain scaffolds into implemented capabilities.
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root README retains parts of the original desktop design. The current code has a broader
-Tauri boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events
-cross Tauri IPC before reaching the same Axum API used by the browser. This document records that
-implemented path.
+The root README provides concise developer onboarding. The current code has a broader Tauri
+boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
+Tauri IPC before reaching the same Axum API used by the browser. This document records that
+implemented path in detail.
 
 ## Maintenance contract
 
@@ -1360,7 +1360,6 @@ configuration. Never use `clear_helix` as verification.
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | No CI, container, provider, signing, updater, or TLS config | Repository is not independently deployable |
 | Health | Shallow process check | Cannot determine dependency readiness |
-| Docs | README describes an older desktop boundary | This file should be used for current code |
 | Plans | Ignored and sometimes stale after implementation | Must not be treated as tracked contract |
 
 The retained `docs/architecture/*.docx` files are useful point-in-time assessments. Their file

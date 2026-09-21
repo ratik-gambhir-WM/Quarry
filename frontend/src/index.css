@@ -338,11 +338,6 @@
     background: var(--theme-workspace-chrome);
   }
 
-  .workspace-shell-content:has([data-workspace-sidebar-replacement])
-    > [data-workspace-primary-sidebar] {
-    display: none;
-  }
-
   .workspace-sidebar {
     --background: var(--theme-workspace-chrome);
     background: var(--theme-workspace-chrome);
@@ -615,6 +610,11 @@
 }
 
 @layer utilities {
+  .workspace-shell-content:has([data-workspace-sidebar-replacement])
+    > [data-workspace-primary-sidebar] {
+    display: none;
+  }
+
   .backdrop-blur-sm,
   .backdrop-blur-md,
   .backdrop-blur-xl {
