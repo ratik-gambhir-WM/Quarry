@@ -24,13 +24,31 @@ pub(super) struct AssistantChatHttpState {
 
 pub(super) async fn query_model_handler(
     State(state): State<AssistantChatHttpState>,
+    headers: HeaderMap,
     multipart: Multipart,
 ) -> AppResult<(
     HeaderMap,
     Sse<impl Stream<Item = Result<Event, Infallible>>>,
 )> {
-    let input = collect_query_upload(multipart).await?;
-    let receiver = state.assistant_chat.ask(input).map_err(AppError::from)?;
+    let started_at = std::time::Instant::now();
+    let http_request_id = request_id(&headers);
+    tracing::info!(request_id = %http_request_id, route = "/query_model", "assistant request received");
+    let input = match collect_query_upload(multipart).await {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant request rejected while parsing multipart");
+            return Err(error);
+        }
+    };
+    tracing::info!(request_id = %http_request_id, context_messages = input.context.len(), file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant request parsed");
+    let receiver = match state.assistant_chat.ask(input) {
+        Ok(receiver) => receiver,
+        Err(error) => {
+            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant request rejected while starting run");
+            return Err(AppError::from(error));
+        }
+    };
+    tracing::info!(request_id = %http_request_id, elapsed_ms = started_at.elapsed().as_millis(), "assistant stream opened");
     Ok(query_sse(receiver))
 }
 
@@ -180,19 +198,41 @@ pub(super) async fn delete_thread_handler(
 
 pub(super) async fn run_thread_handler(
     State(state): State<AssistantChatHttpState>,
+    headers: HeaderMap,
     Path(thread_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<(
     HeaderMap,
     Sse<impl Stream<Item = Result<Event, Infallible>>>,
 )> {
-    let input = collect_persistent_query_upload(multipart, thread_id).await?;
-    let receiver = state
-        .assistant_chat
-        .ask_persisted(input)
-        .await
-        .map_err(AppError::from)?;
+    let started_at = std::time::Instant::now();
+    let http_request_id = request_id(&headers);
+    tracing::info!(request_id = %http_request_id, thread_id = %thread_id, route = "/assistant/threads/{thread_id}/runs", "assistant persisted request received");
+    let input = match collect_persistent_query_upload(multipart, thread_id).await {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted request rejected while parsing multipart");
+            return Err(error);
+        }
+    };
+    tracing::info!(request_id = %http_request_id, thread_id = %input.thread_id, client_request_id = %input.request_id, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted request parsed");
+    let receiver = match state.assistant_chat.ask_persisted(input).await {
+        Ok(receiver) => receiver,
+        Err(error) => {
+            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted request rejected while starting run");
+            return Err(AppError::from(error));
+        }
+    };
+    tracing::info!(request_id = %http_request_id, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted stream opened");
     Ok(query_sse(receiver))
+}
+
+fn request_id(headers: &HeaderMap) -> String {
+    headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("missing")
+        .to_string()
 }
 
 fn query_sse(
@@ -203,6 +243,7 @@ fn query_sse(
 ) {
     let events = stream::unfold(receiver, |mut receiver| async move {
         receiver.recv().await.map(|event| {
+            tracing::debug!(event = event.event_name(), "assistant SSE event emitted");
             let encoded = Event::default()
                 .event(event.event_name())
                 .json_data(&event)

@@ -48,6 +48,25 @@ describe("createTauriQuarryApi", () => {
     expect(deleteRequest).toHaveBeenCalledWith("/api/v1/templates/template%2Fone");
   });
 
+  it("deletes an encoded assistant thread through the desktop relay", async () => {
+    const deleteRequest = vi.fn().mockResolvedValue(undefined);
+    const api = createTauriQuarryApi({
+      delete: deleteRequest,
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart: vi.fn(),
+      subscribeJob: vi.fn(),
+    });
+
+    await expect(api.deleteAssistantThread("thread/one", "analyst@example.com"))
+      .resolves.toBeUndefined();
+    expect(deleteRequest).toHaveBeenCalledWith(
+      "/api/v1/assistant/threads/thread%2Fone?userEmail=analyst%40example.com",
+    );
+  });
+
   it("loads and validates an encoded template through the desktop relay", async () => {
     const payload = templateDocument();
     const get = vi.fn().mockResolvedValue(payload);

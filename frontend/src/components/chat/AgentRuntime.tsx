@@ -11,6 +11,7 @@ import { createModelAdapter } from "./threadModelAdapter";
 
 export type ThreadRuntimeState = {
   copiedMessageId: string | null;
+  deletingThreadId: string | null;
   draft: string;
   isPreparingThread: boolean;
   isRunning: boolean;
@@ -18,6 +19,7 @@ export type ThreadRuntimeState = {
   isThreadLoading: boolean;
   messages: readonly Message[];
   selectedThreadId: string | null;
+  threadDeleteError: boolean;
   threadListError: boolean;
   threads: readonly AssistantThread[];
 };
@@ -25,7 +27,7 @@ export type ThreadRuntimeState = {
 type AgentRuntimeOptions = {
   api: Pick<QuarryApi, "queryModel"> & Partial<Pick<
     QuarryApi,
-    "createAssistantThread" | "getAssistantThread" | "listAssistantThreads" | "renameAssistantThread" | "runAssistantThread"
+    "createAssistantThread" | "deleteAssistantThread" | "getAssistantThread" | "listAssistantThreads" | "renameAssistantThread" | "runAssistantThread"
   >>;
   onContextTruncated: (truncated: boolean) => void;
   userEmail: string;
@@ -33,6 +35,7 @@ type AgentRuntimeOptions = {
 
 type AgentRuntimeValue = {
   copy(messageId: string): Promise<void>;
+  deleteThread(threadId: string): Promise<void>;
   newChat(): void;
   retry(messageId: string): void;
   selectThread(threadId: string): Promise<void>;
@@ -44,6 +47,7 @@ type AgentRuntimeValue = {
 
 const emptyState: ThreadRuntimeState = {
   copiedMessageId: null,
+  deletingThreadId: null,
   draft: "",
   isPreparingThread: false,
   isRunning: false,
@@ -51,6 +55,7 @@ const emptyState: ThreadRuntimeState = {
   isThreadLoading: false,
   messages: [],
   selectedThreadId: null,
+  threadDeleteError: false,
   threadListError: false,
   threads: [],
 };
@@ -98,6 +103,13 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     const messages = [...stateRef.current.messages, userMessage, assistantMessage];
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    logChat("run.started", {
+      assistantMessageId: assistantMessage.id,
+      messageCount: messages.length,
+      persisted: Boolean(threadId),
+      promptChars: [...text].length,
+      threadId: threadId || undefined,
+    });
     onContextTruncated(false);
     update({ draft: "", isRunning: true, messages });
 
@@ -114,10 +126,12 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       }
       if (!controller.signal.aborted) {
         replaceAssistantMessage(assistantMessage.id, undefined, { reason: "stop", type: "complete" });
+        logChat("run.completed", { assistantMessageId: assistantMessage.id, threadId: threadId || undefined });
       }
-    } catch {
+    } catch (error) {
       if (!controller.signal.aborted) {
         replaceAssistantMessage(assistantMessage.id, undefined, { reason: "error", type: "incomplete" });
+        logChat("run.failed", { assistantMessageId: assistantMessage.id, error: errorMessage(error), threadId: threadId || undefined });
       }
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null;
@@ -128,7 +142,16 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
   const send = useCallback((prompt = stateRef.current.draft) => {
     const text = prompt.trim();
     const current = stateRef.current;
-    if (!text || current.isPreparingThread || current.isRunning || current.isThreadLoading) return;
+    if (!text || current.isPreparingThread || current.isRunning || current.isThreadLoading) {
+      logChat("send.ignored", {
+        hasText: Boolean(text),
+        isPreparingThread: current.isPreparingThread,
+        isRunning: current.isRunning,
+        isThreadLoading: current.isThreadLoading,
+      });
+      return;
+    }
+    logChat("send.requested", { persisted: Boolean(userEmail), promptChars: [...text].length });
     if (!userEmail) {
       void startRun(text, "");
       return;
@@ -150,11 +173,45 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
         : Promise.resolve(null);
     void threadId
       .then((id) => { if (id) void startRun(text, id); })
-      .catch(() => undefined)
+      .catch((error) => {
+        logChat("thread.create_failed", { error: errorMessage(error) });
+      })
       .finally(() => update({ isPreparingThread: false }));
   }, [api.createAssistantThread, startRun, update, userEmail]);
 
   const setDraft = useCallback((draft: string) => update({ draft }), [update]);
+
+  const deleteThread = useCallback(async (threadId: string) => {
+    const current = stateRef.current;
+    const deleteAssistantThread = api.deleteAssistantThread;
+    if (
+      !userEmail
+      || !deleteAssistantThread
+      || current.isPreparingThread
+      || current.isRunning
+      || current.deletingThreadId
+    ) return;
+
+    update({ deletingThreadId: threadId, threadDeleteError: false });
+    try {
+      await deleteAssistantThread(threadId, userEmail);
+      const wasSelected = stateRef.current.selectedThreadId === threadId;
+      if (wasSelected) loadTokenRef.current += 1;
+      update({
+        copiedMessageId: wasSelected ? null : stateRef.current.copiedMessageId,
+        deletingThreadId: null,
+        draft: wasSelected ? "" : stateRef.current.draft,
+        isThreadLoading: wasSelected ? false : stateRef.current.isThreadLoading,
+        messages: wasSelected ? [] : stateRef.current.messages,
+        selectedThreadId: wasSelected ? null : stateRef.current.selectedThreadId,
+        threads: stateRef.current.threads.filter((thread) => thread.threadId !== threadId),
+      });
+      logChat("thread.deleted", { threadId });
+    } catch (error) {
+      logChat("thread.delete_failed", { error: errorMessage(error), threadId });
+      update({ deletingThreadId: null, threadDeleteError: true });
+    }
+  }, [api.deleteAssistantThread, update, userEmail]);
 
   const newChat = useCallback(() => {
     const current = stateRef.current;
@@ -167,6 +224,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       isThreadLoading: false,
       messages: [],
       selectedThreadId: null,
+      threadDeleteError: false,
     });
   }, [onContextTruncated, update]);
 
@@ -195,7 +253,8 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       if (token === loadTokenRef.current) {
         update({ isThreadLoading: false, messages: activeMessageBranch(thread.messages) });
       }
-    } catch {
+    } catch (error) {
+      logChat("thread.load_failed", { error: errorMessage(error), threadId });
       if (token === loadTokenRef.current) update({ isThreadLoading: false });
     }
   }, [api.getAssistantThread, onContextTruncated, update, userEmail]);
@@ -210,6 +269,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
         message.role === "assistant" && message.status.type === "running"
       ));
     if (runningMessage) {
+      logChat("run.cancelled", { assistantMessageId: runningMessage.id });
       replaceAssistantMessage(runningMessage.id, undefined, { reason: "cancelled", type: "incomplete" });
     }
   }, [replaceAssistantMessage]);
@@ -240,9 +300,11 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     let active = true;
     void api.listAssistantThreads(userEmail)
       .then((page) => {
+        logChat("thread_list.loaded", { threadCount: page.threads.length });
         if (active) update({ isThreadListLoading: false, threads: page.threads });
       })
-      .catch(() => {
+      .catch((error) => {
+        logChat("thread_list.load_failed", { error: errorMessage(error) });
         if (active) update({ isThreadListLoading: false, threadListError: true });
       });
     return () => {
@@ -258,7 +320,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     };
   }, []);
 
-  return { copy, newChat, retry, selectThread, send, setDraft, state, stop };
+  return { copy, deleteThread, newChat, retry, selectThread, send, setDraft, state, stop };
 }
 
 const AgentRuntimeContext = createContext<AgentRuntimeValue | null>(null);
@@ -329,4 +391,12 @@ function createId() {
 
 function textContent(message: Message) {
   return message.content.map((part) => part.type === "text" ? part.text : "").join("");
+}
+
+function logChat(event: string, details: Record<string, unknown>) {
+  console.info(`[chat] ${event}`, details);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

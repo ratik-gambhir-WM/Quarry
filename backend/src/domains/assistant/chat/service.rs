@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use tokio::sync::mpsc;
@@ -67,6 +67,8 @@ impl AssistantChatService {
         let context = into_provider_context(input.context);
         let prompt = input.prompt;
         let files = input.files;
+        let run_id = uuid::Uuid::new_v4().to_string();
+        tracing::info!(run_id = %run_id, model = %model, context_messages = context.len(), file_count = files.len(), prompt_chars = prompt.chars().count(), "assistant ephemeral run accepted");
         let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         event_tx
             .try_send(SendQueryEvent::Started {
@@ -78,6 +80,8 @@ impl AssistantChatService {
             .map_err(|_| ServiceError::internal("failed to initialize query event stream"))?;
 
         tokio::spawn(async move {
+            let run_started_at = Instant::now();
+            tracing::debug!(run_id = %run_id, "assistant ephemeral file encoding started");
             let encoded_files = match tokio::task::spawn_blocking(move || {
                 files
                     .into_iter()
@@ -94,8 +98,8 @@ impl AssistantChatService {
             .await
             {
                 Ok(files) => files,
-                Err(_) => {
-                    tracing::error!(category = "encoding_worker", "assistant query failed");
+                Err(error) => {
+                    tracing::error!(run_id = %run_id, category = "encoding_worker", error = %error, "assistant ephemeral file encoding failed");
                     let _ = event_tx
                         .send(SendQueryEvent::Failed {
                             error: "query generation failed",
@@ -129,11 +133,15 @@ impl AssistantChatService {
                 delta_tx,
             );
             tokio::pin!(response);
+            tracing::info!(run_id = %run_id, "assistant provider stream started");
 
             loop {
                 tokio::select! {
                     biased;
-                    _ = event_tx.closed() => break,
+                    _ = event_tx.closed() => {
+                        tracing::info!(run_id = %run_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant client disconnected");
+                        break
+                    },
                     result = &mut response => {
                         while let Ok(delta) = delta_rx.try_recv() {
                             if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
@@ -141,9 +149,12 @@ impl AssistantChatService {
                             }
                         }
                         let terminal = match result {
-                            Ok(response) => SendQueryEvent::Completed { response },
+                            Ok(response) => {
+                                tracing::info!(run_id = %run_id, response_chars = response.chars().count(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant ephemeral run completed");
+                                SendQueryEvent::Completed { response }
+                            },
                             Err(error) => {
-                                tracing::error!(category = %error.category(), "assistant query failed");
+                                tracing::error!(run_id = %run_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant ephemeral provider failed");
                                 SendQueryEvent::Failed { error: "query generation failed" }
                             }
                         };
@@ -273,6 +284,8 @@ impl AssistantChatService {
         let instructions = input
             .system_instructions
             .unwrap_or_else(|| DEFAULT_CHAT_INSTRUCTIONS.to_string());
+        let client_request_id = input.request_id.clone();
+        tracing::info!(client_request_id = %client_request_id, thread_id = %input.thread_id, assistant_message_id = %input.assistant_message_id, user_message_id = %input.user_message_id, model = %model, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted run starting");
         let start = repository
             .start_run(StartRunInput {
                 assistant_message_id: input.assistant_message_id.clone(),
@@ -292,6 +305,7 @@ impl AssistantChatService {
                 other => other.into(),
             })?;
         if matches!(&start, StartRunResult::Conflict) {
+            tracing::warn!(client_request_id = %client_request_id, thread_id = %input.thread_id, "assistant persisted run rejected due to message id conflict");
             return Err(ServiceError::Conflict(
                 "assistant run message ids conflict with existing messages".to_string(),
             ));
@@ -306,6 +320,7 @@ impl AssistantChatService {
             })
             .map_err(|_| ServiceError::internal("failed to initialize query event stream"))?;
         if let StartRunResult::Existing(message) = start {
+            tracing::info!(client_request_id = %client_request_id, thread_id = %input.thread_id, status = %message.status, response_chars = message.content.chars().count(), "assistant persisted run replayed");
             let event = match message.status.as_str() {
                 "completed" => SendQueryEvent::Completed {
                     response: message.content,
@@ -331,7 +346,10 @@ impl AssistantChatService {
         let prompt = input.prompt;
         let files = input.files;
         let assistant_message_id = input.assistant_message_id;
+        let thread_id = input.thread_id;
         tokio::spawn(async move {
+            let run_started_at = Instant::now();
+            tracing::info!(client_request_id = %client_request_id, thread_id = %thread_id, assistant_message_id = %assistant_message_id, "assistant persisted provider stream started");
             let encoded_files = match tokio::task::spawn_blocking(move || {
                 files
                     .into_iter()
@@ -348,7 +366,8 @@ impl AssistantChatService {
             .await
             {
                 Ok(files) => files,
-                Err(_) => {
+                Err(error) => {
+                    tracing::error!(client_request_id = %client_request_id, error = %error, "assistant persisted file encoding failed");
                     let _ = repository
                         .finish_run(
                             assistant_message_id,
@@ -395,6 +414,7 @@ impl AssistantChatService {
                 tokio::select! {
                     biased;
                     _ = event_tx.closed() => {
+                        tracing::info!(client_request_id = %client_request_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted client disconnected");
                         let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
                         break;
                     }
@@ -408,14 +428,16 @@ impl AssistantChatService {
                         }
                         match result {
                             Ok(response) => {
+                                tracing::info!(client_request_id = %client_request_id, response_chars = response.chars().count(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider completed");
                                 if repository.finish_run(assistant_message_id, "completed", response.clone(), None).await.is_err() {
+                                    tracing::error!(client_request_id = %client_request_id, "assistant persisted completion failed to save");
                                     let _ = event_tx.send(SendQueryEvent::Failed { error: "query persistence failed" }).await;
                                 } else {
                                     let _ = event_tx.send(SendQueryEvent::Completed { response }).await;
                                 }
                             }
                             Err(error) => {
-                                tracing::error!(category = %error.category(), "assistant query failed");
+                                tracing::error!(client_request_id = %client_request_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider failed");
                                 let _ = repository.finish_run(assistant_message_id, "failed", buffer, Some("provider_failed")).await;
                                 let _ = event_tx.send(SendQueryEvent::Failed { error: "query generation failed" }).await;
                             }

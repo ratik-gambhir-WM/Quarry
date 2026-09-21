@@ -11,6 +11,7 @@ import { AssistantWorkspaceSidebar } from "@/components/hub/sidebar/AssistantWor
 const { api } = vi.hoisted(() => ({
   api: {
     createAssistantThread: vi.fn(),
+    deleteAssistantThread: vi.fn(),
     getAssistantThread: vi.fn(),
     listAssistantThreads: vi.fn(),
     queryModel: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
 afterEach(() => {
   cleanup();
   api.createAssistantThread.mockReset();
+  api.deleteAssistantThread.mockReset();
   api.getAssistantThread.mockReset();
   api.listAssistantThreads.mockReset();
   api.queryModel.mockReset();
@@ -94,6 +96,57 @@ describe("QueryChatRuntimeProvider", () => {
     expect(run.assistantMessageId).toBe(run.requestId);
     expect(run.userMessageId).toEqual(expect.any(String));
     expect(api.queryModel).not.toHaveBeenCalled();
+  });
+
+  it("deletes a previous chat from its options menu and clears the selected transcript", async () => {
+    const user = userEvent.setup();
+    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [threadMetadata] });
+    api.getAssistantThread.mockResolvedValue(threadDetail);
+    api.deleteAssistantThread.mockResolvedValue(undefined);
+
+    render(
+      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+        <MemoryRouter>
+          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <QueryChatThread contextTruncated={false} />
+        </MemoryRouter>
+      </QueryChatRuntimeProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: threadMetadata.title }));
+    expect(await screen.findByText("Earlier assistant answer")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: `Chat options for ${threadMetadata.title}` }));
+    expect(screen.getByRole("menuitem", { name: "Archive chat" }).getAttribute("data-disabled"))
+      .not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "Delete chat" }));
+
+    await waitFor(() => expect(api.deleteAssistantThread).toHaveBeenCalledWith(
+      threadMetadata.threadId,
+      "analyst@example.com",
+    ));
+    await waitFor(() => expect(screen.queryByRole("button", { name: threadMetadata.title })).toBeNull());
+    expect(screen.queryByText("Earlier assistant answer")).toBeNull();
+  });
+
+  it("keeps the thread and reports a sanitized error when deletion fails", async () => {
+    const user = userEvent.setup();
+    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [threadMetadata] });
+    api.deleteAssistantThread.mockRejectedValue(new Error("network unavailable"));
+
+    render(
+      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+        <MemoryRouter>
+          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+        </MemoryRouter>
+      </QueryChatRuntimeProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: `Chat options for ${threadMetadata.title}` }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete chat" }));
+
+    expect(await screen.findByText("Couldn’t delete chat. Please try again.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: threadMetadata.title })).toBeTruthy();
   });
 });
 

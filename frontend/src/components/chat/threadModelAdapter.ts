@@ -33,6 +33,12 @@ export function createModelAdapter(
       const prompt = readCurrentPrompt(runOptions.messages);
       const { context, truncated } = buildContext(runOptions.messages);
       options.onContextTruncated?.(truncated);
+      console.info("[chat] adapter.prepared", {
+        contextMessageCount: context.length,
+        truncated,
+        persisted: Boolean(options.userEmail && runOptions.threadId && api.runAssistantThread),
+        promptChars: [...prompt].length,
+      });
 
       if (runOptions.abortSignal.aborted) return;
 
@@ -75,7 +81,8 @@ export function createModelAdapter(
               && api.runAssistantThread,
           );
           const handlers: SendQueryEventHandlers = {
-              onConnectionError: () => {
+              onConnectionError: (message) => {
+                console.error("[chat] stream.connection_error", { message });
                 queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
                 dispose();
               },
@@ -83,12 +90,15 @@ export function createModelAdapter(
                 if (!queue.accepting()) return;
                 switch (event.type) {
                   case "started":
+                    console.info("[chat] stream.started", { model: event.model });
                     return;
                   case "delta":
+                    console.debug("[chat] stream.delta", { characterCount: [...event.delta].length });
                     buffer += event.delta;
                     if (buffer.length > 0) queue.push({ kind: "snapshot", text: buffer });
                     return;
                   case "completed":
+                    console.info("[chat] stream.completed", { characterCount: [...event.response].length });
                     if (event.response !== buffer) {
                       buffer = event.response;
                       queue.push({ kind: "snapshot", text: buffer });
@@ -97,6 +107,7 @@ export function createModelAdapter(
                     dispose();
                     return;
                   case "failed":
+                    console.error("[chat] stream.failed", { error: event.error });
                   queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
                   dispose();
                 }
@@ -114,7 +125,8 @@ export function createModelAdapter(
                 userMessageId: currentUser.id,
               }, handlers)
             : api.queryModel({ context, files: [], prompt }, handlers);
-        } catch {
+        } catch (error) {
+          console.error("[chat] adapter.transport_error", error);
           queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
         }
         if (cleanupPending || !queue.accepting() || runOptions.abortSignal.aborted) dispose();

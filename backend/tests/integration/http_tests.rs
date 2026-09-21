@@ -58,6 +58,7 @@ async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
     assert_eq!(body["threads"][0]["threadId"], "thread-1");
 
     let other_owner = app
+        .clone()
         .oneshot(
             Request::get("/api/v1/assistant/threads/thread-1?userEmail=someone%40example.com")
                 .body(Body::empty())
@@ -66,6 +67,27 @@ async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
         .await
         .unwrap();
     assert_eq!(other_owner.status(), StatusCode::NOT_FOUND);
+
+    let deleted = app
+        .clone()
+        .oneshot(
+            Request::delete("/api/v1/assistant/threads/thread-1?userEmail=analyst%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    let missing = app
+        .oneshot(
+            Request::get("/api/v1/assistant/threads/thread-1?userEmail=analyst%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

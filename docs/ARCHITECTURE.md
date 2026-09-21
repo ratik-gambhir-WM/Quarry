@@ -1050,9 +1050,11 @@ Custom AgentRuntime remote thread list + current prompt and stable IDs
   -> started, ordered deltas, and one completed/failed terminal persisted to SQLite
 ```
 
-The thread-scoped transcript survives page and application restarts. The server, rather than the
-client runtime, selects canonical prior text context. The run endpoint retains partial text on an
-observed failure/cancellation, but there is no token checkpoint or stale-`streaming` recovery after
+The thread-scoped transcript survives page and application restarts. Each expanded previous-chat
+item offers a menu with a wired Delete action; Archive is displayed but intentionally disabled.
+The server, rather than the client runtime, selects canonical prior text context. The run endpoint
+retains partial text on an observed failure/cancellation, but there is no token checkpoint or
+stale-`streaming` recovery after
 a backend process crash. Current-turn file bytes are still not retained for reuse. The legacy
 `/query_model` path remains ephemeral and requires a client context snapshot.
 
@@ -1196,8 +1198,10 @@ and deployment TLS/rate limits/observability established.
 - `x-request-id` is generated and returned.
 - Internal application errors log contextual detail while returning a generic message.
 - Parser and AI-client paths record selected timing/failure context.
-- Assistant query logs contain provider status/category and timing only; prompts, context,
-  instructions, filenames, file contents, deltas, completed text, and raw provider bodies are omitted.
+- Assistant query logs contain request/thread/message identifiers, phase, counts, provider
+  status/category, and timing only; prompts, context, instructions, filenames, file contents,
+  deltas, completed text, and raw provider bodies are omitted. The frontend also emits matching
+  metadata-only `[chat]` console entries for runtime, transport, and SSE transitions.
 - Diligence Studio failures log internal context and surface only stable sanitized responses;
   preview data is read through on each template gallery request and is not persisted or cached.
   PPTX import transport failures are surfaced as uncertain because the upstream write has no

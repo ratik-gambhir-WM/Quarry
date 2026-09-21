@@ -650,6 +650,7 @@ function streamQuery(
     request: requestDetails,
     url,
   });
+  console.info("[chat] http.stream.started", { path, requestId, requestDetails });
   let active = true;
   let settled = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -664,6 +665,7 @@ function streamQuery(
     settled = true;
     active = false;
     stopStream();
+    console.error("[chat] http.stream.failed", { httpStatus, message, path, requestId });
     finishApiRequest(requestId, {
       durationMs: performance.now() - startedAt,
       httpStatus,
@@ -686,6 +688,7 @@ function streamQuery(
         return;
       }
       const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+      console.info("[chat] http.stream.connected", { contentType, path, requestId, status: response.status });
       if (contentType !== "text/event-stream" || !response.body) {
         failConnection("The query backend returned an invalid streaming response.", response.status);
         return;
@@ -700,6 +703,14 @@ function streamQuery(
           status: event.type === "failed" ? "error" : "success",
           title: `Query ${event.type} event`,
           url,
+        });
+        console.info("[chat] http.sse.event", {
+          event: event.type,
+          path,
+          requestId,
+          valueCharacters: event.type === "delta"
+            ? [...event.delta].length
+            : event.type === "completed" ? [...event.response].length : undefined,
         });
         onEvent(event);
         if (event.type === "completed" || event.type === "failed") {
@@ -721,6 +732,7 @@ function streamQuery(
       }
       if (active) parser.finish();
     } catch (error) {
+      console.error("[chat] http.stream.exception", { error, path, requestId });
       if (!active && error instanceof DOMException && error.name === "AbortError") return;
       failConnection(error instanceof Error ? error.message : "The query connection failed.");
     }
