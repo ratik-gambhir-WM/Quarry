@@ -20,6 +20,7 @@ export type ThreadRuntimeState = {
   messages: readonly Message[];
   selectedThreadId: string | null;
   threadDeleteError: boolean;
+  threadLoadError: boolean;
   threadListError: boolean;
   threads: readonly AssistantThread[];
 };
@@ -56,6 +57,7 @@ const emptyState: ThreadRuntimeState = {
   messages: [],
   selectedThreadId: null,
   threadDeleteError: false,
+  threadLoadError: false,
   threadListError: false,
   threads: [],
 };
@@ -97,10 +99,16 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     });
   }, [update]);
 
-  const startRun = useCallback(async (text: string, threadId: string) => {
-    const userMessage = userMessageFor(text);
+  const startRun = useCallback(async (
+    userMessage: UserMessage,
+    threadId: string,
+    reusesUserMessage = false,
+  ) => {
     const assistantMessage = assistantMessageFor();
-    const messages = [...stateRef.current.messages, userMessage, assistantMessage];
+    const messages = reusesUserMessage
+      ? [...stateRef.current.messages, assistantMessage]
+      : [...stateRef.current.messages, userMessage, assistantMessage];
+    const text = textContent(userMessage);
     const controller = new AbortController();
     abortControllerRef.current = controller;
     logChat("run.started", {
@@ -111,7 +119,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       threadId: threadId || undefined,
     });
     onContextTruncated(false);
-    update({ draft: "", isRunning: true, messages });
+    update({ draft: "", isRunning: true, messages, threadLoadError: false });
 
     try {
       const adapter = createModelAdapter(api, { onContextTruncated, userEmail: userEmail || undefined });
@@ -153,7 +161,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     }
     logChat("send.requested", { persisted: Boolean(userEmail), promptChars: [...text].length });
     if (!userEmail) {
-      void startRun(text, "");
+      void startRun(userMessageFor(text), "");
       return;
     }
 
@@ -172,7 +180,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
           })
         : Promise.resolve(null);
     void threadId
-      .then((id) => { if (id) void startRun(text, id); })
+      .then((id) => { if (id) void startRun(userMessageFor(text), id); })
       .catch((error) => {
         logChat("thread.create_failed", { error: errorMessage(error) });
       })
@@ -225,6 +233,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       messages: [],
       selectedThreadId: null,
       threadDeleteError: false,
+      threadLoadError: false,
     });
   }, [onContextTruncated, update]);
 
@@ -247,6 +256,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       isThreadLoading: true,
       messages: [],
       selectedThreadId: threadId,
+      threadLoadError: false,
     });
     try {
       const thread = await getAssistantThread(threadId, userEmail);
@@ -255,7 +265,13 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
       }
     } catch (error) {
       logChat("thread.load_failed", { error: errorMessage(error), threadId });
-      if (token === loadTokenRef.current) update({ isThreadLoading: false });
+      if (token === loadTokenRef.current) {
+        update({
+          isThreadLoading: false,
+          selectedThreadId: null,
+          threadLoadError: true,
+        });
+      }
     }
   }, [api.getAssistantThread, onContextTruncated, update, userEmail]);
 
@@ -281,8 +297,8 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     const previous = current.messages[failedIndex - 1];
     if (failedIndex < 1 || previous?.role !== "user") return;
     update({ messages: current.messages.slice(0, failedIndex) });
-    send(textContent(previous));
-  }, [send, update]);
+    void startRun(previous, current.selectedThreadId ?? "", true);
+  }, [startRun, update]);
 
   const copy = useCallback(async (messageId: string) => {
     const message = stateRef.current.messages.find((candidate) => candidate.id === messageId);
@@ -301,7 +317,13 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     void api.listAssistantThreads(userEmail)
       .then((page) => {
         logChat("thread_list.loaded", { threadCount: page.threads.length });
-        if (active) update({ isThreadListLoading: false, threads: page.threads });
+        if (active) {
+          update({
+            isThreadListLoading: false,
+            threadListError: false,
+            threads: mergeThreadPage(page.threads, stateRef.current.threads),
+          });
+        }
       })
       .catch((error) => {
         logChat("thread_list.load_failed", { error: errorMessage(error) });
@@ -360,6 +382,17 @@ function activeMessageBranch(messages: readonly PersistedAssistantMessage[]): Me
     current = current.parentMessageId ? byId.get(current.parentMessageId) : undefined;
   }
   return branch.reverse().map(fromAssistantMessage);
+}
+
+function mergeThreadPage(
+  remoteThreads: readonly AssistantThread[],
+  localThreads: readonly AssistantThread[],
+) {
+  const remoteThreadIds = new Set(remoteThreads.map((thread) => thread.threadId));
+  return [
+    ...localThreads.filter((thread) => !remoteThreadIds.has(thread.threadId)),
+    ...remoteThreads,
+  ];
 }
 
 function fromAssistantMessage(message: PersistedAssistantMessage): Message {

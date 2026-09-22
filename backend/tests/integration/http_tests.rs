@@ -91,6 +91,46 @@ async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
 }
 
 #[tokio::test]
+async fn handlers_reject_transport_validation_failures_before_service_calls() {
+    let app = test_router();
+
+    let invalid_deal = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"dealId":"DEAL-000184","dealName":"Acme","status":"Active","startDate":"2026-05-01","closeDate":"2026-01-01","transactionType":"Acquisition","targetCompany":"WidgetCo","primaryBuyer":"Buyer","dealSponsor":"Sponsor","userEmail":"analyst@example.com"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_deal.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_assistant_owner = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/assistant/threads?userEmail=%20%20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_assistant_owner.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_document_id = app
+        .oneshot(
+            Request::get("/api/v1/deals/%20/documents")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_document_id.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn health_route_is_available_under_api_prefix() {
     let app = test_router();
 

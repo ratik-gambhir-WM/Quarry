@@ -37,6 +37,7 @@ export function QueryChatThread({ contextTruncated }: { contextTruncated: boolea
           {isEmpty ? <ThreadWelcome /> : null}
           <div className="mb-8 flex flex-col gap-7 empty:hidden" data-slot="query-message-group">
             {state.isThreadLoading ? <ThreadHistorySkeleton /> : null}
+            {state.threadLoadError ? <ThreadLoadError /> : null}
             {state.messages.map((message) => (
               <ThreadMessage key={message.id} message={message} />
             ))}
@@ -63,6 +64,10 @@ function ThreadWelcome() {
 
 function ThreadHistorySkeleton() {
   return <div aria-label="Loading previous chat" className="space-y-5" data-testid="thread-history-skeleton" role="status"><div className="flex justify-end"><Skeleton aria-hidden="true" className="h-10 w-3/5 rounded-2xl motion-reduce:animate-none" /></div><div aria-hidden="true" className="space-y-2"><Skeleton className="h-4 w-full motion-reduce:animate-none" /><Skeleton className="h-4 w-11/12 motion-reduce:animate-none" /><Skeleton className="h-4 w-3/5 motion-reduce:animate-none" /></div></div>;
+}
+
+function ThreadLoadError() {
+  return <p className="rounded-xl border border-error/35 bg-error-container/35 p-3 text-sm text-error" role="status">Couldn’t load this chat. Please select it again.</p>;
 }
 
 function ThreadSuggestions() {

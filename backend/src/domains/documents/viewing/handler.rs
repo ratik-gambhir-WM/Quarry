@@ -22,6 +22,7 @@ pub(super) async fn list_deal_documents_handler(
     State(state): State<DocumentViewingHttpState>,
     Path(deal_id): Path<String>,
 ) -> AppResult<Json<Vec<DealDocumentSummary>>> {
+    validate_identifier("dealId", &deal_id)?;
     state
         .stored_documents
         .list(&deal_id)
@@ -34,6 +35,8 @@ pub(super) async fn get_deal_document_text_handler(
     State(state): State<DocumentViewingHttpState>,
     Path((deal_id, file_id)): Path<(String, String)>,
 ) -> AppResult<Json<StoredDocumentText>> {
+    validate_identifier("dealId", &deal_id)?;
+    validate_identifier("fileId", &file_id)?;
     let document = state
         .stored_documents
         .load(&deal_id, &file_id)
@@ -51,6 +54,8 @@ pub(super) async fn get_deal_document_pdf_handler(
     State(state): State<DocumentViewingHttpState>,
     Path((deal_id, file_id)): Path<(String, String)>,
 ) -> AppResult<Response> {
+    validate_identifier("dealId", &deal_id)?;
+    validate_identifier("fileId", &file_id)?;
     let document = state
         .stored_documents
         .load(&deal_id, &file_id)
@@ -76,4 +81,11 @@ pub(super) async fn get_deal_document_pdf_handler(
         HeaderValue::from_static("private, no-store"),
     );
     Ok((headers, pdf_bytes).into_response())
+}
+
+fn validate_identifier(field: &str, value: &str) -> AppResult<()> {
+    if value.trim().is_empty() {
+        return Err(AppError::bad_request(format!("{field} is required")));
+    }
+    Ok(())
 }

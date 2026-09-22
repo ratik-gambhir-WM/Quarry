@@ -393,7 +393,8 @@ global state or query-cache library.
   thread list. Axum/SQLite own thread metadata and normalized messages; the runtime owns the
   composer, active streaming state, retry actions, and pinned scroll. The provider wraps both the
   route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
-  one runtime owner. The provider is keyed by the workspace email to prevent one development
+  one runtime owner. It retains locally created threads when the initial remote list resolves late
+  and returns a failed history load to an explicit retryable selection state. The provider is keyed by the workspace email to prevent one development
   profile's client cache from surviving an identity change. A narrow `ModelAdapter` converts
   the callback-based stream into cumulative custom thread-message snapshots, treats completion as
   authoritative, and cancels the matching transport exactly once.
@@ -1026,9 +1027,9 @@ therefore require LibreOffice.
 
 ### 10.4 Search
 
-Keyword and vector requests carry a caller-supplied workspace identity and limit. Services validate
-common constraints and delegate to the Helix index repository. There is currently no server-side
-identity binding to prove that the caller owns the requested workspace.
+Keyword and vector requests carry a caller-supplied workspace identity and limit. Handlers validate
+common request constraints before services delegate to the Helix index repository. There is currently
+no server-side identity binding to prove that the caller owns the requested workspace.
 
 The Data Room document-search overlay does not consume these endpoints. Its reusable frontend
 component currently filters deterministic fixture excerpts, while `DataRoomPage` maps activated

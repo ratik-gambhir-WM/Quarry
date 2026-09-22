@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use tokio::sync::mpsc;
@@ -179,7 +183,6 @@ impl AssistantChatService {
         email: &str,
         thread_id: String,
     ) -> ServiceResult<AssistantThread> {
-        validate_identifier("threadId", &thread_id)?;
         let user_id = self.user_id(email).await?;
         self.repository()?
             .create_thread(user_id, thread_id)
@@ -211,7 +214,6 @@ impl AssistantChatService {
         email: &str,
         thread_id: String,
     ) -> ServiceResult<AssistantThreadDetail> {
-        validate_identifier("threadId", &thread_id)?;
         let user_id = self.user_id(email).await?;
         self.repository()?
             .get_thread(user_id, thread_id)
@@ -225,11 +227,7 @@ impl AssistantChatService {
         thread_id: String,
         title: String,
     ) -> ServiceResult<()> {
-        validate_identifier("threadId", &thread_id)?;
         let title = title.trim();
-        if title.is_empty() || title.chars().count() > 160 {
-            return Err(ServiceError::validation("title is invalid"));
-        }
         let user_id = self.user_id(email).await?;
         if !self
             .repository()?
@@ -247,7 +245,6 @@ impl AssistantChatService {
         thread_id: String,
         archived: bool,
     ) -> ServiceResult<()> {
-        validate_identifier("threadId", &thread_id)?;
         let user_id = self.user_id(email).await?;
         let status = if archived { "archived" } else { "regular" }.to_string();
         if !self
@@ -261,7 +258,6 @@ impl AssistantChatService {
     }
 
     pub async fn delete_thread(&self, email: &str, thread_id: String) -> ServiceResult<()> {
-        validate_identifier("threadId", &thread_id)?;
         let user_id = self.user_id(email).await?;
         if !self.repository()?.delete_thread(user_id, thread_id).await? {
             return Err(ServiceError::not_found("assistant thread was not found"));
@@ -285,12 +281,13 @@ impl AssistantChatService {
             .system_instructions
             .unwrap_or_else(|| DEFAULT_CHAT_INSTRUCTIONS.to_string());
         let client_request_id = input.request_id.clone();
+        let parent_message_id = input.parent_message_id.clone();
         tracing::info!(client_request_id = %client_request_id, thread_id = %input.thread_id, assistant_message_id = %input.assistant_message_id, user_message_id = %input.user_message_id, model = %model, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted run starting");
         let start = repository
             .start_run(StartRunInput {
                 assistant_message_id: input.assistant_message_id.clone(),
                 model: model.clone(),
-                parent_message_id: input.parent_message_id,
+                parent_message_id: parent_message_id.clone(),
                 prompt: input.prompt.clone(),
                 request_id: input.request_id,
                 thread_id: input.thread_id.clone(),
@@ -342,7 +339,7 @@ impl AssistantChatService {
         let StartRunResult::Started { prior_messages } = start else {
             unreachable!()
         };
-        let context = bounded_provider_context(prior_messages);
+        let context = bounded_provider_context(prior_messages, parent_message_id.as_deref());
         let prompt = input.prompt;
         let files = input.files;
         let assistant_message_id = input.assistant_message_id;
@@ -466,9 +463,6 @@ impl AssistantChatService {
 
     async fn user_id(&self, email: &str) -> ServiceResult<i64> {
         let email = email.trim();
-        if email.is_empty() || email.chars().count() > 320 {
-            return Err(ServiceError::validation("userEmail is invalid"));
-        }
         self.users
             .as_ref()
             .ok_or_else(|| ServiceError::internal("assistant identity lookup is not configured"))?
@@ -479,34 +473,41 @@ impl AssistantChatService {
     }
 }
 
-fn validate_identifier(name: &str, value: &str) -> ServiceResult<()> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
-        return Err(ServiceError::validation(format!("{name} is invalid")));
-    }
-    Ok(())
-}
-
 fn bounded_provider_context(
     messages: Vec<super::repository::AssistantMessage>,
+    last_assistant_message_id: Option<&str>,
 ) -> Vec<ChatMessageInput> {
+    let messages_by_id = messages
+        .iter()
+        .map(|message| (message.message_id.as_str(), message))
+        .collect::<HashMap<_, _>>();
     let mut pairs = Vec::new();
-    for pair in messages.windows(2) {
-        if pair[0].role == "user"
-            && pair[1].role == "assistant"
-            && pair[1].sequence == pair[0].sequence + 1
-            && pair[1].parent_message_id.as_deref() == Some(pair[0].message_id.as_str())
-        {
-            pairs.push((pair[0].content.clone(), pair[1].content.clone()));
+    let mut visited_message_ids = HashSet::new();
+    let mut assistant_message =
+        last_assistant_message_id.and_then(|message_id| messages_by_id.get(message_id).copied());
+
+    while let Some(assistant) = assistant_message {
+        if assistant.role != "assistant" || !visited_message_ids.insert(&assistant.message_id) {
+            break;
         }
+        let Some(user_message_id) = assistant.parent_message_id.as_deref() else {
+            break;
+        };
+        let Some(user) = messages_by_id.get(user_message_id).copied() else {
+            break;
+        };
+        if user.role != "user" || !visited_message_ids.insert(&user.message_id) {
+            break;
+        }
+        pairs.push((user.content.clone(), assistant.content.clone()));
+        assistant_message = user
+            .parent_message_id
+            .as_deref()
+            .and_then(|message_id| messages_by_id.get(message_id).copied());
     }
     let mut selected = Vec::new();
     let mut chars = 0usize;
-    for (user, assistant) in pairs.into_iter().rev() {
+    for (user, assistant) in pairs {
         let pair_chars = user.chars().count() + assistant.chars().count();
         if chars + pair_chars > MAX_CONTEXT_CHARS {
             break;

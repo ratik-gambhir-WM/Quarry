@@ -92,6 +92,7 @@ pub(super) async fn list_threads_handler(
     State(state): State<AssistantChatHttpState>,
     Query(query): Query<ThreadListQuery>,
 ) -> AppResult<Json<ThreadListResponse>> {
+    validate_user_email(&query.user_email)?;
     let limit = query.limit.unwrap_or(30).clamp(1, 100);
     let threads = state
         .assistant_chat
@@ -117,9 +118,11 @@ pub(super) async fn create_thread_handler(
     State(state): State<AssistantChatHttpState>,
     Json(input): Json<CreateThreadInput>,
 ) -> AppResult<(StatusCode, Json<AssistantThread>)> {
+    validate_user_email(&input.user_email)?;
     let thread_id = input
         .thread_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+    validate_identifier("threadId", &thread_id)?;
     let thread = state
         .assistant_chat
         .create_thread(&input.user_email, thread_id)
@@ -133,6 +136,8 @@ pub(super) async fn get_thread_handler(
     Path(thread_id): Path<String>,
     Query(query): Query<OwnerQuery>,
 ) -> AppResult<Json<AssistantThreadDetail>> {
+    validate_user_email(&query.user_email)?;
+    validate_identifier("threadId", &thread_id)?;
     state
         .assistant_chat
         .get_thread(&query.user_email, thread_id)
@@ -149,6 +154,9 @@ pub(super) async fn rename_thread_handler(
     let title = input
         .title
         .ok_or_else(|| AppError::bad_request("title is required"))?;
+    validate_user_email(&input.user_email)?;
+    validate_identifier("threadId", &thread_id)?;
+    validate_title(&title)?;
     state
         .assistant_chat
         .rename_thread(&input.user_email, thread_id, title)
@@ -162,6 +170,8 @@ pub(super) async fn archive_thread_handler(
     Path(thread_id): Path<String>,
     Json(input): Json<ThreadMutationInput>,
 ) -> AppResult<StatusCode> {
+    validate_user_email(&input.user_email)?;
+    validate_identifier("threadId", &thread_id)?;
     state
         .assistant_chat
         .set_thread_archived(&input.user_email, thread_id, true)
@@ -175,6 +185,8 @@ pub(super) async fn unarchive_thread_handler(
     Path(thread_id): Path<String>,
     Json(input): Json<ThreadMutationInput>,
 ) -> AppResult<StatusCode> {
+    validate_user_email(&input.user_email)?;
+    validate_identifier("threadId", &thread_id)?;
     state
         .assistant_chat
         .set_thread_archived(&input.user_email, thread_id, false)
@@ -188,6 +200,8 @@ pub(super) async fn delete_thread_handler(
     Path(thread_id): Path<String>,
     Query(query): Query<OwnerQuery>,
 ) -> AppResult<StatusCode> {
+    validate_user_email(&query.user_email)?;
+    validate_identifier("threadId", &thread_id)?;
     state
         .assistant_chat
         .delete_thread(&query.user_email, thread_id)
@@ -233,6 +247,32 @@ fn request_id(headers: &HeaderMap) -> String {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("missing")
         .to_string()
+}
+
+fn validate_user_email(email: &str) -> AppResult<()> {
+    if email.trim().is_empty() || email.chars().count() > 320 {
+        return Err(AppError::bad_request("userEmail is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_identifier(name: &str, value: &str) -> AppResult<()> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err(AppError::bad_request(format!("{name} is invalid")));
+    }
+    Ok(())
+}
+
+fn validate_title(title: &str) -> AppResult<()> {
+    if title.trim().is_empty() || title.chars().count() > 160 {
+        return Err(AppError::bad_request("title is invalid"));
+    }
+    Ok(())
 }
 
 fn query_sse(
