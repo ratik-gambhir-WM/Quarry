@@ -189,12 +189,23 @@ explicitly decided.
 ```text
 React.StrictMode
   -> build-selected AppRouter
-      -> ThemeModeProvider
-          -> shared route manifest and pages
+      -> root route split
+          -> lazy internal template-preview renderer
+          -> product App fallback
+              -> ThemeModeProvider
+                  -> shared product route manifest and pages
 ```
 
 The app does not perform runtime sniffing to choose its host. Vite mode and the corresponding
 TypeScript project select the implementation before the bundle runs.
+
+[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) keeps the headless template
+renderer outside the product application shell. The renderer is lazy-loaded and requires a server
+runner to inject template JSON into `window.__TTS_MERMAID_TEMPLATE_PREVIEW_INPUT__` before React
+renders it. A direct visit without that input produces an explicit render error and never mounts
+the product application. The route name and injected global are not authentication or
+authorization controls; deployments that require the render URL to be private must enforce that
+at their network/server boundary.
 
 ### 4.2 Build-time aliases
 
@@ -245,12 +256,15 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 
 ### 5.2 Route map
 
-[`frontend/src/App.tsx`](../frontend/src/App.tsx) declares the eager outer routes and lazy workspace
-boundary; [`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares
-the shared `/hub/*` route tree:
+[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) declares the isolated
+headless-render route and product fallback. [`frontend/src/App.tsx`](../frontend/src/App.tsx)
+declares the eager product routes and lazy workspace boundary;
+[`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares the
+shared `/hub/*` route tree:
 
 | Route | Page | Loading |
 | --- | --- | --- |
+| `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
 | `/login` | `LoginPage` | eager |
 | `/hub` | `HubPage` | lazy workspace route and page |
