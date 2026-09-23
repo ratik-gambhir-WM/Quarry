@@ -18,7 +18,10 @@ use crate::{
         migrations::{self, MigrationError},
     },
     domains::{
-        assistant::{self, chat::service::AssistantChatService},
+        assistant::{
+            self,
+            chat::{repository::AssistantChatRepository, service::AssistantChatService},
+        },
         data_rooms::{self, service::DataRoomService},
         deals::{self, repository::DealRepository, service::DealService, DataRoomSourceReader},
         dev_support,
@@ -129,9 +132,9 @@ pub(crate) fn assemble_api(
         .map(|studio| Arc::new(DiligenceStudioClient::new(http, studio.base_url.clone())));
 
     let user_directory = UserDirectory::new(users_repository.clone());
-    let users = Arc::new(UserService::new(users_repository));
+    let users = Arc::new(UserService::new(users_repository.clone()));
     let deals = Arc::new(DealService::new(
-        user_directory,
+        user_directory.clone(),
         deals_repository.clone(),
         openai.clone(),
         config
@@ -174,13 +177,15 @@ pub(crate) fn assemble_api(
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
     let templates = Arc::new(TemplateService::new(diligence_studio));
-    let assistant_chat = Arc::new(AssistantChatService::new(
+    let assistant_chat = Arc::new(AssistantChatService::with_persistence(
         openai,
         config
             .openai
             .as_ref()
             .map(|config| config.chat_model.clone())
             .unwrap_or_else(|| "gpt-5.5".to_string()),
+        AssistantChatRepository::new(sqlite),
+        user_directory,
     ));
 
     Router::new()

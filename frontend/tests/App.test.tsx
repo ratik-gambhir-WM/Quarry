@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
+import { RootRoutes } from "@/app/RootRoutes";
 import type { PersistedDeal } from "@/contracts/quarryApi";
 
 const { listDeals, queryModel } = vi.hoisted(() => ({ listDeals: vi.fn(), queryModel: vi.fn() }));
@@ -36,6 +37,18 @@ describe("App routes", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Quarry" })).toBeTruthy();
+    expect(listDeals).not.toHaveBeenCalled();
+  });
+
+  it("isolates the internal template renderer from the product application", async () => {
+    render(
+      <MemoryRouter initialEntries={["/_internal/template-preview"]}>
+        <RootRoutes />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("No template preview input was provided.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Quarry" })).toBeNull();
     expect(listDeals).not.toHaveBeenCalled();
   });
 

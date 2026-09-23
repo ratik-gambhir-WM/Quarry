@@ -169,13 +169,16 @@ request -> router -> handler -> service -> repository/client
 ## Backend development rules
 
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
-- Keep handlers thin and body-consuming extractors last.
+- Keep handlers thin and body-consuming extractors last. Validate every client-controlled
+  path, query, header, JSON, and multipart value in the handler (or router only when routing
+  requires it); do not move transport validation into services. Services retain only use-case
+  constraints derived from trusted, persisted, or upstream state.
 - Use `ServiceError` for use-case failures, `RepositoryError` for persistence failures, and
   `AppError` only at the HTTP boundary. Log internal context and return sanitized client messages.
 - Never hold a blocking filesystem, SQLite, Office, or CPU-heavy operation on a Tokio worker.
   Follow existing client/service offloading patterns.
-- Use bound parameters and the existing SQL builder/client. Preserve transaction and file-version
-  invariants when changing persistence.
+- Do not write ad hoc SQL. Always use bound parameters through the existing SQL builder/client,
+  and preserve transaction and file-version invariants when changing persistence.
 - Update migration tests and architecture/recovery documentation for schema or graph changes. Do
   not edit local SQLite databases, ignored `backend/data/`, or `.env` files as implementation
   shortcuts.

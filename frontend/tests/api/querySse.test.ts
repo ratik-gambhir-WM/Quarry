@@ -23,6 +23,20 @@ describe("QuerySseParser", () => {
     expect(() => new QuerySseParser(vi.fn()).finish()).toThrow("terminal event");
   });
 
+  it("accepts stable identifiers on the persisted started event", () => {
+    const onEvent = vi.fn();
+    const parser = new QuerySseParser(onEvent);
+    parser.push(new TextEncoder().encode(
+      "event: started\ndata: {\"type\":\"started\",\"model\":\"gpt-5.5\",\"threadId\":\"thread-1\",\"userMessageId\":\"user-1\",\"assistantMessageId\":\"assistant-1\"}\n\nevent: completed\ndata: {\"type\":\"completed\",\"response\":\"done\"}\n\n",
+    ));
+    parser.finish();
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      assistantMessageId: "assistant-1",
+      threadId: "thread-1",
+      userMessageId: "user-1",
+    }));
+  });
+
   it("enforces the event limit in UTF-8 bytes", () => {
     const parser = new QuerySseParser(vi.fn());
     const oversized = `event: delta\ndata: {"type":"delta","delta":"${"😀".repeat(262_145)}"}`;

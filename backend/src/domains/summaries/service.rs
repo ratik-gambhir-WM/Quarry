@@ -116,9 +116,6 @@ impl SummaryService {
     }
 
     pub async fn summarize_paths(&self, paths: Vec<String>) -> ServiceResult<String> {
-        if paths.is_empty() {
-            return Err(ServiceError::validation("no files selected for summary"));
-        }
         let selected_paths = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
         let root = common_parent_path(&selected_paths).unwrap_or_default();
         let (files, skipped_files) =

@@ -86,8 +86,17 @@ export function parseQueryEvent(value: unknown): SendQueryEvent {
   }
   switch (value.type) {
     case "started":
-      requireKeys(value, ["model", "type"]);
-      if (typeof value.model === "string" && value.model.length > 0) return value as SendQueryEvent;
+      requireOptionalKeys(value, ["model", "type"], [
+        "assistantMessageId",
+        "threadId",
+        "userMessageId",
+      ]);
+      if (
+        typeof value.model === "string"
+        && value.model.length > 0
+        && [value.assistantMessageId, value.threadId, value.userMessageId]
+          .every((item) => item === undefined || typeof item === "string")
+      ) return value as SendQueryEvent;
       break;
     case "delta":
       requireKeys(value, ["delta", "type"]);
@@ -144,6 +153,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requireKeys(value: Record<string, unknown>, expected: string[]) {
   const keys = Object.keys(value).sort();
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error("The query stream returned an invalid event shape.");
+  }
+}
+
+function requireOptionalKeys(
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[],
+) {
+  const keys = Object.keys(value);
+  if (
+    required.some((key) => !keys.includes(key))
+    || keys.some((key) => !required.includes(key) && !optional.includes(key))
+  ) {
     throw new Error("The query stream returned an invalid event shape.");
   }
 }

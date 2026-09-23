@@ -12,7 +12,10 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::app::http::error::{AppError, AppResult};
+use crate::{
+    adapters::diligence_studio::templates::{MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES},
+    app::http::error::{AppError, AppResult},
+};
 
 use super::service::{
     PptxTemplateImportMode, PptxTemplateImportResult, PptxTemplateUpload, TemplatePreviewPage,
@@ -46,7 +49,7 @@ pub(super) async fn list_template_previews_handler(
 ) -> AppResult<Json<TemplatePreviewPage>> {
     let Query(query) =
         query.map_err(|_| AppError::bad_request("page must be a positive integer"))?;
-    if query.page == 0 {
+    if query.page == 0 || query.page > MAX_TEMPLATE_PREVIEW_PAGES {
         return Err(AppError::bad_request("page must be a positive integer"));
     }
     state
@@ -61,6 +64,7 @@ pub(super) async fn delete_template_handler(
     State(state): State<TemplatesHttpState>,
     Path(template_id): Path<String>,
 ) -> AppResult<StatusCode> {
+    validate_template_id(&template_id)?;
     state
         .templates
         .delete(&template_id)
@@ -73,6 +77,7 @@ pub(super) async fn get_template_handler(
     State(state): State<TemplatesHttpState>,
     Path(template_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
+    validate_template_id(&template_id)?;
     let document = state
         .templates
         .get(&template_id)
@@ -105,6 +110,7 @@ pub(super) async fn export_powerpoint_handler(
     State(state): State<TemplatesHttpState>,
     Json(document): Json<serde_json::Value>,
 ) -> AppResult<Response<Body>> {
+    validate_presentation_document(&document)?;
     let export = state
         .templates
         .export_powerpoint(document)
@@ -126,6 +132,29 @@ pub(super) async fn export_powerpoint_handler(
         .map_err(|error| {
             AppError::internal(format!("PowerPoint response could not be built: {error}"))
         })
+}
+
+fn validate_template_id(template_id: &str) -> AppResult<()> {
+    if template_id.trim().is_empty()
+        || template_id.len() > MAX_TEMPLATE_ID_BYTES
+        || template_id.chars().any(char::is_control)
+    {
+        return Err(AppError::bad_request("template ID is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_presentation_document(document: &serde_json::Value) -> AppResult<()> {
+    if !document
+        .as_object()
+        .and_then(|root| root.get("presentation"))
+        .is_some_and(serde_json::Value::is_object)
+    {
+        return Err(AppError::bad_request(
+            "presentation document is missing a presentation object",
+        ));
+    }
+    Ok(())
 }
 
 async fn collect_pptx_template_upload(mut multipart: Multipart) -> AppResult<PptxTemplateUpload> {

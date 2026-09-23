@@ -1,8 +1,9 @@
 import type {
-  ChatModelAdapter,
-  ThreadMessage,
-} from "@assistant-ui/react";
-import type { ChatContextMessage, QuarryApi } from "../../contracts/quarryApi";
+  ChatContextMessage,
+  QuarryApi,
+  SendQueryEventHandlers,
+} from "../../contracts/quarryApi";
+import type { Message, ModelAdapter } from "./chatModel";
 
 const MAX_CONTEXT_MESSAGES = 64;
 const MAX_CONTEXT_CHARS = 400_000;
@@ -13,6 +14,7 @@ const CONNECTION_ERROR_MESSAGE = "The assistant connection was interrupted. Plea
 
 type QueryModelAdapterOptions = {
   onContextTruncated?: (truncated: boolean) => void;
+  userEmail?: string;
 };
 
 type QueueItem =
@@ -22,15 +24,21 @@ type QueueItem =
 
 type CompletedPair = readonly [ChatContextMessage, ChatContextMessage];
 
-export function createQueryModelAdapter(
-  api: Pick<QuarryApi, "queryModel">,
+export function createModelAdapter(
+  api: Pick<QuarryApi, "queryModel"> & Partial<Pick<QuarryApi, "runAssistantThread">>,
   options: QueryModelAdapterOptions = {},
-): ChatModelAdapter {
+): ModelAdapter {
   return {
     async *run(runOptions) {
       const prompt = readCurrentPrompt(runOptions.messages);
       const { context, truncated } = buildContext(runOptions.messages);
       options.onContextTruncated?.(truncated);
+      console.info("[chat] adapter.prepared", {
+        contextMessageCount: context.length,
+        truncated,
+        persisted: Boolean(options.userEmail && runOptions.threadId && api.runAssistantThread),
+        promptChars: [...prompt].length,
+      });
 
       if (runOptions.abortSignal.aborted) return;
 
@@ -60,10 +68,21 @@ export function createQueryModelAdapter(
 
       try {
         try {
-          cleanup = api.queryModel(
-            { context, files: [], prompt },
-            {
-              onConnectionError: () => {
+          const currentUser = findCurrentUserMessage(runOptions.messages);
+          const currentUserIndex = findCurrentUserIndex(runOptions.messages);
+          const previousMessage = runOptions.messages[currentUserIndex - 1];
+          const parentMessageId = previousMessage?.role === "assistant"
+            ? previousMessage.id
+            : undefined;
+          const usePersistedRun = Boolean(
+            options.userEmail
+              && runOptions.threadId
+              && runOptions.assistantMessageId
+              && api.runAssistantThread,
+          );
+          const handlers: SendQueryEventHandlers = {
+              onConnectionError: (message) => {
+                console.error("[chat] stream.connection_error", { message });
                 queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
                 dispose();
               },
@@ -71,12 +90,15 @@ export function createQueryModelAdapter(
                 if (!queue.accepting()) return;
                 switch (event.type) {
                   case "started":
+                    console.info("[chat] stream.started", { model: event.model });
                     return;
                   case "delta":
+                    console.debug("[chat] stream.delta", { characterCount: [...event.delta].length });
                     buffer += event.delta;
                     if (buffer.length > 0) queue.push({ kind: "snapshot", text: buffer });
                     return;
                   case "completed":
+                    console.info("[chat] stream.completed", { characterCount: [...event.response].length });
                     if (event.response !== buffer) {
                       buffer = event.response;
                       queue.push({ kind: "snapshot", text: buffer });
@@ -85,13 +107,26 @@ export function createQueryModelAdapter(
                     dispose();
                     return;
                   case "failed":
-                    queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
-                    dispose();
+                    console.error("[chat] stream.failed", { error: event.error });
+                  queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
+                  dispose();
                 }
               },
-            },
-          );
-        } catch {
+            };
+          cleanup = usePersistedRun
+            ? api.runAssistantThread!({
+                assistantMessageId: runOptions.assistantMessageId!,
+                files: [],
+                parentMessageId,
+                prompt,
+                requestId: runOptions.assistantMessageId!,
+                threadId: runOptions.threadId!,
+                userEmail: options.userEmail!,
+                userMessageId: currentUser.id,
+              }, handlers)
+            : api.queryModel({ context, files: [], prompt }, handlers);
+        } catch (error) {
+          console.error("[chat] adapter.transport_error", error);
           queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
         }
         if (cleanupPending || !queue.accepting() || runOptions.abortSignal.aborted) dispose();
@@ -111,7 +146,7 @@ export function createQueryModelAdapter(
   };
 }
 
-function readCurrentPrompt(messages: readonly ThreadMessage[]) {
+function readCurrentPrompt(messages: readonly Message[]) {
   const current = findCurrentUserMessage(messages);
   const text = textOnlyContent(current);
   if (text === null || text.trim().length === 0 || current.attachments.length > 0) {
@@ -120,7 +155,7 @@ function readCurrentPrompt(messages: readonly ThreadMessage[]) {
   return text;
 }
 
-function buildContext(messages: readonly ThreadMessage[]) {
+function buildContext(messages: readonly Message[]) {
   const currentUserIndex = findCurrentUserIndex(messages);
   const pairs: CompletedPair[] = [];
 
@@ -178,14 +213,14 @@ function buildContext(messages: readonly ThreadMessage[]) {
   };
 }
 
-function findCurrentUserIndex(messages: readonly ThreadMessage[]) {
+function findCurrentUserIndex(messages: readonly Message[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === "user") return index;
   }
   throw new Error("A user message is required to run the assistant.");
 }
 
-function findCurrentUserMessage(messages: readonly ThreadMessage[]) {
+function findCurrentUserMessage(messages: readonly Message[]) {
   const message = messages[findCurrentUserIndex(messages)];
   if (!message || message.role !== "user") {
     throw new Error("A user message is required to run the assistant.");
@@ -193,7 +228,7 @@ function findCurrentUserMessage(messages: readonly ThreadMessage[]) {
   return message;
 }
 
-function textOnlyContent(message: ThreadMessage) {
+function textOnlyContent(message: Message) {
   if (message.content.length === 0 || message.content.some((part) => part.type !== "text")) {
     return null;
   }

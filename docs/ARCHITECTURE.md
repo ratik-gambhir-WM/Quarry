@@ -21,10 +21,10 @@ planned domain scaffolds into implemented capabilities.
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root README retains parts of the original desktop design. The current code has a broader
-Tauri boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events
-cross Tauri IPC before reaching the same Axum API used by the browser. This document records that
-implemented path.
+The root README provides concise developer onboarding. The current code has a broader Tauri
+boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
+Tauri IPC before reaching the same Axum API used by the browser. This document records that
+implemented path in detail.
 
 ## Maintenance contract
 
@@ -189,12 +189,23 @@ explicitly decided.
 ```text
 React.StrictMode
   -> build-selected AppRouter
-      -> ThemeModeProvider
-          -> shared route manifest and pages
+      -> root route split
+          -> lazy internal template-preview renderer
+          -> product App fallback
+              -> ThemeModeProvider
+                  -> shared product route manifest and pages
 ```
 
 The app does not perform runtime sniffing to choose its host. Vite mode and the corresponding
 TypeScript project select the implementation before the bundle runs.
+
+[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) keeps the headless template
+renderer outside the product application shell. The renderer is lazy-loaded and requires a server
+runner to inject template JSON into `window.__TTS_MERMAID_TEMPLATE_PREVIEW_INPUT__` before React
+renders it. A direct visit without that input produces an explicit render error and never mounts
+the product application. The route name and injected global are not authentication or
+authorization controls; deployments that require the render URL to be private must enforce that
+at their network/server boundary.
 
 ### 4.2 Build-time aliases
 
@@ -234,7 +245,8 @@ The live frontend is an npm package using:
 - Vite 7 and TypeScript 6.0 with strict/no-unused/no-emit checks
 - React Router DOM 7
 - Tailwind CSS 4's CSS-first Vite integration
-- Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and assistant-ui LocalRuntime/primitives
+- Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and the custom Assistant `AgentRuntime`
+  and thread primitives
 - react-pdf/pdf.js for document preview
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
@@ -244,12 +256,15 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 
 ### 5.2 Route map
 
-[`frontend/src/App.tsx`](../frontend/src/App.tsx) declares the eager outer routes and lazy workspace
-boundary; [`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares
-the shared `/hub/*` route tree:
+[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) declares the isolated
+headless-render route and product fallback. [`frontend/src/App.tsx`](../frontend/src/App.tsx)
+declares the eager product routes and lazy workspace boundary;
+[`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares the
+shared `/hub/*` route tree:
 
 | Route | Page | Loading |
 | --- | --- | --- |
+| `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
 | `/login` | `LoginPage` | eager |
 | `/hub` | `HubPage` | lazy workspace route and page |
@@ -310,8 +325,8 @@ global state or query-cache library.
   non-Assistant Deal Hub headers identify the active sidebar without fixture-backed alternate
   spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
   initially selects Chat. Deal Hub restores the normal home navigation in the same sidebar without
-  leaving the Assistant route or unmounting its conversation; Chat shows an empty previous-chat
-  list plus a New chat action. The normal home sidebar still labels `/hub/assistant` as Assistant
+  leaving the Assistant route or unmounting its conversation; Chat shows the persisted regular
+  thread list plus a New chat action. The normal home sidebar still labels `/hub/assistant` as Assistant
   and uses an animated Twitch glyph.
   An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
@@ -388,17 +403,18 @@ global state or query-cache library.
   controls use a consistent 12-pixel text size. Selecting a file from the grid enters the existing
   preview state and swaps the Deal Room sidebar for the file explorer without nesting another main
   container; an empty Data Room continues to use the upload-first state.
-- The Assistant page uses assistant-ui's `LocalRuntime` as the sole owner of its ephemeral
-  transcript, composer draft, running/cancel/error state, retry actions, and pinned thread scroll.
-  The provider wraps both the route-specific sidebar and conversation so the sidebar's New chat
-  action can switch to a fresh local thread without introducing a second state owner. Previous
-  chats are intentionally not listed or persisted.
-  A narrow `ChatModelAdapter` converts the callback-based `QuarryApi.queryModel` stream into
-  cumulative assistant-ui text snapshots, treats completion as authoritative, and cancels the
-  matching transport exactly once. Each turn sends the current prompt plus a bounded immutable
-  snapshot of completed prior text-only user/assistant pairs; incomplete, failed, and stopped
-  turns are excluded. The transcript is page-local and is not written to fixtures, browser
-  storage, the activity log, SQLite, or Helix.
+- The Assistant page uses the custom `AgentRuntime` for its selected conversation and remote
+  thread list. Axum/SQLite own thread metadata and normalized messages; the runtime owns the
+  composer, active streaming state, retry actions, and pinned scroll. The provider wraps both the
+  route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
+  one runtime owner. It retains locally created threads when the initial remote list resolves late
+  and returns a failed history load to an explicit retryable selection state. The provider is keyed by the workspace email to prevent one development
+  profile's client cache from surviving an identity change. A narrow `ModelAdapter` converts
+  the callback-based stream into cumulative custom thread-message snapshots, treats completion as
+  authoritative, and cancels the matching transport exactly once.
+  Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
+  Axum loads bounded canonical completed pairs from SQLite. The legacy `/query_model` adapter path
+  still sends bounded client context for compatibility.
 - Legacy summarize components, `useSummarizeWorkflow`, data modules, and summary API methods remain
   available to the codebase, but the former `SummarizePage` route module and summary screen are no
   longer registered in the product route tree.
@@ -422,7 +438,7 @@ operational failures.
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | Ephemeral multi-turn text chat with starter prompts, incremental Markdown, stop/retry/copy actions, bounded completed-pair context replay, shared web/desktop streaming transport, and Assistant-only Deal Hub/Chat sidebar views whose New chat action starts a fresh local thread | No persistence/resume or visible previous-chat history, attachments, voice, model picker, tools, retrieval, citations, identity, authorization, rate limits, moderation, or quotas; each included context turn is resent and rebilled |
+| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, starter prompts, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Activity stream | Static data |
@@ -473,16 +489,17 @@ Any canary API use must retain feature/fallback behavior, keyboard/focus semanti
 `prefers-reduced-motion` behavior.
 
 The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its current `Summarize` title, but
-uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains an
-empty previous-chat list plus a New chat action backed by the same local assistant runtime. Deal
+uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains the
+persisted previous-chat list plus a New chat action backed by the remote thread runtime; selecting
+a previous chat shows a message-history skeleton until its stored messages load. Deal
 Hub swaps the same sidebar body to the normal home navigation without changing the Assistant URL
 or conversation. `WorkspaceLayout` has a default-preserving fill mode for this route:
-workspace Demo/error notices remain shrinking-safe siblings above one assistant-ui Thread
+workspace Demo/error notices remain shrinking-safe siblings above one custom thread
 viewport, and only that viewport scrolls. One mounted composer moves from the centered empty view
-to the measured sticky `ThreadPrimitive.ViewportFooter`; Motion interpolates the layout change and
-switches immediately under reduced motion. Adapted assistant-ui registry Thread, Composer,
-Markdown, and typing-indicator sources use Quarry's existing primitives and semantic tokens and
-omit unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
+to the measured sticky custom thread footer; Motion interpolates the layout change and
+switches immediately under reduced motion. Custom Thread, Composer, Markdown, and
+typing-indicator components use Quarry's existing primitives and semantic tokens and omit
+unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
 controls.
 
 ## 6. Web and desktop transports
@@ -502,7 +519,7 @@ The contract covers:
 - stored document list/PDF/text
 - synchronous and job-based document processing
 - document job subscriptions
-- ephemeral multi-turn assistant query streaming with current-turn attachments
+- persisted assistant threads/messages and thread-scoped streaming, plus legacy ephemeral queries
 - keyword/vector document search
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
@@ -643,7 +660,7 @@ Axum's default 2 MB body limit first; this mismatch remains a known contract gap
 
 ### 7.4 Research and summarization
 
-`POST /query_model` is the assistant chat contract. It accepts multipart `prompt`, required JSON
+`POST /query_model` is the legacy assistant chat contract. It accepts multipart `prompt`, required JSON
 `context`, optional `model` and `systemInstructions`, and up to 20 current-turn `files`. Context is
 an empty array or at most 64 messages (32 complete alternating user/assistant pairs), with 100,000
 Unicode scalar values per message and 400,000 total; prompts allow 100,000 and instructions 50,000. File bytes are
@@ -662,9 +679,27 @@ Streams have a 45-second provider/desktop idle bound, a 10-minute maximum, bound
 buffers, and bounded channels for backpressure. Cancellation drops the upstream response but is
 best effort and is not provider-side erasure.
 
+The persisted contract is rooted at `/assistant/threads`. List/create/load/rename/archive/
+unarchive/delete operations resolve the caller-supplied workspace email to `users.id` and enforce
+that owner in SQLite. This is useful development isolation, not authentication. A thread-scoped
+`POST /assistant/threads/{thread_id}/runs` accepts stable user/assistant message IDs, uses the
+assistant message ID as its idempotency key, atomically inserts the prompt and pending assistant
+row with the preceding assistant as the user's parent, reuses the existing user row when retrying
+that prompt with a new assistant response branch, loads bounded completed history before the
+retried prompt, and persists `completed`, `failed`, or `cancelled` terminal content. Thread reads
+normalize the earlier client bug that stored a user message as its own parent, allowing those
+transcripts to load without rewriting local data. Conflicting message-ID reuse is rejected before
+insertion. Observed failures and disconnects retain buffered partial text; process termination can
+still leave a `streaming` row because schema v8 has no checkpoint/recovery worker. The legacy route
+remains mounted under both API prefixes for compatibility.
+
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
 | POST | `/query_model` | Stream an ephemeral assistant answer over SSE | OpenAI |
+| GET/POST | `/assistant/threads` | List or create owned assistant threads | SQLite users and assistant tables |
+| GET/DELETE | `/assistant/threads/{thread_id}` | Load messages or delete an owned thread | SQLite |
+| POST | `/assistant/threads/{thread_id}/{rename,archive,unarchive}` | Mutate owned thread metadata | SQLite |
+| POST | `/assistant/threads/{thread_id}/runs` | Persist and stream an idempotent assistant turn | SQLite and OpenAI |
 | POST | `/files/extract` | WM file extraction/upload | WM AI group |
 | POST | `/indexes` | Create WM index | WM AI group |
 | GET | `/indexes/{index_id}/status` | Read WM index status | WM AI group |
@@ -728,7 +763,7 @@ result properties are currently snake_case because their Rust DTO lacks a rename
 flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
-    Bootstrap --> Sqlite[Open SQLite and run schema v7 migration]
+    Bootstrap --> Sqlite[Open SQLite and run schema v8 migration]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -758,7 +793,7 @@ state.
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
-| `domains/assistant::chat` | Ephemeral textual context validation, query defaults, streaming lifecycle, and cancellation propagation | Durable conversations, provider-specific reasoning/tool state, or future `assistant::agent` work |
+| `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, query defaults, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
 | `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
@@ -787,7 +822,7 @@ service, model, table, or product capability.
 | `system`, `dev_support` | Implemented operations and explicitly development-oriented routes |
 | `user_settings` | Partial client-only preferences; backend scaffold only |
 | `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
-| `assistant::chat` | Implemented ephemeral OpenAI-backed text chat transport when configured; the shared Assistant UI replays bounded completed text context through it |
+| `assistant::chat` | Implemented SQLite-backed OpenAI text threads when configured, plus the legacy client-context stream contract |
 | `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
 | `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
@@ -842,7 +877,7 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 SQLite schema version 7
+### 9.1 SQLite schema version 8
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -851,6 +886,8 @@ schema currently contains:
 | --- | --- | --- |
 | `app_metadata` | Application metadata key/value | No current service/route consumer |
 | `users` | Development user/profile records and API key | Used by user/deal services |
+| `assistant_threads` | User-owned thread metadata, archive state, and recency | Used by Assistant thread list |
+| `assistant_messages` | Ordered normalized user/assistant messages and terminal run state | Used by Assistant history and canonical context |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Core deal record and owner reference | Used |
 | `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
@@ -861,6 +898,8 @@ schema currently contains:
 Key invariants include:
 
 - deals reference an existing user
+- assistant threads reference an existing user and cascade their messages on deletion
+- assistant message order and run request IDs are unique within a thread
 - deal metadata has at most one of local path or SharePoint link; both may be absent
 - SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
 - logical files belong to one deal/workspace
@@ -870,10 +909,11 @@ Key invariants include:
 - archiving a deal retains its file records
 
 There is no migrations directory. `PRAGMA user_version` is the migration marker. Databases below
-version 6 are upgraded by dropping all application tables and recreating the complete version 7
+version 6 are upgraded by dropping all application tables and recreating the complete version 8
 schema. Version 6 databases are upgraded to version 7 in place by adding the nullable
 `sow_link`, `fact_sheet_link`, and `rl_link` columns to `deal_metadata`; existing rows are
-preserved. Databases above version 7 fail startup. The pre-version-6 rebuild remains deliberately
+preserved, then version 7 adds the assistant tables incrementally as version 8. Databases above
+version 8 fail startup. The pre-version-6 rebuild remains deliberately
 destructive and is not a production-safe incremental migration strategy.
 
 ### 9.2 Helix versioned file graph
@@ -1001,9 +1041,9 @@ therefore require LibreOffice.
 
 ### 10.4 Search
 
-Keyword and vector requests carry a caller-supplied workspace identity and limit. Services validate
-common constraints and delegate to the Helix index repository. There is currently no server-side
-identity binding to prove that the caller owns the requested workspace.
+Keyword and vector requests carry a caller-supplied workspace identity and limit. Handlers validate
+common request constraints before services delegate to the Helix index repository. There is currently
+no server-side identity binding to prove that the caller owns the requested workspace.
 
 The Data Room document-search overlay does not consume these endpoints. Its reusable frontend
 component currently filters deterministic fixture excerpts, while `DataRoomPage` maps activated
@@ -1015,18 +1055,23 @@ an expanded viewer contract.
 ### 10.5 Assistant chat
 
 ```text
-Assistant UI LocalRuntime + bounded completed text pairs + current prompt
-  -> ChatModelAdapter emits cumulative assistant-ui snapshots
-  -> web fetch parser or fixed-path Tauri relay
-  -> assistant::chat validates multipart/context/file bytes
-  -> AssistantChatService::ask resolves server defaults and opens bounded event channels
+Custom AgentRuntime remote thread list + current prompt and stable IDs
+  -> ModelAdapter emits cumulative thread-message snapshots
+  -> web fetch parser or allowlisted Tauri thread-run relay
+  -> assistant::chat resolves the development user and atomically inserts the pending turn
+  -> SQLite supplies bounded completed prior pairs
+  -> AssistantChatService resolves server defaults and opens bounded event channels
   -> OpenAiClient replays text plus current files to Responses API with store=false
-  -> started, ordered deltas, and one completed/failed terminal
+  -> started, ordered deltas, and one completed/failed terminal persisted to SQLite
 ```
 
-The transcript is not stored in Quarry or identified as a durable conversation. Callers must send
-the completed textual context snapshot on every request; failed, stopped, or partial turns and prior
-file bytes are not implicitly available to later turns.
+The thread-scoped transcript survives page and application restarts. Each expanded previous-chat
+item offers a menu with a wired Delete action; Archive is displayed but intentionally disabled.
+The server, rather than the client runtime, selects canonical prior text context. The run endpoint
+retains partial text on an observed failure/cancellation, but there is no token checkpoint or
+stale-`streaming` recovery after
+a backend process crash. Current-turn file bytes are still not retained for reuse. The legacy
+`/query_model` path remains ephemeral and requires a client context snapshot.
 
 ## 11. Configuration
 
@@ -1168,8 +1213,10 @@ and deployment TLS/rate limits/observability established.
 - `x-request-id` is generated and returned.
 - Internal application errors log contextual detail while returning a generic message.
 - Parser and AI-client paths record selected timing/failure context.
-- Assistant query logs contain provider status/category and timing only; prompts, context,
-  instructions, filenames, file contents, deltas, completed text, and raw provider bodies are omitted.
+- Assistant query logs contain request/thread/message identifiers, phase, counts, provider
+  status/category, and timing only; prompts, context, instructions, filenames, file contents,
+  deltas, completed text, and raw provider bodies are omitted. The frontend also emits matching
+  metadata-only `[chat]` console entries for runtime, transport, and SSE transitions.
 - Diligence Studio failures log internal context and surface only stable sanitized responses;
   preview data is read through on each template gallery request and is not persisted or cached.
   PPTX import transport failures are surfaced as uncertain because the upstream write has no
@@ -1225,8 +1272,9 @@ Coverage currently includes:
   migration/provider lifetime, legacy Summarize workflow coverage, and manifest-driven
   bundle-budget validation
 - Assistant stream-adapter ordering, authoritative completion, sanitized failures, synchronous
-  terminal cleanup, cancellation, completed-pair context bounds, composer/suggestion behavior,
-  incremental Markdown, retry/stop states, reduced motion, and fill-layout notice composition
+  terminal cleanup, cancellation, completed-pair context bounds, previous-chat history loading
+  skeletons, composer/suggestion behavior, incremental Markdown, retry/stop states, reduced motion,
+  and fill-layout notice composition
 
 There is no browser end-to-end suite or visual regression suite.
 
@@ -1320,14 +1368,13 @@ configuration. Never use `clear_helix` as verification.
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
-| Assistant chat | Ephemeral client-replayed text context; no persistence, identity, rate limits, moderation, resume, or attachment reuse | Not safe for public production exposure; each turn resends and rebills included context |
+| Assistant chat | SQLite transcript with caller-supplied email ownership; no authentication, stale-stream recovery, rate limits, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
 | API mapping | Handwritten in web and desktop adapters | Drift risk without shared descriptors/generation |
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | No CI, container, provider, signing, updater, or TLS config | Repository is not independently deployable |
 | Health | Shallow process check | Cannot determine dependency readiness |
-| Docs | README describes an older desktop boundary | This file should be used for current code |
 | Plans | Ignored and sometimes stale after implementation | Must not be treated as tracked contract |
 
 The retained `docs/architecture/*.docx` files are useful point-in-time assessments. Their file

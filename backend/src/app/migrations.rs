@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 
-const LATEST_SCHEMA_VERSION: i64 = 7;
+const LATEST_SCHEMA_VERSION: i64 = 8;
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -29,19 +29,24 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
         });
     }
     if version < 6 {
-        recreate_version_7_schema(connection)?;
-    } else if version < LATEST_SCHEMA_VERSION {
+        recreate_version_8_schema(connection)?;
+    } else if version == 6 {
         migrate_version_6_to_7(connection)?;
+        migrate_version_7_to_8(connection)?;
+    } else if version < LATEST_SCHEMA_VERSION {
+        migrate_version_7_to_8(connection)?;
     }
     Ok(())
 }
 
-fn recreate_version_7_schema(connection: &mut Connection) -> Result<(), MigrationError> {
+fn recreate_version_8_schema(connection: &mut Connection) -> Result<(), MigrationError> {
     connection.pragma_update(None, "foreign_keys", "OFF")?;
     let migration = (|| -> Result<(), MigrationError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
+            DROP TABLE IF EXISTS assistant_messages;
+            DROP TABLE IF EXISTS assistant_threads;
             DROP TABLE IF EXISTS quarry_file_blobs;
             DROP TABLE IF EXISTS quarry_file_versions;
             DROP TABLE IF EXISTS quarry_files;
@@ -66,6 +71,49 @@ fn recreate_version_7_schema(connection: &mut Connection) -> Result<(), Migratio
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE assistant_threads (
+                thread_id TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'regular'
+                    CHECK (status IN ('regular', 'archived')),
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_message_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (length(trim(thread_id)) > 0),
+                CHECK (length(trim(title)) > 0)
+            );
+
+            CREATE INDEX idx_assistant_threads_user_status_recent
+                ON assistant_threads(user_id, status, last_message_at DESC, thread_id);
+
+            CREATE TABLE assistant_messages (
+                message_id TEXT PRIMARY KEY NOT NULL,
+                thread_id TEXT NOT NULL REFERENCES assistant_threads(thread_id) ON DELETE CASCADE,
+                parent_message_id TEXT REFERENCES assistant_messages(message_id),
+                sequence INTEGER NOT NULL CHECK (sequence >= 0),
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (status IN ('streaming', 'completed', 'failed', 'cancelled')),
+                model TEXT,
+                request_id TEXT,
+                error_code TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                UNIQUE (thread_id, sequence),
+                UNIQUE (thread_id, request_id),
+                CHECK (length(trim(message_id)) > 0),
+                CHECK (request_id IS NULL OR length(trim(request_id)) > 0)
+            );
+
+            CREATE INDEX idx_assistant_messages_thread_sequence
+                ON assistant_messages(thread_id, sequence);
+            CREATE INDEX idx_assistant_messages_thread_parent
+                ON assistant_messages(thread_id, parent_message_id);
 
             CREATE TABLE reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,6 +253,57 @@ fn migrate_version_6_to_7(connection: &mut Connection) -> Result<(), MigrationEr
         ALTER TABLE deal_metadata
             ADD COLUMN rl_link TEXT
             CHECK (rl_link IS NULL OR length(trim(rl_link)) > 0);
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", 7)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn migrate_version_7_to_8(connection: &mut Connection) -> Result<(), MigrationError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS assistant_threads (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'regular'
+                CHECK (status IN ('regular', 'archived')),
+            metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_message_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CHECK (length(trim(thread_id)) > 0),
+            CHECK (length(trim(title)) > 0)
+        );
+        CREATE INDEX IF NOT EXISTS idx_assistant_threads_user_status_recent
+            ON assistant_threads(user_id, status, last_message_at DESC, thread_id);
+
+        CREATE TABLE IF NOT EXISTS assistant_messages (
+            message_id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL REFERENCES assistant_threads(thread_id) ON DELETE CASCADE,
+            parent_message_id TEXT REFERENCES assistant_messages(message_id),
+            sequence INTEGER NOT NULL CHECK (sequence >= 0),
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK (status IN ('streaming', 'completed', 'failed', 'cancelled')),
+            model TEXT,
+            request_id TEXT,
+            error_code TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
+            UNIQUE (thread_id, sequence),
+            UNIQUE (thread_id, request_id),
+            CHECK (length(trim(message_id)) > 0),
+            CHECK (request_id IS NULL OR length(trim(request_id)) > 0)
+        );
+        CREATE INDEX IF NOT EXISTS idx_assistant_messages_thread_sequence
+            ON assistant_messages(thread_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_assistant_messages_thread_parent
+            ON assistant_messages(thread_id, parent_message_id);
         "#,
     )?;
     transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;

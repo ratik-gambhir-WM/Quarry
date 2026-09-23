@@ -29,61 +29,6 @@ fn input() -> SaveDealInput {
     }
 }
 
-#[test]
-fn validates_dates_and_optional_data_room_location() {
-    assert!(validate_deal_input(&input()).is_ok());
-
-    let mut no_location = input();
-    no_location.local_path = None;
-    assert!(validate_deal_input(&no_location).is_ok());
-
-    let mut invalid_dates = input();
-    invalid_dates.close_date = "2026-01-01".to_string();
-    assert_eq!(
-        validate_deal_input(&invalid_dates).unwrap_err(),
-        ServiceError::validation("closeDate cannot be before startDate")
-    );
-
-    let mut both_locations = input();
-    both_locations.sharepoint_link =
-        Some("https://company.sharepoint.com/sites/deal-room".to_string());
-    assert_eq!(
-        validate_deal_input(&both_locations).unwrap_err(),
-        ServiceError::validation("localPath and sharepointLink cannot both be provided")
-    );
-
-    let mut invalid_sharepoint_link = no_location;
-    invalid_sharepoint_link.sharepoint_link = Some("http://example.com/deal-room".to_string());
-    assert_eq!(
-        validate_deal_input(&invalid_sharepoint_link).unwrap_err(),
-        ServiceError::validation("sharepointLink must be an HTTPS SharePoint URL")
-    );
-}
-
-#[test]
-fn validates_resource_links_as_credential_free_https_urls() {
-    assert!(validate_https_link("sowLink", Some("https://example.com/sow")).is_ok());
-    assert!(validate_https_link("factSheetLink", None).is_ok());
-
-    for link in [
-        "http://example.com/resource",
-        "javascript:alert(1)",
-        "https://user:password@example.com/resource",
-        "not a URL",
-    ] {
-        assert_eq!(
-            validate_https_link("rlLink", Some(link)).unwrap_err(),
-            ServiceError::validation("rlLink must be an HTTPS URL")
-        );
-    }
-
-    assert_eq!(
-        validate_sharepoint_link(Some("https://example.com/.sharepoint.com/sites/acme"))
-            .unwrap_err(),
-        ServiceError::validation("sharepointLink must be an HTTPS SharePoint URL")
-    );
-}
-
 #[tokio::test]
 async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
     let sqlite = SqliteClient::open_in_memory().unwrap();

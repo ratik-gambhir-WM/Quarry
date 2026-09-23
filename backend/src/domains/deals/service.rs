@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
-use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 pub use crate::domains::deals::repository::{Deal, DealMetadata, DealWithMetadata};
@@ -134,7 +133,6 @@ impl DealService {
     }
 
     pub async fn create(&self, input: SaveDealInput) -> ServiceResult<SaveDealResponse> {
-        validate_deal_input(&input)?;
         let user_email = input.user_email.trim().to_string();
         let user = self.users.by_email(&user_email).await?.ok_or_else(|| {
             ServiceError::validation(format!("user not found for email `{user_email}`"))
@@ -195,10 +193,6 @@ impl DealService {
         let fact_sheet_link =
             updated_optional_value(input.fact_sheet_link, existing_metadata.fact_sheet_link);
         let rl_link = updated_optional_value(input.rl_link, existing_metadata.rl_link);
-        validate_sharepoint_link(sharepoint_link.as_deref())?;
-        validate_https_link("sowLink", sow_link.as_deref())?;
-        validate_https_link("factSheetLink", fact_sheet_link.as_deref())?;
-        validate_https_link("rlLink", rl_link.as_deref())?;
         if existing_metadata.local_path.is_some() && sharepoint_link.is_some() {
             return Err(ServiceError::validation(
                 "localPath and sharepointLink cannot both be provided",
@@ -321,93 +315,6 @@ impl DealService {
     }
 }
 
-fn validate_deal_input(input: &SaveDealInput) -> ServiceResult<()> {
-    let required = [
-        ("dealId", input.deal_id.as_str()),
-        ("dealName", input.deal_name.as_str()),
-        ("status", input.status.as_str()),
-        ("startDate", input.start_date.as_str()),
-        ("closeDate", input.close_date.as_str()),
-        ("transactionType", input.transaction_type.as_str()),
-        ("targetCompany", input.target_company.as_str()),
-        ("primaryBuyer", input.primary_buyer.as_str()),
-        ("dealSponsor", input.deal_sponsor.as_str()),
-        ("userEmail", input.user_email.as_str()),
-    ];
-    if let Some((name, _)) = required.iter().find(|(_, value)| value.trim().is_empty()) {
-        return Err(ServiceError::validation(format!("{name} is required")));
-    }
-    if !input.deal_id.starts_with("DEAL-")
-        || input.deal_id.len() > 64
-        || !input
-            .deal_id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
-        return Err(ServiceError::validation("dealId must start with DEAL- and contain only letters, numbers, hyphens, and underscores"));
-    }
-    let start_date = parse_date("startDate", &input.start_date)?;
-    let close_date = parse_date("closeDate", &input.close_date)?;
-    if close_date < start_date {
-        return Err(ServiceError::validation(
-            "closeDate cannot be before startDate",
-        ));
-    }
-
-    let local_path = trim_optional(input.local_path.as_deref());
-    let sharepoint_link = trim_optional(input.sharepoint_link.as_deref());
-    if local_path.is_some() && sharepoint_link.is_some() {
-        return Err(ServiceError::validation(
-            "localPath and sharepointLink cannot both be provided",
-        ));
-    }
-    validate_sharepoint_link(sharepoint_link)?;
-    Ok(())
-}
-
-fn validate_sharepoint_link(link: Option<&str>) -> ServiceResult<()> {
-    if let Some(link) = link {
-        let parsed = reqwest::Url::parse(link).map_err(|_| {
-            ServiceError::validation("sharepointLink must be an HTTPS SharePoint URL")
-        })?;
-        let is_sharepoint = parsed
-            .host_str()
-            .is_some_and(|host| host.to_ascii_lowercase().ends_with(".sharepoint.com"));
-        if parsed.scheme() != "https"
-            || !is_sharepoint
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-        {
-            return Err(ServiceError::validation(
-                "sharepointLink must be an HTTPS SharePoint URL",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_https_link(field: &str, link: Option<&str>) -> ServiceResult<()> {
-    if let Some(link) = link {
-        let parsed = reqwest::Url::parse(link)
-            .map_err(|_| ServiceError::validation(format!("{field} must be an HTTPS URL")))?;
-        if parsed.scheme() != "https"
-            || parsed.host_str().is_none()
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-        {
-            return Err(ServiceError::validation(format!(
-                "{field} must be an HTTPS URL"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn parse_date(field: &str, value: &str) -> ServiceResult<NaiveDate> {
-    NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
-        .map_err(|_| ServiceError::validation(format!("{field} must use YYYY-MM-DD format")))
-}
-
 fn parse_deal_extraction(response: &str) -> Result<DealExtraction, String> {
     let trimmed = response.trim();
     let json_text = trimmed
@@ -422,10 +329,6 @@ fn parse_deal_extraction(response: &str) -> Result<DealExtraction, String> {
         .trim();
     serde_json::from_str(json_text)
         .map_err(|error| format!("failed to parse deal extraction JSON: {error}"))
-}
-
-fn trim_optional(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 fn trim_optional_owned(value: Option<String>) -> Option<String> {

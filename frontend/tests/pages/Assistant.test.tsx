@@ -7,6 +7,9 @@ import { Assistant } from "@/pages/Assistant";
 
 const { shellProps } = vi.hoisted(() => ({ shellProps: vi.fn() }));
 
+vi.mock("@/app/WorkspaceProvider", () => ({
+  useWorkspace: () => ({ email: "analyst@example.com" }),
+}));
 vi.mock("@/components/chat/QueryChat", () => ({
   QueryChatThread: () => <div>Assistant chat</div>,
 }));

@@ -83,8 +83,58 @@ export type QueryModelInput = {
   systemInstructions?: string;
 };
 
+export type AssistantThread = {
+  createdAt: string;
+  lastMessageAt: string;
+  status: "regular" | "archived";
+  threadId: string;
+  title: string;
+  updatedAt: string;
+};
+
+export type AssistantMessage = {
+  completedAt: string | null;
+  content: string;
+  createdAt: string;
+  messageId: string;
+  model: string | null;
+  parentMessageId: string | null;
+  role: "user" | "assistant";
+  sequence: number;
+  status: "streaming" | "completed" | "failed" | "cancelled";
+  threadId: string;
+};
+
+export type AssistantThreadDetail = AssistantThread & {
+  messages: AssistantMessage[];
+};
+
+export type AssistantThreadPage = {
+  nextCursor: string | null;
+  threads: AssistantThread[];
+};
+
+export type RunAssistantThreadInput = {
+  assistantMessageId: string;
+  files: File[];
+  model?: string;
+  parentMessageId?: string;
+  prompt: string;
+  requestId: string;
+  systemInstructions?: string;
+  threadId: string;
+  userEmail: string;
+  userMessageId: string;
+};
+
 export type SendQueryEvent =
-  | { model: string; type: "started" }
+  | {
+      assistantMessageId?: string;
+      model: string;
+      threadId?: string;
+      type: "started";
+      userMessageId?: string;
+    }
   | { delta: string; type: "delta" }
   | { response: string; type: "completed" }
   | { error: string; type: "failed" };
@@ -182,16 +232,20 @@ export type PowerPointExport = {
 };
 
 export interface QuarryApi {
+  archiveAssistantThread(threadId: string, userEmail: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
+  createAssistantThread(userEmail: string, threadId?: string): Promise<AssistantThread>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
   deleteTemplate(templateId: string): Promise<void>;
+  deleteAssistantThread(threadId: string, userEmail: string): Promise<void>;
   exportPowerPoint(document: DiligenceCanvasDocument): Promise<PowerPointExport>;
   saveDealMetadata(
     dealId: string,
     input: SaveDealMetadataInput,
   ): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
+  getAssistantThread(threadId: string, userEmail: string): Promise<AssistantThreadDetail>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
   getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
   getTemplate(templateId: string): Promise<DiligenceCanvasDocument>;
@@ -201,6 +255,10 @@ export interface QuarryApi {
     importMode: PptxTemplateImportMode,
   ): Promise<PptxTemplateImportResult>;
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
+  listAssistantThreads(
+    userEmail: string,
+    options?: { after?: string; archived?: boolean },
+  ): Promise<AssistantThreadPage>;
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
   listDeals(): Promise<PersistedDeal[]>;
   listTemplatePreviews(page: number): Promise<TemplatePreviewPage>;
@@ -215,6 +273,11 @@ export interface QuarryApi {
     files: File[],
   ): Promise<ProcessDocumentsResponse>;
   queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers): () => void;
+  renameAssistantThread(threadId: string, userEmail: string, title: string): Promise<void>;
+  runAssistantThread(
+    input: RunAssistantThreadInput,
+    handlers: SendQueryEventHandlers,
+  ): () => void;
   searchDocumentChunksByKeyword(
     search: FileChunkKeywordSearch,
   ): Promise<KeywordFileChunkHit[]>;
@@ -233,6 +296,7 @@ export interface QuarryApi {
   summarizePath(path: string): Promise<string>;
   summarizeSelected(paths: string[]): Promise<string>;
   summarizeUpload(files: File[]): Promise<string>;
+  unarchiveAssistantThread(threadId: string, userEmail: string): Promise<void>;
   userExistsByEmail(email: string): Promise<boolean>;
 }
 

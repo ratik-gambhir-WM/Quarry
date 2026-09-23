@@ -31,16 +31,6 @@ async fn unconfigured_get_returns_a_sanitized_unavailable_error() {
 }
 
 #[tokio::test]
-async fn get_rejects_an_invalid_template_id_before_capability_lookup() {
-    let service = TemplateService::new(None);
-
-    assert_eq!(
-        service.get("\n").await.unwrap_err(),
-        ServiceError::Validation("template ID is invalid".to_string())
-    );
-}
-
-#[tokio::test]
 async fn unconfigured_import_returns_a_sanitized_unavailable_error() {
     let service = TemplateService::new(None);
 
@@ -53,28 +43,6 @@ async fn unconfigured_import_returns_a_sanitized_unavailable_error() {
             .await
             .unwrap_err(),
         ServiceError::Unavailable("template import is not configured".to_string())
-    );
-}
-
-#[tokio::test]
-async fn export_validates_the_document_before_capability_lookup() {
-    let service = TemplateService::new(None);
-
-    assert_eq!(
-        service
-            .export_powerpoint(serde_json::json!({ "notPresentation": {} }))
-            .await
-            .unwrap_err(),
-        ServiceError::Validation(
-            "presentation document is missing a presentation object".to_string()
-        )
-    );
-    assert_eq!(
-        service
-            .export_powerpoint(serde_json::json!({ "presentation": {} }))
-            .await
-            .unwrap_err(),
-        ServiceError::Unavailable("PowerPoint export capability is not configured".to_string())
     );
 }
 
@@ -108,24 +76,6 @@ fn service_rejects_a_powerpoint_result_above_the_response_limit() {
     );
 }
 
-#[tokio::test]
-async fn pptx_import_rejects_empty_bytes_before_capability_lookup() {
-    let service = TemplateService::new(None);
-
-    assert_eq!(
-        service
-            .import_pptx_template(
-                PptxTemplateUpload { bytes: Vec::new() },
-                PptxTemplateImportMode::Single,
-            )
-            .await
-            .unwrap_err(),
-        ServiceError::Validation(
-            "PPTX template bytes are empty or exceed the 25 MB limit".to_string()
-        )
-    );
-}
-
 #[test]
 fn single_slide_rejection_maps_to_the_actionable_product_error() {
     assert_eq!(
@@ -148,16 +98,6 @@ fn transport_failure_maps_to_an_uncertain_outcome_without_upstream_details() {
             "Template import could not be confirmed. Refresh templates before trying again."
                 .to_string()
         )
-    );
-}
-
-#[tokio::test]
-async fn delete_rejects_an_invalid_template_id_before_capability_lookup() {
-    let service = TemplateService::new(None);
-
-    assert_eq!(
-        service.delete("   ").await.unwrap_err(),
-        ServiceError::Validation("template ID is invalid".to_string())
     );
 }
 
@@ -188,19 +128,6 @@ fn malformed_template_document_maps_to_sanitized_unavailable() {
             "private payload details".to_string(),
         )),
         ServiceError::Unavailable("template is temporarily unavailable".to_string())
-    );
-}
-
-#[tokio::test]
-async fn service_rejects_pages_beyond_the_catalog_guard() {
-    let service = TemplateService::new(None);
-
-    assert_eq!(
-        service
-            .list_previews(MAX_TEMPLATE_PREVIEW_PAGES + 1)
-            .await
-            .unwrap_err(),
-        ServiceError::Validation("page is outside the supported range".to_string())
     );
 }
 

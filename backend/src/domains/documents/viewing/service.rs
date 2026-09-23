@@ -17,7 +17,6 @@ use crate::{
     shared::{
         error::{ServiceError, ServiceResult},
         file_policy::office_extension_for_mime_type,
-        ids::require_non_empty,
     },
 };
 use lopdf::{
@@ -101,13 +100,10 @@ impl StoredDocumentService {
     }
 
     pub async fn list(&self, deal_id: &str) -> ServiceResult<Vec<DealDocumentSummary>> {
-        require_non_empty(deal_id, "dealId").map_err(ServiceError::validation)?;
         self.files.list_for_deal(deal_id).await.map_err(Into::into)
     }
 
     pub async fn load(&self, deal_id: &str, file_id: &str) -> ServiceResult<StoredDocumentBlob> {
-        require_non_empty(deal_id, "dealId").map_err(ServiceError::validation)?;
-        require_non_empty(file_id, "fileId").map_err(ServiceError::validation)?;
         self.files
             .current_blob(deal_id, file_id)
             .await?

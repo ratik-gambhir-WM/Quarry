@@ -20,6 +20,16 @@ const file: DataRoomFileEntry = {
 afterEach(cleanup);
 
 describe("FileReviewTable", () => {
+  it("embeds the review grid directly in the Data Room surface", () => {
+    render(<FileReviewTable files={[file]} onSelectFile={vi.fn()} />);
+
+    const grid = document.querySelector('[data-slot="data-grid"]');
+
+    expect(grid?.className).toContain("border-t");
+    expect(grid?.parentElement?.className).not.toContain("rounded-2xl");
+    expect(grid?.parentElement?.className).not.toContain("bg-surface-container-lowest");
+  });
+
   it("expands its left-aligned search control and restores focus when dismissed", async () => {
     const user = userEvent.setup({ skipHover: true });
     render(<FileReviewTable files={[file]} onSelectFile={vi.fn()} />);

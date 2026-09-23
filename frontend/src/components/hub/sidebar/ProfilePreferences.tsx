@@ -37,7 +37,7 @@ export function ProfilePreferences({ email, navigationState }: ProfilePreference
             </div>
           </>
         ) : null}
-        <div className="border-t border-outline-variant pt-3">
+        <div className={DARK_THEME_ENABLED ? "border-t border-outline-variant pt-3" : undefined}>
           <button
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-text-main transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
             onClick={handleAccountInfo}

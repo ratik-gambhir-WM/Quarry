@@ -8,8 +8,7 @@ use crate::{
         templates::{
             PptxTemplateImportMode as AdapterImportMode,
             PptxTemplateImportResult as AdapterImportResult, SlideTemplateClientError,
-            TemplatePreviewPage as AdapterPage, MAX_POWERPOINT_EXPORT_BYTES, MAX_TEMPLATE_ID_BYTES,
-            MAX_TEMPLATE_PREVIEW_PAGES,
+            TemplatePreviewPage as AdapterPage, MAX_POWERPOINT_EXPORT_BYTES,
         },
     },
     shared::error::{ServiceError, ServiceResult},
@@ -89,11 +88,6 @@ impl TemplateService {
     }
 
     pub async fn list_previews(&self, page: usize) -> ServiceResult<TemplatePreviewPage> {
-        if page == 0 || page > MAX_TEMPLATE_PREVIEW_PAGES {
-            return Err(ServiceError::validation(
-                "page is outside the supported range",
-            ));
-        }
         let client = self.client.as_ref().ok_or_else(|| {
             ServiceError::unavailable("template preview capability is not configured")
         })?;
@@ -105,12 +99,6 @@ impl TemplateService {
     }
 
     pub async fn delete(&self, template_id: &str) -> ServiceResult<()> {
-        if template_id.trim().is_empty()
-            || template_id.len() > MAX_TEMPLATE_ID_BYTES
-            || template_id.chars().any(char::is_control)
-        {
-            return Err(ServiceError::validation("template ID is invalid"));
-        }
         let client = self
             .client
             .as_ref()
@@ -122,12 +110,6 @@ impl TemplateService {
     }
 
     pub async fn get(&self, template_id: &str) -> ServiceResult<serde_json::Value> {
-        if template_id.trim().is_empty()
-            || template_id.len() > MAX_TEMPLATE_ID_BYTES
-            || template_id.chars().any(char::is_control)
-        {
-            return Err(ServiceError::validation("template ID is invalid"));
-        }
         let client = self
             .client
             .as_ref()
@@ -143,11 +125,6 @@ impl TemplateService {
         upload: PptxTemplateUpload,
         import_mode: PptxTemplateImportMode,
     ) -> ServiceResult<PptxTemplateImportResult> {
-        if upload.bytes.is_empty() || upload.bytes.len() > MAX_PPTX_TEMPLATE_IMPORT_BYTES {
-            return Err(ServiceError::validation(
-                "PPTX template bytes are empty or exceed the 25 MB limit",
-            ));
-        }
         let client = self
             .client
             .as_ref()
@@ -167,15 +144,6 @@ impl TemplateService {
         &self,
         document: serde_json::Value,
     ) -> ServiceResult<PowerPointExport> {
-        if !document
-            .as_object()
-            .and_then(|root| root.get("presentation"))
-            .is_some_and(serde_json::Value::is_object)
-        {
-            return Err(ServiceError::validation(
-                "presentation document is missing a presentation object",
-            ));
-        }
         let client = self.client.as_ref().ok_or_else(|| {
             ServiceError::unavailable("PowerPoint export capability is not configured")
         })?;

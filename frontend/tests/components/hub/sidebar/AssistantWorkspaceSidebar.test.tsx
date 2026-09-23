@@ -1,42 +1,23 @@
 // @vitest-environment happy-dom
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantWorkspaceSidebar } from "@/components/hub/sidebar/AssistantWorkspaceSidebar";
-
-const { startNewChat } = vi.hoisted(() => ({ startNewChat: vi.fn() }));
-
-vi.mock("@assistant-ui/react", () => ({
-  ThreadListPrimitive: {
-    New: ({ children, onClick, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) => (
-      <button
-        {...props}
-        onClick={(event) => {
-          onClick?.(event);
-          startNewChat();
-        }}
-        type="button"
-      >
-        {children}
-      </button>
-    ),
-  },
-}));
+import { QueryChatRuntimeProvider } from "@/components/chat/QueryChatRuntimeProvider";
+import { QueryChatThread } from "@/components/chat/QueryChat";
 
 afterEach(() => {
   cleanup();
-  startNewChat.mockReset();
 });
 
 describe("AssistantWorkspaceSidebar", () => {
   it("starts on Chat with an empty previous-chat list", () => {
     render(
-      <MemoryRouter initialEntries={["/hub/assistant"]}>
+      <ChatTestRuntime><MemoryRouter initialEntries={["/hub/assistant"]}>
         <AssistantWorkspaceSidebar activeHomeSection="assistant" tools={[]} />
-      </MemoryRouter>,
+      </MemoryRouter></ChatTestRuntime>,
     );
 
     const tabs = screen.getByRole("tablist", { name: "Assistant sidebar views" });
@@ -53,10 +34,10 @@ describe("AssistantWorkspaceSidebar", () => {
   it("shows Deal Hub navigation without leaving the Assistant route", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/hub/assistant"]}>
+      <ChatTestRuntime><MemoryRouter initialEntries={["/hub/assistant"]}>
         <AssistantWorkspaceSidebar activeHomeSection="assistant" tools={[]} />
         <LocationProbe />
-      </MemoryRouter>,
+      </MemoryRouter></ChatTestRuntime>,
     );
 
     await user.click(screen.getByRole("tab", { name: "Deal Hub" }));
@@ -77,9 +58,9 @@ describe("AssistantWorkspaceSidebar", () => {
   it("switches and focuses tabs with arrow keys", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/hub/assistant"]}>
+      <ChatTestRuntime><MemoryRouter initialEntries={["/hub/assistant"]}>
         <AssistantWorkspaceSidebar activeHomeSection="assistant" tools={[]} />
-      </MemoryRouter>,
+      </MemoryRouter></ChatTestRuntime>,
     );
 
     const chat = screen.getByRole("tab", { name: "Chat" });
@@ -95,22 +76,24 @@ describe("AssistantWorkspaceSidebar", () => {
   it("exposes the new-chat action", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/hub/assistant"]}>
+      <ChatTestRuntime><MemoryRouter initialEntries={["/hub/assistant"]}>
         <AssistantWorkspaceSidebar activeHomeSection="assistant" tools={[]} />
-      </MemoryRouter>,
+        <QueryChatThread contextTruncated={false} />
+      </MemoryRouter></ChatTestRuntime>,
     );
 
+    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Draft");
     await user.click(screen.getByRole("button", { name: "New chat" }));
 
-    expect(startNewChat).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("textbox", { name: "Message input" }) as HTMLTextAreaElement).value).toBe("");
   });
 
   it("centers the new-chat action when the sidebar is collapsed", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/hub/assistant"]}>
+      <ChatTestRuntime><MemoryRouter initialEntries={["/hub/assistant"]}>
         <AssistantWorkspaceSidebar activeHomeSection="assistant" tools={[]} />
-      </MemoryRouter>,
+      </MemoryRouter></ChatTestRuntime>,
     );
 
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
@@ -124,4 +107,8 @@ describe("AssistantWorkspaceSidebar", () => {
 
 function LocationProbe() {
   return <span data-testid="location">{useLocation().pathname}</span>;
+}
+
+function ChatTestRuntime({ children }: { children: React.ReactNode }) {
+  return <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="">{children}</QueryChatRuntimeProvider>;
 }

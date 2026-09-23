@@ -34,13 +34,45 @@ pub struct QueryModelInput {
     pub system_instructions: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct PersistentQueryInput {
+    pub assistant_message_id: String,
+    pub files: Vec<super::upload::ChatUpload>,
+    pub model: Option<String>,
+    pub parent_message_id: Option<String>,
+    pub prompt: String,
+    pub request_id: String,
+    pub system_instructions: Option<String>,
+    pub thread_id: String,
+    pub user_email: String,
+    pub user_message_id: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SendQueryEvent {
-    Started { model: String },
-    Delta { delta: String },
-    Completed { response: String },
-    Failed { error: &'static str },
+    Started {
+        model: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_message_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        assistant_message_id: Option<String>,
+    },
+    Delta {
+        delta: String,
+    },
+    Completed {
+        response: String,
+    },
+    Failed {
+        error: &'static str,
+    },
 }
 
 impl SendQueryEvent {

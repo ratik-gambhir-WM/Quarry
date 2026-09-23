@@ -29,6 +29,21 @@ describe("ProfilePreferences", () => {
 
     expect(screen.getByTestId("location").textContent).toBe("/hub/account");
   });
+
+  it("keeps the account-only menu compact while the theme picker is unavailable", () => {
+    render(
+      <MemoryRouter>
+        <ThemeModeProvider>
+          <ProfilePreferences />
+        </ThemeModeProvider>
+      </MemoryRouter>,
+    );
+
+    const accountSection = screen.getByRole("menuitem", { name: "Account info" }).parentElement;
+
+    expect(accountSection?.className).not.toContain("border-t");
+    expect(accountSection?.className).not.toContain("pt-3");
+  });
 });
 
 function LocationProbe() {

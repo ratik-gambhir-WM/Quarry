@@ -136,7 +136,7 @@ const tauriQuarryApi = createTauriQuarryApi({
   async startQuery(request: TauriQueryRequest, onPayload: (payload: TauriQueryPayload) => void) {
     const subscriptionId = crypto.randomUUID();
     const activityId = beginIpcRequest("send_query_stream", {
-      contextMessageCount: request.context.length,
+      contextMessageCount: request.context?.length ?? 0,
       fileBytes: request.files.reduce(
         (total, file) => total + Math.floor(file.dataBase64.length * 0.75),
         0,

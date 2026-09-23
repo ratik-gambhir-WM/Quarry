@@ -69,6 +69,9 @@ pub(super) async fn summarize_selected_handler(
     State(state): State<SummariesHttpState>,
     Json(payload): Json<SelectedPathsPayload>,
 ) -> AppResult<Json<SummaryResponse>> {
+    if payload.paths.is_empty() {
+        return Err(AppError::bad_request("no files selected for summary"));
+    }
     state
         .document_summaries
         .summarize_paths(payload.paths)

@@ -1,11 +1,20 @@
-import { ThreadListPrimitive } from "@assistant-ui/react";
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
+import { Archive, MoreHorizontal, Trash2 } from "lucide-react";
 import type { HomeSidebarProps } from "./sidebarTypes";
 import { Icon } from "../../ui/Icon";
+import { buttonVariants } from "../../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown-menu";
 import { HomeWorkspaceSidebarNavigation } from "./HomeWorkspaceSidebar";
 import { SidebarFrame } from "./SidebarFrame";
 import { SidebarIcon } from "./SidebarIcon";
+import { useAgentRuntimeContext, useThreadRuntimeState } from "../../chat/AgentRuntime";
 
 type AssistantWorkspaceSidebarProps = Pick<
   HomeSidebarProps,
@@ -137,13 +146,27 @@ function AssistantTab({
 }
 
 function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
+  const runtime = useAgentRuntimeContext();
+  const {
+    isPreparingThread,
+    isRunning,
+    isThreadListLoading,
+    selectedThreadId,
+    deletingThreadId,
+    threadDeleteError,
+    threadListError,
+    threads,
+  } = useThreadRuntimeState((state) => state);
   return (
     <div className="space-y-3">
-      <ThreadListPrimitive.New
+      <button
         aria-label="New chat"
         className={`group flex w-full items-center rounded-xl py-2.5 text-left text-[14px] font-medium text-sidebar-active transition hover:bg-sidebar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
           collapsed ? "justify-center px-0" : "gap-3 px-3"
         }`}
+        onClick={() => runtime.newChat()}
+        disabled={isPreparingThread}
+        type="button"
       >
         <Icon className="h-5 w-5 shrink-0 text-sidebar-muted" name="editSquare" />
         {collapsed ? null : (
@@ -155,8 +178,82 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
             />
           </>
         )}
-      </ThreadListPrimitive.New>
-      <ul aria-label="Previous chats" className="space-y-1" />
+      </button>
+      {collapsed ? null : (
+        <ul aria-label="Previous chats" className="space-y-1">
+          {threads.map((thread) => (
+            <AssistantThreadListItem
+              active={selectedThreadId === thread.threadId}
+              deleting={deletingThreadId === thread.threadId}
+              key={thread.threadId}
+              onDelete={() => void runtime.deleteThread(thread.threadId)}
+              onSelect={() => void runtime.selectThread(thread.threadId)}
+              actionsDisabled={isPreparingThread || isRunning || deletingThreadId !== null}
+              title={thread.title}
+            />
+          ))}
+          {isThreadListLoading ? (
+            <li className="px-3 py-2 text-xs text-sidebar-muted" role="status">Loading chats…</li>
+          ) : null}
+          {threadListError ? (
+            <li className="px-3 py-2 text-xs text-error" role="status">Couldn’t load previous chats.</li>
+          ) : null}
+          {threadDeleteError ? (
+            <li className="px-3 py-2 text-xs text-error" role="status">Couldn’t delete chat. Please try again.</li>
+          ) : null}
+        </ul>
+      )}
     </div>
+  );
+}
+
+function AssistantThreadListItem({
+  active,
+  actionsDisabled,
+  deleting,
+  onDelete,
+  onSelect,
+  title,
+}: {
+  active: boolean;
+  actionsDisabled: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+  onSelect: () => void;
+  title: string;
+}) {
+  return (
+    <li className="group flex items-center gap-1">
+      <button
+        aria-current={active ? "page" : undefined}
+        className={`min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-[13px] text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
+          active ? "bg-sidebar-selected text-sidebar-active" : ""
+        }`}
+        onClick={onSelect}
+        type="button"
+      >
+        {title || "New chat"}
+      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`Chat options for ${title || "New chat"}`}
+          className={`${buttonVariants({ variant: "ghost", size: "icon-xs" })} shrink-0 text-sidebar-muted hover:text-sidebar-active`}
+          type="button"
+        >
+          <MoreHorizontal />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-auto">
+          <DropdownMenuItem disabled>
+            <Archive />
+            Archive chat
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={actionsDisabled || deleting} onSelect={onDelete} variant="destructive">
+            <Trash2 />
+            {deleting ? "Deleting…" : "Delete chat"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </li>
   );
 }

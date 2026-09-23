@@ -103,10 +103,14 @@ impl QuarryHttpClient {
         Ok(response)
     }
 
-    pub async fn post_query_stream(&self, form: Form) -> Result<reqwest::Response, String> {
+    pub async fn post_query_stream(
+        &self,
+        path: &str,
+        form: Form,
+    ) -> Result<reqwest::Response, String> {
         let response = self
             .stream_client
-            .post(self.url("/api/v1/query_model")?)
+            .post(self.url(path)?)
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .multipart(form)
             .send()

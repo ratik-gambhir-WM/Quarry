@@ -16,6 +16,121 @@ fn test_router() -> axum::Router {
 }
 
 #[tokio::test]
+async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
+    let application = test_application().unwrap();
+    crate::domains::users::repository::UserRepository::new(application.sqlite.clone())
+        .create(crate::domains::users::repository::AddUserInput {
+            api_key: "development-key".to_string(),
+            email: "analyst@example.com".to_string(),
+            first_name: "Avery".to_string(),
+            last_name: "Analyst".to_string(),
+            role: "Analyst".to_string(),
+        })
+        .await
+        .unwrap();
+    let app = application.router;
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/assistant/threads")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"userEmail":"analyst@example.com","threadId":"thread-1"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::CREATED);
+
+    let list = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/assistant/threads?userEmail=analyst%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(list.into_body(), 1024 * 1024).await.unwrap()).unwrap();
+    assert_eq!(body["threads"][0]["threadId"], "thread-1");
+
+    let other_owner = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/assistant/threads/thread-1?userEmail=someone%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(other_owner.status(), StatusCode::NOT_FOUND);
+
+    let deleted = app
+        .clone()
+        .oneshot(
+            Request::delete("/api/v1/assistant/threads/thread-1?userEmail=analyst%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    let missing = app
+        .oneshot(
+            Request::get("/api/v1/assistant/threads/thread-1?userEmail=analyst%40example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn handlers_reject_transport_validation_failures_before_service_calls() {
+    let app = test_router();
+
+    let invalid_deal = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"dealId":"DEAL-000184","dealName":"Acme","status":"Active","startDate":"2026-05-01","closeDate":"2026-01-01","transactionType":"Acquisition","targetCompany":"WidgetCo","primaryBuyer":"Buyer","dealSponsor":"Sponsor","userEmail":"analyst@example.com"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_deal.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_assistant_owner = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/assistant/threads?userEmail=%20%20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_assistant_owner.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_document_id = app
+        .oneshot(
+            Request::get("/api/v1/deals/%20/documents")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_document_id.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn health_route_is_available_under_api_prefix() {
     let app = test_router();
 

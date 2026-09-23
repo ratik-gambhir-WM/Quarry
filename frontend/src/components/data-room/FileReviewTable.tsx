@@ -144,8 +144,8 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
       <header className="flex h-12 shrink-0 items-center gap-4 border-b border-outline-variant bg-background px-5">
         <h1 className="min-w-0 flex-1 truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">File review</h1>
       </header>
-      <div className="min-h-0 flex-1 overflow-hidden p-3 pb-28">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
+      <div className="min-h-0 flex-1 overflow-hidden pb-28">
+        <div className="mb-2 flex flex-wrap items-center gap-2 px-5 pt-3">
           <div
             className={`relative h-8 shrink-0 overflow-hidden rounded-full border border-input bg-background transition-[width,border-color,box-shadow] duration-300 ease-out focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 motion-reduce:transition-none ${
               searchExpanded ? "w-64 max-sm:w-44" : "w-8"
@@ -243,15 +243,13 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
             width: "fixed",
           }}
         >
-          <div className="overflow-hidden rounded-2xl border border-outline-variant/70 bg-surface-container-lowest">
-            <DataGridContainer>
-              <DataGridScrollArea className="max-h-[calc(100vh-17rem)]" orientation="both">
-                <DataGridTable />
-              </DataGridScrollArea>
-            </DataGridContainer>
-            <div className="border-t border-outline-variant/70 px-5 py-2">
-              <DataGridPagination sizes={[5, 10, 25, 50]} />
-            </div>
+          <DataGridContainer className="border-t border-outline-variant/70">
+            <DataGridScrollArea className="max-h-[calc(100vh-17rem)]" orientation="both">
+              <DataGridTable />
+            </DataGridScrollArea>
+          </DataGridContainer>
+          <div className="border-y border-outline-variant/70 px-5 py-2">
+            <DataGridPagination sizes={[5, 10, 25, 50]} />
           </div>
         </DataGrid>
       </div>

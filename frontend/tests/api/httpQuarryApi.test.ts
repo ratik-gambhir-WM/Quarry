@@ -56,6 +56,18 @@ describe("httpQuarryApi", () => {
     });
   });
 
+  it("deletes an encoded assistant thread through the versioned API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(httpQuarryApi.deleteAssistantThread("thread/one", "analyst@example.com"))
+      .resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/assistant/threads/thread%2Fone?userEmail=analyst%40example.com",
+      { method: "DELETE" },
+    );
+  });
+
   it("loads and validates an encoded template document", async () => {
     const payload = templateDocument();
     const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));

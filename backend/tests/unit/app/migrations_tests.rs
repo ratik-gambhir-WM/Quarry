@@ -355,7 +355,7 @@ fn create_actual_version_5_database(connection: &Connection) {
 }
 
 #[test]
-fn migration_recreates_the_complete_version_7_schema_from_an_actual_version_5_database() {
+fn migration_recreates_the_complete_version_8_schema_from_an_actual_version_5_database() {
     let mut connection = Connection::open_in_memory().unwrap();
     create_actual_version_5_database(&connection);
     connection
@@ -383,7 +383,7 @@ fn migration_recreates_the_complete_version_7_schema_from_an_actual_version_5_da
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         table_columns(&connection, "deals"),
@@ -416,6 +416,8 @@ fn migration_recreates_the_complete_version_7_schema_from_an_actual_version_5_da
         tables,
         [
             "app_metadata",
+            "assistant_messages",
+            "assistant_threads",
             "deal_metadata",
             "deals",
             "quarry_file_blobs",
@@ -491,7 +493,7 @@ fn migration_adds_nullable_deal_links_to_version_6_without_losing_data() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         table_columns(&connection, "deal_metadata"),
