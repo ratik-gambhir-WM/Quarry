@@ -10,9 +10,25 @@ function Popover({
 }
 
 function PopoverTrigger({
+  render,
+  children,
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
+}: React.ComponentProps<typeof PopoverPrimitive.Trigger> & {
+  render?: React.ReactElement
+}) {
+  return (
+    <PopoverPrimitive.Trigger
+      asChild={render !== undefined}
+      data-slot="popover-trigger"
+      {...props}
+    >
+      {render
+        ? children === undefined
+          ? render
+          : React.cloneElement(render, undefined, children)
+        : children}
+    </PopoverPrimitive.Trigger>
+  )
 }
 
 function PopoverContent({

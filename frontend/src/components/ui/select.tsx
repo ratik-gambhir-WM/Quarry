@@ -7,8 +7,13 @@ import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
 function Select({
+  items: _items,
+  modal: _modal,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Root>) {
+}: React.ComponentProps<typeof SelectPrimitive.Root> & {
+  items?: ReadonlyArray<unknown>
+  modal?: boolean
+}) {
   return <SelectPrimitive.Root data-slot="select" {...props} />
 }
 
@@ -60,10 +65,13 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
+  alignItemWithTrigger,
+  position = alignItemWithTrigger === false ? "popper" : "item-aligned",
   align = "center",
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  alignItemWithTrigger?: boolean
+}) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content

@@ -26,6 +26,7 @@
     "@ericts": "https://ui.ericts.com/r/{name}.json",
     "@ilinxa": "https://ui.ilinxa.com/r/{name}.json",
     "@heroicons-animated": "https://www.heroicons-animated.com/r/{name}.json",
-    "@shark": "https://shark.vini.one/r/{name}.json"
+    "@shark": "https://shark.vini.one/r/{name}.json",
+    "@extend": "https://ui.extend.ai/r/{name}.json"
   }
 }

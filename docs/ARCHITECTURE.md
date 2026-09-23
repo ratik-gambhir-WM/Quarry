@@ -247,7 +247,8 @@ The live frontend is an npm package using:
 - Tailwind CSS 4's CSS-first Vite integration
 - Radix/shadcn primitives, Lucide icons, Motion, dnd-kit, and the custom Assistant `AgentRuntime`
   and thread primitives
-- react-pdf/pdf.js for document preview
+- Extend UI's EmbedPDF/PDFium editor for Data Room PDF preview and in-memory annotations;
+  the earlier reusable react-pdf/pdf.js viewer remains in the frontend tree
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
 The repository does not pin Node, set `packageManager`/`engines`, or define ESLint/Prettier.
@@ -339,23 +340,33 @@ global state or query-cache library.
   server records and exposes a retryable error without fixture fallback. Explicit `demo` mode
   dynamically imports `fixtures/workspace/portfolio.ts` and the shell visibly labels the result
   as demo data.
-- The PDF viewer uses an internal context plus focused hooks for document loading, zoom,
-  virtualization, keyboard behavior, selection, page tracking, drop, and printing.
+- The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
+  page navigation, annotations, comments, and export. The Data Room instance exposes only View and
+  Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
+  fullscreen controls remain disabled. Annotation snapshots are retained only in module memory by
+  selected-document ID, restored when a document is reopened in the same browser session, and
+  intentionally disappear on refresh. Signature persistence is disabled so the editor does not
+  write signature data to `localStorage`.
 - `useDataRoomContents` owns independent local-tree and stored-document resources, stale-request
   protection, retry, and their derived explorer/review model. `useDocumentSession` owns one
   selected document plus preview and raw-text request lifecycles; closing it invalidates pending
   work and releases retained preview/text values.
 - A Data Room file selection lazy-loads the document-preview module. Its local Suspense fallback
-  preserves the filename and an accessible Close action; once loaded, the existing PDF viewer
-  chrome shows preview-byte loading and errors. The PDF worker remains a separate emitted asset
-  and is not requested by an unselected Data Room. The selected-document session also owns the
-  sidebar swap: the Data Room explorer exists only while the preview surface is open, and the
+  preserves the filename and an accessible Close action; once loaded, the preview shell shows
+  preview-byte loading and errors before mounting the PDF editor. The editor's EmbedPDF packages
+  are split into package-scoped lazy chunks; its PDFium WASM is emitted as a same-origin asset for
+  the desktop CSP and resolved to an absolute URL before it crosses the blob-worker boundary. The
+  separately emitted PDFium engine runtime is tracked alongside other non-application PDF engine
+  assets by the bundle-size check. Neither is requested by an
+  unselected Data Room. The editor stays mounted when the raw-text view is open so unsaved
+  in-memory edits are preserved. The selected-document session also owns the sidebar swap: the
+  Data Room explorer exists only while the preview surface is open, and the
   workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
 - `DataRoomWorkspace` owns document-search coordination independently of the selected preview. The
   enabled search action stays in the persistent arc menu across Data Room states, while the
   reusable search component accepts result-activation, focus, portal, and trigger contracts. A
   selected preview exposes only generic page-count, requested-page, and focus capabilities; this
-  preserves current-document page jumps without coupling the search UI to the PDF viewer.
+   preserves current-document page jumps without coupling the search UI to the editor implementation.
 - `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
   panel is a frontend-local scaffold: its text survives panel close/reopen during the current
   Data Room route mount, but is neither persisted nor connected to an API.
@@ -1031,9 +1042,10 @@ for images, spreadsheets, and PowerPoint.
 1. The frontend lists current documents by deal from SQLite.
 2. A PDF request returns original PDF bytes or converts a supported stored source to PDF.
 3. A text request parses the stored PDF/DOCX into canonical raw text.
-4. The frontend's PDF viewer renders bytes with pdf.js/react-pdf.
-5. The selected-file header can open a panel-scoped search overlay while the viewer stays mounted;
-   supported local mock results call the viewer's typed page-navigation action.
+4. The frontend's Extend UI editor renders the bytes through EmbedPDF/PDFium and keeps annotation
+   snapshots in frontend memory only.
+5. The selected-file header can open a panel-scoped search overlay while the editor stays mounted;
+   supported local mock results call the panel's typed page-navigation action.
 
 Stored-document DOCX-to-PDF conversion has a built-in fallback renderer when LibreOffice is
 unavailable. Local data-room DOCX, XLSX, and PPTX previews call the Office converter directly and
@@ -1249,7 +1261,8 @@ Coverage currently includes:
 - Deals ReUI table/filter/modal/Kanban interactions in the uncommitted work
 - sidebar/layout interactions
 - PDF source normalization and page tracking
-- PDF pending-source chrome and Data Room preview loading-shell behavior
+- Data Room PDF editor loading-shell behavior, in-memory annotation restoration, focus, page count,
+  and requested-page navigation
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
   viewer mount preservation, and generic requested-page navigation
 - Data Room arc-menu closed initial state, enabled persistent search and Synthesis Canvas panel,

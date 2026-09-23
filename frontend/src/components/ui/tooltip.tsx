@@ -7,12 +7,13 @@ import { cn } from "@/lib/utils"
 
 function TooltipProvider({
   delayDuration = 0,
+  delay,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Provider> & { delay?: number }) {
   return (
     <TooltipPrimitive.Provider
       data-slot="tooltip-provider"
-      delayDuration={delayDuration}
+      delayDuration={delay ?? delayDuration}
       {...props}
     />
   )
@@ -25,9 +26,25 @@ function Tooltip({
 }
 
 function TooltipTrigger({
+  render,
+  children,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+}: React.ComponentProps<typeof TooltipPrimitive.Trigger> & {
+  render?: React.ReactElement
+}) {
+  return (
+    <TooltipPrimitive.Trigger
+      asChild={render !== undefined}
+      data-slot="tooltip-trigger"
+      {...props}
+    >
+      {render
+        ? children === undefined
+          ? render
+          : React.cloneElement(render, undefined, children)
+        : children}
+    </TooltipPrimitive.Trigger>
+  )
 }
 
 function TooltipContent({

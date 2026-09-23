@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DataTableHeaderRow, DataTableHeading } from "@/components/ui/DataTable";
 import { MetadataGrid, MetadataItem } from "@/components/ui/MetadataGrid";
 import { ModalTextField } from "@/components/ui/ModalField";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 afterEach(cleanup);
 
@@ -52,5 +55,25 @@ describe("reusable UI primitives", () => {
 
     await user.type(input, "https://example.com");
     expect(onValueChange).toHaveBeenCalled();
+  });
+
+  it("adapts Base UI-style trigger rendering without dropping trigger content", () => {
+    render(
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger render={<button type="button">Tooltip action</button>} />
+        </Tooltip>
+        <Popover>
+          <PopoverTrigger render={<button type="button">Popover action</button>} />
+        </Popover>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<button type="button">Menu action</button>} />
+        </DropdownMenu>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Tooltip action" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Popover action" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Menu action" })).toBeTruthy();
   });
 });

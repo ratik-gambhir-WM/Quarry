@@ -31,6 +31,19 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
     build: {
       manifest: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const embedPdfMarker = "/node_modules/@embedpdf/";
+            const embedPdfIndex = id.indexOf(embedPdfMarker);
+            if (embedPdfIndex === -1) {
+              return undefined;
+            }
+            const packageName = id.slice(embedPdfIndex + embedPdfMarker.length).split("/")[0];
+            return packageName ? `embedpdf-${packageName}` : undefined;
+          },
+        },
+      },
     },
     server: {
       port: 1420,
