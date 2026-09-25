@@ -2,9 +2,15 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import type { ProcessFileJobEvent } from "../../contracts/quarryApi";
 import { formatFileSize } from "../../lib/formatters";
-import { DialogBackdrop } from "../ui/DialogBackdrop";
-import { DialogHeader } from "../ui/DialogHeader";
 import { Icon } from "../ui/Icon";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 
 type UploadFilesModalProps = {
   dealId: string;
@@ -43,21 +49,6 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
     (entry) => entry.selected && (entry.status === "ready" || entry.status === "failed"),
   );
   const selectedCount = entries.filter((entry) => entry.selected).length;
-
-  useEffect(() => {
-    chooseFilesButtonRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && activeCount === 0) {
-        onClose();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [activeCount, onClose]);
 
   useEffect(() => {
     const subscriptions = subscriptionsRef.current;
@@ -262,27 +253,46 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
   }
 
   return (
-    <DialogBackdrop
-      closeLabel="Close upload files dialog"
-      disabled={activeCount > 0}
-      onClose={onClose}
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open && activeCount === 0) onClose();
+      }}
+      open
     >
-      <section
-        aria-labelledby="upload-files-title"
-        aria-modal="true"
-        className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-[680px] flex-col overflow-hidden rounded-[20px] border border-outline-variant bg-surface-container-lowest shadow-[0_28px_70px_rgba(7,1,84,0.24)]"
-        role="dialog"
+      <DialogContent
+        className="max-h-[calc(100vh-3rem)] gap-0 overflow-hidden rounded-[20px] border-outline-variant p-0 sm:max-w-[680px]"
+        onEscapeKeyDown={(event) => {
+          if (activeCount > 0) event.preventDefault();
+        }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          chooseFilesButtonRef.current?.focus();
+        }}
+        onPointerDownOutside={(event) => {
+          if (activeCount > 0) event.preventDefault();
+        }}
+        showCloseButton={false}
       >
         <DialogHeader
-          className="border-b border-outline-variant px-6 py-5"
-          closeLabel="Close upload files dialog"
-          description="Choose PDF and DOCX files from your Mac, then select which ones to process."
-          disabled={activeCount > 0}
-          eyebrow="Data Room"
-          onClose={onClose}
-          title="Upload files"
-          titleId="upload-files-title"
-        />
+          className="relative gap-1 border-b border-outline-variant px-6 py-5 pr-14"
+        >
+          <p className="order-first text-xs font-medium uppercase tracking-[0.12em] text-muted">
+            Data Room
+          </p>
+          <DialogTitle className="text-2xl font-semibold text-text-main">Upload files</DialogTitle>
+          <DialogDescription className="text-[13px] leading-5 text-muted">
+            Choose PDF and DOCX files from your Mac, then select which ones to process.
+          </DialogDescription>
+          <button
+            aria-label="Close upload files dialog"
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-40"
+            disabled={activeCount > 0}
+            onClick={onClose}
+            type="button"
+          >
+            <Icon className="h-4 w-4 rotate-45" name="plus" />
+          </button>
+        </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <input
@@ -346,7 +356,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
           ) : null}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant bg-surface-container-low/70 px-6 py-4">
+        <DialogFooter className="m-0 flex-row flex-wrap items-center justify-between gap-3 rounded-none border-outline-variant bg-surface-container-low/70 px-6 py-4 sm:justify-between">
           <div className="flex items-center gap-2 text-[12px] text-muted">
             {isProcessing ? (
               <>
@@ -385,9 +395,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
               </span>
             </button>
           </div>
-        </footer>
-      </section>
-    </DialogBackdrop>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

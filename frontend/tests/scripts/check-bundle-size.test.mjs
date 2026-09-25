@@ -25,6 +25,24 @@ describe("bundle size inspection", () => {
     expect(result.chunks.map((chunk) => chunk.file)).not.toContain("assets/pdf.worker-HASH.mjs");
   });
 
+  it("excludes the separately emitted EmbedPDF engine runtime", async () => {
+    const distDirectory = await makeBundle({
+      "assets/index-HASH.js": { contents: "entry", manifest: { isEntry: true } },
+      "assets/worker-engine-HASH.js": {
+        contents: "x".repeat(600_000),
+        manifest: {
+          isDynamicEntry: true,
+          src: "node_modules/@embedpdf/engines/dist/lib/pdfium/web/worker-engine.js",
+        },
+      },
+    });
+
+    const result = await inspectBundle({ distDirectory, entryBudget: 100, target: "web" });
+
+    expect(result.failures).toEqual([]);
+    expect(result.chunks.map((chunk) => chunk.file)).not.toContain("assets/worker-engine-HASH.js");
+  });
+
   it("reports entry and dynamic chunk budget failures independently", async () => {
     const distDirectory = await makeBundle({
       "assets/feature-HASH.js": { contents: "x".repeat(500_000), manifest: { isDynamicEntry: true } },

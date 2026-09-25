@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,8 +23,14 @@ const items: DocumentSearchItem[] = [
   },
 ];
 
-function Harness({ onSelect = vi.fn() }: { onSelect?: (item: DocumentSearchItem) => void }) {
-  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null);
+function Harness({
+  onSelect = vi.fn(),
+  onSelectionFocus,
+}: {
+  onSelect?: (item: DocumentSearchItem) => void;
+  onSelectionFocus?: () => void;
+}) {
+  const [boundaryElement, setBoundaryElement] = useState<HTMLDivElement | null>(null);
 
   return (
     <div>
@@ -33,10 +39,11 @@ function Harness({ onSelect = vi.fn() }: { onSelect?: (item: DocumentSearchItem)
         dialogTitle="Search Synthetic_Terms.pdf"
         items={items}
         onSelect={onSelect}
-        portalContainer={portalContainer}
+        onSelectionFocus={onSelectionFocus}
+        boundaryElement={boundaryElement}
       />
       <div data-testid="preview-canvas">Mounted document canvas</div>
-      <div data-testid="overlay-host" ref={setPortalContainer} />
+      <div data-testid="search-boundary" ref={setBoundaryElement} />
     </div>
   );
 }
@@ -51,7 +58,7 @@ describe("DocumentSearch", () => {
     expect(filterDocumentSearchItems(items, "missing term")).toEqual([]);
   });
 
-  it("opens over the mounted canvas, focuses search, and restores trigger focus", async () => {
+  it("opens as a draggable panel over the mounted canvas and restores trigger focus", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     const trigger = screen.getByRole("button", { name: "Search document" });
@@ -59,36 +66,40 @@ describe("DocumentSearch", () => {
     await user.click(trigger);
 
     const searchbox = screen.getByRole("searchbox", { name: "Search document" });
-    expect(searchbox).toBe(document.activeElement);
+    await waitFor(() => expect(searchbox).toBe(document.activeElement));
     const dialog = screen.getByRole("dialog", {
       name: "Search Synthetic_Terms.pdf",
     });
     expect(dialog).toBeTruthy();
-    expect(dialog.classList.contains("md:top-1/2")).toBe(true);
-    expect(dialog.classList.contains("md:-translate-y-1/2")).toBe(true);
+    expect(dialog.classList.contains("bg-surface-container-lowest")).toBe(true);
+    expect(dialog.classList.contains("shadow-[var(--theme-panel-shadow)]")).toBe(true);
+    expect(dialog.querySelector('[data-slot="floating-panel-drag-trigger"]')).toBeTruthy();
+    expect(document.querySelector('[class*="bg-black/50"]')).toBeNull();
     expect(screen.getByTestId("preview-canvas")).toBeTruthy();
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(trigger).toBe(document.activeElement);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(trigger).toBe(document.activeElement));
   });
 
   it("highlights query terms and activates the selected mock result", async () => {
     const onSelect = vi.fn();
+    const onSelectionFocus = vi.fn();
     const user = userEvent.setup();
-    const { container } = render(<Harness onSelect={onSelect} />);
+    render(<Harness onSelect={onSelect} onSelectionFocus={onSelectionFocus} />);
     await user.click(screen.getByRole("button", { name: "Search document" }));
     await user.type(
       screen.getByRole("searchbox", { name: "Search document" }),
       "liability",
     );
 
-    expect(container.querySelectorAll("mark").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("mark").length).toBeGreaterThan(0);
     await user.keyboard("{Enter}");
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]?.[0].id).toBe("current-document");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(onSelectionFocus).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("does not activate a mock result without a preview target", async () => {

@@ -5,10 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { createRef, type ForwardedRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  PdfToolbarContext,
-  PdfViewerHandle,
-  PdfViewerProps,
-} from "@/components/pdf-viewer";
+  PDFEditorHandle,
+  PDFEditorProps,
+} from "@/components/extend/pdf-editor";
 import {
   DocumentPreviewPanel,
   type DocumentPreviewPanelHandle,
@@ -17,52 +16,38 @@ import {
 } from "@/components/data-room/DocumentPreviewPanel";
 
 const pdfMock = vi.hoisted(() => ({
-  goToPage: vi.fn(),
+  scrollToPage: vi.fn(),
+  importAnnotations: vi.fn(),
   mounts: 0,
   unmounts: 0,
-  pendingSource: false,
 }));
 
-vi.mock("@/components/pdf-viewer", async () => {
+vi.mock("@/components/extend/pdf-editor", async () => {
   const React = await import("react");
 
-  const PdfViewer = React.forwardRef(function MockPdfViewer(
-    props: PdfViewerProps,
-    ref: ForwardedRef<PdfViewerHandle>,
+  const PDFEditor = React.forwardRef(function MockPDFEditor(
+    props: PDFEditorProps,
+    ref: ForwardedRef<PDFEditorHandle>,
   ) {
-    pdfMock.pendingSource = props.pendingSource ?? false;
+    const viewportRef = React.useRef<HTMLDivElement>(null);
     React.useImperativeHandle(
       ref,
-      (): PdfViewerHandle =>
-        ({
-          actions: {
-            download: vi.fn(),
-            goToNextPage: vi.fn(),
-            goToPage: pdfMock.goToPage,
-            goToPrevPage: vi.fn(),
-            print: vi.fn(),
-            resetZoom: vi.fn(),
-            rotate: vi.fn(),
-            setRotation: vi.fn(),
-            setScale: vi.fn(),
-            zoomIn: vi.fn(),
-            zoomOut: vi.fn(),
-          },
-          pdfDocument: null,
-          state: {
-            error: null,
-            fitMode: null,
-            loading: false,
-            numPages: 3,
-            page: 1,
-            ready: true,
-            rotation: 0,
-            scale: 1,
-            selectedText: "",
-            source: null,
-            status: "ready",
-          },
-        }),
+      (): PDFEditorHandle => ({
+        applyRedactions: vi.fn(),
+        download: vi.fn(),
+        exportAnnotations: vi.fn().mockResolvedValue([]),
+        getDocumentBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        getFormValues: vi.fn().mockReturnValue({}),
+        getViewportElement: () => viewportRef.current,
+        importAnnotations: pdfMock.importAnnotations,
+        print: vi.fn(),
+        redo: vi.fn(),
+        scrollToPage: pdfMock.scrollToPage,
+        setActiveTool: vi.fn(),
+        setFormValues: vi.fn(),
+        setMode: vi.fn(),
+        undo: vi.fn(),
+      }),
       [],
     );
     React.useEffect(() => {
@@ -72,48 +57,28 @@ vi.mock("@/components/pdf-viewer", async () => {
       };
     }, []);
     React.useEffect(() => {
-      if (!props.pendingSource) {
-        props.onLoad?.({ numPages: 3, pdfDocument: {} as never });
-      }
-    }, [props.pendingSource]);
+      props.onDocumentLoadSuccess?.({
+        documentId: "mock-pdf",
+        fileName: props.fileName ?? "document.pdf",
+        numPages: 3,
+      });
+    }, []);
 
     return (
-      <div
-        aria-label={props.ariaLabel}
-        data-pdf-viewer-root
-        data-testid="pdf-viewer"
-        role="region"
-      >
-        <div tabIndex={0}>PDF canvas</div>
-        {props.renderToolbar?.({} as PdfToolbarContext)}
-        {props.pendingSource ? <div data-testid="pdf-page-skeleton" /> : null}
+      <div data-slot="pdf-editor" data-testid="pdf-editor">
+        <div ref={viewportRef} tabIndex={0}>PDF canvas</div>
+        {props.toolbarActions}
+        <button
+          onClick={() => props.onAnnotationsChange?.([{ id: "annotation-1" }] as never)}
+          type="button"
+        >
+          Add annotation
+        </button>
       </div>
     );
   });
 
-  return {
-    PdfToolbar: ({
-      leadingContent,
-      onPrintAction,
-      printActionLabel,
-      trailingContent,
-    }: {
-      leadingContent?: React.ReactNode;
-      onPrintAction?: () => void;
-      printActionLabel?: string;
-      trailingContent?: React.ReactNode;
-    }) =>
-      <div aria-label="PDF viewer controls" role="toolbar">
-        {leadingContent}
-        {onPrintAction ? (
-          <button onClick={onPrintAction} type="button">
-            {printActionLabel}
-          </button>
-        ) : null}
-        {trailingContent}
-      </div>,
-    PdfViewer,
-  };
+  return { PDFEditor };
 });
 
 const document = {
@@ -176,59 +141,52 @@ function renderPreview(
 }
 
 beforeEach(() => {
-  pdfMock.goToPage.mockReset();
+  pdfMock.scrollToPage.mockReset();
+  pdfMock.importAnnotations.mockReset();
   pdfMock.mounts = 0;
   pdfMock.unmounts = 0;
-  pdfMock.pendingSource = false;
 });
 
 afterEach(cleanup);
 
 describe("DocumentPreviewPanel navigation contract", () => {
-  it("mounts the document viewer header and page skeleton while preview bytes load", () => {
+  it("shows the document header and loading state while preview bytes load", () => {
     const { container, onPageCountChange } = renderPreview(
       { status: "idle" },
       { status: "loading" },
     );
 
-    expect(
-      screen.getByRole("region", { name: `PDF document viewer: ${document.name}` }),
-    ).toBeTruthy();
-    expect(screen.getByRole("toolbar", { name: "PDF viewer controls" })).toBeTruthy();
     expect(screen.getByText(document.name)).toBeTruthy();
-    expect(screen.getByTestId("pdf-page-skeleton")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Loading document preview");
     expect(screen.getByRole("button", { name: "Close document preview" }).hasAttribute("disabled"))
       .toBe(false);
-    expect(container.querySelector("section > header")).toBeNull();
-    expect(pdfMock.pendingSource).toBe(true);
+    expect(container.querySelector("section > header")).toBeTruthy();
+    expect(screen.queryByTestId("pdf-editor")).toBeNull();
     expect(onPageCountChange).toHaveBeenCalledWith(0);
   });
 
-  it("replaces the page skeleton without remounting the viewer shell", () => {
-    const { container, resolvePreview } = renderPreview(
+  it("mounts the editor when preview bytes resolve", () => {
+    const { resolvePreview } = renderPreview(
       { status: "idle" },
       { status: "loading" },
     );
-    const viewer = container.querySelector("[data-testid='pdf-viewer']");
 
     resolvePreview();
 
-    expect(container.querySelector("[data-testid='pdf-viewer']")).toBe(viewer);
-    expect(screen.queryByTestId("pdf-page-skeleton")).toBeNull();
-    expect(pdfMock.pendingSource).toBe(false);
+    expect(screen.getByTestId("pdf-editor")).toBeTruthy();
     expect(pdfMock.mounts).toBe(1);
     expect(pdfMock.unmounts).toBe(0);
   });
 
   it("applies an externally requested page exactly once without remounting", async () => {
     const { container, onRequestRawText, onRequestedPageHandled, requestPage } = renderPreview();
-    const viewer = container.querySelector("[data-testid='pdf-viewer']");
+    const viewer = container.querySelector("[data-testid='pdf-editor']");
 
     requestPage(1);
 
-    expect(container.querySelector("[data-testid='pdf-viewer']")).toBe(viewer);
-    await waitFor(() => expect(pdfMock.goToPage).toHaveBeenCalledTimes(1));
-    expect(pdfMock.goToPage).toHaveBeenCalledWith(1);
+    expect(container.querySelector("[data-testid='pdf-editor']")).toBe(viewer);
+    await waitFor(() => expect(pdfMock.scrollToPage).toHaveBeenCalledTimes(1));
+    expect(pdfMock.scrollToPage).toHaveBeenCalledWith(1);
     expect(onRequestedPageHandled).toHaveBeenCalledTimes(1);
     expect(pdfMock.mounts).toBe(1);
     expect(pdfMock.unmounts).toBe(0);
@@ -257,10 +215,24 @@ describe("DocumentPreviewPanel navigation contract", () => {
 
     requestPage(1);
 
-    await waitFor(() => expect(screen.getByTestId("pdf-viewer")).toBeTruthy());
-    expect(pdfMock.goToPage).toHaveBeenCalledTimes(1);
-    expect(pdfMock.goToPage).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(screen.getByTestId("pdf-editor")).toBeTruthy());
+    expect(pdfMock.scrollToPage).toHaveBeenCalledTimes(1);
+    expect(pdfMock.scrollToPage).toHaveBeenCalledWith(1);
+    expect(pdfMock.mounts).toBe(1);
+    expect(pdfMock.unmounts).toBe(0);
     expect(onRequestRawText).not.toHaveBeenCalled();
+  });
+
+  it("restores annotations from memory when the same document is reopened", async () => {
+    const user = userEvent.setup();
+    const firstView = renderPreview();
+
+    await user.click(screen.getByRole("button", { name: "Add annotation" }));
+    firstView.unmount();
+    renderPreview();
+
+    await waitFor(() => expect(pdfMock.importAnnotations).toHaveBeenCalledTimes(1));
+    expect(pdfMock.importAnnotations.mock.calls[0]?.[0]).toEqual([{ id: "annotation-1" }]);
   });
 
   it("exposes viewer focus without exposing the PDF viewer implementation", async () => {

@@ -7,7 +7,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import PdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { AnnotationTransferItem } from "@embedpdf/plugin-annotation/react";
 import previewLoadingMark from "../../assets/quarry-preview-mark.svg";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type {
@@ -15,9 +15,10 @@ import type {
   PreviewState,
   RawTextState,
 } from "../../data/dataRoomPreview";
-import { PdfToolbar, PdfViewer as ShadcnPdfViewer } from "../pdf-viewer";
-import type { PdfViewerHandle } from "../pdf-viewer";
+import { PDFEditor, type PDFEditorHandle } from "../extend/pdf-editor";
 import { Icon } from "../ui/Icon";
+
+const inMemoryAnnotations = new Map<string, AnnotationTransferItem[]>();
 
 type DocumentPreviewPanelProps = {
   document: DataRoomTreeNode;
@@ -53,28 +54,24 @@ export const DocumentPreviewPanel = forwardRef<
   ref,
 ) {
   const [viewMode, setViewMode] = useState<"preview" | "raw-text">("preview");
-  const previewBodyRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<PdfViewerHandle>(null);
+  const editorRef = useRef<PDFEditorHandle>(null);
   const canShowRawText = Boolean(document.storedFileId);
 
   useEffect(() => {
     if (requestedPage === null) {
       return;
     }
-    if (viewMode !== "preview") {
-      setViewMode("preview");
-      return;
-    }
-    if (!viewerRef.current) {
+    if (!editorRef.current) {
       return;
     }
     const frame = requestAnimationFrame(() => {
-      viewerRef.current?.actions.goToPage(requestedPage);
+      setViewMode("preview");
+      editorRef.current?.scrollToPage(requestedPage);
       onRequestedPageHandled();
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [onRequestedPageHandled, requestedPage, viewMode]);
+  }, [onRequestedPageHandled, requestedPage]);
 
   useEffect(() => {
     if (preview.status !== "ready") {
@@ -87,9 +84,7 @@ export const DocumentPreviewPanel = forwardRef<
     () => ({
       focusViewer() {
         requestAnimationFrame(() => {
-          previewBodyRef.current
-            ?.querySelector<HTMLElement>("[data-pdf-viewer-root] [tabindex='0']")
-            ?.focus({ preventScroll: true });
+          editorRef.current?.getViewportElement()?.focus({ preventScroll: true });
         });
       },
     }),
@@ -105,7 +100,7 @@ export const DocumentPreviewPanel = forwardRef<
 
   return (
     <section className="glass-panel workspace-pane relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-none border-y-0">
-      {viewMode === "raw-text" || preview.status === "error" ? (
+      {viewMode === "raw-text" || preview.status !== "ready" ? (
         <DocumentPreviewHeader
           document={document}
           onBackToPreview={viewMode === "raw-text" ? () => setViewMode("preview") : undefined}
@@ -120,34 +115,31 @@ export const DocumentPreviewPanel = forwardRef<
         />
       ) : null}
 
-      <div
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-        ref={previewBodyRef}
-      >
-        {viewMode === "raw-text" ? (
-          <RawTextViewer rawText={rawText} />
-        ) : (
-          <>
-            {preview.status === "error" ? (
-              <PreviewMessage
-                detail={preview.message}
-                title={document.error ? "File is inaccessible" : "Preview unavailable"}
-                tone="error"
-              />
-            ) : null}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {preview.status === "error" ? (
+          <PreviewMessage
+            detail={preview.message}
+            title={document.error ? "File is inaccessible" : "Preview unavailable"}
+            tone="error"
+          />
+        ) : null}
 
-            {preview.status === "loading" || preview.status === "ready" ? (
-              <PdfViewer
-                documentName={document.name}
-                onClose={onClose}
-                onLoad={onPageCountChange}
-                onShowRawText={canShowRawText ? showRawText : undefined}
-                response={preview.status === "ready" ? preview.response : undefined}
-                viewerRef={viewerRef}
-              />
-            ) : null}
-          </>
-        )}
+        {preview.status === "loading" ? <PdfPreviewLoading /> : null}
+
+        {preview.status === "ready" ? (
+          <PdfEditorViewer
+            className={viewMode === "raw-text" ? "hidden" : undefined}
+            documentId={document.id}
+            documentName={document.name}
+            onClose={onClose}
+            onLoad={onPageCountChange}
+            onShowRawText={canShowRawText ? showRawText : undefined}
+            response={preview.response}
+            editorRef={editorRef}
+          />
+        ) : null}
+
+        {viewMode === "raw-text" ? <RawTextViewer rawText={rawText} /> : null}
       </div>
     </section>
   );
@@ -258,73 +250,127 @@ function RawTextLoading() {
   );
 }
 
-function PdfViewer({
+function PdfPreviewLoading() {
+  return (
+    <div
+      aria-live="polite"
+      className="flex min-h-0 flex-1 items-center justify-center bg-surface-container p-8 [html[data-theme=dark]_&]:bg-black"
+      role="status"
+    >
+      <div className="text-center">
+        <img
+          alt=""
+          aria-hidden="true"
+          className="mx-auto h-14 w-14 animate-spin motion-reduce:animate-none [animation-duration:1.4s] [html[data-theme=dark]_&]:brightness-0 [html[data-theme=dark]_&]:invert"
+          src={previewLoadingMark}
+        />
+        <p className="mt-5 text-base font-semibold text-text-main">Loading document preview</p>
+        <p className="mt-1 text-sm leading-6 text-muted">Preparing the PDF editor…</p>
+      </div>
+    </div>
+  );
+}
+
+function PdfEditorViewer({
+  className,
+  documentId,
   documentName,
   onClose,
   onLoad,
   onShowRawText,
   response,
-  viewerRef,
+  editorRef,
 }: {
+  className?: string;
+  documentId: string;
   documentName: string;
   onClose: () => void;
   onLoad: (numPages: number) => void;
   onShowRawText?: () => void;
-  response?: DocumentPreviewResponse;
-  viewerRef: RefObject<PdfViewerHandle | null>;
+  response: DocumentPreviewResponse;
+  editorRef: RefObject<PDFEditorHandle | null>;
 }) {
-  const decodedPdf = useMemo(() => (response ? buildPdfSource(response) : null), [response]);
+  const decodedPdf = useMemo(() => buildPdfSource(response), [response]);
+  const documentLoadedRef = useRef(false);
+  const annotationImportFrameRef = useRef<number | null>(null);
 
-  if (decodedPdf && "message" in decodedPdf) {
+  useEffect(
+    () => () => {
+      if (annotationImportFrameRef.current !== null) {
+        cancelAnimationFrame(annotationImportFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  if ("message" in decodedPdf) {
     return <PreviewMessage detail={decodedPdf.message} title="PDF data is invalid" tone="error" />;
   }
 
   return (
-    <div className="min-h-0 min-w-0 flex-1 bg-surface-container [html[data-theme=dark]_&]:bg-black">
-      <ShadcnPdfViewer
-        allowPrint={false}
-        ariaLabel={`PDF document viewer: ${response?.fileName ?? documentName}`}
+    <div
+      aria-label={`PDF document editor: ${response.fileName ?? documentName}`}
+      className={`min-h-0 min-w-0 flex-1 bg-surface-container [html[data-theme=dark]_&]:bg-black ${className ?? ""}`}
+      role="region"
+    >
+      <PDFEditor
         className="h-full min-h-0 rounded-none border-0"
-        downloadFilename={response?.fileName ?? documentName}
-        enableDragDrop={false}
-        onLoad={({ numPages: loadedPageCount }) => onLoad(loadedPageCount)}
-        ref={viewerRef}
-        pendingSource={!response}
-        renderToolbar={() => (
-          <PdfToolbar
-            leadingContent={
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary">
-                  <Icon className="h-4 w-4" name="pdf" />
-                </span>
-                <h1
-                  className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold text-text-main"
-                  title={documentName}
-                >
-                  {documentName}
-                </h1>
-              </div>
-            }
-            onPrintAction={onShowRawText}
-            printActionLabel="Show raw text"
-            trailingContent={
+        defaultMode="annotate"
+        features={{
+          attachments: false,
+          capture: false,
+          forms: false,
+          fullscreen: false,
+          print: false,
+          redact: false,
+          security: false,
+          sign: false,
+          stamps: false,
+        }}
+        fileName={response.fileName ?? documentName}
+        onAnnotationsChange={(items) => {
+          if (documentLoadedRef.current) {
+            inMemoryAnnotations.set(documentId, items);
+          }
+        }}
+        onDocumentLoadSuccess={({ numPages }) => {
+          documentLoadedRef.current = true;
+          onLoad(numPages);
+          const annotations = inMemoryAnnotations.get(documentId);
+          if (annotations?.length) {
+            annotationImportFrameRef.current = requestAnimationFrame(() => {
+              editorRef.current?.importAnnotations(annotations);
+              annotationImportFrameRef.current = null;
+            });
+          }
+        }}
+        persistSignatures={false}
+        ref={editorRef}
+        showUpload={false}
+        signatureFontsStylesheetUrl={null}
+        src={decodedPdf.source}
+        toolbarActions={
+          <div className="flex shrink-0 items-center gap-2">
+            {onShowRawText ? (
               <button
-                aria-label="Close document preview"
-                className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-3 text-[11px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
-                onClick={onClose}
+                className="h-8 rounded-lg px-3 text-[11px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main"
+                onClick={onShowRawText}
                 type="button"
               >
-                <span aria-hidden="true" className="text-base leading-none">
-                  ×
-                </span>
-                Close
+                Show raw text
               </button>
-            }
-          />
-        )}
-        scrollContainerClassName="workspace-scrollbar-hidden"
-        source={decodedPdf && "source" in decodedPdf ? decodedPdf.source : null}
-        workerSrc={PdfWorkerUrl}
+            ) : null}
+            <button
+              aria-label="Close document preview"
+              className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-3 text-[11px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
+              onClick={onClose}
+              type="button"
+            >
+              <span aria-hidden="true" className="text-base leading-none">×</span>
+              Close
+            </button>
+          </div>
+        }
       />
     </div>
   );

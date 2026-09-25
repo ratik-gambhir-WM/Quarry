@@ -21,14 +21,14 @@ export async function inspectBundle({ distDirectory, entryBudget, target }) {
   }
 
   const records = Object.values(manifest);
-  const entryRecords = records.filter((record) => record?.isEntry === true && isApplicationChunk(record.file));
+  const entryRecords = records.filter((record) => record?.isEntry === true && isApplicationChunk(record));
   if (entryRecords.length !== 1) {
     throw new Error(`Expected exactly one JavaScript entry in the Vite manifest, found ${entryRecords.length}.`);
   }
 
   const chunkFiles = [...new Set(records
-    .map((record) => record?.file)
-    .filter((file) => typeof file === "string" && isApplicationChunk(file)))];
+    .filter((record) => isApplicationChunk(record))
+    .map((record) => record.file))];
   if (chunkFiles.length === 0) {
     throw new Error("The Vite manifest contains no application JavaScript chunks.");
   }
@@ -56,8 +56,10 @@ export async function inspectBundle({ distDirectory, entryBudget, target }) {
   return { chunks, entry, entryBudget, failures, target };
 }
 
-function isApplicationChunk(file) {
-  return file.endsWith(".js");
+function isApplicationChunk(record) {
+  return typeof record?.file === "string" &&
+    record.file.endsWith(".js") &&
+    record.src !== "node_modules/@embedpdf/engines/dist/lib/pdfium/web/worker-engine.js";
 }
 
 async function readJson(filePath, label) {
