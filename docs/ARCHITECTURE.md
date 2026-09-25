@@ -301,7 +301,7 @@ authorization controls.
 | --- | --- | --- |
 | `pages/` | Route-level orchestration and screen composition | login, hub, deals, data room, assistant |
 | `components/<feature>/` | Product feature UI | deal room, data room, deals, PDF viewer |
-| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, registry arc menu and floating panel |
+| `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
@@ -362,14 +362,14 @@ global state or query-cache library.
   in-memory edits are preserved. The selected-document session also owns the sidebar swap: the
   Data Room explorer exists only while the preview surface is open, and the
   workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
-- `DataRoomWorkspace` owns document-search coordination independently of the selected preview. The
-  enabled search action stays in the persistent arc menu across Data Room states, while the
-  reusable search component accepts result-activation, focus, portal, and trigger contracts. A
-  selected preview exposes only generic page-count, requested-page, and focus capabilities; this
-   preserves current-document page jumps without coupling the search UI to the editor implementation.
-- `DataRoomArcMenu` owns the Synthesis Canvas panel's open state and editable draft. The floating
-  panel is a frontend-local scaffold: its text survives panel close/reopen during the current
-  Data Room route mount, but is neither persisted nor connected to an API.
+- `DataRoomWorkspace` owns selected-document search coordination. When a selected preview replaces
+  the workspace sidebar with the Data Room explorer, it passes current-document page-count,
+  requested-page, and focus capabilities to the explorer's quick actions. This preserves
+  current-document page jumps without coupling the reusable search UI to the editor implementation.
+- `DataRoomQuickActions` owns the Synthesis Canvas panel's open state and editable draft, and
+  invokes its owning route's existing upload-modal callback from the animated Upload icon. The
+  floating panel is a frontend-local scaffold: its text survives panel close/reopen during the
+  current Data Room route mount, but is neither persisted nor connected to an API.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Its keyed deal boundary initializes those local
   values for a new deal without render-derived effects. The Deliverables summary links to a
@@ -448,7 +448,7 @@ operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, persistent arc-menu search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, starter prompts, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -474,19 +474,16 @@ non-clickable and unavailable. The API accepts only credential-free HTTPS resour
 requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions header
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
 Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
-data-grid implementation on TanStack React Table. The Data Room view
-switcher lives in the registry arc menu rather than the sidebar; its full action set stays
-mounted across the file-review grid and selected-document preview. It starts closed but visible,
-uses the same deep-navy action token as New Analysis, has a
-dedicated downward-arrow hide control, and remains recoverable as a centered bottom-edge bookmark.
-The closed Views trigger, hide control, and recoverable bookmark use a compact 70% visual scale.
-Data Room and Diligence Graph are disabled in that menu. Synthesis Canvas is enabled and opens a
-draggable, resizable floating panel with a route-local unsaved text draft; Notes and Search are
-also enabled, though Notes does not yet have a persisted workspace and Search exposes
-fixture-backed results. The Search dialog is centered within the usable Data Room surface and its
-overlay remains above sticky file-review chrome. Launching Synthesis Canvas or Search retracts the
-arc shortcuts to the closed Views trigger, and closing the overlay returns keyboard focus to that
-trigger.
+data-grid implementation on TanStack React Table. When a selected document replaces the normal
+workspace sidebar with the Data Room explorer, its direct quick-action toolbar appears above Saved
+documents. The toolbar distributes bare animated Upload, Pencil Square (Synthesis Canvas), Notes,
+and Document Magnifying Glass (Search) icons evenly across the sidebar. Upload opens the existing
+Data Room file-upload modal through the ReUI dialog primitives, including focus trapping and a
+scrollable body; Notes remains an unpersisted placeholder, while Search exposes fixture-backed
+results. Synthesis Canvas opens a draggable, resizable floating panel with a route-local unsaved
+text draft. The Search floating panel opens centered within the usable Data Room surface without a
+backdrop. Its title bar supports dragging, it remains above sticky file-review chrome, and each
+panel restores focus to its originating sidebar action when closed.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
@@ -1265,9 +1262,8 @@ Coverage currently includes:
   and requested-page navigation
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
   viewer mount preservation, and generic requested-page navigation
-- Data Room arc-menu closed initial state, enabled persistent search and Synthesis Canvas panel,
-  synthesis editing and focus restoration, overlay-aware hide/restore behavior, and persistence
-  across file-preview selection
+- Data Room explorer quick-action placement, direct Upload/Search/Synthesis Canvas access,
+  synthesis editing and focus restoration, and persistence across file-preview selection
 - Data Room tree flattening and illustrative file-review row mapping
 - Data Room file-review search expansion, filtering, dismissal, and focus restoration
 - Deliverables-to-templates route navigation, template pagination, loading/empty/error/retry states,

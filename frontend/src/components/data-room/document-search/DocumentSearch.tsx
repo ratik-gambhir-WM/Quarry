@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, CornerDownLeft, SearchIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, CornerDownLeft, SearchIcon, XIcon } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -7,8 +7,16 @@ import {
   useState,
   type ReactElement,
 } from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
+import {
+  FloatingPanel,
+  FloatingPanelCloseTrigger,
+  FloatingPanelContent,
+  FloatingPanelControl,
+  FloatingPanelHeader,
+  FloatingPanelTitle,
+  FloatingPanelTrigger,
+} from "@/components/ui/floating-panel";
 import {
   type DocumentSearchButtonProps,
   DocumentSearchButton,
@@ -30,7 +38,7 @@ export type DocumentSearchConfig = {
   onSelect: (item: DocumentSearchItem) => void;
   onSelectionFocus?: () => void;
   placeholder?: string;
-  portalContainer?: HTMLElement | null;
+  boundaryElement?: HTMLElement | null;
   trigger?: ReactElement;
 };
 
@@ -41,6 +49,7 @@ type SearchInputProps = {
   onArrowUp: () => void;
   onEnter: () => void;
   onQueryChange: (query: string) => void;
+  onClose: () => void;
   placeholder: string;
   query: string;
 };
@@ -52,6 +61,7 @@ const SearchInput = memo(function SearchInput({
   onArrowUp,
   onEnter,
   onQueryChange,
+  onClose,
   placeholder,
   query,
 }: SearchInputProps) {
@@ -107,16 +117,15 @@ const SearchInput = memo(function SearchInput({
             Clear
           </Button>
         ) : null}
-        <DialogPrimitive.Close asChild>
-          <Button
-            aria-label="Close document search"
-            className="px-2 text-muted-foreground"
-            type="button"
-            variant="outline"
-          >
-            esc
-          </Button>
-        </DialogPrimitive.Close>
+        <Button
+          aria-label="Close document search"
+          className="px-2 text-muted-foreground"
+          onClick={onClose}
+          type="button"
+          variant="outline"
+        >
+          esc
+        </Button>
       </span>
     </form>
   );
@@ -152,7 +161,7 @@ const HitsList = memo(function HitsList({
 
   return (
     <div
-      className="flex h-[91vh] flex-col gap-4 overflow-y-auto bg-muted p-2 md:h-[50vh]"
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-muted p-2"
       id="local-search-results"
       ref={containerRef}
       role="listbox"
@@ -180,7 +189,7 @@ const NoResults = memo(function NoResults({
   query: string;
 }) {
   return (
-    <div className="flex h-[91vh] flex-col items-center justify-center gap-2 bg-muted p-4 text-foreground md:h-[50vh]">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-muted p-4 text-foreground">
       <span className="flex h-10 w-10 items-center justify-center rounded-full border border-muted-foreground p-2">
         <SearchIcon aria-hidden="true" />
       </span>
@@ -217,6 +226,26 @@ const Footer = memo(function Footer() {
   );
 });
 
+const DOCUMENT_SEARCH_DEFAULT_SIZE = { width: 720, height: 440 };
+const DOCUMENT_SEARCH_MIN_SIZE = { width: 320, height: 220 };
+
+function getInitialDocumentSearchSize() {
+  if (typeof window === "undefined") {
+    return DOCUMENT_SEARCH_DEFAULT_SIZE;
+  }
+
+  return {
+    width: Math.min(
+      DOCUMENT_SEARCH_DEFAULT_SIZE.width,
+      Math.max(window.innerWidth - 32, 1),
+    ),
+    height: Math.min(
+      DOCUMENT_SEARCH_DEFAULT_SIZE.height,
+      Math.max(window.innerHeight - 32, 1),
+    ),
+  };
+}
+
 /**
  * Installed from the @algolia/search shadcn registry item, then adapted to accept
  * local items. It intentionally has no Algolia client, credentials, analytics,
@@ -234,13 +263,13 @@ export default function DocumentSearch({
   onSelect,
   onSelectionFocus,
   placeholder = "What are you looking for?",
-  portalContainer,
+  boundaryElement,
   trigger,
 }: DocumentSearchConfig) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const selectedItemRef = useRef(false);
+  const [panelSize] = useState(getInitialDocumentSearchSize);
   const filteredItems = useMemo(
     () => filterDocumentSearchItems(items, query),
     [items, query],
@@ -256,10 +285,7 @@ export default function DocumentSearch({
   const selectedItem = selectedIndex >= 0 ? visibleItems[selectedIndex] : undefined;
 
   function setOpen(open: boolean) {
-    if (open) {
-      selectedItemRef.current = false;
-    }
-    setIsModalOpen(open);
+    setIsPanelOpen(open);
     onOpenChange?.(open);
   }
 
@@ -267,9 +293,11 @@ export default function DocumentSearch({
     if (!item || item.disabledReason) {
       return;
     }
-    selectedItemRef.current = true;
     onSelect(item);
     setOpen(false);
+    if (onSelectionFocus) {
+      queueMicrotask(onSelectionFocus);
+    }
   }
 
   useEffect(() => {
@@ -287,39 +315,61 @@ export default function DocumentSearch({
   }, [enableKeyboardShortcut]);
 
   return (
-    <DialogPrimitive.Root modal onOpenChange={setOpen} open={isModalOpen}>
-      <DialogPrimitive.Trigger asChild>
+    <FloatingPanel
+      allowOverflow={false}
+      closeOnEscape
+      defaultSize={panelSize}
+      getAnchorPosition={({ boundaryRect }) => {
+        const boundaryX = boundaryRect?.x ?? 0;
+        const boundaryY = boundaryRect?.y ?? 0;
+        const boundaryWidth = boundaryRect?.width ?? window.innerWidth;
+        const boundaryHeight = boundaryRect?.height ?? window.innerHeight;
+
+        return {
+          x: Math.max(boundaryX, boundaryX + (boundaryWidth - panelSize.width) / 2),
+          y: Math.max(boundaryY, boundaryY + (boundaryHeight - panelSize.height) / 2),
+        };
+      }}
+      getBoundaryEl={() => boundaryElement ?? document.documentElement}
+      initialFocusEl={() => inputRef.current}
+      finalFocusEl={finalFocusEl}
+      minSize={{
+        width: Math.min(DOCUMENT_SEARCH_MIN_SIZE.width, panelSize.width),
+        height: Math.min(DOCUMENT_SEARCH_MIN_SIZE.height, panelSize.height),
+      }}
+      onOpenChange={({ open }) => setOpen(open)}
+      open={isPanelOpen}
+    >
+      <FloatingPanelTrigger asChild>
         {trigger ?? (
           <DocumentSearchButton showShortcut={enableKeyboardShortcut} {...buttonProps}>
             {buttonText}
           </DocumentSearchButton>
         )}
-      </DialogPrimitive.Trigger>
-      <DialogPrimitive.Portal container={portalContainer}>
-        <DialogPrimitive.Overlay className="pointer-events-auto absolute inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm dark:bg-black/60" />
-        <DialogPrimitive.Content
-          aria-describedby="local-search-description"
-          className="pointer-events-auto absolute inset-x-0 top-0 z-50 h-full w-full max-w-full overflow-hidden bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none md:inset-x-4 md:top-1/2 md:mx-auto md:h-auto md:max-h-[80%] md:max-w-[720px] md:-translate-y-1/2 md:rounded-xl"
-          onCloseAutoFocus={(event) => {
-            if (selectedItemRef.current && onSelectionFocus) {
-              event.preventDefault();
-              onSelectionFocus();
-            } else if (finalFocusEl) {
-              event.preventDefault();
-              finalFocusEl()?.focus();
-            }
-          }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault();
-            inputRef.current?.focus();
-          }}
-        >
-          <DialogPrimitive.Title className="sr-only">
-            {dialogTitle}
-          </DialogPrimitive.Title>
-          <DialogPrimitive.Description className="sr-only" id="local-search-description">
-            {dialogDescription}
-          </DialogPrimitive.Description>
+      </FloatingPanelTrigger>
+      <FloatingPanelContent
+        aria-describedby="local-search-description"
+        className="max-w-[calc(100vw-2rem)] overflow-hidden"
+      >
+        <FloatingPanelHeader>
+          <FloatingPanelTitle>{dialogTitle}</FloatingPanelTitle>
+          <FloatingPanelControl>
+            <FloatingPanelCloseTrigger asChild>
+              <Button
+                aria-label="Close document search"
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            </FloatingPanelCloseTrigger>
+          </FloatingPanelControl>
+        </FloatingPanelHeader>
+        <p className="sr-only" id="local-search-description">
+          {dialogDescription}
+        </p>
+        <div className="flex min-h-0 flex-1 flex-col">
           <SearchInput
             activeItemId={
               selectedItem ? `local-search-result-${selectedItem.id}` : undefined
@@ -329,6 +379,7 @@ export default function DocumentSearch({
             onArrowUp={moveUp}
             onEnter={() => selectItem(selectedItem)}
             onQueryChange={setQuery}
+            onClose={() => setOpen(false)}
             placeholder={placeholder}
             query={query}
           />
@@ -352,9 +403,9 @@ export default function DocumentSearch({
             />
           ) : null}
           <Footer />
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        </div>
+      </FloatingPanelContent>
+    </FloatingPanel>
   );
 }
 

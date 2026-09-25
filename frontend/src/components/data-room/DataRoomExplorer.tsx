@@ -3,15 +3,16 @@ import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DealExtractionLocationState } from "../../data/dealExtraction";
 import { SidebarFrame } from "../hub/sidebar/SidebarFrame";
 import { Icon } from "../ui/Icon";
-import { NewAnalysisMenu } from "./NewAnalysisMenu";
+import { DataRoomQuickActions } from "./DataRoomQuickActions";
+import type { DataRoomDocumentSearchProps } from "./document-search/DataRoomDocumentSearch";
 
 type DataRoomExplorerProps = {
   dealName: string;
   dealRoomPath: string;
+  documentSearch: Omit<DataRoomDocumentSearchProps, "finalFocusEl" | "trigger">;
   email?: string;
   navigationState?: DealExtractionLocationState;
   nodes: DataRoomTreeNode[];
-  onConnectToSharePoint: () => void;
   onSelectFile: (node: DataRoomTreeNode) => void;
   onUploadNewFile: () => void;
   rootPath?: string;
@@ -22,10 +23,10 @@ type DataRoomExplorerProps = {
 export function DataRoomExplorer({
   dealName,
   dealRoomPath,
+  documentSearch,
   email,
   navigationState,
   nodes,
-  onConnectToSharePoint,
   onSelectFile,
   onUploadNewFile,
   rootPath,
@@ -70,8 +71,8 @@ export function DataRoomExplorer({
       {({ collapsed }) =>
         collapsed ? null : (
           <div className="flex min-h-full flex-col gap-3">
-            <NewAnalysisMenu
-              onConnectToSharePoint={onConnectToSharePoint}
+            <DataRoomQuickActions
+              documentSearch={documentSearch}
               onUploadNewFile={onUploadNewFile}
             />
 

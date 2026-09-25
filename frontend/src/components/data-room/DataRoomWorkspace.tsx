@@ -6,7 +6,6 @@ import type { WorkspaceLocationState } from "../../data/workspace";
 import type { DataRoomContents } from "../../hooks/useDataRoomContents";
 import { useDocumentSession } from "../../hooks/useDocumentSession";
 import { EmptyState } from "../empty-state/empty-state";
-import { DataRoomArcMenu } from "./DataRoomArcMenu";
 import { DataRoomExplorer } from "./DataRoomExplorer";
 import { FileReviewTable } from "./FileReviewTable";
 
@@ -37,22 +36,19 @@ export function DataRoomWorkspace({
 }: DataRoomWorkspaceProps) {
   const { closeDocument, requestRawText, selectDocument, state: documentSession } = useDocumentSession(dealId);
   const [documentPageCount, setDocumentPageCount] = useState(0);
-  const [documentSearchOpen, setDocumentSearchOpen] = useState(false);
   const [requestedPreviewPage, setRequestedPreviewPage] = useState<number | null>(null);
-  const [searchPortalContainer, setSearchPortalContainer] = useState<HTMLDivElement | null>(null);
+  const [searchBoundaryElement, setSearchBoundaryElement] = useState<HTMLDivElement | null>(null);
   const documentPreviewRef = useRef<DocumentPreviewPanelHandle>(null);
   const selectedDocument = documentSession.status === "open" ? documentSession.document : null;
 
   const handleSelectDocument = useCallback((document: DataRoomTreeNode) => {
     setDocumentPageCount(0);
-    setDocumentSearchOpen(false);
     setRequestedPreviewPage(null);
     void selectDocument(document);
   }, [selectDocument]);
 
   const handleClosePreview = useCallback(() => {
     setDocumentPageCount(0);
-    setDocumentSearchOpen(false);
     setRequestedPreviewPage(null);
     closeDocument();
   }, [closeDocument]);
@@ -68,10 +64,18 @@ export function DataRoomWorkspace({
           <DataRoomExplorer
             dealName={dealName}
             dealRoomPath={dealRoomPath}
+            documentSearch={{
+              boundaryElement: searchBoundaryElement,
+              currentFileName: selectedDocument.name,
+              currentPageCount: documentPageCount,
+              onActivateResult: (result: DocumentSearchResult) => {
+                if (result.target?.kind === "pdf-page") setRequestedPreviewPage(result.target.page);
+              },
+              onSelectionFocus: focusDocumentPreview,
+            }}
             email={email}
             navigationState={navigationState}
             nodes={contents.explorerNodes}
-            onConnectToSharePoint={onConnectToSharePoint}
             onSelectFile={handleSelectDocument}
             onUploadNewFile={onUploadFiles}
             rootPath={contents.rootPath}
@@ -122,20 +126,7 @@ export function DataRoomWorkspace({
         )}
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-0 z-50 ${selectedDocument ? "top-12" : "top-0"}`}
-          ref={setSearchPortalContainer}
-        />
-        <DataRoomArcMenu
-          documentSearch={{
-            currentFileName: selectedDocument?.name ?? "Data Room",
-            currentPageCount: selectedDocument ? documentPageCount : 0,
-            onActivateResult: (result: DocumentSearchResult) => {
-              if (result.target?.kind === "pdf-page") setRequestedPreviewPage(result.target.page);
-            },
-            onOpenChange: setDocumentSearchOpen,
-            onSelectionFocus: selectedDocument ? focusDocumentPreview : undefined,
-            portalContainer: searchPortalContainer,
-          }}
-          documentSearchOpen={documentSearchOpen}
+          ref={setSearchBoundaryElement}
         />
       </main>
     </div>

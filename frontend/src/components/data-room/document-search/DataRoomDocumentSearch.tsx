@@ -15,7 +15,7 @@ export type DataRoomDocumentSearchProps = {
   onActivateResult: (result: DocumentSearchResult) => void;
   onOpenChange?: (open: boolean) => void;
   onSelectionFocus?: () => void;
-  portalContainer?: HTMLElement | null;
+  boundaryElement?: HTMLElement | null;
   trigger?: ReactElement;
 };
 
@@ -26,7 +26,7 @@ export function DataRoomDocumentSearch({
   onActivateResult,
   onOpenChange,
   onSelectionFocus,
-  portalContainer,
+  boundaryElement,
   trigger,
 }: DataRoomDocumentSearchProps) {
   const results = useMemo(
@@ -75,7 +75,7 @@ export function DataRoomDocumentSearch({
       onSelect={activateItem}
       onSelectionFocus={onSelectionFocus}
       placeholder="Search files and excerpts…"
-      portalContainer={portalContainer}
+      boundaryElement={boundaryElement}
       trigger={trigger}
     />
   );
