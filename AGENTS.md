@@ -52,13 +52,27 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
+| `diligence-studio-server/` | Standalone Node/Express template catalog and PowerPoint service | npm + `package-lock.json` |
 | `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
 There is no root workspace manifest or root task runner. Run commands from the correct
-build root. There is currently no CI, deployment manifest, Docker setup, ESLint/Prettier
+build root. There is currently no CI, deployment manifest, repository-owned container manifest, ESLint/Prettier
 configuration, or repository-pinned Node/Rust version. Do not invent scripts that do
 not exist.
+
+### Diligence Studio remains a separate server boundary
+
+- `diligence-studio-server/` is an independent Node 22.5+ build root. Do not add it to the
+  frontend package or create a root npm workspace.
+- The browser and Tauri webview call only Axum. Axum reaches Diligence Studio through its typed
+  adapter and fixed `X-App-Id: Quarry_WestMonroe`; client code must never call port `43127`.
+- Diligence Studio owns its in-memory template catalog, PowerPoint conversion, and Playwright
+  preview generation. Quarry's hidden Vite route supplies the read-only SVG render surface.
+- The catalog is seeded on startup and all imports are process-local. Do not copy local SQLite
+  files into the package or describe imported templates as durable.
+- Keep server keys in the ignored `diligence-studio-server/.env`; never place them in `VITE_*`,
+  Tauri IPC payloads, or Axum request data.
 
 ## Non-negotiable architecture boundaries
 
@@ -241,6 +255,20 @@ Also run frontend desktop typechecking and boundary checks for native contract c
 `npm run build:desktop` for packaging or release validation; it is substantially broader than a
 normal code check.
 
+### Diligence Studio server (`diligence-studio-server/`)
+
+```sh
+npm ci
+npm run typecheck
+npm test
+```
+
+Install the matching local preview browser with `npx playwright install chromium` when imports
+will be exercised. The root `./quarry web` and `./quarry desktop` launchers supervise Axum, the
+selected UI, and this server after ensuring Docker Desktop and the configured local Helix container
+are ready; Docker and Helix remain running after the launcher exits. A direct `npm start` is a
+standalone runtime operation.
+
 ## Change checklists
 
 ### When changing a frontend route or feature
@@ -257,6 +285,8 @@ normal code check.
 - Update web and desktop adapters without bypassing their transport boundaries.
 - Update Tauri relay/native code if method, body, bytes, multipart, or SSE behavior changed.
 - Update Axum route, extractor, handler, service, and error mapping as needed.
+- When a template operation changes, also update and test the matching Diligence Studio route,
+  headers, request bounds, app scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 
@@ -300,6 +330,8 @@ Do not hand-edit or commit generated/local outputs unless the task explicitly re
 - `frontend/node_modules/`, `frontend/dist/`
 - `frontend/src-tauri/target/`, `frontend/src-tauri/gen/schemas/`
 - `backend/target/`, `backend/data/`, `backend/.helix/`
+- `diligence-studio-server/node_modules/`, `coverage/`, `server-dist/`, `data/`, caches, and
+  `*.tsbuildinfo`
 - local `.env*` files and `*.log`
 
 `frontend/tsconfig.node.tsbuildinfo` is tracked even though it is generated. Never edit it by

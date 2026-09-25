@@ -7,17 +7,26 @@ readonly QUARRY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly QUARRY_API_HOST="127.0.0.1"
 readonly QUARRY_API_PORT="3001"
 readonly QUARRY_API_URL="http://${QUARRY_API_HOST}:${QUARRY_API_PORT}"
+readonly DILIGENCE_STUDIO_HOST="127.0.0.1"
+readonly DILIGENCE_STUDIO_PORT="43127"
+readonly DILIGENCE_STUDIO_API_URL="http://${DILIGENCE_STUDIO_HOST}:${DILIGENCE_STUDIO_PORT}"
+readonly DILIGENCE_STUDIO_API_BASE_URL="${DILIGENCE_STUDIO_API_URL}/api/v1"
+readonly QUARRY_UI_URL="http://localhost:1420"
+readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template-preview"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-rgambhir-dev}"
+readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
 
 backend_pid=""
 ui_pid=""
+diligence_studio_pid=""
 
 usage() {
   cat <<'EOF'
 Usage: quarry <web|desktop>
 
-  web      Start the Axum API, then the React UI in web mode.
-  desktop  Start the Axum API, then the React UI in Tauri desktop mode.
+  web      Start Docker, Helix, Axum, the React web UI, and Diligence Studio.
+  desktop  Start Docker, Helix, Axum, the Tauri desktop UI, and Diligence Studio.
 
 Run this command from the Quarry repository root.
 EOF
@@ -45,7 +54,9 @@ signal_process_group() {
 }
 
 children_are_running() {
-  process_group_is_running "$ui_pid" || process_group_is_running "$backend_pid"
+  process_group_is_running "$diligence_studio_pid" \
+    || process_group_is_running "$ui_pid" \
+    || process_group_is_running "$backend_pid"
 }
 
 cleanup() {
@@ -54,6 +65,7 @@ cleanup() {
 
   trap - EXIT INT TERM HUP
 
+  signal_process_group "$diligence_studio_pid" INT
   signal_process_group "$ui_pid" INT
   signal_process_group "$backend_pid" INT
 
@@ -64,6 +76,7 @@ cleanup() {
     sleep 0.1
   done
 
+  signal_process_group "$diligence_studio_pid" TERM
   signal_process_group "$ui_pid" TERM
   signal_process_group "$backend_pid" TERM
 
@@ -74,9 +87,13 @@ cleanup() {
     sleep 0.1
   done
 
+  signal_process_group "$diligence_studio_pid" KILL
   signal_process_group "$ui_pid" KILL
   signal_process_group "$backend_pid" KILL
 
+  if [[ -n "$diligence_studio_pid" ]]; then
+    wait "$diligence_studio_pid" 2>/dev/null || true
+  fi
   if [[ -n "$ui_pid" ]]; then
     wait "$ui_pid" 2>/dev/null || true
   fi
@@ -121,14 +138,81 @@ case "$1" in
     ;;
 esac
 
-for required_command in cargo npm curl; do
+for required_command in cargo npm curl node docker; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     fail "required command not found: ${required_command}"
   fi
 done
 
-if curl --fail --silent --max-time 1 "${QUARRY_API_URL}/api/v1/health" >/dev/null 2>&1; then
-  fail "another Quarry API is already running at ${QUARRY_API_URL}"
+port_is_available() {
+  node -e '
+    const net = require("node:net");
+    const server = net.createServer();
+    server.once("error", () => process.exit(1));
+    server.listen({ host: process.argv[1], port: Number(process.argv[2]) }, () => {
+      server.close(() => process.exit(0));
+    });
+  ' "$1" "$2"
+}
+
+port_is_available "$QUARRY_API_HOST" "$QUARRY_API_PORT" \
+  || fail "port ${QUARRY_API_PORT} is already in use; refusing to start the Quarry API"
+port_is_available "127.0.0.1" "1420" \
+  || fail "port 1420 is already in use; refusing to start the Quarry UI"
+port_is_available "$DILIGENCE_STUDIO_HOST" "$DILIGENCE_STUDIO_PORT" \
+  || fail "port ${DILIGENCE_STUDIO_PORT} is already in use; refusing to start Diligence Studio"
+
+docker_daemon_is_ready() {
+  docker info >/dev/null 2>&1
+}
+
+helix_is_ready() {
+  curl --silent --max-time 1 --output /dev/null "$LOCAL_HELIX_URL"
+}
+
+if ! docker_daemon_is_ready; then
+  if [[ "$(uname -s)" != "Darwin" ]] || ! command -v open >/dev/null 2>&1; then
+    fail "Docker daemon is not running; start it and try again"
+  fi
+
+  printf 'Starting Docker Desktop...\n'
+  open -a "Docker Desktop" \
+    || fail "could not open Docker Desktop"
+
+  readonly docker_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
+  while ! docker_daemon_is_ready; do
+    if ((SECONDS >= docker_startup_deadline)); then
+      fail "Docker daemon did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+    fi
+    sleep 1
+  done
+fi
+
+if helix_is_ready; then
+  printf 'Helix is already ready at %s.\n' "$LOCAL_HELIX_URL"
+else
+  if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+    fail "Helix container '${HELIX_CONTAINER_NAME}' does not exist; set QUARRY_HELIX_CONTAINER_NAME to the local container name"
+  fi
+
+  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" != "true" ]]; then
+    printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
+    docker start "$HELIX_CONTAINER_NAME" >/dev/null \
+      || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
+  else
+    printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
+  fi
+
+  readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
+  while ! helix_is_ready; do
+    if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
+      fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
+    fi
+    if ((SECONDS >= helix_startup_deadline)); then
+      fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+    fi
+    sleep 0.25
+  done
 fi
 
 printf 'Starting Axum API at %s...\n' "$QUARRY_API_URL"
@@ -138,6 +222,7 @@ set -m
   exec env \
     QUARRY_API_HOST="$QUARRY_API_HOST" \
     QUARRY_API_PORT="$QUARRY_API_PORT" \
+    DILIGENCE_STUDIO_API_BASE_URL="$DILIGENCE_STUDIO_API_BASE_URL" \
     cargo run --locked
 ) &
 backend_pid=$!
@@ -175,6 +260,78 @@ set -m
 ui_pid=$!
 set +m
 
+while ! curl --fail --silent --max-time 1 "$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" >/dev/null 2>&1; do
+  if ! kill -0 "$backend_pid" 2>/dev/null; then
+    wait "$backend_pid"
+    backend_status=$?
+    backend_pid=""
+    if [[ $backend_status -eq 0 ]]; then
+      backend_status=1
+    fi
+    printf 'quarry: Axum API stopped while waiting for %s.\n' "$ui_label" >&2
+    exit "$backend_status"
+  fi
+
+  if ! kill -0 "$ui_pid" 2>/dev/null; then
+    wait "$ui_pid"
+    ui_status=$?
+    ui_pid=""
+    if [[ $ui_status -eq 0 ]]; then
+      ui_status=1
+    fi
+    printf 'quarry: %s exited before becoming ready.\n' "$ui_label" >&2
+    exit "$ui_status"
+  fi
+
+  if ((SECONDS >= startup_deadline)); then
+    fail "$ui_label did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+  fi
+
+  sleep 0.25
+done
+
+printf '%s is ready at %s. Starting Diligence Studio at %s...\n' \
+  "$ui_label" "$QUARRY_UI_URL" "$DILIGENCE_STUDIO_API_URL"
+set -m
+(
+  cd "$QUARRY_ROOT/diligence-studio-server" || exit 1
+  exec env \
+    HOST="$DILIGENCE_STUDIO_HOST" \
+    PORT="$DILIGENCE_STUDIO_PORT" \
+    QUARRY_TEMPLATE_PREVIEW_RENDER_URL="$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" \
+    npm start
+) &
+diligence_studio_pid=$!
+set +m
+
+while ! curl --fail --silent --max-time 1 \
+  --header 'X-App-Id: Quarry_WestMonroe' \
+  "${DILIGENCE_STUDIO_API_BASE_URL}/templates/previews?page=1" >/dev/null 2>&1; do
+  if ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
+    wait "$diligence_studio_pid"
+    diligence_studio_status=$?
+    diligence_studio_pid=""
+    if [[ $diligence_studio_status -eq 0 ]]; then
+      diligence_studio_status=1
+    fi
+    printf 'quarry: Diligence Studio exited before becoming ready.\n' >&2
+    exit "$diligence_studio_status"
+  fi
+
+  if ! kill -0 "$backend_pid" 2>/dev/null || ! kill -0 "$ui_pid" 2>/dev/null; then
+    fail "a required child process stopped while Diligence Studio was starting"
+  fi
+
+  if ((SECONDS >= startup_deadline)); then
+    fail "Diligence Studio did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+  fi
+
+  sleep 0.25
+done
+
+printf 'Quarry is ready: Helix %s, Axum %s, UI %s, Diligence Studio %s.\n' \
+  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "$DILIGENCE_STUDIO_API_URL"
+
 while true; do
   if ! kill -0 "$backend_pid" 2>/dev/null; then
     wait "$backend_pid"
@@ -192,6 +349,17 @@ while true; do
     ui_status=$?
     ui_pid=""
     exit "$ui_status"
+  fi
+
+  if ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
+    wait "$diligence_studio_pid"
+    diligence_studio_status=$?
+    diligence_studio_pid=""
+    if [[ $diligence_studio_status -eq 0 ]]; then
+      diligence_studio_status=1
+    fi
+    printf 'quarry: Diligence Studio stopped; shutting down the local stack.\n' >&2
+    exit "$diligence_studio_status"
   fi
 
   sleep 0.5

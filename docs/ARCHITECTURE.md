@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Status | Canonical current-state architecture reference |
-| Last verified | 2026-09-16 |
-| Repository snapshot | Live working tree after the backend domain modularization |
+| Last verified | 2026-09-25 |
+| Repository snapshot | Live working tree with the co-located Diligence Studio server |
 | Audience | Quarry developers, reviewers, operators, and coding agents |
-| Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, persistence, integrations, and verification |
+| Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, Diligence Studio service, persistence, integrations, and verification |
 
 This document describes the implementation in the live repository, not an idealized target.
 When it disagrees with code, manifests, lockfiles, or tests, the executable repository is the
@@ -37,7 +37,7 @@ must state `Architecture impact: none — <specific reason>`.
 
 ## 1. Executive summary
 
-Quarry is a multiplatform diligence application built from three cooperating runtimes:
+Quarry is a multiplatform diligence application built from four cooperating runtimes:
 
 1. A single React application under `frontend/src/`, compiled by Vite for either a browser or a
    Tauri webview.
@@ -45,6 +45,9 @@ Quarry is a multiplatform diligence application built from three cooperating run
    capabilities and the current desktop-to-Axum transport gateway.
 3. An Axum 0.8 product API under `backend/`, responsible for product behavior, configuration,
    persistence, document processing, AI integrations, search, and background jobs.
+4. A standalone Node/Express service under `diligence-studio-server/`, responsible for the
+   app-scoped in-memory template catalog, PowerPoint import/export, optional classification, and
+   Playwright-based preview generation.
 
 The web and desktop distributions share pages, components, hooks, contracts, and product routes.
 Build-time aliases select the router and runtime adapter:
@@ -100,6 +103,14 @@ flowchart LR
         Router --> Domains --> Adapters
     end
 
+    subgraph Studio[Diligence Studio Node service]
+        StudioApi[Express /api/v1 and /api/v2]
+        StudioCatalog[(In-memory SQLite catalog)]
+        PreviewRunner[Playwright Chromium]
+        StudioApi --> StudioCatalog
+        StudioApi --> PreviewRunner
+    end
+
     SQLite[(SQLite\ncanonical records and blobs)]
     Helix[(Helix\nversioned graph and search)]
     OpenAI[OpenAI]
@@ -110,6 +121,8 @@ flowchart LR
     User --> DesktopUI
     HttpApi --> Router
     Relay --> Router
+    Adapters -->|typed template client| StudioApi
+    PreviewRunner -->|injected JSON; same-origin assets only| WebUI
     Adapters --> SQLite
     Adapters --> Helix
     Adapters --> OpenAI
@@ -155,6 +168,11 @@ Quarry/
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
 │   └── helix.toml                    local Helix metadata, partly stale
+├── diligence-studio-server/
+│   ├── src/                          Express routes, services, catalog, and PowerPoint libraries
+│   ├── test/                         server API and behavior tests
+│   ├── package.json                  standalone private npm package
+│   └── package-lock.json             package-owned dependency lock
 └── plans/                            tracked, non-canonical implementation plans
 ```
 
@@ -162,18 +180,26 @@ Quarry/
 
 | Root | Package | Primary commands | Relationship to product build |
 | --- | --- | --- | --- |
-| repository root | Bash launcher | `./quarry web`, `./quarry desktop` | Local Axum-plus-UI process orchestration only |
+| repository root | Bash launcher | `./quarry web`, `./quarry desktop` | Local dependency and three-process orchestration only |
 | `frontend/` | npm application | `npm test`, typechecks, Vite builds | Shared web and desktop UI |
 | `frontend/src-tauri/` | Cargo crate `quarry-desktop` | Rust format, Clippy, tests | Native desktop shell |
 | `backend/` | Cargo crate `quarry-backend` | Rust format, Clippy, tests | Product API |
+| `diligence-studio-server/` | npm package `diligence-studio-server` | `npm run typecheck`, `npm test` | Template and PowerPoint API |
 
 There is no root workspace manifest. The root `quarry` executable is a development-only process
 supervisor, not another build root: it can run only while the working directory is the repository
-root. Both modes start `cargo run --locked` from `backend/`, pin Axum to `127.0.0.1:3001`, wait for
-`/api/v1/health`, and then run either `npm run dev:web` or `npm run dev:desktop` from `frontend/`.
-It pins the matching frontend API-base variable and stops both child process groups when either
-child exits or the launcher receives a termination signal. Backend configuration, migrations,
-Helix startup, and Tauri's own `beforeDevCommand` remain owned by their existing build roots.
+root. Both modes reject conflicting listeners on ports 3001, 1420, and 43127; start
+Docker Desktop on macOS when its daemon is unavailable; and wait for Docker and the Helix service
+at `127.0.0.1:6969`. If Helix is not already reachable, the launcher starts the existing local
+container named by `QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-rgambhir-dev`. It then starts
+`cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001` and the versioned
+Diligence Studio upstream URL set explicitly; waits for `/api/v1/health`; and runs either
+`npm run dev:web` or `npm run dev:desktop` from `frontend/`. After Vite serves the internal preview
+route, the launcher starts `npm start` from `diligence-studio-server/`, binding it to
+`127.0.0.1:43127`, and probes its app-scoped preview page. It stops all three owned process groups
+when any child exits or the launcher receives a termination signal. Docker Desktop and Helix are
+shared external dependencies and remain running. Backend configuration, migrations, and Tauri's
+own `beforeDevCommand` remain owned by their build roots.
 
 The backend contains an isolated Rust SharePoint adapter under
 `backend/src/adapters/sharepoint/`; it is tested but not assembled into a domain or exposed
@@ -229,6 +255,7 @@ uses the web runtime in its normal test mode unless a test directly exercises th
 | --- | --- | --- |
 | Vite | `http://localhost:1420` | Strict port; `/api` proxies to Axum |
 | Axum | `http://127.0.0.1:3001` | Configurable host/port |
+| Diligence Studio | `http://127.0.0.1:43127` | Express; launcher binds loopback |
 | Helix | `http://127.0.0.1:6969` | Required during normal backend bootstrap |
 
 An empty browser `VITE_API_BASE_URL` uses Vite's `/api` proxy in development. Static web hosting
@@ -737,8 +764,11 @@ explicit `single|batch` mode. The single mode maps only to Diligence Studio `/im
 batch maps only to `/batchImport?kind=diagram`. Both send raw PPTX bytes and return only the
 camelCase mode/imported-count/warning-count DTO after validating the upstream 201, JSON content
 type, and operation-specific response headers. Diligence Studio owns conversion, atomic slide
-splitting, preview generation, and persistence; Quarry keeps no imported template copy. The exact
-single-mode multi-slide rejection directs the user to the deck action without an automatic retry.
+splitting, preview generation, and its process-local catalog; Quarry keeps no imported template
+copy. Diligence Studio seeds its checked-in built-ins into in-memory SQLite at startup. Imports,
+assets, previews, classifications, and app registrations disappear when that process restarts.
+The exact single-mode multi-slide rejection directs the user to the deck action without an
+automatic retry.
 Because the upstream writes are not idempotent, timeouts and connection failures are not retried
 and are reported as uncertain outcomes. The fixed `X-App-Id` segregates the upstream catalog but
 is not authentication or authorization. `GET /templates/{template_id}` validates the decoded ID,
@@ -759,6 +789,14 @@ cache. Upstream 404 remains 404; malformed, oversized, unavailable, and timeout 
 sanitized 503. Deletes require the upstream 204 contract; an upstream
 404 remains a 404, while other upstream failures return a sanitized 503. The browser and Tauri
 webview call these Quarry routes; they never connect to Diligence Studio directly.
+
+The import preview path deliberately crosses back into the UI runtime: Diligence Studio launches
+headless Chromium, injects normalized slide JSON before navigation to
+`http://localhost:1420/_internal/template-preview`, blocks requests outside that origin plus
+`blob:` and `data:`, waits for the read-only SVG surface, and screenshots it as a bounded PNG. The
+route is outside the product shell, but its name is not a security boundary. Vite must therefore
+be ready before the local launcher starts Diligence Studio. The copied `/api/v2` classification
+and retrieval routes remain service-owned and are not exposed through Quarry's Axum contract.
 
 The API contract is not generated. JSON is generally camelCase, but flattened document search
 result properties are currently snake_case because their Rust DTO lacks a rename rule.
@@ -1091,13 +1129,15 @@ a backend process crash. Current-turn file bytes are still not retained for reus
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
+| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Existing local Helix container to start; defaults to `helix-rgambhir-dev` | Local development identifier; not passed to application runtimes |
 
-Local development has one live environment file per build root: `frontend/.env` for public Vite
-configuration shared by web and desktop UI builds, and `backend/.env` for Axum configuration and
-server-side secrets. Additional `.env.local` and mode-specific frontend environment files are not
-part of the maintained configuration. Environment keys and defaults are documented below instead
-of in another env-shaped template file. The Rust desktop client reads `QUARRY_API_BASE_URL`; the
-root launcher pins it to the loopback API.
+Local development has one live environment file per runtime build root: `frontend/.env` for public
+Vite configuration shared by web and desktop UI builds, `backend/.env` for Axum configuration and
+server-side secrets, and `diligence-studio-server/.env` for its server-only settings. Additional
+`.env.local` and mode-specific frontend environment files are not part of the maintained
+configuration. Environment keys and defaults are documented below instead of in another
+env-shaped template file. The Rust desktop client reads `QUARRY_API_BASE_URL`; the root launcher
+pins it to the loopback API.
 
 ### 11.2 Backend core configuration
 
@@ -1124,9 +1164,38 @@ and passed through bootstrap into one shared `DiligenceStudioClient`. It must us
 or a fragment. Capability methods append relative paths so the version prefix is preserved and
 identify Quarry to the upstream API as `Quarry_WestMonroe`. Local development can place
 `http://127.0.0.1:43127/api/v1` in the ignored `backend/.env`; this is server-side integration
-configuration and must not be exposed through a `VITE_*` variable.
+configuration and must not be exposed through a `VITE_*` variable. The root launcher always
+supplies this exact versioned loopback URL explicitly.
 
-### 11.3 Optional OpenAI capability group
+### 11.3 Diligence Studio configuration
+
+| Variable | Default/behavior |
+| --- | --- |
+| `HOST` | `0.0.0.0`; IP address only. The root launcher overrides it with `127.0.0.1` |
+| `PORT` | `43127` |
+| `QUARRY_TEMPLATE_PREVIEW_RENDER_URL` | `http://localhost:1420/_internal/template-preview` |
+| `MAX_PPTX_UPLOAD_BYTES` | `26214400` (25 MiB) |
+| `MAX_EXPORT_JSON_BYTES` | `52428800` (50 MiB) |
+| `MAX_TEMPLATE_PREVIEW_BYTES` | `10485760` (10 MiB) |
+| `TEMPLATE_PREVIEW_RENDER_SIZE` | `1600`; valid range 320–4096 |
+| `TEMPLATE_PREVIEW_TIMEOUT_MS` | `15000` |
+| `REQUEST_TIMEOUT_MS` | `90000` |
+| `SLIDE_CLASSIFICATION_PROVIDER` | `disabled`, or `openai` |
+| `OPENAI_API_KEY` | Required only when classification is `openai`; server secret |
+| `OPENAI_SLIDE_CLASSIFICATION_MODEL` | Required only when classification is `openai` |
+| `OPENAI_SLIDE_EMBEDDING_MODEL` | Required only when classification is `openai` |
+| `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` | Optional positive integer |
+| `SLIDE_CLASSIFICATION_TIMEOUT_MS` | `45000` |
+| `SLIDE_EMBEDDING_TIMEOUT_MS` | `20000` |
+| `SLIDE_CLASSIFICATION_MAX_TEXT_CHARS` | `12000` |
+| `SLIDE_CLASSIFICATION_MAX_IMAGE_BYTES` | `5242880` |
+| `SLIDE_EMBEDDING_MAX_TEXT_BYTES` | `32000` |
+
+The service reads only its own ignored `.env`, validates configuration before binding, and keeps
+provider credentials out of routine logs and all client transports. Manual starts retain the
+source default bind of `0.0.0.0`; the maintained local full stack uses loopback explicitly.
+
+### 11.4 Optional OpenAI capability group
 
 If any OpenAI setting is present, `OPENAI_API_KEY` is required:
 
@@ -1147,7 +1216,7 @@ It is stored and returned by the user API but never read when services are assem
 AI use cases share the server-side `OpenAiClient` built only from `OPENAI_API_KEY`; creating a user
 profile does not configure or select an AI credential.
 
-### 11.4 Optional WM AI capability group
+### 11.5 Optional WM AI capability group
 
 All fields are required if any one is present:
 
@@ -1159,7 +1228,7 @@ All fields are required if any one is present:
 - `WM_GRAPHRAG_API_KEY`
 - `WM_GRAPHRAG_APPLICATION_NAME`
 
-### 11.5 Configuration caveats
+### 11.6 Configuration caveats
 
 - Helix is not optional during bootstrap: the client is always constructed and document indexes
   are initialized before the server starts.
@@ -1192,6 +1261,8 @@ All fields are required if any one is present:
   error body. Hydrated template JSON is relayed only through the bounded, validated, private
   no-store template-document endpoint and remains protected only by deployment/network controls;
   the fixed app ID is catalog scoping, not inbound authorization.
+- The maintained launcher binds Diligence Studio to loopback, and its preview runner blocks
+  navigation and subresources outside the configured frontend origin except `blob:` and `data:`.
 
 ### 12.2 Development-only or missing controls
 
@@ -1208,6 +1279,9 @@ The following are current facts, not merely future enhancements:
 - No rate limiting or abuse protection exists.
 - Health and capability responses do not verify live dependencies.
 - Tauri's proxy path restriction is not product authorization.
+- Diligence Studio has no authentication or tenant authorization. `X-App-Id` selects an isolated
+  catalog view but is caller-controlled and must not be treated as identity. The hidden preview
+  route is likewise protected only by deployment/network controls.
 
 Before public deployment, identity and tenancy must be enforced in Axum, server secrets must be
 server-managed, filesystem operations must be policy-scoped, sensitive response fields removed,
@@ -1230,6 +1304,11 @@ and deployment TLS/rate limits/observability established.
   preview data is read through on each template gallery request and is not persisted or cached.
   PPTX import transport failures are surfaced as uncertain because the upstream write has no
   idempotency contract and Quarry does not retry it.
+- Diligence Studio writes one sanitized structured record per completed or aborted request with a
+  request ID, method, query-free path, status, duration, and error code/name. It omits headers,
+  bodies, query strings, app IDs, filenames, provider content, and credentials. Its graceful
+  shutdown stops accepting requests, closes idle/all connections within ten seconds, and closes
+  the in-memory repository.
 
 There is no metrics backend, distributed tracing exporter, audit store, alerting, or durable job
 telemetry in the repository.
@@ -1321,7 +1400,8 @@ From the repository root, the local full-stack development entrypoints are:
 ```
 
 These are runtime operations rather than verification gates. They start the backend only with
-known local/disposable data and require its configured Helix service.
+known local/disposable data and require an existing local Helix container. On macOS the launcher
+opens Docker Desktop when necessary and starts that container before Axum.
 
 From `frontend/`:
 
@@ -1352,6 +1432,18 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 ```
 
+From `diligence-studio-server/`:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+```
+
+Install the matching browser runtime with `npx playwright install chromium` before exercising
+real imports. The server suites construct the Express app without binding a port and include the
+stdin/stdout PowerPoint CLI tests.
+
 From `frontend/src-tauri/` when native code or the desktop contract changes:
 
 ```sh
@@ -1377,6 +1469,7 @@ configuration. Never use `clear_helix` as verification.
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
+| Template catalog | Diligence Studio uses in-memory SQLite | Built-ins reseed on restart; all imported templates and derived data are lost |
 | Assistant chat | SQLite transcript with caller-supplied email ownership; no authentication, stale-stream recovery, rate limits, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
@@ -1424,6 +1517,7 @@ current-state reference.
 | SQLite schema | `app/migrations`, owning domain store/repository, state tests, recovery documentation | disposable database tests; never real local data |
 | Helix graph/query | document index models/query/writer/repository, documented reindex policy | graph/query tests and explicit integration plan |
 | Config | parser/default/example/bootstrap | config tests, secret redaction, startup plan with disposable config |
+| Diligence Studio API or catalog | Express routes/services/repository, Axum adapter contract, preview renderer | server typecheck/tests, backend adapter tests, supervised local smoke when dependencies exist |
 | Styling/theme | semantic tokens, light/dark, reduced motion, affected primitives | typecheck/tests plus visual/keyboard inspection |
 
 ## 18. Primary source map
@@ -1440,6 +1534,8 @@ current-state reference.
 | Tauri API gateway | `frontend/src-tauri/src/quarry_api/` |
 | Tauri native files/export | [`frontend/src-tauri/src/deal_files.rs`](../frontend/src-tauri/src/deal_files.rs), [`frontend/src-tauri/src/save_file.rs`](../frontend/src-tauri/src/save_file.rs) |
 | Backend process/composition | [`backend/src/main.rs`](../backend/src/main.rs), [`backend/src/app/config.rs`](../backend/src/app/config.rs), [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) |
+| Diligence Studio process/composition | [`diligence-studio-server/src/server.ts`](../diligence-studio-server/src/server.ts), [`diligence-studio-server/src/app.ts`](../diligence-studio-server/src/app.ts) |
+| Diligence Studio catalog and previews | [`diligence-studio-server/src/repositories/SqliteTemplateRepository.ts`](../diligence-studio-server/src/repositories/SqliteTemplateRepository.ts), [`diligence-studio-server/src/services/TemplatePreview.ts`](../diligence-studio-server/src/services/TemplatePreview.ts) |
 | Axum mounts/middleware/errors | [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs), [`backend/src/app/http/middleware.rs`](../backend/src/app/http/middleware.rs), [`backend/src/app/http/error.rs`](../backend/src/app/http/error.rs) |
 | Product use cases and owned persistence | `backend/src/domains/` |
 | Concrete infrastructure | `backend/src/adapters/` |
@@ -1457,6 +1553,7 @@ current-state reference.
 | Platform capability | Host-specific operation such as native folder selection or export |
 | Tauri gateway | The desktop IPC/Rust transport hop to Axum, plus native capabilities |
 | Product API | Axum's versioned `/api/v1` contract |
+| Template service | Co-located Node/Express process reached only through Axum's typed adapter |
 | Composition root | Vite/runtime selection on the client; `bootstrap.rs` on the server |
 | Canonical store | SQLite records and blobs used for recovery and product persistence |
 | Search projection | Helix graph/index intended to be recoverable from canonical file versions; bulk rebuild tooling is not implemented |

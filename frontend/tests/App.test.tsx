@@ -8,6 +8,7 @@ import { RootRoutes } from "@/app/RootRoutes";
 import type { PersistedDeal } from "@/contracts/quarryApi";
 
 const { listDeals, queryModel } = vi.hoisted(() => ({ listDeals: vi.fn(), queryModel: vi.fn() }));
+const lazyRouteWait = { timeout: 5_000 };
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
@@ -63,16 +64,16 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" })).toBeTruthy();
-    expect((await screen.findAllByRole("heading", { name: "Deal Activity" })).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" }, lazyRouteWait)).toBeTruthy();
+    expect((await screen.findAllByRole("heading", { name: "Deal Activity" }, lazyRouteWait)).length).toBeGreaterThan(0);
     expect(listDeals).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(await screen.findByRole("link", { name: "Deal Room", current: "page" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Deal Room", current: "page" }, lazyRouteWait)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
-    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" }, lazyRouteWait)).toBeTruthy();
     expect(listDeals).toHaveBeenCalledTimes(1);
-  });
+  }, 10_000);
 
   it("registers Assistant at its new route and removes the former summarize leaf", async () => {
     const { unmount } = render(

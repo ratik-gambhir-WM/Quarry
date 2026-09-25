@@ -1,0 +1,1193 @@
+{
+  "presentation": {
+    "title": "Supporting details: Product architecture: KBC",
+    "preserveElementOrder": true,
+    "showBranding": false,
+    "slides": [
+      {
+        "id": "slide-1",
+        "name": "Supporting details: Product architecture: KBC",
+        "width": 1280,
+        "height": 720,
+        "backgroundColor": "FFFFFF",
+        "elements": [
+          {
+            "id": "element-903000",
+            "type": "image",
+            "x": 0,
+            "y": 0,
+            "w": 1280,
+            "h": 720,
+            "src": "./assets/image-324aedf4f592.jpg",
+            "fit": "stretch",
+            "altText": "Layout Background Image"
+          },
+          {
+            "id": "element-5",
+            "type": "image",
+            "x": 48.33,
+            "y": 664.08,
+            "w": 153,
+            "h": 32.02,
+            "src": "./assets/image-41fac03a4e69.png",
+            "fit": "stretch",
+            "altText": "A blue text on a black background&#xA;&#xA;Description automatically generated"
+          },
+          {
+            "id": "element-2",
+            "type": "text",
+            "x": 453.65,
+            "y": 672,
+            "w": 745.7,
+            "h": 17.63,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "© 2026 West Monroe Partners | Reproduction and/or distribution without West Monroe Partners’ prior consent is prohibited.",
+            "fontSize": 16,
+            "fontFace": "Arial",
+            "textColor": "111827"
+          },
+          {
+            "id": "element-3",
+            "type": "text",
+            "x": 1208.35,
+            "y": 672,
+            "w": 22.98,
+            "h": 17.63,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "1",
+            "fontSize": 16,
+            "fontFace": "Arial",
+            "textColor": "111827"
+          },
+          {
+            "id": "element-4",
+            "type": "text",
+            "x": 48.33,
+            "y": 58.47,
+            "w": 1211.37,
+            "h": 89.86,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Dedicated KBC limits application entanglement, while LoanIQ hosting migration and loan-platform rationalization remain the primary separation and integration challenges\n",
+            "fontSize": 16,
+            "fontFace": "Arial",
+            "bold": true,
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "Dedicated KBC limits application entanglement, while LoanIQ hosting migration and loan-platform rationalization remain the primary separation and integration challenges",
+                "bold": true,
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 16
+              },
+              {
+                "text": "\n",
+                "bold": true,
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 16,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-5",
+            "type": "text",
+            "x": 48.83,
+            "y": 0,
+            "w": 561.83,
+            "h": 58.47,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 2.4,
+            "text": "Supporting details: Product architecture: KBC",
+            "valign": "bottom",
+            "fontSize": 16,
+            "fontFace": "Arial",
+            "textColor": "111827"
+          },
+          {
+            "id": "element-6001",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1290.08,
+            "y": 0,
+            "w": 25.01,
+            "h": 144,
+            "fill": "00B050",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "Status",
+            "align": "center",
+            "fontSize": 14,
+            "fontFace": "Arial",
+            "bold": true,
+            "textColor": "FFFFFF"
+          },
+          {
+            "id": "element-6002",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1315.09,
+            "y": 0,
+            "w": 203.21,
+            "h": 27.2,
+            "fill": "070154",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "Ratik/Shashank",
+            "fontSize": 15,
+            "fontFace": "Arial",
+            "bold": true,
+            "textColor": "FFFFFF"
+          },
+          {
+            "id": "element-6102",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1315.09,
+            "y": 27.2,
+            "w": 60.95,
+            "h": 15.52,
+            "fill": "F52C00",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "Not Started​",
+            "align": "center",
+            "fontSize": 9,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Not Started",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 9
+              },
+              {
+                "text": "​",
+                "color": "797979",
+                "fontFace": "Arial",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-6103",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1376.04,
+            "y": 27.2,
+            "w": 37.96,
+            "h": 15.52,
+            "fill": "FFC700",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "WIP​",
+            "align": "center",
+            "fontSize": 9,
+            "fontFace": "Arial",
+            "textColor": "070154",
+            "runs": [
+              {
+                "text": "WIP",
+                "bold": true,
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 9
+              },
+              {
+                "text": "​",
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-6104",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1414,
+            "y": 27.2,
+            "w": 68.04,
+            "h": 15.52,
+            "fill": "1DD566",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "Complete​",
+            "align": "center",
+            "fontSize": 9,
+            "fontFace": "Arial",
+            "textColor": "070154",
+            "runs": [
+              {
+                "text": "Complete",
+                "bold": true,
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 9
+              },
+              {
+                "text": "​",
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-6105",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1482.04,
+            "y": 27.2,
+            "w": 36.27,
+            "h": 15.52,
+            "fill": "0047FF",
+            "stroke": "FFFFFF",
+            "strokeWidth": 1,
+            "text": "QA’d​",
+            "align": "center",
+            "fontSize": 9,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "QA’d",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 9
+              },
+              {
+                "text": "​",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-6202",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1315.09,
+            "y": 42.72,
+            "w": 203.21,
+            "h": 17.6,
+            "fill": "transparent",
+            "stroke": "FFFFFF",
+            "strokeWidth": 0.9,
+            "text": "​Notes",
+            "fontSize": 12,
+            "fontFace": "Arial",
+            "textColor": "070154"
+          },
+          {
+            "id": "element-6302",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1315.09,
+            "y": 60.32,
+            "w": 203.21,
+            "h": 17.6,
+            "fill": "transparent",
+            "stroke": "FFFFFF",
+            "strokeWidth": 0.9,
+            "text": "​",
+            "fontSize": 12,
+            "fontFace": "Arial",
+            "textColor": "070154"
+          },
+          {
+            "id": "element-6402",
+            "type": "shape",
+            "shape": "rect",
+            "x": 1315.09,
+            "y": 77.92,
+            "w": 203.21,
+            "h": 66.08,
+            "fill": "transparent",
+            "stroke": "FFFFFF",
+            "strokeWidth": 0.9,
+            "text": "​",
+            "fontSize": 12,
+            "fontFace": "Arial",
+            "textColor": "070154"
+          },
+          {
+            "id": "element-15",
+            "type": "text",
+            "x": 18.46,
+            "y": 6.16,
+            "w": 165.68,
+            "h": 16.16,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "DRAFT",
+            "valign": "top",
+            "fontSize": 10,
+            "fontFace": "Arial",
+            "bold": true,
+            "textColor": "FF0000"
+          },
+          {
+            "id": "element-8",
+            "type": "shape",
+            "shape": "rect",
+            "x": 9.46,
+            "y": 139.28,
+            "w": 687.07,
+            "h": 497.81,
+            "fill": "F3F6FB",
+            "stroke": "CED7E6",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "KBC Architecture",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Segoe UI",
+            "bold": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-9",
+            "type": "shape",
+            "shape": "rect",
+            "x": 22.66,
+            "y": 179.36,
+            "w": 330.79,
+            "h": 355.25,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Core Application",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Segoe UI",
+            "bold": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-10",
+            "type": "shape",
+            "shape": "rect",
+            "x": 39.73,
+            "y": 212.9,
+            "w": 278.01,
+            "h": 54.72,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Presentation Layer\nReact\n[ AWS ]",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Presentation Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "React",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "[ AWS ]",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-11",
+            "type": "shape",
+            "shape": "rect",
+            "x": 39.73,
+            "y": 321.39,
+            "w": 278.01,
+            "h": 64.19,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Application Layer\nKotlin/SpringBoot\n[ AWS ECS ]",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Kotlin/SpringBoot",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "[ AWS ECS ]",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-12",
+            "type": "line",
+            "x1": 178.74,
+            "y1": 267.62,
+            "x2": 178.74,
+            "y2": 321.39,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-13",
+            "type": "text",
+            "x": 69.89,
+            "y": 284.81,
+            "w": 72.53,
+            "h": 19.39,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "REST API",
+            "fontSize": 12,
+            "fontFace": "Arial",
+            "textColor": "111827"
+          },
+          {
+            "id": "element-14",
+            "type": "shape",
+            "shape": "rect",
+            "x": 388.59,
+            "y": 175.1,
+            "w": 295.07,
+            "h": 142.02,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Business Integrations",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Segoe UI",
+            "bold": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-16",
+            "type": "shape",
+            "shape": "rect",
+            "x": 387.5,
+            "y": 339.66,
+            "w": 295.07,
+            "h": 192.67,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Key Integrations",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Segoe UI",
+            "bold": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-18",
+            "type": "shape",
+            "shape": "rect",
+            "x": 400.71,
+            "y": 263.35,
+            "w": 269.99,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Data & Analytics\nDatabricks, PowerBI",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data & Analytics",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Databricks, PowerBI",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-19",
+            "type": "shape",
+            "shape": "rect",
+            "x": 39.73,
+            "y": 413.51,
+            "w": 278.01,
+            "h": 101.82,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "bold": true,
+            "textColor": "FFFFFF"
+          },
+          {
+            "id": "element-20",
+            "type": "shape",
+            "shape": "rect",
+            "x": 400.16,
+            "y": 371.61,
+            "w": 269.92,
+            "h": 46.51,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Loan Processing\nLoanIQ",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Loan Processing",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "LoanIQ",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-21",
+            "type": "shape",
+            "shape": "rect",
+            "x": 400.16,
+            "y": 422.92,
+            "w": 269.92,
+            "h": 46.51,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Trading & Reconciliation\nClearpar, S&P",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Trading & Reconciliation",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Clearpar, S&P",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-22",
+            "type": "shape",
+            "shape": "rect",
+            "x": 400.16,
+            "y": 474.23,
+            "w": 269.92,
+            "h": 46.51,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Payments\nDixio/SWIFT",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Payments",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Dixio/SWIFT",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-23",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 57.71,
+            "y": 445.76,
+            "w": 114.83,
+            "h": 55.81,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 5.4,
+            "text": "Postgres DB\nAWS Aurora",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "070154",
+            "runs": [
+              {
+                "text": "Postgres DB",
+                "bold": true,
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "AWS Aurora",
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-24",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 190.53,
+            "y": 447.45,
+            "w": 89.78,
+            "h": 55.81,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "File DB\nAWS S3",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "070154",
+            "runs": [
+              {
+                "text": "File DB",
+                "bold": true,
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "AWS S3",
+                "color": "070154",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-28",
+            "type": "line",
+            "x1": 178.74,
+            "y1": 267.62,
+            "x2": 178.74,
+            "y2": 321.39,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-30",
+            "type": "text",
+            "x": 714.49,
+            "y": 139.28,
+            "w": 563.2,
+            "h": 504.07,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "KBC and LoanIQ are dedicated to Katalyst with limited parent entanglement and modern, maintainable technology, reducing separation complexity\n2. KBC is a dedicated Katalyst application with Katalyst-controlled infrastructure and an AWS-native deployment model, limiting parent entanglement and separation effort\n3. Despite being dedicated to Katalyst, LoanIQ remains hosted in Parent Corporate Azure, leaving separation effort in infrastructure migration rather than application disentanglement\n4. KBC’s modern Kotlin/Spring Boot backend and React frontend have no material technical debt identified, supporting maintainability with limited near-term remediation needs \nKBC’s cloud-enabled elasticity and customer-hosted LoanIQ provide infrastructure flexibility to support continued transaction growth\n6. KBC’s ECS and Aurora PostgreSQL architecture provides a scalable foundation for incremental PortCo volumes, though capacity headroom remains unvalidated\n7. LoanIQ is hosted on Katalyst-controlled infrastructure, providing control over capacity; however, licensing has only ~400 deals of headroom before the next pricing tier, creating potential post-close run-rate cost step-up \nOverlapping PortCo and Katalyst loan-agency platforms creates a consolidation opportunity, with migration required before legacy retirement\n9. PortCo’s Loan Agency Dashboard and Oneiro overlap with KBC and LoanIQ, platform rationalization can reduce run-rate costs, simplify ongoing support and redeploy resources toward roadmap initiatives \n10. Complete feature-parity and architecture tech-stack assessment across KBC / LoanIQ and PortCo’s loan-agency stack to sequence migration will avoid capability loss and maximize run-rate savings",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "KBC and LoanIQ are dedicated to Katalyst with limited parent entanglement and modern, maintainable technology, reducing separation complexity",
+                "bold": true,
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "2. KBC is a dedicated Katalyst application with Katalyst-controlled infrastructure and an AWS-native deployment model, limiting parent entanglement and separation effort",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "3. Despite being dedicated to Katalyst, LoanIQ remains hosted in Parent Corporate Azure, leaving separation effort in infrastructure migration rather than application disentanglement",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "4. KBC’s modern Kotlin/Spring Boot backend and React frontend have no material technical debt identified, supporting maintainability with limited near-term remediation needs",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11
+              },
+              {
+                "text": " ",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "KBC’s cloud-enabled elasticity and customer-hosted LoanIQ provide infrastructure flexibility to support continued transaction growth",
+                "bold": true,
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "6. KBC’s ECS and Aurora PostgreSQL architecture provides a scalable foundation for incremental PortCo volumes, though capacity headroom remains unvalidated",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "7. LoanIQ is hosted on Katalyst-controlled infrastructure, providing control over capacity; however, licensing has only ~400 deals of headroom before the next pricing tier, creating potential post-close run-rate cost step-up ",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Overlapping PortCo and Katalyst loan-agency platforms creates a consolidation opportunity, with migration required before legacy retirement",
+                "bold": true,
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "9. PortCo’s Loan Agency Dashboard and Oneiro overlap with KBC and LoanIQ, platform rationalization can reduce run-rate costs, simplify ongoing support and redeploy resources toward roadmap initiatives ",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "10. Complete feature-parity and architecture tech-stack assessment across KBC / LoanIQ and PortCo’s loan-agency stack to sequence migration will avoid capability loss and maximize run-rate savings",
+                "color": "111827",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-33",
+            "type": "shape",
+            "shape": "rect",
+            "x": 400.71,
+            "y": 205.07,
+            "w": 269.99,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Workflow & Case Mgmt.\nSalesforce Service Cloud",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Workflow & Case Mgmt.",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Salesforce Service Cloud",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-36",
+            "type": "text",
+            "x": 205.24,
+            "y": 282.42,
+            "w": 95.45,
+            "h": 19.39,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "GraphQL API",
+            "fontSize": 12,
+            "fontFace": "Arial",
+            "textColor": "111827"
+          },
+          {
+            "id": "element-40",
+            "type": "shape",
+            "shape": "rect",
+            "x": 22.66,
+            "y": 553.89,
+            "w": 661,
+            "h": 80.58,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Infrastructure",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Segoe UI",
+            "bold": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-41",
+            "type": "shape",
+            "shape": "rect",
+            "x": 30.72,
+            "y": 579.26,
+            "w": 153.65,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Compute\nLoad Balancer",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Compute",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Load Balancer",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-42",
+            "type": "shape",
+            "shape": "rect",
+            "x": 195.34,
+            "y": 579.26,
+            "w": 153.65,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Identity & Access\nAWS Cognito",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Identity & Access",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "AWS Cognito",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-43",
+            "type": "shape",
+            "shape": "rect",
+            "x": 359.95,
+            "y": 579.26,
+            "w": 153.65,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Monitoring\nAWS CloudWatch",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Monitoring",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "AWS CloudWatch",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-44",
+            "type": "shape",
+            "shape": "rect",
+            "x": 524.56,
+            "y": 579.26,
+            "w": 153.65,
+            "h": 44.74,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 5.4,
+            "text": "Encryption\nAWS KMS",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Encryption",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "AWS KMS",
+                "color": "FFFFFF",
+                "fontFace": "Arial",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-45",
+            "type": "text",
+            "x": 55.88,
+            "y": 156.1,
+            "w": 233.31,
+            "h": 33.79,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "Dedicated",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "italic": true,
+            "textColor": "111827"
+          },
+          {
+            "id": "element-46",
+            "type": "text",
+            "x": 406.69,
+            "y": 322.58,
+            "w": 233.31,
+            "h": 33.79,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "Dedicated",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "italic": true,
+            "textColor": "111827"
+          },
+          {
+            "id": "element-47",
+            "type": "text",
+            "x": 436.77,
+            "y": 153.83,
+            "w": 233.31,
+            "h": 33.79,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "Dedicated (hosted in Parent Azure)",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "italic": true,
+            "textColor": "070154"
+          },
+          {
+            "id": "element-49",
+            "type": "text",
+            "x": 236.8,
+            "y": 536.89,
+            "w": 233.31,
+            "h": 33.79,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "padding": 0,
+            "text": "Dedicated",
+            "align": "center",
+            "fontSize": 11,
+            "fontFace": "Arial",
+            "italic": true,
+            "textColor": "111827"
+          },
+          {
+            "id": "element-51",
+            "type": "line",
+            "x1": 317.74,
+            "y1": 353.48,
+            "x2": 388.59,
+            "y2": 246.11,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-54",
+            "type": "line",
+            "x1": 317.74,
+            "y1": 353.48,
+            "x2": 387.49,
+            "y2": 436,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-25",
+            "type": "line",
+            "x1": 178.74,
+            "y1": 385.58,
+            "x2": 178.74,
+            "y2": 413.51,
+            "stroke": "transparent",
+            "strokeWidth": 1
+          }
+        ]
+      }
+    ]
+  }
+}

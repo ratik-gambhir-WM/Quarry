@@ -69,6 +69,19 @@ describe('PlateTextEditor', () => {
       expect(paragraph.style.padding).toBe('0px')
     })
   })
+
+  it('only paints the native caret when Plate owns the visible text', () => {
+    const view = render(
+      <PlateTextEditor caretColor="#123456" element={element} hideText />,
+    )
+    const getEditor = () => within(view.container).getByRole('textbox')
+
+    expect(getEditor().style.caretColor).toBe('transparent')
+
+    view.rerender(<PlateTextEditor caretColor="#123456" element={element} />)
+
+    expect(getEditor().style.caretColor).toBe('#123456')
+  })
 })
 
 const element: NormalizedTextElement = {
