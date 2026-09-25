@@ -30,84 +30,67 @@ Quarry/
 There is no root workspace manifest. `frontend/`, `frontend/src-tauri/`, `backend/`, and
 `diligence-studio-server/` are independent build roots.
 
-## Prerequisites
+## Set up local development
 
-- [Node.js](https://nodejs.org/en/download) 22.5 or newer, including npm, for the shared frontend
-  and Diligence Studio server
-- [Rust and Cargo](https://www.rust-lang.org/tools/install) for the Axum API and Tauri shell
-- The [Tauri 2 system prerequisites](https://v2.tauri.app/start/prerequisites/). On macOS, desktop
-  development requires Xcode or the Xcode Command Line Tools.
-- [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/), including
-  its `docker` CLI
-- A local [HelixDB](https://www.helix-db.com/) container. The
-  [HelixDB documentation](https://docs.helix-db.com/) and
-  [source repository](https://github.com/HelixDB/helix-db) cover the optional Helix CLI and the
-  current upstream local-development workflow. Quarry itself starts the compatible Docker
-  container directly and does not require the Helix CLI.
-- [LibreOffice](https://www.libreoffice.org/download/) only for document conversion flows that
-  use it
-- Optional server-side OpenAI and WM AI configuration for those capabilities
+This guide takes a new developer from a fresh checkout to a running web or desktop application. Run each command from the repository root unless the step says otherwise.
 
-The launcher is currently Mac-oriented because it uses `open -a "Docker Desktop"` when the Docker
-daemon is unavailable. The backend uses local SQLite by default. Do not point it at valuable local
-data while experimenting with migrations or startup configuration.
+### 1. Install prerequisites
 
-## First-time setup
+Install these tools before you install project dependencies:
 
-Run all commands below from the repository root unless a step says otherwise.
+| Tool | Requirement | Download and setup |
+| --- | --- | --- |
+| Git | Required | [Download Git](https://git-scm.com/downloads) |
+| Node.js and npm | Node.js 22.5 or newer | [Download Node.js](https://nodejs.org/en/download) |
+| Rust and Cargo | Current stable toolchain | [Install Rust with rustup](https://www.rust-lang.org/tools/install) |
+| Docker | Docker Desktop on macOS, or a running Docker Engine on Linux | [Install Docker Desktop](https://docs.docker.com/desktop/setup/install/) |
+| Tauri system dependencies | Required for `./quarry desktop` | [Install the Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) |
+| LibreOffice | Optional; required only for supported Office conversion flows | [Download LibreOffice](https://www.libreoffice.org/download/) |
 
-### 1. Verify the toolchain
+On macOS, the Tauri prerequisites require Xcode or the Xcode Command Line Tools. Install the command-line tools with:
 
 ```sh
+xcode-select --install
+```
+
+The launcher can open Docker Desktop automatically on macOS. On Linux, start the Docker daemon before you run the launcher. The launcher does not automate Docker startup on Windows.
+
+Verify the required command-line tools:
+
+```sh
+git --version
 node --version
 npm --version
+rustc --version
 cargo --version
 docker --version
 ```
 
-Node must report 22.5 or newer. For desktop mode on a Mac that does not already have Apple's build
-tools, install them once with `xcode-select --install`.
+### 2. Start Quarry
 
-### 2. Create the local Helix container
+Quarry uses [HelixDB](https://www.helix-db.com/) for its document graph and search projection. You can read the [HelixDB documentation](https://docs.helix-db.com/) or browse the [HelixDB source repository](https://github.com/HelixDB/helix-db). Quarry starts the compatible Docker container directly, so the Helix command-line interface is optional.
 
-Install and open Docker Desktop once so that its license/setup flow completes. Wait until this
-command succeeds:
+Open Docker Desktop once and complete its setup flow. On Linux, start Docker Engine. Continue when this command succeeds:
 
 ```sh
 docker info
 ```
 
-Check whether the expected Quarry container already exists:
+When you first run `./quarry web` or `./quarry desktop`, the launcher looks for the local
+`helix-quarry-dev` container. If it is absent, the launcher creates it with the image and tag from
+the `[local.dev]` section of [`backend/helix.toml`](backend/helix.toml), maps host port `6969` to
+the image's port `8080`, and then starts it. On later runs it reuses the existing container; it
+never deletes or recreates one.
+
+If you already have a compatible container under another name, set its name when you start Quarry:
 
 ```sh
-docker container inspect helix-rgambhir-dev
-```
-
-If Docker reports `No such container`, create it once using the image and port mapping declared by
-[`backend/helix.toml`](backend/helix.toml):
-
-```sh
-docker pull ghcr.io/helixdb/enterprise-dev:latest
-docker create \
-  --name helix-rgambhir-dev \
-  --restart unless-stopped \
-  --publish 6969:8080 \
-  ghcr.io/helixdb/enterprise-dev:latest
-```
-
-Do not run `docker create` again when the container already exists. The `./quarry` launcher starts
-the container and waits for port `6969`; it does not create or delete containers.
-
-If your compatible Helix container has a different name, pass it to the launcher without editing
-the script:
-
-```sh
-QUARRY_HELIX_CONTAINER_NAME=helix-quarry-web-dev ./quarry web
+QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
 ```
 
 ### 3. Install project dependencies
 
-Install the independent npm dependencies once:
+Install both npm packages and the browser used for Diligence Studio previews:
 
 ```sh
 cd frontend
@@ -118,10 +101,23 @@ npx playwright install chromium
 cd ..
 ```
 
-`npm ci` uses each package's checked-in lockfile. The Playwright command installs the Chromium
-binary used to generate Diligence Studio template previews.
+`npm ci` uses each package's checked-in lockfile. Do not run `npm install` from the repository root because Quarry has no root npm workspace. Cargo downloads Rust dependencies during the first Rust build or launcher run.
 
-## Start the project
+The Playwright command installs the Chromium binary used to generate Diligence Studio template previews.
+
+### 4. Configure optional capabilities
+
+The default local stack does not require an environment file. Add ignored local environment files only when you need an override or optional integration:
+
+- `frontend/.env` contains public Vite settings
+- `backend/.env` contains Axum settings and server-side secrets
+- `diligence-studio-server/.env` contains Diligence Studio settings and optional provider secrets
+
+Never put secrets in a `VITE_*` variable. See [Configuration](#configuration) for the supported variables.
+
+## Run the project
+
+Use the root launcher for normal development. It starts dependencies and application processes in the required order.
 
 Start the browser distribution from the repository root:
 
@@ -135,22 +131,17 @@ Start the desktop distribution instead:
 ./quarry desktop
 ```
 
-Keep the launcher terminal open while developing. Press `Ctrl-C` once to stop Axum, the selected
-UI, and Diligence Studio together. Docker Desktop and Helix remain running because they may be
-shared with other local work. Stop Helix separately only when desired:
+Keep the launcher terminal open while you develop. Press `Ctrl-C` once to stop Axum, the selected UI, and Diligence Studio. Docker and Helix remain running because other local projects may use them.
+
+Stop the default Helix container separately when you no longer need it:
 
 ```sh
-docker stop helix-rgambhir-dev
+docker stop helix-quarry-dev
 ```
 
-The launcher must be run from the repository root. After confirming its application ports are
-free, it opens Docker Desktop if the daemon is unavailable, waits for Docker, and ensures the
-configured Helix container is serving `http://127.0.0.1:6969`. It then starts the Axum API at
-`http://127.0.0.1:3001`, the selected UI at `http://localhost:1420`, and Diligence Studio at
-`http://127.0.0.1:43127`. It waits for each runtime in dependency order and stops all three owned
-process groups when any child exits. Docker Desktop and Helix are shared external dependencies and
-remain running. The launcher passes the versioned Diligence Studio URL to Axum; the browser and
-Tauri webview never call port `43127` directly.
+Run the launcher from the repository root. It first checks ports `3001`, `1420`, and `43127`. It then waits for Docker and Helix before it starts Axum, the selected user interface, and Diligence Studio. The launcher stops its three application process groups together when one exits.
+
+The browser and Tauri webview call Axum. They do not call Diligence Studio on port `43127` directly.
 
 ### Local URLs
 
@@ -165,12 +156,12 @@ Tauri webview never call port `43127` directly.
 
 - `required command not found`: install the missing prerequisite above, restart the terminal, and
   confirm the command is on `PATH`.
-- `Helix container ... does not exist`: create it with the first-time command above or set
-  `QUARRY_HELIX_CONTAINER_NAME` to the exact name shown by `docker ps -a`.
+- Helix container creation failures: confirm `backend/helix.toml` has a valid `[local.dev]` image
+  and tag, then check Docker's error output and registry access.
 - `port ... is already in use`: another development process owns one of ports `3001`, `1420`, or
   `43127`. Stop that process intentionally; the launcher will not terminate an unknown listener.
-- Docker or Helix startup timeout: open Docker Desktop, wait for its status to become ready, then
-  check `docker info`, `docker ps -a`, and `docker logs helix-rgambhir-dev` before retrying.
+- Docker or Helix startup timeout: open Docker Desktop or start Docker Engine, then check
+  `docker info`, `docker ps -a`, and `docker logs helix-quarry-dev` before retrying.
 - Diligence Studio preview failures: rerun `npx playwright install chromium` from
   `diligence-studio-server/`.
 - Desktop-only build failures: revisit the Tauri prerequisites and confirm `xcode-select -p` and

@@ -14,7 +14,8 @@ readonly DILIGENCE_STUDIO_API_BASE_URL="${DILIGENCE_STUDIO_API_URL}/api/v1"
 readonly QUARRY_UI_URL="http://localhost:1420"
 readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template-preview"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-rgambhir-dev}"
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-dev}"
+readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
 readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
 
 backend_pid=""
@@ -170,6 +171,19 @@ helix_is_ready() {
   curl --silent --max-time 1 --output /dev/null "$LOCAL_HELIX_URL"
 }
 
+helix_local_dev_config_value() {
+  local key="$1"
+
+  awk -F '"' -v key="$key" '
+    /^\[local\.dev\][[:space:]]*$/ { in_local_dev = 1; next }
+    in_local_dev && /^\[/ { exit }
+    in_local_dev && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*\"[^\"]+\"[[:space:]]*$") {
+      print $2
+      exit
+    }
+  ' "$HELIX_CONFIG_PATH"
+}
+
 if ! docker_daemon_is_ready; then
   if [[ "$(uname -s)" != "Darwin" ]] || ! command -v open >/dev/null 2>&1; then
     fail "Docker daemon is not running; start it and try again"
@@ -188,13 +202,25 @@ if ! docker_daemon_is_ready; then
   done
 fi
 
+helix_image_repository="$(helix_local_dev_config_value image)"
+helix_image_tag="$(helix_local_dev_config_value tag)"
+[[ -n "$helix_image_repository" && -n "$helix_image_tag" ]] \
+  || fail "could not read the local Helix image and tag from ${HELIX_CONFIG_PATH}"
+readonly HELIX_IMAGE="${helix_image_repository}:${helix_image_tag}"
+
+if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+  printf 'Creating Helix container %s from %s...\n' "$HELIX_CONTAINER_NAME" "$HELIX_IMAGE"
+  docker create \
+    --name "$HELIX_CONTAINER_NAME" \
+    --restart unless-stopped \
+    --publish 6969:8080 \
+    "$HELIX_IMAGE" >/dev/null \
+    || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
+fi
+
 if helix_is_ready; then
   printf 'Helix is already ready at %s.\n' "$LOCAL_HELIX_URL"
 else
-  if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
-    fail "Helix container '${HELIX_CONTAINER_NAME}' does not exist; set QUARRY_HELIX_CONTAINER_NAME to the local container name"
-  fi
-
   if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" != "true" ]]; then
     printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
     docker start "$HELIX_CONTAINER_NAME" >/dev/null \

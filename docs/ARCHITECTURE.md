@@ -167,7 +167,7 @@ Quarry/
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
-│   └── helix.toml                    local Helix metadata, partly stale
+│   └── helix.toml                    local Helix metadata; launcher reads `[local.dev]` image/tag
 ├── diligence-studio-server/
 │   ├── src/                          Express routes, services, catalog, and PowerPoint libraries
 │   ├── test/                         server API and behavior tests
@@ -190,9 +190,12 @@ There is no root workspace manifest. The root `quarry` executable is a developme
 supervisor, not another build root: it can run only while the working directory is the repository
 root. Both modes reject conflicting listeners on ports 3001, 1420, and 43127; start
 Docker Desktop on macOS when its daemon is unavailable; and wait for Docker and the Helix service
-at `127.0.0.1:6969`. If Helix is not already reachable, the launcher starts the existing local
-container named by `QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-rgambhir-dev`. It then starts
-`cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001` and the versioned
+at `127.0.0.1:6969`. The launcher first inspects the local container named by
+`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-dev`. If it is absent, the launcher
+creates it with the image and tag from `backend/helix.toml`'s `[local.dev]` section, a persistent
+restart policy, and the `6969:8080` development port mapping. It then starts the container when
+Helix is not already reachable. The launcher does not recreate or delete an existing container.
+It then starts `cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001` and the versioned
 Diligence Studio upstream URL set explicitly; waits for `/api/v1/health`; and runs either
 `npm run dev:web` or `npm run dev:desktop` from `frontend/`. After Vite serves the internal preview
 route, the launcher starts `npm start` from `diligence-studio-server/`, binding it to
@@ -1129,7 +1132,7 @@ a backend process crash. Current-turn file bytes are still not retained for reus
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
-| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Existing local Helix container to start; defaults to `helix-rgambhir-dev` | Local development identifier; not passed to application runtimes |
+| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-dev` | Local development identifier; not passed to application runtimes |
 
 Local development has one live environment file per runtime build root: `frontend/.env` for public
 Vite configuration shared by web and desktop UI builds, `backend/.env` for Axum configuration and
@@ -1400,8 +1403,8 @@ From the repository root, the local full-stack development entrypoints are:
 ```
 
 These are runtime operations rather than verification gates. They start the backend only with
-known local/disposable data and require an existing local Helix container. On macOS the launcher
-opens Docker Desktop when necessary and starts that container before Axum.
+known local/disposable data. On macOS the launcher opens Docker Desktop when necessary, creates an
+absent configured Helix container from `backend/helix.toml`, and starts it before Axum.
 
 From `frontend/`:
 
