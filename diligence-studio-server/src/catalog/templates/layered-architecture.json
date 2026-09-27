@@ -1,0 +1,558 @@
+{
+  "presentation": {
+    "title": "<Product> Architecture",
+    "slides": [
+      {
+        "id": "slide-1",
+        "name": "<Product> Architecture",
+        "width": 1280,
+        "height": 720,
+        "backgroundColor": "FFFFFF",
+        "elements": [
+          {
+            "id": "element-12",
+            "type": "shape",
+            "shape": "rect",
+            "x": 48.33,
+            "y": 148.8,
+            "w": 738.67,
+            "h": 455.27,
+            "fill": "F3F6FB",
+            "stroke": "CED7E6",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": " <Product> Architecture",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 16,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": " ",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 16
+              },
+              {
+                "text": "<Product>",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 16
+              },
+              {
+                "text": " Architecture",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 16,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-18",
+            "type": "shape",
+            "shape": "rect",
+            "x": 61.53,
+            "y": 193.54,
+            "w": 402.33,
+            "h": 398.89,
+            "fill": "D0D7E5",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Core Application",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Core Application",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-19",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 227.08,
+            "w": 368.19,
+            "h": 84.72,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Presentation Layer\nAngularJS (30%), React 18 (70%)\n[ S3/Cloudfront ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Presentation Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "AngularJS (30%), React 18 (70%)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "[ S3/Cloudfront ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-20",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 335.57,
+            "w": 368.19,
+            "h": 84.72,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application Layer\nJava 17/Spring\n[ EKS – mutli-AZ ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Java 17/Spring",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "[ EKS – mutli-AZ ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-21",
+            "type": "line",
+            "x1": 262.7,
+            "y1": 311.8,
+            "x2": 262.7,
+            "y2": 335.56,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-22",
+            "type": "text",
+            "x": 271.36,
+            "y": 313.99,
+            "w": 72.53,
+            "h": 19.39,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "REST API",
+            "align": "left",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "REST API",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-23",
+            "type": "shape",
+            "shape": "rect",
+            "x": 478.73,
+            "y": 193.54,
+            "w": 295.07,
+            "h": 192.67,
+            "fill": "D0D7E5",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Background Workers",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Background Workers",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-24",
+            "type": "shape",
+            "shape": "rect",
+            "x": 478.73,
+            "y": 399.76,
+            "w": 295.07,
+            "h": 192.67,
+            "fill": "D0D7E5",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Analytics",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Analytics",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-25",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.97,
+            "y": 227.08,
+            "w": 246.38,
+            "h": 67.2,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Worker Array\nJava 17/Spring\n[ EC2 ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Worker Array",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Java 17/Spring",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "[ EC2 ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-26",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.31,
+            "y": 302.16,
+            "w": 246.38,
+            "h": 67.2,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Queue\nRedis [ ElastiCache ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Queue",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Redis [ ElastiCache ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-27",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 444.05,
+            "w": 368.19,
+            "h": 136.79,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-30",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.97,
+            "y": 431.71,
+            "w": 246.38,
+            "h": 46.51,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Pipeline\nKafka [ AWS managed ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Pipeline",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Kafka [ AWS managed ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-31",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.97,
+            "y": 483.02,
+            "w": 246.38,
+            "h": 46.51,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "ETL\nPython [ EC2 ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "ETL",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Python [ EC2 ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-32",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.97,
+            "y": 534.33,
+            "w": 246.38,
+            "h": 46.51,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Visualization\nAWS QuickSight",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Visualization",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "AWS QuickSight",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-28",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 128.04,
+            "y": 479.32,
+            "w": 147.04,
+            "h": 90.11,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "text": "Relational DB\nPostgres [ RDS ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Relational DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Postgres [ RDS ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-29",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 282.39,
+            "y": 496.23,
+            "w": 114.96,
+            "h": 69.87,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 10.8,
+            "text": "Cache\nDocumentDB",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Cache",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "DocumentDB",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

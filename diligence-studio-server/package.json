@@ -1,0 +1,35 @@
+{
+  "name": "diligence-studio-server",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "dev": "node --watch --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "pptx:to-json": "node --import tsx scripts/parse-pptx.ts"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "express": "^5.2.1",
+    "jszip": "^3.10.1",
+    "openai": "^6.29.0",
+    "playwright": "^1.63.0",
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/busboy": "^1.5.4",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.5",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

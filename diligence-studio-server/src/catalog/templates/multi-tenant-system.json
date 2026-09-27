@@ -1,0 +1,709 @@
+{
+  "presentation": {
+    "title": "Product Architecture (On-Prem)",
+    "slides": [
+      {
+        "id": "slide-3",
+        "name": "Product Architecture (On-Prem)",
+        "width": 1280,
+        "height": 720,
+        "backgroundColor": "FFFFFF",
+        "elements": [
+          {
+            "id": "element-12",
+            "type": "shape",
+            "shape": "rect",
+            "x": 47.99,
+            "y": 149.29,
+            "w": 738.67,
+            "h": 455.27,
+            "fill": "F3F6FB",
+            "stroke": "CED7E6",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "Product Architecture (On-Prem)",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 16,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Product Architecture (On-Prem)",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 16,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-18",
+            "type": "text",
+            "x": 54.22,
+            "y": 206.81,
+            "w": 351.56,
+            "h": 384,
+            "fill": "D0D7E5",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "SPA/Microservices",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "SPA/Microservices",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-50",
+            "type": "line",
+            "x1": 238.96,
+            "y1": 312.06,
+            "x2": 238.96,
+            "y2": 336.98,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-21",
+            "type": "line",
+            "x1": 162.64,
+            "y1": 316.53,
+            "x2": 162.64,
+            "y2": 336.98,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-39",
+            "type": "line",
+            "x1": 171.37,
+            "y1": 385.85,
+            "x2": 171.37,
+            "y2": 409.61,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-40",
+            "type": "line",
+            "x1": 289.86,
+            "y1": 383.69,
+            "x2": 289.86,
+            "y2": 407.45,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-19",
+            "type": "shape",
+            "shape": "rect",
+            "x": 74.49,
+            "y": 252.76,
+            "w": 102.63,
+            "h": 63.77,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Web JavaScript\n[ AngularJS 1.7* ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10.5,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Web",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 10.5
+              },
+              {
+                "text": " JavaScript",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "[ AngularJS 1.7* ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-20",
+            "type": "shape",
+            "shape": "rect",
+            "x": 74.49,
+            "y": 332.34,
+            "w": 317.9,
+            "h": 63.77,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application Layer\n.NET 4.8\n[ Windows Server 2020 / IIS ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": ".NET 4.8",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "[ Windows Server 2020 / IIS ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-22",
+            "type": "text",
+            "x": 152.63,
+            "y": 316.74,
+            "w": 50.49,
+            "h": 14.54,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "WCF API",
+            "align": "left",
+            "valign": "middle",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "WCF API",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-26",
+            "type": "shape",
+            "shape": "rect",
+            "x": 74.49,
+            "y": 404.76,
+            "w": 317.9,
+            "h": 41,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Queue\nRabbitMQ 2.4",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Queue",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "RabbitMQ 2.4",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-38",
+            "type": "line",
+            "x1": 340.7,
+            "y1": 310.88,
+            "x2": 340.7,
+            "y2": 334.64,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-27",
+            "type": "shape",
+            "shape": "rect",
+            "x": 74.49,
+            "y": 454.22,
+            "w": 317.9,
+            "h": 125,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-31",
+            "type": "shape",
+            "shape": "rect",
+            "x": 183,
+            "y": 252.72,
+            "w": 103.07,
+            "h": 63.77,
+            "fill": "120D56",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Mobile\nC# / Xamarin \n[ Android 10+, iOS 11+ ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10.5,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Mobile",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 10.5,
+                "breakLine": true
+              },
+              {
+                "text": "C# / Xamarin ",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "[ Android 10+, iOS 11+ ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-28",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 157.12,
+            "y": 481.09,
+            "w": 151.6,
+            "h": 90.11,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "text": "Relational DB\nSQL Server 2022 Express",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Relational DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "SQL Server 2022 Express",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-5",
+            "type": "text",
+            "x": 423.18,
+            "y": 206.81,
+            "w": 351.56,
+            "h": 384,
+            "fill": "D0D7E5",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "SPA/Monolith",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "SPA/Monolith",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-57",
+            "type": "line",
+            "x1": 677.66,
+            "y1": 324.54,
+            "x2": 677.66,
+            "y2": 349.51,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-11",
+            "type": "shape",
+            "shape": "rect",
+            "x": 437.04,
+            "y": 260.27,
+            "w": 153.1,
+            "h": 64.61,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Web\nJavaScript\n[ AngularJS 1.7*, \nGWT 2.9 ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10.5,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Web",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 10.5,
+                "breakLine": true
+              },
+              {
+                "text": "JavaScript",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "[ AngularJS 1.7*, ",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "GWT 2.9 ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-30",
+            "type": "shape",
+            "shape": "rect",
+            "x": 608.37,
+            "y": 260.27,
+            "w": 148.14,
+            "h": 64.61,
+            "fill": "120D56",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Mobile\nObjective-C \n[ iOS 11+ ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10.5,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Mobile",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 10.5,
+                "breakLine": true
+              },
+              {
+                "text": "Objective-C ",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "[ iOS 11+ ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-13",
+            "type": "shape",
+            "shape": "rect",
+            "x": 437.21,
+            "y": 348.98,
+            "w": 319.3,
+            "h": 84.72,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application Layer\nJava 16* / Spring 5.2.25*\n[ Apache Tomcat 9.0.22 ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "Java 16* / Spring 5.2.25*",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "[ ",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12
+              },
+              {
+                "text": "Apache Tomcat 9.0.22",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12
+              },
+              {
+                "text": " ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-17",
+            "type": "shape",
+            "shape": "rect",
+            "x": 437.21,
+            "y": 441.23,
+            "w": 319.3,
+            "h": 136.79,
+            "fill": "120D56",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-48",
+            "type": "shape",
+            "shape": "rect",
+            "x": 291.96,
+            "y": 252.72,
+            "w": 100.43,
+            "h": 63.77,
+            "fill": "0B0055",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Desktop\nTypescript\n[ Electron ]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10.5,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Desktop",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 10.5,
+                "breakLine": true
+              },
+              {
+                "text": "Typescript",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "[ Electron ]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-54",
+            "type": "text",
+            "x": 520.53,
+            "y": 331.78,
+            "w": 55.2,
+            "h": 14.54,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "REST API",
+            "align": "left",
+            "valign": "middle",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "REST API",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-55",
+            "type": "line",
+            "x1": 489.75,
+            "y1": 324.01,
+            "x2": 489.75,
+            "y2": 348.98,
+            "stroke": "50658E",
+            "strokeWidth": 0.75
+          },
+          {
+            "id": "element-61",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 522.52,
+            "y": 472.69,
+            "w": 151.6,
+            "h": 90.11,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "text": "Relational DB\nMariaDB 11.4",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 12,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Relational DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              },
+              {
+                "text": "MariaDB 11.4",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 12,
+                "breakLine": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

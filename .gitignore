@@ -8,6 +8,16 @@ backend/.helix/
 backend/data/
 backend/target/
 
+diligence-studio-server/.env
+diligence-studio-server/.env.*
+diligence-studio-server/coverage/
+diligence-studio-server/data/
+diligence-studio-server/node_modules/
+diligence-studio-server/server-dist/
+diligence-studio-server/.vite/
+diligence-studio-server/.vitest/
+diligence-studio-server/*.tsbuildinfo
+
 frontend/.env
 frontend/.env.*
 frontend/dist/

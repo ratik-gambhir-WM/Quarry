@@ -55,12 +55,14 @@ describe('SVG text editor overlay', () => {
     const snapshot = view.container.querySelector('svg[aria-hidden="true"]')
     expect(snapshot?.textContent).toContain('Alpha beta')
     expect(editor.dataset.textVisibility).toBe('snapshot')
+    expect(editor.style.caretColor).toBe('transparent')
 
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Align center' }))
 
     await waitFor(() => {
       expect(view.container.querySelector('svg[aria-hidden="true"]')).toBeNull()
       expect(editor.dataset.textVisibility).toBe('draft')
+      expect(editor.style.caretColor).toBe('#111827')
     })
   })
 })

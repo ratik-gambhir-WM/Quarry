@@ -1,0 +1,1702 @@
+{
+  "presentation": {
+    "title": "User Interfaces / Backend for Frontend",
+    "slides": [
+      {
+        "id": "slide-7",
+        "name": "User Interfaces / Backend for Frontend",
+        "width": 1280,
+        "height": 720,
+        "backgroundColor": "FFFFFF",
+        "elements": [
+          {
+            "id": "element-76",
+            "type": "shape",
+            "shape": "rect",
+            "x": 47.99,
+            "y": 126.53,
+            "w": 738.67,
+            "h": 483.07,
+            "fill": "F3F6FB",
+            "stroke": "CED7E6",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "align": "center",
+            "valign": "top",
+            "fontSize": 16,
+            "fontFace": "Aptos",
+            "textColor": "FFFFFF",
+            "runs": []
+          },
+          {
+            "id": "element-77",
+            "type": "shape",
+            "shape": "rect",
+            "x": 524.1,
+            "y": 453.29,
+            "w": 248.62,
+            "h": 131.31,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Shared Infrastructure",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Shared Infrastructure",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-78",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 479.2,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "RabbitMQ 3",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "RabbitMQ 3",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-79",
+            "type": "shape",
+            "shape": "rect",
+            "x": 651.13,
+            "y": 512.65,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "DataDog",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "DataDog",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-80",
+            "type": "shape",
+            "shape": "rect",
+            "x": 60.16,
+            "y": 466.67,
+            "w": 441.73,
+            "h": 90.05,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Storage",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Storage",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-81",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 546.1,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Google OIDC",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Google OIDC",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-82",
+            "type": "shape",
+            "shape": "rect",
+            "x": 651.13,
+            "y": 479.2,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Microsoft OIDC",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Microsoft OIDC",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-83",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 512.65,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "AWS Secrets Manager",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "AWS Secrets Manager",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-84",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 70.83,
+            "y": 491.7,
+            "w": 81.6,
+            "h": 58.25,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "Relational DB\n[PostgreSQL 15]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Relational DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[PostgreSQL 15]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-85",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 157.42,
+            "y": 491.7,
+            "w": 76.8,
+            "h": 57.97,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "Caching\n[Redis 7]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Caching",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Redis 7]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-86",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 239.21,
+            "y": 491.7,
+            "w": 76.8,
+            "h": 57.97,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "File Storage\n[S3]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "File Storage",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[S3]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-87",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 402.79,
+            "y": 491.7,
+            "w": 89.72,
+            "h": 57.97,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 8.28,
+            "text": "Search\n[ElasticSearch 7, OpenSearch 3]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Search",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[ElasticSearch 7, OpenSearch 3]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-88",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 321,
+            "y": 491.7,
+            "w": 76.8,
+            "h": 57.97,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": "No-SQL DB\n[DynamoDB]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "No-SQL DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[DynamoDB]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-89",
+            "type": "shape",
+            "shape": "rect",
+            "x": 60.16,
+            "y": 240.79,
+            "w": 441.73,
+            "h": 197.88,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application Services**",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Services**",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-90",
+            "type": "shape",
+            "shape": "rect",
+            "x": 69.54,
+            "y": 265.88,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "companies-data-service\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "companies-data-service",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-91",
+            "type": "shape",
+            "shape": "rect",
+            "x": 61.53,
+            "y": 147.14,
+            "w": 711.66,
+            "h": 74.08,
+            "fill": "CED7E6",
+            "stroke": "FFFFFF",
+            "strokeWidth": 0.25,
+            "text": "User Interfaces / Backend for Frontend",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "User Interfaces / Backend for Frontend",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-92",
+            "type": "shape",
+            "shape": "rect",
+            "x": 69.06,
+            "y": 170.86,
+            "w": 134.4,
+            "h": 43.2,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "App 1\n[React* / Express, NextJS*]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "App 1",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[React* / Express, ",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8
+              },
+              {
+                "text": "NextJS",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8
+              },
+              {
+                "text": "*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-93",
+            "type": "shape",
+            "shape": "rect",
+            "x": 628.6,
+            "y": 170.86,
+            "w": 134.4,
+            "h": 43.2,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Chrome Extension\n[JavaScript]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Chrome Extension",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[JavaScript]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-94",
+            "type": "line",
+            "x1": 589.21,
+            "y1": 247.12,
+            "x2": 619.72,
+            "y2": 247.12,
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "endArrow": "arrow"
+          },
+          {
+            "id": "element-95",
+            "type": "shape",
+            "shape": "rect",
+            "x": 208.95,
+            "y": 170.86,
+            "w": 134.4,
+            "h": 43.2,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "App 2\n[React* / Express]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "App 2",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[React* / Express]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-96",
+            "type": "shape",
+            "shape": "rect",
+            "x": 348.83,
+            "y": 170.86,
+            "w": 134.4,
+            "h": 43.2,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "App 3\n[React* / Kotlin*]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "App 3",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[React* / Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-97",
+            "type": "shape",
+            "shape": "rect",
+            "x": 488.71,
+            "y": 170.86,
+            "w": 134.4,
+            "h": 43.2,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "App 4\n[React* / Kotlin*]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "App 4",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[React* / Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-98",
+            "type": "shape",
+            "shape": "rect",
+            "x": 524.1,
+            "y": 240.79,
+            "w": 248.62,
+            "h": 60.61,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Integrations",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Integrations",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-102",
+            "type": "shape",
+            "shape": "rect",
+            "x": 70.54,
+            "y": 395.47,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "materials-api\n[Kotlin*]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "materials-api",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-103",
+            "type": "shape",
+            "shape": "rect",
+            "x": 212.59,
+            "y": 265.88,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "delivery-api\n[Ruby*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "delivery-api",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Ruby*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-104",
+            "type": "shape",
+            "shape": "rect",
+            "x": 355.64,
+            "y": 265.88,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "content-api\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "content-api",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-105",
+            "type": "shape",
+            "shape": "rect",
+            "x": 69.54,
+            "y": 308.37,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "client-controls\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "client-controls",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-106",
+            "type": "shape",
+            "shape": "rect",
+            "x": 212.59,
+            "y": 308.37,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "transitional-services\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "transitional-services",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-107",
+            "type": "shape",
+            "shape": "rect",
+            "x": 355.64,
+            "y": 308.37,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "person-discovery\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "person-discovery",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-108",
+            "type": "shape",
+            "shape": "rect",
+            "x": 69.54,
+            "y": 350.86,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "rewrite\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "rewrite",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-110",
+            "type": "shape",
+            "shape": "rect",
+            "x": 212.59,
+            "y": 350.86,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "platform-projects-api\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "platform-projects-api",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-111",
+            "type": "shape",
+            "shape": "rect",
+            "x": 355.64,
+            "y": 350.86,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "transcripts\n[Kotlin*]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "transcripts",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-112",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 264.22,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "CoreSignal",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "CoreSigna",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8
+              },
+              {
+                "text": "l",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-113",
+            "type": "shape",
+            "shape": "rect",
+            "x": 692.41,
+            "y": 264.22,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "S&P",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "S&P",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-114",
+            "type": "shape",
+            "shape": "rect",
+            "x": 611.91,
+            "y": 264.22,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "FactSet",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "FactSet",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-118",
+            "type": "shape",
+            "shape": "rect",
+            "x": 355.64,
+            "y": 393.35,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Others\n[Kotlin*, Ruby*, Python 3]",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Others",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*, Ruby*, Python 3]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-120",
+            "type": "line",
+            "x1": 281.03,
+            "y1": 219.64,
+            "x2": 281.03,
+            "y2": 240.79,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-121",
+            "type": "line",
+            "x1": 278.6,
+            "y1": 439.97,
+            "x2": 278.6,
+            "y2": 465.92,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-123",
+            "type": "text",
+            "x": 60.16,
+            "y": 575.92,
+            "w": 441.73,
+            "h": 27.32,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "** Each domain-aligned service owns its datastore, with access enforced at the service boundary to ensure isolation and minimize coupling",
+            "align": "left",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "italic": true,
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "** Each domain-aligned service owns its datastore, with access enforced at the service boundary to ensure isolation and minimize coupling",
+                "italic": true,
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-124",
+            "type": "shape",
+            "shape": "rect",
+            "x": 651.13,
+            "y": 546.1,
+            "w": 113.28,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "AWS Cognito",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "AWS Cognito",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-125",
+            "type": "line",
+            "x1": 652.37,
+            "y1": 219.64,
+            "x2": 652.37,
+            "y2": 240.79,
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-126",
+            "type": "shape",
+            "shape": "rect",
+            "x": 524.1,
+            "y": 311.22,
+            "w": 248.61,
+            "h": 59.2,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Finance Service Group",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Finance Service Group",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-127",
+            "type": "shape",
+            "shape": "rect",
+            "x": 524.1,
+            "y": 380.24,
+            "w": 248.61,
+            "h": 58.21,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "AI Service Group",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 9,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "AI Service Group",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-115",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 402.93,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "OpenAI",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "OpenAI",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-116",
+            "type": "shape",
+            "shape": "rect",
+            "x": 611.91,
+            "y": 402.93,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "AWS Bedrock",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "AWS Bedrock",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-117",
+            "type": "shape",
+            "shape": "rect",
+            "x": 692.41,
+            "y": 402.93,
+            "w": 72,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Google Vertex AI",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Google Vertex AI",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-99",
+            "type": "shape",
+            "shape": "rect",
+            "x": 706.81,
+            "y": 332.91,
+            "w": 57.6,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Workday",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Workday",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-100",
+            "type": "shape",
+            "shape": "rect",
+            "x": 651.54,
+            "y": 332.91,
+            "w": 48,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Wise",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Wise",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-101",
+            "type": "shape",
+            "shape": "rect",
+            "x": 596.27,
+            "y": 332.91,
+            "w": 48,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Onfido",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Onfido",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-119",
+            "type": "shape",
+            "shape": "rect",
+            "x": 531.4,
+            "y": 332.91,
+            "w": 57.6,
+            "h": 28.8,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "PCI Proxy",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "PCI Proxy",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-128",
+            "type": "shape",
+            "shape": "rect",
+            "x": 212.59,
+            "y": 393.35,
+            "w": 134.4,
+            "h": 36.48,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "search-services\n[Kotlin*]",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "search-services",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              },
+              {
+                "text": "[Kotlin*]",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-6",
+            "type": "line",
+            "x1": 501.89,
+            "y1": 271.09,
+            "x2": 524.1,
+            "y2": 339.73,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-12",
+            "type": "line",
+            "x1": 501.89,
+            "y1": 339.73,
+            "x2": 524.1,
+            "y2": 339.73,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-18",
+            "type": "line",
+            "x1": 501.89,
+            "y1": 339.73,
+            "x2": 524.1,
+            "y2": 409.35,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-5",
+            "type": "line",
+            "x1": 360.82,
+            "y1": 439.97,
+            "x2": 360.82,
+            "y2": 465.92,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-11",
+            "type": "line",
+            "x1": 443.05,
+            "y1": 439.97,
+            "x2": 443.05,
+            "y2": 465.92,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-13",
+            "type": "line",
+            "x1": 196.37,
+            "y1": 439.97,
+            "x2": 196.37,
+            "y2": 465.92,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-17",
+            "type": "line",
+            "x1": 114.14,
+            "y1": 439.97,
+            "x2": 114.14,
+            "y2": 465.92,
+            "stroke": "070154",
+            "strokeWidth": 0.5,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-20",
+            "type": "line",
+            "x1": 501.89,
+            "y1": 339.73,
+            "x2": 524.1,
+            "y2": 518.95,
+            "stroke": "334155",
+            "strokeWidth": 1,
+            "endArrow": "triangle"
+          },
+          {
+            "id": "element-21",
+            "type": "text",
+            "x": 60.16,
+            "y": 560.3,
+            "w": 455.64,
+            "h": 27.32,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "* Version ranges: Kotlin 1.9-2.2, Ruby 3.2-3.4, React 16-19, NextJS running on Node.js 20-25",
+            "align": "left",
+            "valign": "middle",
+            "fontSize": 8,
+            "fontFace": "Aptos",
+            "italic": true,
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "* Version ranges: Kotlin 1.9-2.2, Ruby 3.2-3.4, React 16-19, NextJS running on Node.js 20-25",
+                "italic": true,
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 8,
+                "breakLine": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

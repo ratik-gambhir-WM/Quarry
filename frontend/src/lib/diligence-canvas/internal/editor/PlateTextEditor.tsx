@@ -93,7 +93,7 @@ function PlateTextEditor({
           role="textbox"
           spellCheck={false}
           style={{
-            caretColor,
+            caretColor: hideText ? 'transparent' : caretColor,
             lineHeight: SLIDE_TEXT_LINE_HEIGHT,
             WebkitTextFillColor: hideText ? 'transparent' : undefined,
             whiteSpace: 'pre-wrap',

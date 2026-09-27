@@ -1,0 +1,680 @@
+{
+  "presentation": {
+    "title": "Product Architecture",
+    "slides": [
+      {
+        "id": "slide-4",
+        "name": "Product Architecture",
+        "width": 1280,
+        "height": 720,
+        "backgroundColor": "FFFFFF",
+        "elements": [
+          {
+            "id": "element-12",
+            "type": "shape",
+            "shape": "rect",
+            "x": 48.33,
+            "y": 129.94,
+            "w": 738.67,
+            "h": 489.54,
+            "fill": "F3F6FB",
+            "stroke": "CED7E6",
+            "strokeWidth": 1,
+            "padding": 7.2,
+            "text": " Product Architecture",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 16,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": " Product Architecture",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 16,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-18",
+            "type": "shape",
+            "shape": "rect",
+            "x": 61.53,
+            "y": 192.69,
+            "w": 347.73,
+            "h": 398.89,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "[Product 1] (Rackspace, Azure)",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "[Product 1] ",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14
+              },
+              {
+                "text": "(Rackspace, Azure)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-19",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 226.83,
+            "w": 315.5,
+            "h": 35.38,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Presentation Layer\nAngular, jQuery",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Presentation Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Angular, jQuery",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-20",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 275.28,
+            "w": 315.5,
+            "h": 90.97,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application Layer\n.NET 8, .NET 4.8 (VM)\n90% shared code,\n~10% auto/consumer specific",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": ".NET 8, .NET 4.8 (VM)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "90% shared co",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11
+              },
+              {
+                "text": "de,",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "~10% auto/consumer specific",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-23",
+            "type": "shape",
+            "shape": "rect",
+            "x": 505.31,
+            "y": 192.69,
+            "w": 268.5,
+            "h": 398.89,
+            "fill": "CED7E6",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "[Product 2] (Azure)",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 14,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "[Product 2]",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14
+              },
+              {
+                "text": " (Azure)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 14,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-25",
+            "type": "shape",
+            "shape": "rect",
+            "x": 522.44,
+            "y": 231.13,
+            "w": 229.91,
+            "h": 45.51,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Presentation Layer\nAngular",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Presentation Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Angular",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-26",
+            "type": "shape",
+            "shape": "rect",
+            "x": 522.44,
+            "y": 291.73,
+            "w": 229.24,
+            "h": 45.51,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "API\n.NET 8 (containerized)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "API",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": ".NET 8 (containerized)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-27",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 471.24,
+            "w": 315.5,
+            "h": 108.75,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-28",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 109.27,
+            "y": 496.3,
+            "w": 127.08,
+            "h": 72.9,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "text": "Primary DB\nSQL Server (VM)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Primary DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "SQL Server (VM)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-29",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 258.29,
+            "y": 502.43,
+            "w": 88.32,
+            "h": 60.63,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "padding": 10.8,
+            "text": "Cache\nRedis (VM)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Cache",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Redis (VM)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-11",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 379.24,
+            "w": 315.5,
+            "h": 34.28,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "API\n.NET 4.8 (VM)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "API",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": ".NET 4.8 (VM)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-13",
+            "type": "shape",
+            "shape": "rect",
+            "x": 78.6,
+            "y": 423.97,
+            "w": 315.5,
+            "h": 34.28,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Background Processes\nHangfire, .NET 4.8 (VM)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Background Processes",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "Hangfire, .NET 4.8 (VM)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-17",
+            "type": "shape",
+            "shape": "rect",
+            "x": 522.44,
+            "y": 352.33,
+            "w": 229.24,
+            "h": 99.13,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Application / Services\n(containerized)",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Application / Services",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "(containerized)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-34",
+            "type": "shape",
+            "shape": "rect",
+            "x": 522.44,
+            "y": 466.55,
+            "w": 229.91,
+            "h": 107.84,
+            "fill": "070154",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "Data Layer",
+            "align": "center",
+            "valign": "top",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Data Layer",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-35",
+            "type": "shape",
+            "shape": "flowChartMagneticDisk",
+            "x": 587.66,
+            "y": 495.93,
+            "w": 103.79,
+            "h": 65.53,
+            "fill": "E8EEF8",
+            "stroke": "070154",
+            "strokeWidth": 1,
+            "text": "Primary DB\nSQL Server\n(Azure DB)",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 11,
+            "fontFace": "Aptos",
+            "bold": true,
+            "textColor": "FFFFFF",
+            "runs": [
+              {
+                "text": "Primary DB",
+                "bold": true,
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 11,
+                "breakLine": true
+              },
+              {
+                "text": "SQL Server",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              },
+              {
+                "text": "(Azure DB)",
+                "color": "FFFFFF",
+                "fontFace": "Aptos",
+                "fontSize": 9,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-37",
+            "type": "line",
+            "x1": 409.26,
+            "y1": 329.6,
+            "x2": 505.3,
+            "y2": 329.6,
+            "stroke": "070154",
+            "strokeWidth": 2,
+            "endArrow": "arrow"
+          },
+          {
+            "id": "element-38",
+            "type": "text",
+            "x": 409.26,
+            "y": 351.01,
+            "w": 96.04,
+            "h": 119.25,
+            "fill": "transparent",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": "API calls from [Product 2] to [Product 1] enable data sharing of contracts and loan-related data",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": "API calls from [Product 2] to [Product 1] enable data sharing of contracts and loan-related data",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-39",
+            "type": "shape",
+            "shape": "rect",
+            "x": 538.43,
+            "y": 405.95,
+            "w": 57.39,
+            "h": 31.49,
+            "fill": "E8EFF8",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": ".NET 4.8",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": ".NET 4.8",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-40",
+            "type": "shape",
+            "shape": "rect",
+            "x": 608.2,
+            "y": 406.29,
+            "w": 57.39,
+            "h": 31.49,
+            "fill": "E8EFF8",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": ".NET 4.8",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": ".NET 4.8",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          },
+          {
+            "id": "element-41",
+            "type": "shape",
+            "shape": "rect",
+            "x": 681.59,
+            "y": 405.95,
+            "w": 57.39,
+            "h": 31.49,
+            "fill": "E8EFF8",
+            "stroke": "transparent",
+            "strokeWidth": 0,
+            "text": ".NET 4.8",
+            "align": "center",
+            "valign": "middle",
+            "fontSize": 10,
+            "fontFace": "Aptos",
+            "textColor": "111827",
+            "runs": [
+              {
+                "text": ".NET 4.8",
+                "color": "111827",
+                "fontFace": "Aptos",
+                "fontSize": 10,
+                "breakLine": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
