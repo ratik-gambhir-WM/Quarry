@@ -179,7 +179,7 @@ async fn collect_document_upload(
     let user_id = normalize_required_request_value(user_id.unwrap_or_default(), "userId")?;
     if files.is_empty() {
         return Err(AppError::bad_request(
-            "at least one PDF, DOCX, PNG, JPEG, WebP, or GIF upload is required",
+            "at least one PDF, DOCX, XLS, XLSX, PPTX, PNG, JPEG, WebP, or GIF upload is required",
         ));
     }
     Ok((user_id, files))
@@ -202,10 +202,10 @@ fn validate_document_upload_filename(filename: &str) -> AppResult<()> {
         .map(str::to_ascii_lowercase);
     if !matches!(
         extension.as_deref(),
-        Some("pdf" | "docx" | "png" | "jpg" | "jpeg" | "webp" | "gif")
+        Some("pdf" | "docx" | "xls" | "xlsx" | "pptx" | "png" | "jpg" | "jpeg" | "webp" | "gif")
     ) {
         return Err(AppError::bad_request(format!(
-            "upload `{filename}` must be a PDF, DOCX, PNG, JPEG, WebP, or GIF file"
+            "upload `{filename}` must be a PDF, DOCX, XLS, XLSX, PPTX, PNG, JPEG, WebP, or GIF file"
         )));
     }
     Ok(())

@@ -156,7 +156,7 @@ export type DealDocumentPdf = {
 
 export type DealDocumentText = {
   fileName: string;
-  sourceKind: "docx" | "pdf";
+  sourceKind: "docx" | "pdf" | "powerpoint" | "spreadsheet";
   text: string;
 };
 

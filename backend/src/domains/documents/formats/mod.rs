@@ -1,6 +1,7 @@
 pub mod docx;
 pub mod image;
 pub mod image_prompt;
+pub mod office_text;
 pub mod pdf;
 pub mod powerpoint;
 pub mod spreadsheet;
@@ -13,11 +14,11 @@ use std::{
 
 use self::{
     docx::{parse_docx_chunks_from_bytes, DocxAssembly},
-    image::{parse_image_by_bytes, ImageAssembly},
+    office_text::{build_office_text_assembly, OfficeTextAssembly},
     pdf::{parse_pdf_by_bytes, PdfDocumentAssembly},
+    powerpoint::parse_powerpoint_from_bytes,
+    spreadsheet::parse_spreadsheet_from_bytes,
 };
-use crate::adapters::openai::client::OpenAiClient;
-use crate::shared::file_policy::infer_supported_image_mime_type;
 
 #[derive(Debug)]
 pub enum QuarryFile {
@@ -31,7 +32,13 @@ pub enum QuarryFile {
         path: Option<PathBuf>,
         file_name: String,
     },
-    Image {
+    Spreadsheet {
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        file_name: String,
+        source_type: &'static str,
+    },
+    Powerpoint {
         bytes: Vec<u8>,
         path: Option<PathBuf>,
         file_name: String,
@@ -42,7 +49,8 @@ pub enum QuarryFile {
 pub enum ParsedQuarryFile {
     Pdf(PdfDocumentAssembly),
     Docx(DocxAssembly),
-    Image(ImageAssembly),
+    Spreadsheet(OfficeTextAssembly),
+    Powerpoint(OfficeTextAssembly),
 }
 
 /// Reads filesystem metadata from an already-open file without consuming it.
@@ -73,12 +81,7 @@ impl QuarryFile {
 
     /// Parses the file into Quarry's graph-ready document/chunk assembly.
     /// User identity is explicit so graph nodes are never written unscoped.
-    pub async fn parse(
-        self,
-        user_id: &str,
-        openai_client: &OpenAiClient,
-        image_description_model: &str,
-    ) -> Result<ParsedQuarryFile, String> {
+    pub fn parse(self, user_id: &str) -> Result<ParsedQuarryFile, String> {
         let user_id = user_id.trim();
         if user_id.is_empty() {
             return Err("user_id cannot be empty".to_string());
@@ -103,20 +106,41 @@ impl QuarryFile {
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Docx(assembly))
             }
-            Self::Image {
+            Self::Spreadsheet {
                 bytes,
                 path,
                 file_name,
-            } => parse_image_by_bytes(
+                source_type,
+            } => {
+                let text = parse_spreadsheet_from_bytes(&bytes)?;
+                let mut assembly = build_office_text_assembly(
+                    &bytes,
+                    path.as_deref(),
+                    user_id,
+                    source_type,
+                    "Document.xlsx",
+                    text,
+                )?;
+                assembly.document.file_name = file_name;
+                Ok(ParsedQuarryFile::Spreadsheet(assembly))
+            }
+            Self::Powerpoint {
                 bytes,
-                path.as_deref(),
+                path,
                 file_name,
-                user_id,
-                openai_client,
-                image_description_model,
-            )
-            .await
-            .map(ParsedQuarryFile::Image),
+            } => {
+                let text = parse_powerpoint_from_bytes(&bytes)?;
+                let mut assembly = build_office_text_assembly(
+                    &bytes,
+                    path.as_deref(),
+                    user_id,
+                    "pptx",
+                    "Document.pptx",
+                    text,
+                )?;
+                assembly.document.file_name = file_name;
+                Ok(ParsedQuarryFile::Powerpoint(assembly))
+            }
         }
     }
 
@@ -145,13 +169,17 @@ impl QuarryFile {
                 path,
                 file_name,
             }),
-            _ if infer_supported_image_mime_type(Path::new(&file_name)).is_some() => {
-                Ok(Self::Image {
-                    bytes,
-                    path,
-                    file_name,
-                })
-            }
+            "xls" | "xlsx" => Ok(Self::Spreadsheet {
+                bytes,
+                path,
+                file_name,
+                source_type: if extension == "xls" { "xls" } else { "xlsx" },
+            }),
+            "pptx" => Ok(Self::Powerpoint {
+                bytes,
+                path,
+                file_name,
+            }),
             _ => Err("invalid file format".to_string()),
         }
     }

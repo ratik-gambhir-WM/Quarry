@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::{io::Cursor, path::Path};
 
 use anyhow::Result;
-use calamine::{open_workbook_auto, Data, Reader};
+use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, Reader};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SpreadsheetRow {
@@ -15,6 +15,15 @@ pub fn parse_spreadsheet(path: impl AsRef<Path>) -> Result<String> {
     Ok(rows_to_text(rows))
 }
 
+/// Parses XLS/XLSX bytes received by an upload without requiring a server-local path.
+pub fn parse_spreadsheet_from_bytes(bytes: &[u8]) -> Result<String, String> {
+    let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes))
+        .map_err(|error| format!("failed to open spreadsheet bytes: {error}"))?;
+    let rows = parse_spreadsheet_rows_from_workbook(&mut workbook)
+        .map_err(|error| format!("failed to parse spreadsheet bytes: {error}"))?;
+    Ok(rows_to_text(rows))
+}
+
 fn rows_to_text(rows: Vec<SpreadsheetRow>) -> String {
     rows.iter()
         .map(row_to_text)
@@ -25,6 +34,15 @@ fn rows_to_text(rows: Vec<SpreadsheetRow>) -> String {
 
 fn parse_spreadsheet_rows(path: impl AsRef<Path>) -> Result<Vec<SpreadsheetRow>> {
     let mut workbook = open_workbook_auto(path)?;
+    parse_spreadsheet_rows_from_workbook(&mut workbook)
+}
+
+fn parse_spreadsheet_rows_from_workbook<RS>(
+    workbook: &mut calamine::Sheets<RS>,
+) -> Result<Vec<SpreadsheetRow>>
+where
+    RS: std::io::Read + std::io::Seek,
+{
     let mut rows = Vec::new();
 
     for sheet_name in workbook.sheet_names().to_owned() {

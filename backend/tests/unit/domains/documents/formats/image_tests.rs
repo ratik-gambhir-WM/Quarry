@@ -2,19 +2,14 @@ use super::*;
 use image::{DynamicImage, ImageOutputFormat, RgbaImage};
 use std::io::Cursor;
 
-#[test]
-fn infers_supported_mime_types() {
+#[tokio::test]
+async fn validates_a_supported_image_type_from_the_filename() {
     assert_eq!(
-        infer_image_mime_type(Path::new("screenshot.PNG")).unwrap(),
+        validate_image_by_bytes(png_bytes(1, 1), "screenshot.PNG")
+            .await
+            .unwrap()
+            .mime_type,
         "image/png"
-    );
-    assert_eq!(
-        infer_image_mime_type(Path::new("photo.jpeg")).unwrap(),
-        "image/jpeg"
-    );
-    assert_eq!(
-        infer_image_mime_type(Path::new("graphic.webp")).unwrap(),
-        "image/webp"
     );
 }
 
@@ -63,17 +58,6 @@ fn rejects_invalid_image_bytes_before_calling_openai() {
 fn rejects_images_above_the_pixel_limit() {
     assert!(supported_pixel_count(10_000, 10_000).is_err());
     assert_eq!(supported_pixel_count(4_000, 4_000).unwrap(), 16_000_000);
-}
-
-#[tokio::test]
-async fn rejects_a_blank_image_description_model_before_calling_openai() {
-    let client = OpenAiClient::new(reqwest::Client::new(), "test-key");
-
-    let error = describe_image_with_model(&png_bytes(1, 1), "image/png", &client, "   ")
-        .await
-        .unwrap_err();
-
-    assert_eq!(error, "image description model cannot be empty");
 }
 
 fn png_bytes(width: u32, height: u32) -> Vec<u8> {

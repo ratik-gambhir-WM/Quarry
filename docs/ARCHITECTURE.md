@@ -1056,23 +1056,28 @@ links or files entered in the optional metadata step.
 sequenceDiagram
     participant UI as React UI
     participant API as Axum handler/job service
-    participant Parser as PDF/DOCX/image parser
+    participant Ingestion as Document ingestion service
+    participant Parser as PDF/DOCX parser + image validator/assembler
     participant AI as OpenAI vision + embeddings
     participant SQL as SQLite
     participant H as Helix
 
     UI->>API: multipart dealId path + userId + PDF/DOCX/image
     API-->>UI: 202 jobId (job path) or waits (batch path)
-    API->>Parser: parse bytes and create normalized chunks
-    Parser->>AI: describe validated image bytes (image inputs only)
-    AI-->>Parser: image description
-    Parser-->>API: document + chunks + content-derived IDs and new file_id
-    API->>AI: embed chunk text
-    AI-->>API: embeddings
-    API->>SQL: transactionally persist file/version/blob
-    SQL-->>API: committed file/version identities
-    API->>H: insert versioned file graph and chunks
-    H-->>API: indexed or recoverable error
+    API->>Ingestion: process upload/job
+    Ingestion->>Parser: parse PDF/DOCX or validate image bytes
+    Parser-->>Ingestion: normalized chunks or validated image
+    Ingestion->>AI: describe validated image bytes (image inputs only)
+    AI-->>Ingestion: image description
+    Ingestion->>Parser: build image description chunks (image inputs only)
+    Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
+    Ingestion->>AI: embed chunk text
+    AI-->>Ingestion: embeddings
+    Ingestion->>SQL: transactionally persist file/version/blob
+    SQL-->>Ingestion: committed file/version identities
+    Ingestion->>H: insert versioned file graph and chunks
+    H-->>Ingestion: indexed or recoverable error
+    Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
 

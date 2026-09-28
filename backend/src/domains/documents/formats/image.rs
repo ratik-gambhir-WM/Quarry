@@ -37,32 +37,17 @@ pub(crate) struct DecodedImage {
     pub width: u32,
 }
 
-pub async fn parse_image_file(
-    image_path: &Path,
-    openai_client: &OpenAiClient,
-) -> Result<String, String> {
-    let mime_type = infer_image_mime_type(image_path)?;
-    let image_path = image_path.to_path_buf();
-    let image = tokio::task::spawn_blocking(move || {
-        let image = std::fs::read(&image_path)
-            .map_err(|err| format!("failed to read image file {}: {err}", image_path.display()))?;
-        validate_image(&image, mime_type)?;
-        Ok::<_, String>(image)
-    })
-    .await
-    .map_err(|error| format!("image file worker failed: {error}"))??;
-
-    describe_image(&image, mime_type, openai_client).await
+pub(crate) struct ValidatedImage {
+    pub bytes: Vec<u8>,
+    pub mime_type: &'static str,
 }
 
-pub async fn parse_image_by_bytes(
+/// Validates bytes on the blocking pool and retains the MIME type derived from the filename.
+/// Model calls and ingestion orchestration belong to the ingestion service.
+pub(crate) async fn validate_image_by_bytes(
     bytes: Vec<u8>,
-    path: Option<&Path>,
-    file_name: String,
-    user_id: &str,
-    openai_client: &OpenAiClient,
-    description_model: &str,
-) -> Result<ImageAssembly, String> {
+    file_name: &str,
+) -> Result<ValidatedImage, String> {
     let mime_type = infer_supported_image_mime_type(Path::new(&file_name))
         .ok_or_else(|| format!("unsupported image file `{file_name}`"))?;
     let validation_mime_type = mime_type;
@@ -73,39 +58,18 @@ pub async fn parse_image_by_bytes(
     .await
     .map_err(|error| format!("image validation worker failed: {error}"))??;
 
-    let description =
-        describe_image_with_model(&bytes, mime_type, openai_client, description_model).await?;
-
-    build_image_assembly(bytes, path, file_name, user_id, &description)
+    Ok(ValidatedImage { bytes, mime_type })
 }
 
+/// Legacy PDF image extraction still uses this default-model helper. Upload ingestion owns its
+/// configured model selection and invokes OpenAI from its service instead.
 pub async fn describe_image(
     image: &[u8],
     mime_type: &str,
     openai_client: &OpenAiClient,
 ) -> Result<String, String> {
-    describe_image_with_model(
-        image,
-        mime_type,
-        openai_client,
-        DEFAULT_IMAGE_DESCRIPTION_MODEL,
-    )
-    .await
-}
-
-pub async fn describe_image_with_model(
-    image: &[u8],
-    mime_type: &str,
-    openai_client: &OpenAiClient,
-    description_model: &str,
-) -> Result<String, String> {
     if image.is_empty() {
         return Err("cannot describe an empty image".to_string());
-    }
-
-    let description_model = description_model.trim();
-    if description_model.is_empty() {
-        return Err("image description model cannot be empty".to_string());
     }
 
     let normalized_mime_type = normalize_image_mime_type(mime_type)?;
@@ -119,7 +83,7 @@ pub async fn describe_image_with_model(
         .gen_model_response_with_files(
             Some(IMAGE_DESCRIPTION_PROMPT),
             None,
-            Some(description_model),
+            Some(DEFAULT_IMAGE_DESCRIPTION_MODEL),
             Some(&file_inputs),
         )
         .await?;
@@ -132,7 +96,7 @@ pub async fn describe_image_with_model(
     Ok(description)
 }
 
-fn build_image_assembly(
+pub(crate) fn build_image_assembly(
     bytes: Vec<u8>,
     path: Option<&Path>,
     file_name: String,
@@ -307,27 +271,6 @@ fn image_format_for_mime_type(mime_type: &str) -> ImageFormat {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-fn infer_image_mime_type(image_path: &Path) -> Result<&'static str, String> {
-    infer_supported_image_mime_type(image_path).ok_or_else(|| {
-        match image_path
-            .extension()
-            .and_then(|extension| extension.to_str())
-        {
-            Some(extension) => format!(
-                "unsupported image extension .{extension}; expected png, jpg, jpeg, webp, or gif"
-            ),
-            None => format!(
-                "could not infer image type for {}; pass bytes with an explicit MIME type instead",
-                image_path.display()
-            ),
-        }
-    })
-}
-
 fn normalize_image_mime_type(mime_type: &str) -> Result<&'static str, String> {
     match mime_type.trim().to_ascii_lowercase().as_str() {
         "image/png" => Ok("image/png"),
@@ -338,6 +281,10 @@ fn normalize_image_mime_type(mime_type: &str) -> Result<&'static str, String> {
             "unsupported image MIME type {value}; expected image/png, image/jpeg, image/webp, or image/gif"
         )),
     }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 #[cfg(test)]

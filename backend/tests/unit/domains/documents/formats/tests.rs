@@ -4,12 +4,8 @@ use docx_rust::{document::Paragraph, Docx};
 
 use super::*;
 
-fn openai_client() -> OpenAiClient {
-    OpenAiClient::new(reqwest::Client::new(), "test-key")
-}
-
-#[tokio::test]
-async fn uploaded_docx_keeps_filename_without_a_local_path() {
+#[test]
+fn uploaded_docx_keeps_filename_without_a_local_path() {
     let mut docx = Docx::default();
     docx.document
         .push(Paragraph::default().push_text("Generated Quarry report."));
@@ -17,8 +13,7 @@ async fn uploaded_docx_keeps_filename_without_a_local_path() {
 
     let parsed = QuarryFile::from_bytes("report.docx", bytes)
         .unwrap()
-        .parse("user-1", &openai_client(), "gpt-image-test")
-        .await
+        .parse("user-1")
         .unwrap();
     let ParsedQuarryFile::Docx(assembly) = parsed else {
         panic!("expected DOCX assembly");
@@ -30,21 +25,12 @@ async fn uploaded_docx_keeps_filename_without_a_local_path() {
     assert_eq!(assembly.chunks[0].text, "Generated Quarry report.");
 }
 
-#[tokio::test]
-async fn parser_requires_user_scope() {
+#[test]
+fn parser_requires_user_scope() {
     let error = QuarryFile::from_bytes("report.pdf", b"not a pdf".to_vec())
         .unwrap()
-        .parse("", &openai_client(), "gpt-image-test")
-        .await
+        .parse("")
         .unwrap_err();
 
     assert_eq!(error, "user_id cannot be empty");
-}
-
-#[test]
-fn uploaded_images_are_dispatched_to_the_image_parser() {
-    assert!(matches!(
-        QuarryFile::from_bytes("photo.JPEG", vec![1]).unwrap(),
-        QuarryFile::Image { .. }
-    ));
 }
