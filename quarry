@@ -14,7 +14,7 @@ readonly DILIGENCE_STUDIO_API_BASE_URL="${DILIGENCE_STUDIO_API_URL}/api/v1"
 readonly QUARRY_UI_URL="http://localhost:1420"
 readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template-preview"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-dev}"
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
 readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
 

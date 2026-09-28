@@ -29,6 +29,14 @@ process-serialized and requests durability acknowledgement, but a v3 transport
 failure is terminal because the SDK does not expose enough outcome information
 to safely replay a graph write.
 
+The local `quarry` launcher verifies and starts the configured digest-pinned,
+named Helix container before it polls `/healthz`. A process already listening
+on port 6969 must therefore make the named container fail to start rather than
+be accepted as a compatible runtime. `HELIX_VECTOR_DIMENSION` is the single
+positive configuration source for both the Helix v3 vector-index descriptor
+and OpenAI's embeddings `dimensions` request field, so generated vectors and
+the configured index have the same dimension.
+
 The XLSX/PPTX work must use that existing projection boundary unchanged. In
 particular, a graph write is one atomic, version-scoped request and
 `insert_file_version_graph` rejects serialized requests over the current
@@ -66,9 +74,10 @@ otherwise failed post-commit projection.
   ingested.
 - Keep `HELIX_URL` as an origin; do not append `/v2/query`, create another
   Helix client, alter index DDL, or add write retries. The existing configured
-  `HELIX_VECTOR_DIMENSION` must continue to match the embedding provider's
-  dimension. New Office chunks use the normal graph writer and its exact
-  request-size preflight.
+  `HELIX_VECTOR_DIMENSION` already drives both the index and OpenAI embeddings
+  request dimension; Office code must reuse that coupling rather than create a
+  second dimension setting. New Office chunks use the normal graph writer and
+  its exact request-size preflight.
 - Do not expose a local upload path. Byte parser APIs borrow raw bytes where
   possible and produce the same graph-ready assembly shape as the existing
   DOCX/PDF byte parsers. Path APIs may remain only as CLI/backward-compatible
@@ -100,7 +109,8 @@ ingestion and multipart allowlists, and the upload-modal allowlist.
 | Parser dispatch | `backend/src/domains/documents/formats/mod.rs` | `QuarryFile` currently selects only PDF/DOCX and returns graph-ready assemblies; XLSX/PPTX join this closed dispatch rather than bypassing it in a handler. |
 | Transport validation | `backend/src/domains/documents/ingestion/handler.rs` | Preserve filename, empty-file, per-file 50-MiB, total-request 50-MiB, `userId`, and path-scoped `dealId` validation. |
 | Canonical persistence | `backend/src/domains/documents/ingestion/persistence.rs` | Preserve content-byte hashes, `document_id`, file/version IDs, source-type/extension agreement, MIME mapping, transaction boundaries, and graph invariants. |
-| Helix projection | `backend/src/domains/documents/index/{writer,repository}.rs` | Keep the v3 `QueryRequest` boundary, configured vector dimension, index-readiness bootstrap, one atomic graph write, serialized durable writes, terminal unknown transport outcomes, and the 2-MiB exact-query cap. |
+| Local Helix runtime | `quarry` | Verify the configured digest-pinned named container, start it before health polling, and reject a foreign listener that prevents the named runtime from starting. |
+| Helix projection | `backend/src/domains/documents/index/{writer,repository}.rs` | Keep the v3 `QueryRequest` boundary, index-readiness bootstrap, one atomic graph write, serialized durable writes, terminal unknown transport outcomes, and the 2-MiB exact-query cap. The configured vector dimension must remain coupled to the OpenAI embeddings request. |
 | Stored PDF preview | `backend/src/domains/documents/viewing/service.rs` | Reuse the existing Office byte converter, semaphore, PDF validation, and cache; do not persist a generated PDF or add a separate viewer endpoint. |
 | Shared UI and transports | `frontend/src/components/data-room/UploadFilesModal.tsx`, `frontend/src/api/*QuarryApi.ts` | Maintain web and Tauri multipart paths, selected-file async status/focus behavior, and the transport-neutral PDF viewer contract. |
 
@@ -339,11 +349,11 @@ base64, request-size, and MIME-syntax checks remain in force.
 7. Do not change the Helix v3 graph/query builders, client, or index DDL for
    this feature. Their existing unit coverage remains the authority for
    `QueryRequest` construction, 13-index readiness, terminal write failures,
-   response mapping, and the conservative body limit. If implementation
-   necessarily touches those seams, add the corresponding v3 builder/mapper
-   tests and run the ignored compatibility test only against an explicitly
-   supplied disposable `QUARRY_HELIX_COMPAT_URL`; never point it at the normal
-   local container.
+   response mapping, the OpenAI-request dimension coupling, and the
+   conservative body limit. If implementation necessarily touches those seams,
+   add the corresponding v3 builder/mapper/configuration tests and run the
+   ignored compatibility test only against an explicitly supplied disposable
+   `QUARRY_HELIX_COMPAT_URL`; never point it at the normal local container.
 
 ### Frontend and transport tests
 
@@ -410,11 +420,13 @@ Update `docs/ARCHITECTURE.md` in the implementation change, specifically:
    tests.
 5. Preserve the branch's Helix v3 architecture text: `HELIX_URL` remains an
    origin, SDK request routing remains `/v2/query`-owned, index readiness is a
-   bootstrap precondition, and writes are not retried after an unknown
-   transport outcome. Add the Office graph-request preflight and its
-   pre-persistence rejection behavior to the ingestion/recovery narrative;
-   do not imply that it changes Helix runtime selection, index definitions,
-   or the graph schema.
+   bootstrap precondition, the named digest-pinned local container starts
+   before health polling, and writes are not retried after an unknown transport
+   outcome. Document that `HELIX_VECTOR_DIMENSION` configures both the vector
+   index and OpenAI embeddings request. Add the Office graph-request preflight
+   and its pre-persistence rejection behavior to the ingestion/recovery
+   narrative; do not imply that it changes Helix runtime selection, index
+   definitions, or the graph schema.
 
 Before handoff, inspect `git diff --check`, verify only scoped code/tests/docs
 changed, and rerun `git status --short`. Report the Office-converter manual
@@ -433,9 +445,10 @@ was available.
   chunks are persisted through the same idempotency/recovery rules as PDF and
   DOCX. No new schema or alternate storage path is introduced.
 - Every Office graph request is constructed through the existing Helix v3
-  writer with the configured embedding dimension and remains under its 2-MiB
-  atomic-query limit. A request that would exceed that limit fails before the
-  SQLite write; it is neither split nor retried as an uncertain graph write.
+  writer with embeddings generated using the same configured dimension and
+  remains under its 2-MiB atomic-query limit. A request that would exceed that
+  limit fails before the SQLite write; it is neither split nor retried as an
+  uncertain graph write.
 - Stored XLSX/PPTX requests to the existing PDF endpoint produce a validated
   `application/pdf` response and render in the existing PDF viewer when
   LibreOffice is configured. A conversion failure leaves the uploaded source

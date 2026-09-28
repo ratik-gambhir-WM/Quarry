@@ -191,7 +191,7 @@ supervisor, not another build root: it can run only while the working directory 
 root. Both modes reject conflicting listeners on ports 3001, 1420, and 43127; start
 Docker Desktop on macOS when its daemon is unavailable; and wait for Docker and the Helix service
 at `127.0.0.1:6969`. The launcher first inspects the local container named by
-`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-dev`. If it is absent, the launcher
+`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-v3-dev`. If it is absent, the launcher
 creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section, a
 persistent restart policy, and the `6969:8080` development port mapping. It starts that named
 container before waiting for the local runtime's `/healthz` endpoint, so an unrelated listener
@@ -1159,7 +1159,7 @@ a backend process crash. Current-turn file bytes are still not retained for reus
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
-| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-dev` | Local development identifier; not passed to application runtimes |
+| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-v3-dev` | Local development identifier; not passed to application runtimes |
 
 Local development has one live environment file per runtime build root: `frontend/.env` for public
 Vite configuration shared by web and desktop UI builds, `backend/.env` for Axum configuration and

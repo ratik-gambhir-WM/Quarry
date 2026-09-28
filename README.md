@@ -77,7 +77,7 @@ docker info
 ```
 
 When you first run `./quarry web` or `./quarry desktop`, the launcher looks for the local
-`helix-quarry-dev` container. If it is absent, the launcher creates it from the digest-pinned
+`helix-quarry-v3-dev` container. If it is absent, the launcher creates it from the digest-pinned
 `ghcr.io/helixdb/helixdb` image in the `[local.dev]` section of
 [`backend/helix.toml`](backend/helix.toml), maps host port `6969` to the image's port `8080`, and
 starts that named container before waiting for its `/healthz` endpoint. This remains a local Docker runtime; Quarry does not use Helix
@@ -143,7 +143,7 @@ Keep the launcher terminal open while you develop. Press `Ctrl-C` once to stop A
 Stop the default Helix container separately when you no longer need it:
 
 ```sh
-docker stop helix-quarry-dev
+docker stop helix-quarry-v3-dev
 ```
 
 Run the launcher from the repository root. It first checks ports `3001`, `1420`, and `43127`. It then waits for Docker and Helix before it starts Axum, the selected user interface, and Diligence Studio. The launcher stops its three application process groups together when one exits.
@@ -170,7 +170,7 @@ The browser and Tauri webview call Axum. They do not call Diligence Studio on po
 - `port ... is already in use`: another development process owns one of ports `3001`, `1420`, or
   `43127`. Stop that process intentionally; the launcher will not terminate an unknown listener.
 - Docker or Helix startup timeout: open Docker Desktop or start Docker Engine, then check
-  `docker info`, `docker ps -a`, and `docker logs helix-quarry-dev` before retrying.
+  `docker info`, `docker ps -a`, and `docker logs helix-quarry-v3-dev` before retrying.
 - Diligence Studio preview failures: rerun `npx playwright install chromium` from
   `diligence-studio-server/`.
 - Desktop-only build failures: revisit the Tauri prerequisites and confirm `xcode-select -p` and
