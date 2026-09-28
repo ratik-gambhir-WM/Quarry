@@ -9,7 +9,7 @@ use crate::domains::documents::{
         sqlite::DocumentStore,
     },
 };
-use crate::shared::file_policy::infer_supported_mime_type;
+use crate::shared::file_policy::{infer_supported_image_mime_type, infer_supported_mime_type};
 use crate::shared::ids::{document_id_from_content, file_version_id, sha256_hex};
 use chrono::{SecondsFormat, Utc};
 use serde_json::{json, Value};
@@ -109,7 +109,7 @@ pub(crate) fn build_file_persistence_input(
         ));
     }
 
-    let mime_type = infer_supported_mime_type(Path::new(&display_name))
+    let mime_type = document_mime_type(Path::new(&display_name))
         .ok_or_else(|| format!("unsupported file type for `{display_name}`"))?;
     let extension = Path::new(&display_name)
         .extension()
@@ -190,7 +190,7 @@ fn build_file_version_node(
     insert_blob_result: &PersistedFileIdentity,
     document: &Document,
 ) -> Result<FileVersionNode, String> {
-    let mime_type = infer_supported_mime_type(Path::new(&document.file_name))
+    let mime_type = document_mime_type(Path::new(&document.file_name))
         .ok_or_else(|| format!("unsupported file type for `{}`", document.file_name))?
         .to_string();
     let byte_size = i64::try_from(document.file_size_bytes)
@@ -206,6 +206,10 @@ fn build_file_version_node(
         index_generation: insert_blob_result.version_id.clone(),
         indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
     })
+}
+
+fn document_mime_type(path: &Path) -> Option<&'static str> {
+    infer_supported_mime_type(path).or_else(|| infer_supported_image_mime_type(path))
 }
 
 fn build_file_chunk_node(

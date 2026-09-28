@@ -66,6 +66,7 @@ pub struct DocumentIngestionService {
     index_writer: DocumentIndexWriter,
     openai: Option<Arc<OpenAiClient>>,
     embedding_model: String,
+    image_description_model: String,
     processing_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
     max_concurrent_documents: usize,
 }
@@ -77,6 +78,7 @@ impl DocumentIngestionService {
         index_writer: DocumentIndexWriter,
         openai: Option<Arc<OpenAiClient>>,
         embedding_model: String,
+        image_description_model: String,
         max_concurrent_documents: usize,
     ) -> Self {
         Self {
@@ -85,6 +87,7 @@ impl DocumentIngestionService {
             index_writer,
             openai,
             embedding_model,
+            image_description_model,
             processing_locks: Arc::new(Mutex::new(HashMap::new())),
             max_concurrent_documents,
         }
@@ -231,7 +234,8 @@ impl DocumentIngestionService {
         openai: &OpenAiClient,
     ) -> Result<(String, usize), String> {
         let filename = file.filename.clone();
-        let mut graph = parse_document(file, user_id)?;
+        let mut graph =
+            parse_document(file, user_id, openai, &self.image_description_model).await?;
         if let Some(existing) = existing_attachment {
             graph.document.file_id.clone_from(&existing.file_id);
         }
@@ -325,24 +329,33 @@ fn failed_document(filename: String, error: String) -> ProcessedDocument {
     }
 }
 
-fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocumentGraph, String> {
+async fn parse_document(
+    file: UploadedDocument,
+    user_id: String,
+    openai: &OpenAiClient,
+    image_description_model: &str,
+) -> Result<ParsedDocumentGraph, String> {
     let filename = file.filename.clone();
     let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
-    let result = (|| {
-        let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
+    let result = async {
+        let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?
+            .parse(&user_id, openai, image_description_model)
+            .await?;
         let (document, chunks) = match parsed {
             ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
             ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+            ParsedQuarryFile::Image(assembly) => (assembly.document, assembly.chunks),
         };
         Ok(ParsedDocumentGraph {
             document,
             chunks,
             file_bytes,
         })
-    })();
+    }
+    .await;
     match &result {
         Ok(_) => tracing::info!(
             api = DOCUMENT_PARSE_API,

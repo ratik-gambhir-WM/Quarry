@@ -46,6 +46,7 @@ use crate::{
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
+const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 
 pub struct Application {
     pub router: Router,
@@ -159,6 +160,11 @@ pub(crate) fn assemble_api(
             .as_ref()
             .map(|config| config.embedding_model.clone())
             .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
+        config
+            .openai
+            .as_ref()
+            .map(|config| config.image_description_model.clone())
+            .unwrap_or_else(|| DEFAULT_IMAGE_DESCRIPTION_MODEL.to_string()),
         config.documents.max_concurrent_documents,
     ));
     let document_jobs = Arc::new(DocumentJobService::new(

@@ -45,6 +45,21 @@ pub fn infer_supported_mime_type(path: &Path) -> Option<&'static str> {
     }
 }
 
+pub fn infer_supported_image_mime_type(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        _ => None,
+    }
+}
+
 pub fn office_extension_for_mime_type(mime_type: &str) -> Option<&'static str> {
     match mime_type {
         "application/msword" => Some("doc"),

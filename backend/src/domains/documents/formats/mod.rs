@@ -13,8 +13,11 @@ use std::{
 
 use self::{
     docx::{parse_docx_chunks_from_bytes, DocxAssembly},
+    image::{parse_image_by_bytes, ImageAssembly},
     pdf::{parse_pdf_by_bytes, PdfDocumentAssembly},
 };
+use crate::adapters::openai::client::OpenAiClient;
+use crate::shared::file_policy::infer_supported_image_mime_type;
 
 #[derive(Debug)]
 pub enum QuarryFile {
@@ -28,12 +31,18 @@ pub enum QuarryFile {
         path: Option<PathBuf>,
         file_name: String,
     },
+    Image {
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        file_name: String,
+    },
 }
 
 #[derive(Debug)]
 pub enum ParsedQuarryFile {
     Pdf(PdfDocumentAssembly),
     Docx(DocxAssembly),
+    Image(ImageAssembly),
 }
 
 /// Reads filesystem metadata from an already-open file without consuming it.
@@ -64,7 +73,12 @@ impl QuarryFile {
 
     /// Parses the file into Quarry's graph-ready document/chunk assembly.
     /// User identity is explicit so graph nodes are never written unscoped.
-    pub fn parse(self, user_id: &str) -> Result<ParsedQuarryFile, String> {
+    pub async fn parse(
+        self,
+        user_id: &str,
+        openai_client: &OpenAiClient,
+        image_description_model: &str,
+    ) -> Result<ParsedQuarryFile, String> {
         let user_id = user_id.trim();
         if user_id.is_empty() {
             return Err("user_id cannot be empty".to_string());
@@ -89,6 +103,20 @@ impl QuarryFile {
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Docx(assembly))
             }
+            Self::Image {
+                bytes,
+                path,
+                file_name,
+            } => parse_image_by_bytes(
+                bytes,
+                path.as_deref(),
+                file_name,
+                user_id,
+                openai_client,
+                image_description_model,
+            )
+            .await
+            .map(ParsedQuarryFile::Image),
         }
     }
 
@@ -117,6 +145,13 @@ impl QuarryFile {
                 path,
                 file_name,
             }),
+            _ if infer_supported_image_mime_type(Path::new(&file_name)).is_some() => {
+                Ok(Self::Image {
+                    bytes,
+                    path,
+                    file_name,
+                })
+            }
             _ => Err("invalid file format".to_string()),
         }
     }
