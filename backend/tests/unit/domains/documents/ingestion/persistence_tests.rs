@@ -79,6 +79,24 @@ fn build_file_version_node_maps_document_and_insert_blob_metadata() {
 }
 
 #[test]
+fn build_file_version_node_maps_supported_image_mime_types() {
+    for (filename, expected_mime_type) in [
+        ("evidence.png", "image/png"),
+        ("evidence.jpg", "image/jpeg"),
+        ("evidence.jpeg", "image/jpeg"),
+        ("evidence.webp", "image/webp"),
+        ("evidence.gif", "image/gif"),
+    ] {
+        let document = document("logical-image", OWNER, filename, b"image bytes");
+        let insert_blob_result = insert_blob_result(&document);
+
+        let version_node = build_file_version_node(&insert_blob_result, &document).unwrap();
+
+        assert_eq!(version_node.mime_type, expected_mime_type);
+    }
+}
+
+#[test]
 fn build_file_chunk_node_maps_chunk_metadata_and_derives_its_id() {
     let document = document("logical-file", OWNER, "report.pdf", b"file chunk node");
     let insert_blob_result = insert_blob_result(&document);

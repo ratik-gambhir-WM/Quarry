@@ -10,13 +10,15 @@ use crate::{
     domains::{
         data_rooms::local_source::{validate_pdf_bytes, MAX_PDF_BYTES},
         documents::{
-            formats::{docx::parse_docx_from_bytes, pdf::parse_pdf_from_bytes},
+            formats::{
+                docx::parse_docx_from_bytes, image::decode_image, pdf::parse_pdf_from_bytes,
+            },
             store::sqlite::{DocumentStore, StoredDocumentBlob},
         },
     },
     shared::{
         error::{ServiceError, ServiceResult},
-        file_policy::office_extension_for_mime_type,
+        file_policy::{infer_supported_image_mime_type, office_extension_for_mime_type},
     },
 };
 use lopdf::{
@@ -131,10 +133,47 @@ impl StoredDocumentService {
 
         let pdf_bytes = if document.mime_type == "application/pdf" {
             document.file_bytes
+        } else if infer_supported_image_mime_type(std::path::Path::new(&document.display_name))
+            == Some(document.mime_type.as_str())
+        {
+            let cache_key = office_preview_cache_key(
+                &document.mime_type,
+                &document.display_name,
+                &document.file_bytes,
+            );
+            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+                validate_pdf_bytes(&cached, "the cached PDF preview")?;
+                return Ok(cached);
+            }
+
+            let _permit = self
+                .preview_semaphore
+                .acquire()
+                .await
+                .map_err(|_| "Image preview conversion is shutting down".to_string())?;
+            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+                validate_pdf_bytes(&cached, "the cached PDF preview")?;
+                return Ok(cached);
+            }
+
+            let display_name = document.display_name;
+            let mime_type = document.mime_type;
+            let bytes = document.file_bytes;
+            let converted = tokio::task::spawn_blocking(move || {
+                render_image_bytes_as_pdf(&display_name, &mime_type, &bytes)
+            })
+            .await
+            .map_err(|error| format!("image preview worker failed: {error}"))??;
+            validate_pdf_bytes(&converted, "the converted PDF preview")?;
+            self.preview_cache
+                .lock()
+                .await
+                .insert(cache_key, converted.clone());
+            converted
         } else {
             let extension = office_extension_for_mime_type(&document.mime_type).ok_or_else(|| {
             format!(
-                "Preview is unsupported for `{}` ({}). Supported formats are PDF, DOC, DOCX, XLS, XLSX, PPT, and PPTX.",
+                "Preview is unsupported for `{}` ({}). Supported formats are PDF, PNG, JPEG, WebP, GIF, DOC, DOCX, XLS, XLSX, PPT, and PPTX.",
                 document.display_name, document.mime_type
             )
         })?;
@@ -263,6 +302,105 @@ where
         }
         Err(error) => Err(error),
     }
+}
+
+fn render_image_bytes_as_pdf(
+    display_name: &str,
+    mime_type: &str,
+    bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    const PAGE_PORTRAIT: (f32, f32) = (612.0, 792.0);
+    const PAGE_LANDSCAPE: (f32, f32) = (792.0, 612.0);
+    const PAGE_MARGIN: f32 = 24.0;
+
+    let decoded = decode_image(bytes, mime_type)?;
+    let (page_width, page_height) = if decoded.width > decoded.height {
+        PAGE_LANDSCAPE
+    } else {
+        PAGE_PORTRAIT
+    };
+    let available_width = page_width - 2.0 * PAGE_MARGIN;
+    let available_height = page_height - 2.0 * PAGE_MARGIN;
+    let image_width = decoded.width as f32;
+    let image_height = decoded.height as f32;
+    let scale = (available_width / image_width)
+        .min(available_height / image_height)
+        .min(1.0);
+    let rendered_width = image_width * scale;
+    let rendered_height = image_height * scale;
+    let x = (page_width - rendered_width) / 2.0;
+    let y = (page_height - rendered_height) / 2.0;
+
+    let mut pdf = PdfDocument::with_version("1.5");
+    let pages_id = pdf.new_object_id();
+    let image_id = pdf.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => i64::from(decoded.width),
+            "Height" => i64::from(decoded.height),
+            "ColorSpace" => "DeviceRGB",
+            "BitsPerComponent" => 8,
+        },
+        decoded.rgb_bytes,
+    ));
+    let resources_id = pdf.add_object(dictionary! {
+        "XObject" => dictionary! {
+            "Im0" => image_id,
+        },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("q", vec![]),
+            Operation::new(
+                "cm",
+                vec![
+                    rendered_width.into(),
+                    0.into(),
+                    0.into(),
+                    rendered_height.into(),
+                    x.into(),
+                    y.into(),
+                ],
+            ),
+            Operation::new("Do", vec![Object::Name(b"Im0".to_vec())]),
+            Operation::new("Q", vec![]),
+        ],
+    }
+    .encode()
+    .map_err(|error| format!("failed to encode image PDF content: {error}"))?;
+    let content_id = pdf.add_object(Stream::new(dictionary! {}, content));
+    let page_id = pdf.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Contents" => content_id,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), page_width.into(), page_height.into()],
+    });
+    pdf.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = pdf.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    let info_id = pdf.add_object(dictionary! {
+        "Title" => Object::string_literal(sanitize_pdf_text(display_name)),
+        "Creator" => Object::string_literal("Quarry image preview"),
+    });
+    pdf.trailer.set("Root", catalog_id);
+    pdf.trailer.set("Info", info_id);
+    pdf.compress();
+
+    let mut pdf_bytes = Vec::new();
+    pdf.save_to(&mut pdf_bytes)
+        .map_err(|error| format!("failed to write image PDF: {error}"))?;
+    Ok(pdf_bytes)
 }
 
 fn render_text_as_pdf(title: &str, text: &str) -> Result<Vec<u8>, String> {

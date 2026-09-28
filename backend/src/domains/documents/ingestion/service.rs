@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
+    path::Path,
     sync::{Arc, Weak},
     time::Instant,
 };
 
+use base64::{engine::general_purpose, Engine as _};
 use futures_util::{stream, StreamExt};
 use serde::Serialize;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -11,15 +13,20 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 pub use crate::domains::documents::model::{Document, DocumentChunk};
 
 use crate::{
-    adapters::openai::client::OpenAiClient,
+    adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::documents::{
-        formats::{ParsedQuarryFile, QuarryFile},
+        formats::{
+            image::{build_image_assembly, validate_image_by_bytes},
+            image_prompt::IMAGE_DESCRIPTION_PROMPT,
+            ParsedQuarryFile, QuarryFile,
+        },
         index::repository::{DocumentIndexReader, DocumentIndexWriter},
         ingestion::persistence::persist_document_and_chunks,
         store::{model::PersistedFileIdentity, sqlite::DocumentStore},
     },
     shared::{
         error::{ServiceError, ServiceResult},
+        file_policy::infer_supported_image_mime_type,
         ids::{document_id_from_content, sha256_hex},
     },
 };
@@ -66,6 +73,7 @@ pub struct DocumentIngestionService {
     index_writer: DocumentIndexWriter,
     openai: Option<Arc<OpenAiClient>>,
     embedding_model: String,
+    image_description_model: String,
     processing_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
     max_concurrent_documents: usize,
 }
@@ -77,6 +85,7 @@ impl DocumentIngestionService {
         index_writer: DocumentIndexWriter,
         openai: Option<Arc<OpenAiClient>>,
         embedding_model: String,
+        image_description_model: String,
         max_concurrent_documents: usize,
     ) -> Self {
         Self {
@@ -85,6 +94,7 @@ impl DocumentIngestionService {
             index_writer,
             openai,
             embedding_model,
+            image_description_model,
             processing_locks: Arc::new(Mutex::new(HashMap::new())),
             max_concurrent_documents,
         }
@@ -231,7 +241,8 @@ impl DocumentIngestionService {
         openai: &OpenAiClient,
     ) -> Result<(String, usize), String> {
         let filename = file.filename.clone();
-        let mut graph = parse_document(file, user_id)?;
+        let mut graph =
+            parse_document(file, user_id, openai, &self.image_description_model).await?;
         if let Some(existing) = existing_attachment {
             graph.document.file_id.clone_from(&existing.file_id);
         }
@@ -325,24 +336,46 @@ fn failed_document(filename: String, error: String) -> ProcessedDocument {
     }
 }
 
-fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocumentGraph, String> {
+async fn parse_document(
+    file: UploadedDocument,
+    user_id: String,
+    openai: &OpenAiClient,
+    image_description_model: &str,
+) -> Result<ParsedDocumentGraph, String> {
     let filename = file.filename.clone();
     let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
-    let result = (|| {
-        let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
-        let (document, chunks) = match parsed {
-            ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
-            ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+    let result = async {
+        let (document, chunks) = if infer_supported_image_mime_type(Path::new(&file.filename))
+            .is_some()
+        {
+            let validated = validate_image_by_bytes(file.bytes, &file.filename).await?;
+            let description = describe_image(
+                &validated.bytes,
+                validated.mime_type,
+                openai,
+                image_description_model,
+            )
+            .await?;
+            let assembly =
+                build_image_assembly(validated.bytes, None, file.filename, &user_id, &description)?;
+            (assembly.document, assembly.chunks)
+        } else {
+            let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
+            match parsed {
+                ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
+                ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+            }
         };
         Ok(ParsedDocumentGraph {
             document,
             chunks,
             file_bytes,
         })
-    })();
+    }
+    .await;
     match &result {
         Ok(_) => tracing::info!(
             api = DOCUMENT_PARSE_API,
@@ -359,6 +392,41 @@ fn parse_document(file: UploadedDocument, user_id: String) -> Result<ParsedDocum
         ),
     }
     result
+}
+
+async fn describe_image(
+    image: &[u8],
+    mime_type: &str,
+    openai_client: &OpenAiClient,
+    description_model: &str,
+) -> Result<String, String> {
+    if image.is_empty() {
+        return Err("cannot describe an empty image".to_string());
+    }
+    let description_model = description_model.trim();
+    if description_model.is_empty() {
+        return Err("image description model cannot be empty".to_string());
+    }
+
+    let image_base64 = general_purpose::STANDARD.encode(image);
+    let file_inputs = [ResponsesFileInput::ImageData {
+        mime_type,
+        data_base64: image_base64.as_str(),
+        detail: Some("auto"),
+    }];
+    let description = openai_client
+        .gen_model_response_with_files(
+            Some(IMAGE_DESCRIPTION_PROMPT),
+            None,
+            Some(description_model),
+            Some(&file_inputs),
+        )
+        .await?;
+    let description = description.trim().to_string();
+    if description.is_empty() {
+        return Err("OpenAI image analysis returned an empty description".to_string());
+    }
+    Ok(description)
 }
 
 #[cfg(test)]

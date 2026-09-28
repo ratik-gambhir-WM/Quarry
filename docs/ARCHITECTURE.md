@@ -478,7 +478,7 @@ operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, upload jobs, populated file-review grid, PDF/text preview, explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/image upload jobs, populated file-review grid, PDF/text preview (including PDF-rendered image previews), explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, starter prompts, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -683,9 +683,9 @@ method allowlist.
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
 | GET | `/deals/{deal_id}/documents` | List current logical documents | SQLite source |
-| GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source or rendered preview |
+| GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or rendered DOCX/image preview |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
-| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX; multipart `userId` and `files` |
+| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/PNG/JPEG/WebP/single-frame GIF; multipart `userId` and `files` |
 | POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Returns 202 `{jobId, filename}` |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
 | POST | `/documents/search/vector` | Vector search Helix chunks | Client supplies `workspaceId`, vector, limit |
@@ -976,10 +976,12 @@ FileVersion
 ```
 
 The graph carries workspace, file, version, content hash, byte size, index generation, chunk
-hash/order, character/page ranges, section path, text, embedding, and timestamps. Identity behavior
+hash/order, character/page ranges, section path, text, embedding, and timestamps. Image description
+text is stored as ordinary chunk text with section path `Image description`, and its OpenAI-generated
+embedding is stored on the same chunk. Identity behavior
 in the current upload path is narrower than the versioned graph shape suggests:
 
-- PDF and DOCX parsers assign a new random `file_id` on each parse.
+- PDF, DOCX, and image parsers assign a new random `file_id` on each parse.
 - `document_id` is deterministic from workspace/user identity plus content hash.
 - Ingestion looks up the current SQLite version by deal, workspace, and exact content hash. A match
   reuses its `file_id`; otherwise the parsed random `file_id` becomes a new logical file.
@@ -1019,7 +1021,7 @@ the SQLite record to conceal a Helix failure would violate source ownership.
 | State | Implementation | Lifetime |
 | --- | --- | --- |
 | Document jobs | In-memory map of Tokio watch senders | Lost on process restart; terminal default retention 10 minutes |
-| Office preview cache | Bounded in-memory cache | Process lifetime; max 16 entries/128 MB |
+| Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
 | Duplicate-ingestion locks | Weak per-identity async mutexes | Process lifetime |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
 | Frontend activity log | Module store mirrored to `sessionStorage` | Tab/webview session and reloads within it; max 400 entries |
@@ -1054,32 +1056,44 @@ links or files entered in the optional metadata step.
 sequenceDiagram
     participant UI as React UI
     participant API as Axum handler/job service
-    participant Parser as PDF/DOCX parser
-    participant AI as OpenAI embeddings
+    participant Ingestion as Document ingestion service
+    participant Parser as PDF/DOCX parser + image validator/assembler
+    participant AI as OpenAI vision + embeddings
     participant SQL as SQLite
     participant H as Helix
 
-    UI->>API: multipart dealId path + userId + PDF/DOCX
+    UI->>API: multipart dealId path + userId + PDF/DOCX/image
     API-->>UI: 202 jobId (job path) or waits (batch path)
-    API->>Parser: parse bytes and create normalized chunks
-    Parser-->>API: document + chunks + content-derived IDs and new file_id
-    API->>AI: embed chunk text
-    AI-->>API: embeddings
-    API->>SQL: transactionally persist file/version/blob
-    SQL-->>API: committed file/version identities
-    API->>H: insert versioned file graph and chunks
-    H-->>API: indexed or recoverable error
+    API->>Ingestion: process upload/job
+    Ingestion->>Parser: parse PDF/DOCX or validate image bytes
+    Parser-->>Ingestion: normalized chunks or validated image
+    Ingestion->>AI: describe validated image bytes (image inputs only)
+    AI-->>Ingestion: image description
+    Ingestion->>Parser: build image description chunks (image inputs only)
+    Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
+    Ingestion->>AI: embed chunk text
+    AI-->>Ingestion: embeddings
+    Ingestion->>SQL: transactionally persist file/version/blob
+    SQL-->>Ingestion: committed file/version identities
+    Ingestion->>H: insert versioned file graph and chunks
+    H-->>Ingestion: indexed or recoverable error
+    Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
 
-Only PDF and DOCX are connected to this ingestion path, even though isolated parser helpers exist
-for images, spreadsheets, and PowerPoint.
+PDF, DOCX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path. Image
+decoding runs on a blocking worker with a 20,000-pixel per-dimension limit and a 256 MiB decoder
+allocation limit plus a 16-million-pixel decoded-image limit before OpenAI receives the bytes.
+Spreadsheet and PowerPoint parser helpers remain isolated from document ingestion.
 
 ### 10.3 Stored preview
 
 1. The frontend lists current documents by deal from SQLite.
-2. A PDF request returns original PDF bytes or converts a supported stored source to PDF.
-3. A text request parses the stored PDF/DOCX into canonical raw text.
+2. A PDF request returns original PDF bytes or converts a supported stored DOCX/image source to
+   PDF. Image previews preserve aspect ratio on one portrait or landscape letter-sized page and
+   share the bounded in-memory preview cache.
+3. A text request parses the stored PDF/DOCX into canonical raw text. Image descriptions are
+   searchable Helix chunk text, not exposed by this raw-text endpoint.
 4. The frontend's Extend UI editor renders the bytes through EmbedPDF/PDFium and keeps annotation
    snapshots in frontend memory only.
 5. The selected-file header can open a panel-scoped search overlay while the editor stays mounted;
@@ -1209,10 +1223,12 @@ If any OpenAI setting is present, `OPENAI_API_KEY` is required:
 - `OPENAI_DOCUMENT_SUMMARY_MODEL`
 - `OPENAI_IMAGE_DESCRIPTION_MODEL`
 
-The assembled services currently use chat, deal extraction, embedding, and document summary settings.
+The assembled services currently use chat, deal extraction, embedding, document summary, and image
+description settings.
 Assistant chat defaults `OPENAI_CHAT_MODEL` to `gpt-5.5` and defaults instructions to
 `You are a helpful assistant.` when the request omits its override.
-The image-description model is parsed but not injected into an assembled service.
+Document ingestion injects `OPENAI_IMAGE_DESCRIPTION_MODEL` into the image parser; image uploads
+therefore require the optional OpenAI capability just as the existing embedding stage does.
 
 The “OpenAI API key” collected during profile creation is a separate, development-era user field.
 It is stored and returned by the user API but never read when services are assembled. All current

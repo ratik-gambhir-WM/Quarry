@@ -3,6 +3,7 @@
 use std::io::Cursor;
 
 use docx_rust::{document::Paragraph, Docx};
+use image::{DynamicImage, ImageOutputFormat, RgbImage};
 
 use super::*;
 
@@ -23,6 +24,22 @@ fn renders_docx_fallback_pdf_when_office_conversion_is_unavailable() {
     validate_pdf_bytes(&pdf, "the fallback PDF").unwrap();
     let extracted = pdf_extract::extract_text_from_mem(&pdf).unwrap();
     assert!(extracted.contains("A saved DOCX remains previewable"));
+}
+
+#[test]
+fn renders_an_uploaded_image_as_a_one_page_pdf() {
+    let image = RgbImage::from_pixel(120, 60, image::Rgb([20, 80, 160]));
+    let mut encoded = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(image)
+        .write_to(&mut encoded, ImageOutputFormat::Png)
+        .unwrap();
+
+    let pdf =
+        render_image_bytes_as_pdf("site-photo.png", "image/png", &encoded.into_inner()).unwrap();
+
+    validate_pdf_bytes(&pdf, "the image PDF").unwrap();
+    let document = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(document.get_pages().len(), 1);
 }
 
 #[tokio::test]

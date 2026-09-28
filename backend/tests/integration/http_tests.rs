@@ -1088,6 +1088,30 @@ async fn process_file_rejects_unsupported_uploads_at_the_handler_boundary() {
 }
 
 #[tokio::test]
+async fn process_file_accepts_image_uploads_at_the_handler_boundary() {
+    const BOUNDARY: &str = "quarry-image-upload-boundary";
+    let multipart = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"evidence.png\"\r\nContent-Type: image/png\r\n\r\nimage-bytes\r\n--{BOUNDARY}--\r\n"
+    );
+    let app = test_router();
+
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-PATH/documents/process_file")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(multipart))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
     const BOUNDARY: &str = "quarry-blank-document-user";
     let multipart = format!(

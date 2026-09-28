@@ -32,7 +32,7 @@ type UploadEntry = {
 };
 
 const maxFileBytes = 50 * 1024 * 1024;
-const supportedExtensions = new Set(["pdf", "docx"]);
+const supportedExtensions = new Set(["pdf", "docx", "png", "jpg", "jpeg", "webp", "gif"]);
 
 export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,7 +89,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
     for (const file of files) {
       if (!supportedExtensions.has(getFileExtension(file.name))) {
-        rejected.push(`${file.name} is not a PDF or DOCX file.`);
+        rejected.push(`${file.name} is not a supported document or image file.`);
       } else if (file.size === 0) {
         rejected.push(`${file.name} is empty.`);
       } else if (file.size > maxFileBytes) {
@@ -281,7 +281,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
           </p>
           <DialogTitle className="text-2xl font-semibold text-text-main">Upload files</DialogTitle>
           <DialogDescription className="text-[13px] leading-5 text-muted">
-            Choose PDF and DOCX files from your Mac, then select which ones to process.
+            Choose PDF, DOCX, PNG, JPEG, WebP, or GIF files, then select which ones to process.
           </DialogDescription>
           <button
             aria-label="Close upload files dialog"
@@ -296,7 +296,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <input
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
             multiple
             onChange={handleFileSelection}
@@ -312,7 +312,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Icon className="h-5 w-5" name="upload" />
             </div>
-            <p className="mt-3 text-[13px] font-semibold text-text-main">Drop PDF or DOCX files here</p>
+            <p className="mt-3 text-[13px] font-semibold text-text-main">
+              Drop documents or images here
+            </p>
             <button
               className="mt-2 text-[12px] font-semibold text-primary underline decoration-primary/30 underline-offset-4 transition hover:decoration-primary"
               onClick={() => fileInputRef.current?.click()}
