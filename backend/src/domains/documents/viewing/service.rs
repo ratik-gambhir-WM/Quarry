@@ -12,7 +12,6 @@ use crate::{
         documents::{
             formats::{
                 docx::parse_docx_from_bytes, image::decode_image, pdf::parse_pdf_from_bytes,
-                powerpoint::parse_powerpoint_from_bytes, spreadsheet::parse_spreadsheet_from_bytes,
             },
             store::sqlite::{DocumentStore, StoredDocumentBlob},
         },
@@ -264,13 +263,6 @@ async fn render_stored_document_as_text(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
             parse_docx_from_bytes(bytes).map(|text| ("docx".to_string(), text))
         }
-        "application/vnd.ms-excel"
-        | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
-            parse_spreadsheet_from_bytes(&bytes).map(|text| ("spreadsheet".to_string(), text))
-        }
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
-            parse_powerpoint_from_bytes(&bytes).map(|text| ("powerpoint".to_string(), text))
-        }
         _ => Err(format!(
             "Raw text is unavailable for `{error_file_name}` ({mime_type})."
         )),
@@ -300,27 +292,15 @@ where
 {
     match converter(extension, bytes) {
         Ok(pdf) => Ok(pdf),
-        Err(conversion_error) => {
-            let text = fallback_office_text(extension, bytes).map_err(|fallback_error| {
-                format!(
-                    "{conversion_error} {extension} fallback parsing also failed: {fallback_error}"
-                )
+        Err(conversion_error) if extension == "docx" => {
+            let text = parse_docx_from_bytes(bytes.to_vec()).map_err(|fallback_error| {
+                format!("{conversion_error} DOCX fallback parsing also failed: {fallback_error}")
             })?;
             render_text_as_pdf(display_name, &text).map_err(|fallback_error| {
-                format!("{conversion_error} {extension} fallback rendering also failed: {fallback_error}")
+                format!("{conversion_error} DOCX fallback rendering also failed: {fallback_error}")
             })
         }
-    }
-}
-
-fn fallback_office_text(extension: &str, bytes: &[u8]) -> Result<String, String> {
-    match extension {
-        "docx" => parse_docx_from_bytes(bytes.to_vec()),
-        "xls" | "xlsx" => parse_spreadsheet_from_bytes(bytes),
-        "pptx" => parse_powerpoint_from_bytes(bytes),
-        _ => Err(format!(
-            "no built-in fallback is available for .{extension}"
-        )),
+        Err(error) => Err(error),
     }
 }
 
@@ -426,7 +406,7 @@ fn render_image_bytes_as_pdf(
 fn render_text_as_pdf(title: &str, text: &str) -> Result<Vec<u8>, String> {
     let lines = wrap_pdf_text(text);
     if lines.is_empty() {
-        return Err("the document did not contain previewable text".to_string());
+        return Err("the DOCX document did not contain previewable text".to_string());
     }
 
     let mut pdf = PdfDocument::with_version("1.5");
@@ -492,7 +472,7 @@ fn render_text_as_pdf(title: &str, text: &str) -> Result<Vec<u8>, String> {
     });
     let info_id = pdf.add_object(dictionary! {
         "Title" => Object::string_literal(sanitize_pdf_text(title)),
-        "Creator" => Object::string_literal("Quarry document preview"),
+        "Creator" => Object::string_literal("Quarry DOCX preview"),
     });
     pdf.trailer.set("Root", catalog_id);
     pdf.trailer.set("Info", info_id);

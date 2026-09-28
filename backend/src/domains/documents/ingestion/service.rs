@@ -363,17 +363,10 @@ async fn parse_document(
                 build_image_assembly(validated.bytes, None, file.filename, &user_id, &description)?;
             (assembly.document, assembly.chunks)
         } else {
-            let parser_user_id = user_id.clone();
-            let parsed = tokio::task::spawn_blocking(move || {
-                QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&parser_user_id)
-            })
-            .await
-            .map_err(|error| format!("document parser worker failed: {error}"))??;
+            let parsed = QuarryFile::from_bytes(file.filename, file.bytes)?.parse(&user_id)?;
             match parsed {
                 ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
                 ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
-                ParsedQuarryFile::Spreadsheet(assembly) => (assembly.document, assembly.chunks),
-                ParsedQuarryFile::Powerpoint(assembly) => (assembly.document, assembly.chunks),
             }
         };
         Ok(ParsedDocumentGraph {

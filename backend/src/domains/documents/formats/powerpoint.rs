@@ -1,21 +1,8 @@
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-};
+#![allow(dead_code)]
+
+use std::path::Path;
 
 use pptx_to_md::{ImageHandlingMode, ParserConfig, PptxContainer, SlideElement};
-use uuid::Uuid;
-
-struct StagedPowerpoint {
-    path: PathBuf,
-}
-
-impl Drop for StagedPowerpoint {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
 
 pub fn parse_powerpoint_file(path: &Path) -> Result<String, String> {
     ensure_supported_powerpoint_file(path)?;
@@ -46,37 +33,6 @@ pub fn parse_powerpoint_file(path: &Path) -> Result<String, String> {
     }
 
     Ok(full_text)
-}
-
-/// Parses PPTX upload bytes. `pptx-to-md` currently exposes only a path-based
-/// API, so the bytes are staged in a private, create-new temporary file that
-/// is removed when parsing finishes.
-pub fn parse_powerpoint_from_bytes(bytes: &[u8]) -> Result<String, String> {
-    if bytes.is_empty() {
-        return Err("PowerPoint file is empty".to_string());
-    }
-
-    let staged = stage_powerpoint(bytes)?;
-    parse_powerpoint_file(&staged.path)
-}
-
-fn stage_powerpoint(bytes: &[u8]) -> Result<StagedPowerpoint, String> {
-    for _ in 0..8 {
-        let path = std::env::temp_dir().join(format!("quarry-pptx-{}.pptx", Uuid::new_v4()));
-        match OpenOptions::new().create_new(true).write(true).open(&path) {
-            Ok(mut file) => {
-                if let Err(error) = file.write_all(bytes) {
-                    let _ = fs::remove_file(&path);
-                    return Err(format!("failed to stage PowerPoint bytes: {error}"));
-                }
-                return Ok(StagedPowerpoint { path });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(format!("failed to stage PowerPoint bytes: {error}")),
-        }
-    }
-
-    Err("failed to allocate a temporary PowerPoint file".to_string())
 }
 
 fn ensure_supported_powerpoint_file(path: &Path) -> Result<(), String> {

@@ -32,18 +32,7 @@ type UploadEntry = {
 };
 
 const maxFileBytes = 50 * 1024 * 1024;
-const supportedExtensions = new Set([
-  "pdf",
-  "docx",
-  "xls",
-  "xlsx",
-  "pptx",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-]);
+const supportedExtensions = new Set(["pdf", "docx", "png", "jpg", "jpeg", "webp", "gif"]);
 
 export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -292,7 +281,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
           </p>
           <DialogTitle className="text-2xl font-semibold text-text-main">Upload files</DialogTitle>
           <DialogDescription className="text-[13px] leading-5 text-muted">
-            Choose PDF, DOCX, XLS, XLSX, PPTX, or image files, then select which ones to process.
+            Choose PDF, DOCX, PNG, JPEG, WebP, or GIF files, then select which ones to process.
           </DialogDescription>
           <button
             aria-label="Close upload files dialog"
@@ -307,7 +296,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <input
-            accept=".pdf,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
+            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
             multiple
             onChange={handleFileSelection}
@@ -437,7 +426,7 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
         type="checkbox"
       />
       <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
-        <Icon className="h-5 w-5" name={getUploadFileIcon(entry.file.name)} />
+        <Icon className="h-5 w-5" name={getFileExtension(entry.file.name) === "pdf" ? "pdf" : "doc"} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold text-text-main" title={entry.file.name}>
@@ -508,13 +497,6 @@ function isActive(status: UploadStatus) {
 
 function getFileExtension(filename: string) {
   return filename.split(".").pop()?.toLowerCase() ?? "";
-}
-
-function getUploadFileIcon(filename: string) {
-  const extension = getFileExtension(filename);
-  if (extension === "pdf") return "pdf";
-  if (extension === "xls" || extension === "xlsx") return "sheet";
-  return "doc";
 }
 
 function fileIdentity(file: File) {

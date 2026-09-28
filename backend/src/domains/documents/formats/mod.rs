@@ -1,7 +1,6 @@
 pub mod docx;
 pub mod image;
 pub mod image_prompt;
-pub mod office_text;
 pub mod pdf;
 pub mod powerpoint;
 pub mod spreadsheet;
@@ -14,10 +13,7 @@ use std::{
 
 use self::{
     docx::{parse_docx_chunks_from_bytes, DocxAssembly},
-    office_text::{build_office_text_assembly, OfficeTextAssembly},
     pdf::{parse_pdf_by_bytes, PdfDocumentAssembly},
-    powerpoint::parse_powerpoint_from_bytes,
-    spreadsheet::parse_spreadsheet_from_bytes,
 };
 
 #[derive(Debug)]
@@ -32,25 +28,12 @@ pub enum QuarryFile {
         path: Option<PathBuf>,
         file_name: String,
     },
-    Spreadsheet {
-        bytes: Vec<u8>,
-        path: Option<PathBuf>,
-        file_name: String,
-        source_type: &'static str,
-    },
-    Powerpoint {
-        bytes: Vec<u8>,
-        path: Option<PathBuf>,
-        file_name: String,
-    },
 }
 
 #[derive(Debug)]
 pub enum ParsedQuarryFile {
     Pdf(PdfDocumentAssembly),
     Docx(DocxAssembly),
-    Spreadsheet(OfficeTextAssembly),
-    Powerpoint(OfficeTextAssembly),
 }
 
 /// Reads filesystem metadata from an already-open file without consuming it.
@@ -106,41 +89,6 @@ impl QuarryFile {
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Docx(assembly))
             }
-            Self::Spreadsheet {
-                bytes,
-                path,
-                file_name,
-                source_type,
-            } => {
-                let text = parse_spreadsheet_from_bytes(&bytes)?;
-                let mut assembly = build_office_text_assembly(
-                    &bytes,
-                    path.as_deref(),
-                    user_id,
-                    source_type,
-                    "Document.xlsx",
-                    text,
-                )?;
-                assembly.document.file_name = file_name;
-                Ok(ParsedQuarryFile::Spreadsheet(assembly))
-            }
-            Self::Powerpoint {
-                bytes,
-                path,
-                file_name,
-            } => {
-                let text = parse_powerpoint_from_bytes(&bytes)?;
-                let mut assembly = build_office_text_assembly(
-                    &bytes,
-                    path.as_deref(),
-                    user_id,
-                    "pptx",
-                    "Document.pptx",
-                    text,
-                )?;
-                assembly.document.file_name = file_name;
-                Ok(ParsedQuarryFile::Powerpoint(assembly))
-            }
         }
     }
 
@@ -165,17 +113,6 @@ impl QuarryFile {
                 file_name,
             }),
             "docx" => Ok(Self::Docx {
-                bytes,
-                path,
-                file_name,
-            }),
-            "xls" | "xlsx" => Ok(Self::Spreadsheet {
-                bytes,
-                path,
-                file_name,
-                source_type: if extension == "xls" { "xls" } else { "xlsx" },
-            }),
-            "pptx" => Ok(Self::Powerpoint {
                 bytes,
                 path,
                 file_name,
