@@ -69,16 +69,14 @@ pub struct KeywordFileChunkHit {
 pub fn find_current_helix_document_by_content_hash(
     workspace_id: String,
     content_sha256: String,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     validate_nonempty("workspace_id", &workspace_id)?;
     validate_nonempty("content_sha256", &content_sha256)?;
-    Ok(find_current_helix_document_by_content_hash_route(
-        workspace_id,
-        content_sha256,
-    ))
+    find_current_helix_document_by_content_hash_route(workspace_id, content_sha256)
+        .map_err(|error| format!("failed to construct Helix content-hash query: {error}"))
 }
 
-#[register]
+#[query]
 fn find_current_helix_document_by_content_hash_route(
     workspace_id: String,
     content_sha256: String,
@@ -120,12 +118,13 @@ fn find_current_helix_document_by_content_hash_route(
 pub fn get_current_helix_document(
     workspace_id: String,
     file_id: String,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     validate_workspace_file(&workspace_id, &file_id)?;
-    Ok(get_current_helix_document_route(workspace_id, file_id))
+    get_current_helix_document_route(workspace_id, file_id)
+        .map_err(|error| format!("failed to construct current Helix document query: {error}"))
 }
 
-#[register]
+#[query]
 fn get_current_helix_document_route(workspace_id: String, file_id: String) -> ReadBatch {
     let _ = (&workspace_id, &file_id);
     read_batch()
@@ -154,16 +153,13 @@ pub fn get_helix_document_version(
     workspace_id: String,
     file_id: String,
     version_id: String,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     validate_workspace_file_version(&workspace_id, &file_id, &version_id)?;
-    Ok(get_helix_document_version_route(
-        workspace_id,
-        file_id,
-        version_id,
-    ))
+    get_helix_document_version_route(workspace_id, file_id, version_id)
+        .map_err(|error| format!("failed to construct Helix document-version query: {error}"))
 }
 
-#[register]
+#[query]
 fn get_helix_document_version_route(
     workspace_id: String,
     file_id: String,
@@ -193,16 +189,13 @@ pub fn get_helix_document_version_chunks(
     workspace_id: String,
     file_id: String,
     version_id: String,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     validate_workspace_file_version(&workspace_id, &file_id, &version_id)?;
-    Ok(get_helix_document_version_chunks_route(
-        workspace_id,
-        file_id,
-        version_id,
-    ))
+    get_helix_document_version_chunks_route(workspace_id, file_id, version_id)
+        .map_err(|error| format!("failed to construct Helix version-chunk query: {error}"))
 }
 
-#[register]
+#[query]
 fn get_helix_document_version_chunks_route(
     workspace_id: String,
     file_id: String,
@@ -230,7 +223,7 @@ fn get_helix_document_version_chunks_route(
 
 pub fn search_document_chunks_by_vector(
     search: FileChunkVectorSearch,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     let FileChunkVectorSearch {
         workspace_id,
         query_embedding,
@@ -243,14 +236,15 @@ pub fn search_document_chunks_by_vector(
     if query_embedding.iter().any(|value| !value.is_finite()) {
         return Err("query embedding must contain only finite values".to_string());
     }
-    Ok(search_document_chunks_by_vector_route(
+    search_document_chunks_by_vector_route(
         workspace_id,
         query_embedding,
         search_limit_to_i64(limit)?,
-    ))
+    )
+    .map_err(|error| format!("failed to construct Helix vector-search query: {error}"))
 }
 
-#[register]
+#[query]
 fn search_document_chunks_by_vector_route(
     workspace_id: String,
     query_embedding: Vec<f32>,
@@ -274,7 +268,7 @@ fn search_document_chunks_by_vector_route(
 
 pub fn search_document_chunks_by_keyword(
     search: FileChunkKeywordSearch,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     let FileChunkKeywordSearch {
         workspace_id,
         query_text,
@@ -284,14 +278,11 @@ pub fn search_document_chunks_by_keyword(
     if query_text.trim().is_empty() {
         return Err("keyword query cannot be empty".to_string());
     }
-    Ok(search_document_chunks_by_keyword_route(
-        workspace_id,
-        query_text,
-        search_limit_to_i64(limit)?,
-    ))
+    search_document_chunks_by_keyword_route(workspace_id, query_text, search_limit_to_i64(limit)?)
+        .map_err(|error| format!("failed to construct Helix keyword-search query: {error}"))
 }
 
-#[register]
+#[query]
 fn search_document_chunks_by_keyword_route(
     workspace_id: String,
     query_text: String,

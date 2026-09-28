@@ -1,16 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use helix_db::{
-    dsl::prelude::{DynamicQueryRequest, DynamicQueryRequestType},
-    Client, HelixError,
-};
+use helix_db::{Client, HelixError, QueryRequest, QueryRequestType};
 use serde::de::DeserializeOwned;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::sync::Mutex;
 
 use crate::app::config::HelixConfig;
-
-const MAX_WRITE_ATTEMPTS: usize = 5;
-const INITIAL_WRITE_RETRY_DELAY: Duration = Duration::from_millis(25);
 
 pub struct HelixClient {
     client: Client,
@@ -35,102 +29,105 @@ impl HelixClient {
         })
     }
 
-    pub async fn execute_dynamic_query<R, F>(&self, build_query: F) -> Result<R, String>
+    pub async fn execute_read_query<R>(&self, api: &str, query: QueryRequest) -> Result<R, String>
     where
         R: DeserializeOwned,
-        F: FnOnce() -> DynamicQueryRequest,
     {
-        self.execute_dynamic_query_with_context("helix.dynamic_query", "-", 0, build_query)
-            .await
+        self.execute_query(api, query, QueryIntent::Read).await
     }
 
-    pub async fn execute_document_query<R, F>(
+    pub async fn execute_write_query<R>(&self, api: &str, query: QueryRequest) -> Result<R, String>
+    where
+        R: DeserializeOwned,
+    {
+        self.execute_query(api, query, QueryIntent::Write).await
+    }
+
+    async fn execute_query<R>(
         &self,
         api: &str,
-        filename: &str,
-        file_size_bytes: u64,
-        build_query: F,
+        query: QueryRequest,
+        intent: QueryIntent,
     ) -> Result<R, String>
     where
         R: DeserializeOwned,
-        F: FnOnce() -> DynamicQueryRequest,
     {
-        self.execute_dynamic_query_with_context(api, filename, file_size_bytes, build_query)
-            .await
-    }
-
-    async fn execute_dynamic_query_with_context<R, F>(
-        &self,
-        api: &str,
-        filename: &str,
-        file_size_bytes: u64,
-        build_query: F,
-    ) -> Result<R, String>
-    where
-        R: DeserializeOwned,
-        F: FnOnce() -> DynamicQueryRequest,
-    {
-        let query = build_query();
-        let is_write = query.request_type == DynamicQueryRequestType::Write;
-        let _write_guard = if is_write {
-            Some(self.write_lock.lock().await)
-        } else {
-            None
+        if query.request_type() != intent.request_type() {
+            return Err(format!(
+                "Helix query intent mismatch: expected {} request",
+                intent.name()
+            ));
+        }
+        let started_at = Instant::now();
+        let result = match intent {
+            QueryIntent::Read => self.client.query(query).send().await,
+            QueryIntent::Write => {
+                let _write_guard = self.write_lock.lock().await;
+                self.client
+                    .request_builder()
+                    .writer_only()
+                    .should_await_durability(true)
+                    .query(query)
+                    .send()
+                    .await
+            }
         };
-        let max_attempts = if is_write { MAX_WRITE_ATTEMPTS } else { 1 };
 
-        for attempt in 1..=max_attempts {
-            let started_at = Instant::now();
-
-            match self.client.query().dynamic(query.clone()).send().await {
-                Ok(response) => {
-                    tracing::info!(
-                        api,
-                        filename,
-                        file_size_bytes,
-                        elapsed_seconds = started_at.elapsed().as_secs_f64(),
-                    );
-                    return Ok(response);
-                }
-                Err(error) if attempt < max_attempts && is_concurrent_write_conflict(&error) => {
-                    let delay = write_retry_delay(attempt);
-                    tracing::warn!(
-                        api,
-                        filename,
-                        file_size_bytes,
-                        reason = %error,
-                        attempt,
-                        elapsed_seconds = started_at.elapsed().as_secs_f64(),
-                    );
-                    sleep(delay).await;
-                }
-                Err(error) => {
-                    tracing::error!(
-                        api,
-                        filename,
-                        file_size_bytes,
-                        reason = %error,
-                        elapsed_seconds = started_at.elapsed().as_secs_f64(),
-                    );
-                    return Err(format!("failed to execute Helix query: {error}"));
-                }
+        match result {
+            Ok(response) => {
+                tracing::info!(
+                    api,
+                    operation = intent.name(),
+                    elapsed_seconds = started_at.elapsed().as_secs_f64(),
+                );
+                Ok(response)
+            }
+            Err(error) => {
+                // v3 intentionally exposes a non-200 response only as text. It does not retain
+                // an HTTP status, protocol code, or retryability flag, so retrying a write could
+                // replay an already accepted request. Treat every failed write as terminal.
+                tracing::error!(
+                    api,
+                    operation = intent.name(),
+                    error_kind = helix_error_kind(&error),
+                    elapsed_seconds = started_at.elapsed().as_secs_f64(),
+                );
+                Err("failed to execute Helix query".to_string())
             }
         }
-
-        unreachable!("Helix query attempt loop always returns")
     }
 }
 
-fn is_concurrent_write_conflict(error: &HelixError) -> bool {
-    matches!(
-        error,
-        HelixError::RemoteError { details }
-            if details.contains("request conflicted with a concurrent write")
-    )
+#[derive(Clone, Copy)]
+enum QueryIntent {
+    Read,
+    Write,
 }
 
-fn write_retry_delay(attempt: usize) -> Duration {
-    INITIAL_WRITE_RETRY_DELAY.saturating_mul(1_u32 << (attempt - 1))
+impl QueryIntent {
+    const fn request_type(self) -> QueryRequestType {
+        match self {
+            Self::Read => QueryRequestType::Read,
+            Self::Write => QueryRequestType::Write,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+}
+
+const fn helix_error_kind(error: &HelixError) -> &'static str {
+    match error {
+        HelixError::ReqwestError(_) => "transport",
+        HelixError::RemoteError { .. } => "remote",
+        HelixError::SerializationError(_) => "serialization",
+        HelixError::InvalidURL(_) => "invalid_url",
+        HelixError::InvalidRequest { .. } => "invalid_request",
+    }
 }
 
 #[cfg(test)]

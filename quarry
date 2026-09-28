@@ -168,7 +168,7 @@ docker_daemon_is_ready() {
 }
 
 helix_is_ready() {
-  curl --silent --max-time 1 --output /dev/null "$LOCAL_HELIX_URL"
+  curl --fail --silent --max-time 1 --output /dev/null "${LOCAL_HELIX_URL}/healthz"
 }
 
 helix_local_dev_config_value() {
@@ -204,11 +204,26 @@ fi
 
 helix_image_repository="$(helix_local_dev_config_value image)"
 helix_image_tag="$(helix_local_dev_config_value tag)"
-[[ -n "$helix_image_repository" && -n "$helix_image_tag" ]] \
-  || fail "could not read the local Helix image and tag from ${HELIX_CONFIG_PATH}"
-readonly HELIX_IMAGE="${helix_image_repository}:${helix_image_tag}"
+helix_image_digest="$(helix_local_dev_config_value digest)"
+[[ -n "$helix_image_repository" && -n "$helix_image_tag" && -n "$helix_image_digest" ]] \
+  || fail "could not read the local Helix image, tag, and digest from ${HELIX_CONFIG_PATH}"
+readonly HELIX_IMAGE="${helix_image_repository}@${helix_image_digest}"
 
-if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+if ! expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE" 2>/dev/null)"; then
+  printf 'Pulling pinned Helix image %s (tag %s)...\n' "$HELIX_IMAGE" "$helix_image_tag"
+  docker pull "$HELIX_IMAGE" >/dev/null \
+    || fail "could not pull pinned Helix image '${HELIX_IMAGE}'"
+  expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE")" \
+    || fail "could not inspect pinned Helix image '${HELIX_IMAGE}'"
+fi
+
+if docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+  existing_helix_image_id="$(docker container inspect --format '{{.Image}}' "$HELIX_CONTAINER_NAME")"
+  if [[ "$existing_helix_image_id" != "$expected_helix_image_id" ]]; then
+    existing_helix_image_ref="$(docker container inspect --format '{{.Config.Image}}' "$HELIX_CONTAINER_NAME")"
+    fail "Helix container '${HELIX_CONTAINER_NAME}' uses '${existing_helix_image_ref}', not pinned ${HELIX_IMAGE}. Choose a new QUARRY_HELIX_CONTAINER_NAME or deliberately replace the old container; this launcher will not modify it."
+  fi
+else
   printf 'Creating Helix container %s from %s...\n' "$HELIX_CONTAINER_NAME" "$HELIX_IMAGE"
   docker create \
     --name "$HELIX_CONTAINER_NAME" \
@@ -218,28 +233,24 @@ if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
     || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
 fi
 
-if helix_is_ready; then
-  printf 'Helix is already ready at %s.\n' "$LOCAL_HELIX_URL"
+if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" == "true" ]]; then
+  printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
 else
-  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" != "true" ]]; then
-    printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-    docker start "$HELIX_CONTAINER_NAME" >/dev/null \
-      || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
-  else
-    printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-  fi
-
-  readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
-  while ! helix_is_ready; do
-    if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
-      fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
-    fi
-    if ((SECONDS >= helix_startup_deadline)); then
-      fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
-    fi
-    sleep 0.25
-  done
+  printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
+  docker start "$HELIX_CONTAINER_NAME" >/dev/null \
+    || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
 fi
+
+readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
+while ! helix_is_ready; do
+  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
+    fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
+  fi
+  if ((SECONDS >= helix_startup_deadline)); then
+    fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+  fi
+  sleep 0.25
+done
 
 printf 'Starting Axum API at %s...\n' "$QUARRY_API_URL"
 set -m

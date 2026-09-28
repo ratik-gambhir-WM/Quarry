@@ -77,10 +77,17 @@ docker info
 ```
 
 When you first run `./quarry web` or `./quarry desktop`, the launcher looks for the local
-`helix-quarry-dev` container. If it is absent, the launcher creates it with the image and tag from
-the `[local.dev]` section of [`backend/helix.toml`](backend/helix.toml), maps host port `6969` to
-the image's port `8080`, and then starts it. On later runs it reuses the existing container; it
-never deletes or recreates one.
+`helix-quarry-dev` container. If it is absent, the launcher creates it from the digest-pinned
+`ghcr.io/helixdb/helixdb` image in the `[local.dev]` section of
+[`backend/helix.toml`](backend/helix.toml), maps host port `6969` to the image's port `8080`, and
+starts that named container before waiting for its `/healthz` endpoint. This remains a local Docker runtime; Quarry does not use Helix
+Cloud. The Axum service uses the Helix Rust v3 SDK, which sends queries to `/v2/query` beneath the
+configured base URL.
+
+On later runs the launcher reuses an existing container only when it was created from that exact
+image digest. A different image—or a host listener that prevents the named container from
+starting—fails safely without being replaced. Choose another existing
+container with `QUARRY_HELIX_CONTAINER_NAME`, or deliberately replace the old container yourself.
 
 If you already have a compatible container under another name, set its name when you start Quarry:
 
@@ -156,8 +163,10 @@ The browser and Tauri webview call Axum. They do not call Diligence Studio on po
 
 - `required command not found`: install the missing prerequisite above, restart the terminal, and
   confirm the command is on `PATH`.
-- Helix container creation failures: confirm `backend/helix.toml` has a valid `[local.dev]` image
-  and tag, then check Docker's error output and registry access.
+- Helix container creation failures: confirm `backend/helix.toml` has a valid `[local.dev]` image,
+  tag, and digest, then check Docker's error output and registry access.
+- Helix image mismatch: the named container was created from a different image. The launcher leaves
+  it untouched; set `QUARRY_HELIX_CONTAINER_NAME` or replace that container deliberately.
 - `port ... is already in use`: another development process owns one of ports `3001`, `1420`, or
   `43127`. Stop that process intentionally; the launcher will not terminate an unknown listener.
 - Docker or Helix startup timeout: open Docker Desktop or start Docker Engine, then check

@@ -595,8 +595,8 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
 #[test]
 fn maps_an_empty_document_response_to_none() {
     let response: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": { "properties": [] },
-        "version": { "properties": [] }
+        "file": [],
+        "version": []
     }))
     .unwrap();
 
@@ -607,25 +607,60 @@ fn maps_an_empty_document_response_to_none() {
 }
 
 #[test]
-fn rejects_partial_and_mismatched_document_responses() {
-    let partial: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": { "properties": [{
+fn maps_a_v3_single_element_document_response() {
+    let response: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
+        "file": [{
             "workspace_id": OWNER,
             "file_id": "file-1",
             "display_name": "report.pdf"
-        }] },
-        "version": { "properties": [] }
+        }],
+        "version": [{
+            "workspace_id": OWNER,
+            "file_id": "file-1",
+            "version_id": "version-1",
+            "mime_type": "application/pdf",
+            "content_sha256": "hash",
+            "byte_size": 1,
+            "index_generation": "version-1",
+            "indexed_at": "2026-08-26T00:00:00Z"
+        }]
+    }))
+    .unwrap();
+
+    let document = map_document_version_response(
+        response,
+        OWNER,
+        Some("file-1"),
+        Some("version-1"),
+        Some("hash"),
+    )
+    .unwrap()
+    .expect("the direct v3 arrays contain one document");
+
+    assert_eq!(document.file.display_name, "report.pdf");
+    assert_eq!(document.version.byte_size, 1);
+}
+
+#[test]
+fn rejects_partial_and_mismatched_document_responses() {
+    let partial: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
+        "file": [{
+            "workspace_id": OWNER,
+            "file_id": "file-1",
+            "display_name": "report.pdf"
+        }],
+        "version": []
     }))
     .unwrap();
     assert!(map_document_version_response(partial, OWNER, None, None, None).is_err());
 
     let mismatch: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": { "properties": [{
+        "file": [{
             "workspace_id": OWNER,
             "file_id": "file-1",
             "display_name": "report.pdf"
-        }] },
-        "version": { "properties": [{
+        }],
+        "version": [{
             "workspace_id": OWNER,
             "file_id": "file-2",
             "version_id": "version-1",
@@ -634,7 +669,7 @@ fn rejects_partial_and_mismatched_document_responses() {
             "byte_size": 1,
             "index_generation": "version-1",
             "indexed_at": "2026-08-26T00:00:00Z"
-        }] }
+        }]
     }))
     .unwrap();
     assert!(map_document_version_response(mismatch, OWNER, None, None, None).is_err());

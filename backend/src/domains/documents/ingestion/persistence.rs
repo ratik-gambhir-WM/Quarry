@@ -31,8 +31,6 @@ pub(crate) async fn persist_document_and_chunks(
     file_bytes: Vec<u8>,
 ) -> Result<DocumentPersistenceResult, String> {
     ensure_document_graph_invariants(&document, &chunks)?;
-    let document_filename = document.file_name.clone();
-    let document_file_size_bytes = document.file_size_bytes;
     let file_persistence = build_file_persistence_input(deal_id, &document, file_bytes)?;
     let insert_blob_result = files
         .persist(file_persistence)
@@ -41,13 +39,7 @@ pub(crate) async fn persist_document_and_chunks(
     let (file_node, version_node, chunk_nodes) =
         build_helix_graph_nodes(&insert_blob_result, &document, &chunks)?;
     let insert_document_chunk_result = index
-        .insert_graph(
-            &document_filename,
-            document_file_size_bytes,
-            file_node,
-            version_node,
-            chunk_nodes,
-        )
+        .insert_graph(file_node, version_node, chunk_nodes)
         .await
         .map_err(|error| error.to_string())
     .map_err(|error| {

@@ -1,5 +1,7 @@
 use super::*;
-use helix_db::dsl::BatchQuery;
+use std::num::NonZeroUsize;
+
+use helix_db::dsl::{BatchQuery, QueryRequestType, QueryValue};
 
 fn file() -> FileNode {
     FileNode {
@@ -46,26 +48,25 @@ fn chunk(index: i64) -> FileChunkNode {
 #[test]
 fn builds_one_atomic_version_graph_write() {
     let query = insert_file_version_graph(file(), version(), vec![chunk(1), chunk(2)]).unwrap();
-    let BatchQuery::Write(batch) = &query.query else {
+    let BatchQuery::Write(batch) = query.query() else {
         panic!("expected a write batch");
     };
 
     assert_eq!(
         batch
-            .queries
+            .entries
             .iter()
             .filter(|entry| matches!(entry, BatchEntry::ForEach { param, .. } if param == "chunks"))
             .count(),
         1
     );
-    assert_eq!(query.request_type, DynamicQueryRequestType::Write);
+    assert_eq!(query.request_type(), QueryRequestType::Write);
     assert!(query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES);
     assert!(matches!(
         query
-            .parameters
-            .as_ref()
+            .parameters()
             .and_then(|parameters| parameters.get("chunks")),
-        Some(DynamicQueryValue::Array(values)) if values.len() == 2
+        Some(QueryValue::Array(values)) if values.len() == 2
     ));
 
     let json = query.to_json_string().unwrap();
@@ -118,7 +119,8 @@ fn rejects_an_oversized_atomic_request_without_splitting() {
 
 #[test]
 fn indexes_versioned_file_graph_properties() {
-    let json = create_document_indexes().to_json_string().unwrap();
+    let query = create_document_indexes(NonZeroUsize::new(1536).unwrap());
+    let json = query.to_json_string().unwrap();
 
     assert!(json.contains("file_id"));
     assert!(json.contains("version_id"));
@@ -127,10 +129,24 @@ fn indexes_versioned_file_graph_properties() {
     assert!(json.contains("embedding"));
     assert!(json.contains("workspace_id"));
     assert!(json.contains(FILE_CHUNK_LABEL));
+    assert!(json.contains("cosine"));
     assert!(!json.contains("document_id"));
+    assert_eq!(DOCUMENT_INDEX_NAMES.len(), 13);
+    assert_eq!(query.request_type(), QueryRequestType::Write);
 }
 
 #[test]
-fn uses_the_helix_v1_buffered_body_limit() {
+fn reads_index_operation_status_with_a_read_query() {
+    let query = get_document_index_operation("operation-1".to_string());
+
+    assert_eq!(query.request_type(), QueryRequestType::Read);
+    assert!(query
+        .to_json_string()
+        .unwrap()
+        .contains("get_index_operation"));
+}
+
+#[test]
+fn uses_the_conservative_helix_v3_preflight_body_limit() {
     assert_eq!(HELIX_MAX_QUERY_BODY_BYTES, 2_097_152);
 }

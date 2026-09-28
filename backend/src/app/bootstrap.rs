@@ -76,7 +76,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
     DocumentIndexWriter::new(helix.clone())
-        .initialize()
+        .initialize(config.helix.vector_dimension)
         .await
         .map_err(|error| BootstrapError::HelixIndexes(error.to_string()))?;
 

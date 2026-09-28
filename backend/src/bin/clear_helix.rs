@@ -13,19 +13,28 @@ async fn main() -> Result<()> {
     let config = AppConfig::from_env().map_err(anyhow::Error::msg)?;
     let helix = HelixClient::from_config(&config.helix).map_err(anyhow::Error::msg)?;
     let before: Value = helix
-        .execute_dynamic_query(count_all_nodes)
+        .execute_read_query(
+            "helix.clear.count_before",
+            count_all_nodes().map_err(|error| anyhow::anyhow!(error))?,
+        )
         .await
         .map_err(anyhow::Error::msg)?;
     println!("Helix nodes before cleanup: {before}");
 
     let deleted: Value = helix
-        .execute_dynamic_query(delete_all_nodes)
+        .execute_write_query(
+            "helix.clear.delete_all",
+            delete_all_nodes().map_err(|error| anyhow::anyhow!(error))?,
+        )
         .await
         .map_err(anyhow::Error::msg)?;
     println!("Helix cleanup response: {deleted}");
 
     let after: Value = helix
-        .execute_dynamic_query(count_all_nodes)
+        .execute_read_query(
+            "helix.clear.count_after",
+            count_all_nodes().map_err(|error| anyhow::anyhow!(error))?,
+        )
         .await
         .map_err(anyhow::Error::msg)?;
     println!("Helix nodes after cleanup: {after}");
@@ -33,20 +42,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn count_all_nodes() -> DynamicQueryRequest {
-    DynamicQueryRequest::read(
-        read_batch()
-            .var_as("node_count", g().n(NodeRef::all()).count())
-            .returning(["node_count"]),
-    )
+#[query]
+fn count_all_nodes() -> ReadBatch {
+    read_batch()
+        .var_as("node_count", g().n(NodeRef::all()).count())
+        .returning(["node_count"])
 }
 
-fn delete_all_nodes() -> DynamicQueryRequest {
-    DynamicQueryRequest::write(
-        write_batch()
-            .var_as("deleted_nodes", g().n(NodeRef::all()).drop().count())
-            .returning(["deleted_nodes"]),
-    )
+#[query]
+fn delete_all_nodes() -> WriteBatch {
+    write_batch()
+        .var_as("deleted_nodes", g().n(NodeRef::all()).drop().count())
+        .returning(["deleted_nodes"])
 }
 
 fn verify_zero_nodes(response: &Value) -> Result<()> {

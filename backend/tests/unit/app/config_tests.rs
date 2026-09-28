@@ -8,6 +8,7 @@ fn default_config_is_local_and_has_a_timeout() {
     assert_eq!(config.http.request_timeout, Duration::from_secs(120));
     assert_eq!(config.http.cors_origins.len(), 2);
     assert_eq!(config.sqlite.path, PathBuf::from("data/quarry.sqlite3"));
+    assert_eq!(config.helix.vector_dimension.get(), 1536);
     assert!(config.openai.is_none());
     assert!(config.wm_ai.is_none());
     assert!(config.diligence_studio.is_none());
@@ -69,7 +70,10 @@ fn parses_all_sections_from_an_injected_source() {
     assert_eq!(config.http.bind_address.port(), 4010);
     assert_eq!(config.sqlite.path, PathBuf::from("/tmp/quarry.sqlite3"));
     assert_eq!(config.helix.url, "http://helix.internal:6969");
-    assert_eq!(config.openai.unwrap().embedding_model, "embedding-model");
+    assert_eq!(config.helix.vector_dimension.get(), 1536);
+    let openai = config.openai.unwrap();
+    assert_eq!(openai.embedding_model, "embedding-model");
+    assert_eq!(openai.embedding_dimensions.get(), 1536);
     assert_eq!(
         config.data_room.root_for_deal("DEAL-42"),
         Some(&PathBuf::from("/tmp/data-room"))
@@ -90,6 +94,31 @@ fn rejects_invalid_values_and_partial_optional_capabilities() {
             .unwrap_err()
             .contains("partially configured")
     );
+}
+
+#[test]
+fn helix_requires_an_instance_base_url_and_a_nonzero_vector_dimension() {
+    let configured = AppConfig::from_values([
+        ("HELIX_VECTOR_DIMENSION", "3072"),
+        ("OPENAI_API_KEY", "secret"),
+    ])
+    .unwrap();
+    assert_eq!(configured.helix.vector_dimension.get(), 3072);
+    assert_eq!(
+        configured.openai.unwrap().embedding_dimensions.get(),
+        configured.helix.vector_dimension.get()
+    );
+
+    for value in [
+        "http://127.0.0.1:6969/v2/query",
+        "http://user:secret@127.0.0.1:6969",
+        "http://127.0.0.1:6969?debug=true",
+        "ftp://127.0.0.1:6969",
+    ] {
+        let error = AppConfig::from_values([("HELIX_URL", value)]).unwrap_err();
+        assert!(error.contains("HELIX_URL"), "{error}");
+    }
+    assert!(AppConfig::from_values([("HELIX_VECTOR_DIMENSION", "0")]).is_err());
 }
 
 #[test]
