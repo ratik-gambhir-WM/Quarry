@@ -193,8 +193,9 @@ Docker Desktop on macOS when its daemon is unavailable; and wait for Docker and 
 at `127.0.0.1:6969`. The launcher first inspects the local container named by
 `QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-dev`. If it is absent, the launcher
 creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section, a
-persistent restart policy, and the `6969:8080` development port mapping. It waits for the local
-runtime's `/healthz` endpoint. Before reusing an existing named container, it compares the
+persistent restart policy, and the `6969:8080` development port mapping. It starts that named
+container before waiting for the local runtime's `/healthz` endpoint, so an unrelated listener
+cannot satisfy readiness. Before reusing an existing named container, it compares the
 container image ID with the configured digest and fails without modifying a mismatch. This keeps
 the local Docker topology while preventing a stale v2 runtime from silently serving a v3 SDK. The
 launcher does not recreate or delete an existing container.
@@ -1180,7 +1181,7 @@ pins it to the loopback API.
 | `QUARRY_DATA_DIR` | fallback directory for `quarry.sqlite3` |
 | `HELIX_URL` | `http://127.0.0.1:6969`; origin only (no `/v2/query` path, credentials, query, or fragment) |
 | `HELIX_API_KEY` | optional secret |
-| `HELIX_VECTOR_DIMENSION` | `1536`; must be a positive integer and match the embedding provider dimension |
+| `HELIX_VECTOR_DIMENSION` | `1536`; must be a positive integer; configures both the Helix vector index and the OpenAI embeddings request |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
@@ -1265,7 +1266,9 @@ All fields are required if any one is present:
 - Helix is not optional during bootstrap: the client is always constructed, document-index DDL is
   submitted, and every required index operation must become usable before the server starts.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
-  `OPENAI_API_KEY`; partial configuration fails startup validation.
+  `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
+  `HELIX_VECTOR_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
+  generated vectors use one configured size.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
   parse or wire them into the product application.
 - Data-room environment roots are not always a fallback: if a deal metadata row exists with a

@@ -1,8 +1,21 @@
 use super::*;
 use std::{
     env,
+    num::NonZeroUsize,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[test]
+fn embedding_requests_use_the_configured_vector_dimension() {
+    let request = build_embeddings_request_body(
+        &["document text"],
+        Some("text-embedding-3-small"),
+        NonZeroUsize::new(512).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(request["dimensions"], 512);
+}
 
 #[test]
 fn build_file_input_item_uses_input_file_type_for_file_id() {

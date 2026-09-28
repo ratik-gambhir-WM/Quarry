@@ -1,5 +1,6 @@
 use std::{
     fmt, fs,
+    num::NonZeroUsize,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -16,6 +17,8 @@ use crate::{
 
 const DEFAULT_RESPONSES_MODEL: &str = "gpt-5.5";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+const DEFAULT_EMBEDDING_DIMENSIONS: NonZeroUsize =
+    NonZeroUsize::new(1536).expect("default embedding dimensions are non-zero");
 const OPENAI_EMBEDDINGS_URL: &str = "https://api.openai.com/v1/embeddings";
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
 const OPENAI_EMBEDDINGS_API: &str = "openai.embeddings";
@@ -32,6 +35,7 @@ pub struct OpenAiClient {
     http_client: reqwest::Client,
     api_key: Arc<str>,
     responses_url: Arc<str>,
+    embedding_dimensions: NonZeroUsize,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +97,7 @@ impl OpenAiClient {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(OPENAI_RESPONSES_URL),
+            embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
         }
     }
 
@@ -106,11 +111,17 @@ impl OpenAiClient {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(responses_url.into()),
+            embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
         }
     }
 
     pub fn from_config(http_client: reqwest::Client, config: &OpenAiConfig) -> Self {
-        Self::new(http_client, config.api_key.expose())
+        Self {
+            http_client,
+            api_key: Arc::from(config.api_key.expose()),
+            responses_url: Arc::from(OPENAI_RESPONSES_URL),
+            embedding_dimensions: config.embedding_dimensions,
+        }
     }
 
     pub async fn gen_model_response(
@@ -469,7 +480,8 @@ impl OpenAiClient {
         filename: Option<&str>,
         file_size_bytes: Option<u64>,
     ) -> Result<Vec<Vec<f64>>, String> {
-        let request_body = build_embeddings_request_body(contents, model)?;
+        let request_body =
+            build_embeddings_request_body(contents, model, self.embedding_dimensions)?;
         let started_at = Instant::now();
 
         let response = match self
@@ -617,7 +629,11 @@ fn truncate_error_reason(reason: String) -> String {
     truncated
 }
 
-fn build_embeddings_request_body(contents: &[&str], model: Option<&str>) -> Result<Value, String> {
+fn build_embeddings_request_body(
+    contents: &[&str],
+    model: Option<&str>,
+    dimensions: NonZeroUsize,
+) -> Result<Value, String> {
     let model = model.unwrap_or(DEFAULT_EMBEDDING_MODEL).trim();
     if contents.is_empty() {
         return Err("cannot embed an empty list of document contents".to_string());
@@ -637,7 +653,8 @@ fn build_embeddings_request_body(contents: &[&str], model: Option<&str>) -> Resu
     Ok(json!({
         "model": model,
         "input": contents,
-        "encoding_format": "float"
+        "encoding_format": "float",
+        "dimensions": dimensions.get(),
     }))
 }
 

@@ -233,28 +233,24 @@ else
     || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
 fi
 
-if helix_is_ready; then
-  printf 'Helix is already ready at %s.\n' "$LOCAL_HELIX_URL"
+if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" == "true" ]]; then
+  printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
 else
-  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" != "true" ]]; then
-    printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-    docker start "$HELIX_CONTAINER_NAME" >/dev/null \
-      || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
-  else
-    printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-  fi
-
-  readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
-  while ! helix_is_ready; do
-    if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
-      fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
-    fi
-    if ((SECONDS >= helix_startup_deadline)); then
-      fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
-    fi
-    sleep 0.25
-  done
+  printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
+  docker start "$HELIX_CONTAINER_NAME" >/dev/null \
+    || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
 fi
+
+readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
+while ! helix_is_ready; do
+  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
+    fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
+  fi
+  if ((SECONDS >= helix_startup_deadline)); then
+    fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
+  fi
+  sleep 0.25
+done
 
 printf 'Starting Axum API at %s...\n' "$QUARRY_API_URL"
 set -m

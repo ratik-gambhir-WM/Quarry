@@ -67,6 +67,7 @@ pub struct OpenAiConfig {
     pub chat_model: String,
     pub deal_extraction_model: String,
     pub embedding_model: String,
+    pub embedding_dimensions: NonZeroUsize,
     pub document_summary_model: String,
     pub image_description_model: String,
 }
@@ -136,11 +137,14 @@ impl AppConfig {
             .map(|(key, value)| (key.into(), value.into()))
             .collect::<HashMap<_, _>>();
 
+        let helix = parse_helix_config(&values)?;
+        let openai = parse_openai_config(&values, helix.vector_dimension)?;
+
         Ok(Self {
             http: parse_http_config(&values)?,
             sqlite: parse_sqlite_config(&values),
-            helix: parse_helix_config(&values)?,
-            openai: parse_openai_config(&values)?,
+            helix,
+            openai,
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
@@ -285,7 +289,10 @@ fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, S
     })
 }
 
-fn parse_openai_config(values: &HashMap<String, String>) -> Result<Option<OpenAiConfig>, String> {
+fn parse_openai_config(
+    values: &HashMap<String, String>,
+    embedding_dimensions: NonZeroUsize,
+) -> Result<Option<OpenAiConfig>, String> {
     let names = [
         "OPENAI_API_KEY",
         "OPENAI_CHAT_MODEL",
@@ -309,6 +316,7 @@ fn parse_openai_config(values: &HashMap<String, String>) -> Result<Option<OpenAi
         embedding_model: value(values, "OPENAI_EMBEDDING_MODEL")
             .unwrap_or(DEFAULT_EMBEDDING_MODEL)
             .to_string(),
+        embedding_dimensions,
         document_summary_model: value(values, "OPENAI_DOCUMENT_SUMMARY_MODEL")
             .unwrap_or(DEFAULT_DOCUMENT_SUMMARY_MODEL)
             .to_string(),

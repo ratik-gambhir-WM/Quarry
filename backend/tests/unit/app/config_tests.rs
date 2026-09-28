@@ -71,7 +71,9 @@ fn parses_all_sections_from_an_injected_source() {
     assert_eq!(config.sqlite.path, PathBuf::from("/tmp/quarry.sqlite3"));
     assert_eq!(config.helix.url, "http://helix.internal:6969");
     assert_eq!(config.helix.vector_dimension.get(), 1536);
-    assert_eq!(config.openai.unwrap().embedding_model, "embedding-model");
+    let openai = config.openai.unwrap();
+    assert_eq!(openai.embedding_model, "embedding-model");
+    assert_eq!(openai.embedding_dimensions.get(), 1536);
     assert_eq!(
         config.data_room.root_for_deal("DEAL-42"),
         Some(&PathBuf::from("/tmp/data-room"))
@@ -96,8 +98,16 @@ fn rejects_invalid_values_and_partial_optional_capabilities() {
 
 #[test]
 fn helix_requires_an_instance_base_url_and_a_nonzero_vector_dimension() {
-    let configured = AppConfig::from_values([("HELIX_VECTOR_DIMENSION", "3072")]).unwrap();
+    let configured = AppConfig::from_values([
+        ("HELIX_VECTOR_DIMENSION", "3072"),
+        ("OPENAI_API_KEY", "secret"),
+    ])
+    .unwrap();
     assert_eq!(configured.helix.vector_dimension.get(), 3072);
+    assert_eq!(
+        configured.openai.unwrap().embedding_dimensions.get(),
+        configured.helix.vector_dimension.get()
+    );
 
     for value in [
         "http://127.0.0.1:6969/v2/query",

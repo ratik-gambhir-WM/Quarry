@@ -80,12 +80,13 @@ When you first run `./quarry web` or `./quarry desktop`, the launcher looks for 
 `helix-quarry-dev` container. If it is absent, the launcher creates it from the digest-pinned
 `ghcr.io/helixdb/helixdb` image in the `[local.dev]` section of
 [`backend/helix.toml`](backend/helix.toml), maps host port `6969` to the image's port `8080`, and
-waits for its `/healthz` endpoint. This remains a local Docker runtime; Quarry does not use Helix
+starts that named container before waiting for its `/healthz` endpoint. This remains a local Docker runtime; Quarry does not use Helix
 Cloud. The Axum service uses the Helix Rust v3 SDK, which sends queries to `/v2/query` beneath the
 configured base URL.
 
 On later runs the launcher reuses an existing container only when it was created from that exact
-image digest. A different image fails safely without being replaced. Choose another existing
+image digest. A different image—or a host listener that prevents the named container from
+starting—fails safely without being replaced. Choose another existing
 container with `QUARRY_HELIX_CONTAINER_NAME`, or deliberately replace the old container yourself.
 
 If you already have a compatible container under another name, set its name when you start Quarry:
