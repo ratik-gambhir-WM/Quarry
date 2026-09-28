@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     env, fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::NonZeroUsize,
     path::PathBuf,
     time::Duration,
 };
@@ -13,6 +14,7 @@ const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_CORS_ORIGINS: &str = "http://127.0.0.1:1420,http://localhost:1420";
 const DEFAULT_DATABASE_FILE_NAME: &str = "quarry.sqlite3";
 const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6969";
+const DEFAULT_HELIX_VECTOR_DIMENSION: usize = 1536;
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
@@ -56,6 +58,7 @@ pub struct SqliteConfig {
 pub struct HelixConfig {
     pub url: String,
     pub api_key: Option<SecretString>,
+    pub vector_dimension: NonZeroUsize,
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +168,8 @@ impl Default for AppConfig {
             helix: HelixConfig {
                 url: DEFAULT_HELIX_URL.to_string(),
                 api_key: None,
+                vector_dimension: NonZeroUsize::new(DEFAULT_HELIX_VECTOR_DIMENSION)
+                    .expect("default Helix vector dimension is non-zero"),
             },
             openai: None,
             wm_ai: None,
@@ -265,10 +270,18 @@ fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, S
     let url = value(values, "HELIX_URL")
         .unwrap_or(DEFAULT_HELIX_URL)
         .to_string();
-    validate_url("HELIX_URL", &url)?;
+    validate_helix_base_url(&url)?;
+    let vector_dimension = parse_value(
+        values,
+        "HELIX_VECTOR_DIMENSION",
+        DEFAULT_HELIX_VECTOR_DIMENSION,
+    )?;
+    let vector_dimension = NonZeroUsize::new(vector_dimension)
+        .ok_or_else(|| "HELIX_VECTOR_DIMENSION must be greater than zero".to_string())?;
     Ok(HelixConfig {
         url,
         api_key: value(values, "HELIX_API_KEY").map(SecretString::new),
+        vector_dimension,
     })
 }
 
@@ -432,6 +445,26 @@ fn validate_url(name: &str, value: &str) -> Result<(), String> {
     reqwest::Url::parse(value)
         .map(|_| ())
         .map_err(|error| format!("invalid {name}: {error}"))
+}
+
+fn validate_helix_base_url(value: &str) -> Result<(), String> {
+    let parsed =
+        reqwest::Url::parse(value).map_err(|error| format!("invalid HELIX_URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("HELIX_URL must be an HTTP(S) instance base URL".to_string());
+    }
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != "/"
+    {
+        return Err(
+            "HELIX_URL must be an instance base URL without a path, credentials, query, or fragment"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn normalize_deal_config_key(deal_id: &str) -> String {

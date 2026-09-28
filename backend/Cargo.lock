@@ -689,7 +689,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1013,30 +1013,55 @@ dependencies = [
 ]
 
 [[package]]
-name = "helix-db"
-version = "2.0.6"
+name = "helix-ast"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "677f1a3f2ae40782c06af09f5a7e4ad4141956f381ec9a2a2305c6b07fc75529"
+checksum = "e88673f1f93419fc23ef45968e079ba333dc818651d5dd2388b82a8bba84b10e"
 dependencies = [
  "chrono",
+ "serde",
+ "sonic-rs",
+]
+
+[[package]]
+name = "helix-db"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41ae6e6dce5e00f5208ab3573f800b34ba36260cad1d2d9d68e925aef771f234"
+dependencies = [
+ "chrono",
+ "helix-ast",
  "helix-dsl-macros",
- "inventory",
+ "helix-graph-algorithms",
  "reqwest",
  "serde",
+ "serde_json",
  "sonic-rs",
  "thiserror 2.0.19",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "helix-dsl-macros"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4708418e04e017cf1f4169591923697f270382f7cc86e53a2d44838218164354"
+checksum = "584488c46431f04a796b49cf70ee367f496018c9f1ec309b9ceb1a9ac854c74d"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "helix-graph-algorithms"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "458c6e6b54b4c83b6f51ba701ba809421b1c96ceac7c650728ee889156a79268"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1318,15 +1343,6 @@ checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "block-padding",
  "generic-array",
-]
-
-[[package]]
-name = "inventory"
-version = "0.3.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
-dependencies = [
- "rustversion",
 ]
 
 [[package]]
@@ -1984,7 +2000,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2335,7 +2351,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3131,6 +3147,7 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -3295,7 +3312,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

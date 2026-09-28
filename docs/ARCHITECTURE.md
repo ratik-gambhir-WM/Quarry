@@ -167,7 +167,7 @@ Quarry/
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
-│   └── helix.toml                    local Helix metadata; launcher reads `[local.dev]` image/tag
+│   └── helix.toml                    local Helix metadata; launcher reads `[local.dev]` image/tag/digest
 ├── diligence-studio-server/
 │   ├── src/                          Express routes, services, catalog, and PowerPoint libraries
 │   ├── test/                         server API and behavior tests
@@ -192,9 +192,12 @@ root. Both modes reject conflicting listeners on ports 3001, 1420, and 43127; st
 Docker Desktop on macOS when its daemon is unavailable; and wait for Docker and the Helix service
 at `127.0.0.1:6969`. The launcher first inspects the local container named by
 `QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-dev`. If it is absent, the launcher
-creates it with the image and tag from `backend/helix.toml`'s `[local.dev]` section, a persistent
-restart policy, and the `6969:8080` development port mapping. It then starts the container when
-Helix is not already reachable. The launcher does not recreate or delete an existing container.
+creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section, a
+persistent restart policy, and the `6969:8080` development port mapping. It waits for the local
+runtime's `/healthz` endpoint. Before reusing an existing named container, it compares the
+container image ID with the configured digest and fails without modifying a mismatch. This keeps
+the local Docker topology while preventing a stale v2 runtime from silently serving a v3 SDK. The
+launcher does not recreate or delete an existing container.
 It then starts `cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001` and the versioned
 Diligence Studio upstream URL set explicitly; waits for `/api/v1/health`; and runs either
 `npm run dev:web` or `npm run dev:desktop` from `frontend/`. After Vite serves the internal preview
@@ -993,6 +996,15 @@ in the current upload path is narrower than the versioned graph shape suggests:
 
 Vector and keyword search query this projection.
 
+The adapter uses Helix Rust SDK v3. The configured `HELIX_URL` is the server origin; the SDK owns
+the `/v2/query` path. Read and write operations have separate facade methods: writes are
+process-serialized and request durability acknowledgement, while reads cannot accidentally send a
+write request. SDK transport failures are terminal because the exposed v3 error does not preserve
+an HTTP status suitable for a safe replay decision. Helix metadata needed to construct a graph
+(including display name and byte size) stays in the graph request; it is not passed separately to
+the execution facade or logged as execution metadata. Index bootstrap accepts each DDL receipt and
+waits for every required index operation to report usable before Axum starts.
+
 SQLite is intended to remain the recovery source. An incompatible graph rollout must drain
 ingestion, back up SQLite and Helix, explicitly authorize and run the destructive `clear_helix`
 utility against the selected environment, recreate indexes, reindex from canonical SQLite data,
@@ -1166,8 +1178,9 @@ pins it to the loopback API.
 | `QUARRY_REQUEST_TIMEOUT_SECONDS` | `120`; must be positive |
 | `QUARRY_DATABASE_PATH` | explicit SQLite file |
 | `QUARRY_DATA_DIR` | fallback directory for `quarry.sqlite3` |
-| `HELIX_URL` | `http://127.0.0.1:6969` |
+| `HELIX_URL` | `http://127.0.0.1:6969`; origin only (no `/v2/query` path, credentials, query, or fragment) |
 | `HELIX_API_KEY` | optional secret |
+| `HELIX_VECTOR_DIMENSION` | `1536`; must be a positive integer and match the embedding provider dimension |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
@@ -1249,8 +1262,8 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- Helix is not optional during bootstrap: the client is always constructed and document indexes
-  are initialized before the server starts.
+- Helix is not optional during bootstrap: the client is always constructed, document-index DDL is
+  submitted, and every required index operation must become usable before the server starts.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
@@ -1402,12 +1415,16 @@ layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
 Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
 router composition, schema migration and constraints, SQLite transactions/concurrency,
 repositories, services, router contracts,
-multipart boundaries, parsing/chunking, Helix query construction, OpenAI/WM mapping, stored
-previews, Diligence Studio URL/payload/delete/import/template-document validation, bounded declared
-and streamed template bodies, template service error mapping, template HTTP headers/status/body,
-and isolated SharePoint behavior.
+multipart boundaries, parsing/chunking, Helix query construction and v3 response mapping,
+OpenAI/WM mapping, stored previews, Diligence Studio URL/payload/delete/import/template-document
+validation, bounded declared and streamed template bodies, template service error mapping, template
+HTTP headers/status/body, and isolated SharePoint behavior.
 
-There is no live integration suite for Helix, OpenAI, WM AI, Microsoft Graph, or LibreOffice.
+The ignored Helix v3 compatibility test is an opt-in local-Docker suite. It requires
+`QUARRY_HELIX_COMPAT_URL` and verifies DDL readiness, graph writes, reads, replacement, and scoped
+search against the pinned local image; it never starts or changes a developer's default container.
+There is no automatically run live integration suite for OpenAI, WM AI, Microsoft Graph, or
+LibreOffice.
 
 ### 14.3 Standard gates
 

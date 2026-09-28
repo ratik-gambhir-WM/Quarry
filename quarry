@@ -168,7 +168,7 @@ docker_daemon_is_ready() {
 }
 
 helix_is_ready() {
-  curl --silent --max-time 1 --output /dev/null "$LOCAL_HELIX_URL"
+  curl --fail --silent --max-time 1 --output /dev/null "${LOCAL_HELIX_URL}/healthz"
 }
 
 helix_local_dev_config_value() {
@@ -204,11 +204,26 @@ fi
 
 helix_image_repository="$(helix_local_dev_config_value image)"
 helix_image_tag="$(helix_local_dev_config_value tag)"
-[[ -n "$helix_image_repository" && -n "$helix_image_tag" ]] \
-  || fail "could not read the local Helix image and tag from ${HELIX_CONFIG_PATH}"
-readonly HELIX_IMAGE="${helix_image_repository}:${helix_image_tag}"
+helix_image_digest="$(helix_local_dev_config_value digest)"
+[[ -n "$helix_image_repository" && -n "$helix_image_tag" && -n "$helix_image_digest" ]] \
+  || fail "could not read the local Helix image, tag, and digest from ${HELIX_CONFIG_PATH}"
+readonly HELIX_IMAGE="${helix_image_repository}@${helix_image_digest}"
 
-if ! docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+if ! expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE" 2>/dev/null)"; then
+  printf 'Pulling pinned Helix image %s (tag %s)...\n' "$HELIX_IMAGE" "$helix_image_tag"
+  docker pull "$HELIX_IMAGE" >/dev/null \
+    || fail "could not pull pinned Helix image '${HELIX_IMAGE}'"
+  expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE")" \
+    || fail "could not inspect pinned Helix image '${HELIX_IMAGE}'"
+fi
+
+if docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
+  existing_helix_image_id="$(docker container inspect --format '{{.Image}}' "$HELIX_CONTAINER_NAME")"
+  if [[ "$existing_helix_image_id" != "$expected_helix_image_id" ]]; then
+    existing_helix_image_ref="$(docker container inspect --format '{{.Config.Image}}' "$HELIX_CONTAINER_NAME")"
+    fail "Helix container '${HELIX_CONTAINER_NAME}' uses '${existing_helix_image_ref}', not pinned ${HELIX_IMAGE}. Choose a new QUARRY_HELIX_CONTAINER_NAME or deliberately replace the old container; this launcher will not modify it."
+  fi
+else
   printf 'Creating Helix container %s from %s...\n' "$HELIX_CONTAINER_NAME" "$HELIX_IMAGE"
   docker create \
     --name "$HELIX_CONTAINER_NAME" \

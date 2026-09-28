@@ -1,7 +1,14 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    num::NonZeroUsize,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
+use helix_db::{IndexDdlReceipt, IndexOperationStatus};
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::time::sleep;
 
 use crate::{
     adapters::helix::client::HelixClient,
@@ -17,35 +24,38 @@ use crate::{
             FileChunkResult, FileChunkVectorSearch, HelixDocumentVersion, KeywordFileChunkHit,
             VectorFileChunkHit,
         },
-        writer::{create_document_indexes, insert_file_version_graph},
+        writer::{
+            create_document_indexes, get_document_index_operation, insert_file_version_graph,
+            DOCUMENT_INDEX_NAMES,
+        },
     },
     shared::error::RepositoryError,
 };
 
 #[derive(Debug, Deserialize)]
-struct ProjectionEnvelope<T> {
-    properties: Vec<T>,
-}
-
-#[derive(Debug, Deserialize)]
 pub(crate) struct HelixDocumentVersionResponse {
-    file: ProjectionEnvelope<FileNode>,
-    version: ProjectionEnvelope<FileVersionNode>,
+    file: Vec<FileNode>,
+    version: Vec<FileVersionNode>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FileChunksResponse {
-    chunks: ProjectionEnvelope<FileChunkResult>,
+    chunks: Vec<FileChunkResult>,
 }
 
 #[derive(Debug, Deserialize)]
 struct VectorSearchResponse {
-    chunks: ProjectionEnvelope<VectorFileChunkHit>,
+    chunks: Vec<VectorFileChunkHit>,
 }
 
 #[derive(Debug, Deserialize)]
 struct KeywordSearchResponse {
-    chunks: ProjectionEnvelope<KeywordFileChunkHit>,
+    chunks: Vec<KeywordFileChunkHit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IndexOperationStatusResponse {
+    status: IndexOperationStatus,
 }
 
 #[derive(Clone)]
@@ -58,8 +68,8 @@ impl DocumentIndexWriter {
         Self { helix }
     }
 
-    pub async fn initialize(&self) -> Result<(), RepositoryError> {
-        ensure_document_indexes(&self.helix)
+    pub async fn initialize(&self, vector_dimension: NonZeroUsize) -> Result<(), RepositoryError> {
+        ensure_document_indexes(&self.helix, vector_dimension)
             .await
             .map(|_| ())
             .map_err(RepositoryError::storage)
@@ -67,22 +77,13 @@ impl DocumentIndexWriter {
 
     pub async fn insert_graph(
         &self,
-        filename: &str,
-        file_size_bytes: u64,
         file_node: FileNode,
         version_node: FileVersionNode,
         chunk_nodes: Vec<FileChunkNode>,
     ) -> Result<Value, RepositoryError> {
-        insert_document_graph(
-            &self.helix,
-            filename,
-            file_size_bytes,
-            file_node,
-            version_node,
-            chunk_nodes,
-        )
-        .await
-        .map_err(RepositoryError::storage)
+        insert_document_graph(&self.helix, file_node, version_node, chunk_nodes)
+            .await
+            .map_err(RepositoryError::storage)
     }
 }
 
@@ -170,25 +171,86 @@ impl DocumentSearchIndex {
 
 async fn insert_document_graph(
     helix: &HelixClient,
-    filename: &str,
-    file_size_bytes: u64,
     file_node: FileNode,
     version_node: FileVersionNode,
     chunk_nodes: Vec<FileChunkNode>,
 ) -> Result<Value, String> {
     let query = insert_file_version_graph(file_node, version_node, chunk_nodes)?;
     helix
-        .execute_document_query(
-            "helix.file_version.insert",
-            filename,
-            file_size_bytes,
-            move || query,
-        )
+        .execute_write_query("helix.file_version.insert", query)
         .await
 }
 
-async fn ensure_document_indexes(helix: &HelixClient) -> Result<Value, String> {
-    helix.execute_dynamic_query(create_document_indexes).await
+const DOCUMENT_INDEX_READINESS_TIMEOUT: Duration = Duration::from_secs(60);
+const DOCUMENT_INDEX_READINESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+async fn ensure_document_indexes(
+    helix: &HelixClient,
+    vector_dimension: NonZeroUsize,
+) -> Result<(), String> {
+    let receipts: BTreeMap<String, IndexDdlReceipt> = helix
+        .execute_write_query(
+            "helix.document_indexes.initialize",
+            create_document_indexes(vector_dimension),
+        )
+        .await?;
+    let operation_ids = document_index_operation_ids(receipts)?;
+    for operation_id in operation_ids {
+        wait_for_document_index_operation(helix, &operation_id).await?;
+    }
+    Ok(())
+}
+
+fn document_index_operation_ids(
+    receipts: BTreeMap<String, IndexDdlReceipt>,
+) -> Result<Vec<String>, String> {
+    let mut operation_ids = Vec::new();
+    for index_name in DOCUMENT_INDEX_NAMES {
+        let receipt = receipts
+            .get(index_name)
+            .ok_or_else(|| format!("Helix index initialization omitted `{index_name}`"))?;
+        if let IndexDdlReceipt::Accepted { operation_id, .. }
+        | IndexDdlReceipt::ExistingOperation { operation_id } = receipt
+        {
+            operation_ids.push(operation_id.to_string());
+        }
+    }
+    Ok(operation_ids)
+}
+
+async fn wait_for_document_index_operation(
+    helix: &HelixClient,
+    operation_id: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + DOCUMENT_INDEX_READINESS_TIMEOUT;
+    loop {
+        let response: IndexOperationStatusResponse = helix
+            .execute_read_query(
+                "helix.document_indexes.operation_status",
+                get_document_index_operation(operation_id.to_string()),
+            )
+            .await?;
+        match response.status {
+            IndexOperationStatus::Succeeded { .. } => return Ok(()),
+            IndexOperationStatus::Queued { .. } | IndexOperationStatus::Running { .. } => {
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "Helix index operation `{operation_id}` did not become usable before the bootstrap deadline"
+                    ));
+                }
+                sleep(DOCUMENT_INDEX_READINESS_POLL_INTERVAL).await;
+            }
+            IndexOperationStatus::Blocked { .. } | IndexOperationStatus::Aborted { .. } => {
+                tracing::error!(
+                    operation_id,
+                    "Helix index operation ended without becoming usable"
+                );
+                return Err(format!(
+                    "Helix index operation `{operation_id}` did not become usable"
+                ));
+            }
+        }
+    }
 }
 
 async fn find_current_helix_document_by_content_hash(
@@ -197,7 +259,9 @@ async fn find_current_helix_document_by_content_hash(
     content_sha256: &str,
 ) -> Result<Option<HelixDocumentVersion>, String> {
     let query = build_content_hash_lookup(workspace_id.to_string(), content_sha256.to_string())?;
-    let response: HelixDocumentVersionResponse = helix.execute_dynamic_query(move || query).await?;
+    let response: HelixDocumentVersionResponse = helix
+        .execute_read_query("helix.file_version.by_content_hash", query)
+        .await?;
     map_document_version_response(response, workspace_id, None, None, Some(content_sha256))
 }
 
@@ -207,7 +271,9 @@ async fn get_current_helix_document(
     file_id: &str,
 ) -> Result<Option<HelixDocumentVersion>, String> {
     let query = build_current_document_lookup(workspace_id.to_string(), file_id.to_string())?;
-    let response: HelixDocumentVersionResponse = helix.execute_dynamic_query(move || query).await?;
+    let response: HelixDocumentVersionResponse = helix
+        .execute_read_query("helix.file_version.current", query)
+        .await?;
     map_document_version_response(response, workspace_id, Some(file_id), None, None)
 }
 
@@ -222,7 +288,9 @@ async fn get_helix_document_version(
         file_id.to_string(),
         version_id.to_string(),
     )?;
-    let response: HelixDocumentVersionResponse = helix.execute_dynamic_query(move || query).await?;
+    let response: HelixDocumentVersionResponse = helix
+        .execute_read_query("helix.file_version.by_id", query)
+        .await?;
     map_document_version_response(
         response,
         workspace_id,
@@ -243,8 +311,10 @@ async fn get_helix_document_version_chunks(
         file_id.to_string(),
         version_id.to_string(),
     )?;
-    let response: FileChunksResponse = helix.execute_dynamic_query(move || query).await?;
-    let mut chunks = response.chunks.properties;
+    let response: FileChunksResponse = helix
+        .execute_read_query("helix.file_version.chunks", query)
+        .await?;
+    let mut chunks = response.chunks;
     let mut indices = HashSet::with_capacity(chunks.len());
     for chunk in &chunks {
         if chunk.workspace_id != workspace_id
@@ -272,12 +342,11 @@ async fn search_document_chunks_by_vector(
 ) -> Result<Vec<VectorFileChunkHit>, String> {
     let workspace_id = search.workspace_id.clone();
     let query = build_vector_search(search)?;
-    let response: VectorSearchResponse = helix.execute_dynamic_query(move || query).await?;
-    validate_search_identities(
-        &workspace_id,
-        response.chunks.properties.iter().map(|hit| &hit.chunk),
-    )?;
-    Ok(response.chunks.properties)
+    let response: VectorSearchResponse = helix
+        .execute_read_query("helix.file_chunk.search_vector", query)
+        .await?;
+    validate_search_identities(&workspace_id, response.chunks.iter().map(|hit| &hit.chunk))?;
+    Ok(response.chunks)
 }
 
 async fn search_document_chunks_by_keyword(
@@ -286,12 +355,11 @@ async fn search_document_chunks_by_keyword(
 ) -> Result<Vec<KeywordFileChunkHit>, String> {
     let workspace_id = search.workspace_id.clone();
     let query = build_keyword_search(search)?;
-    let response: KeywordSearchResponse = helix.execute_dynamic_query(move || query).await?;
-    validate_search_identities(
-        &workspace_id,
-        response.chunks.properties.iter().map(|hit| &hit.chunk),
-    )?;
-    Ok(response.chunks.properties)
+    let response: KeywordSearchResponse = helix
+        .execute_read_query("helix.file_chunk.search_keyword", query)
+        .await?;
+    validate_search_identities(&workspace_id, response.chunks.iter().map(|hit| &hit.chunk))?;
+    Ok(response.chunks)
 }
 
 pub(crate) fn map_document_version_response(
@@ -301,8 +369,8 @@ pub(crate) fn map_document_version_response(
     expected_version_id: Option<&str>,
     expected_content_sha256: Option<&str>,
 ) -> Result<Option<HelixDocumentVersion>, String> {
-    let files = response.file.properties;
-    let versions = response.version.properties;
+    let files = response.file;
+    let versions = response.version;
     if files.is_empty() && versions.is_empty() {
         return Ok(None);
     }

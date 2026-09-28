@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, num::NonZeroUsize};
 
 use helix_db::dsl::prelude::*;
 use helix_db::OnNodes;
@@ -12,14 +12,30 @@ pub const HAS_VERSION_LABEL: &str = "HAS_VERSION";
 pub const CURRENT_VERSION_LABEL: &str = "CURRENT_VERSION";
 pub const HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
 
-// Helix's /v1/query route uses Axum's default buffered-body limit of 2 MiB.
+pub const DOCUMENT_INDEX_NAMES: [&str; 13] = [
+    "file_id_unique",
+    "file_workspace_id",
+    "file_display_name",
+    "version_id_unique",
+    "version_workspace_id",
+    "version_file_id",
+    "version_content_sha256",
+    "chunk_id_unique",
+    "chunk_workspace_id",
+    "chunk_file_id",
+    "chunk_version_id",
+    "chunk_embedding",
+    "chunk_text",
+];
+
+// Keep graph writes below the conservative 2 MiB preflight limit.
 pub const HELIX_MAX_QUERY_BODY_BYTES: usize = 2_097_152;
 
 pub fn insert_file_version_graph(
     file: FileNode,
     version: FileVersionNode,
     chunks: Vec<FileChunkNode>,
-) -> Result<DynamicQueryRequest, String> {
+) -> Result<QueryRequest, String> {
     validate_graph_identity(&file, &version, &chunks)?;
 
     let chunk_params = chunks.iter().map(file_chunk_params).collect::<Vec<_>>();
@@ -34,13 +50,14 @@ pub fn insert_file_version_graph(
         version.index_generation,
         version.indexed_at,
         chunk_params,
-    );
+    )
+    .map_err(|error| format!("failed to construct Helix file graph query: {error}"))?;
     validate_query_payload_size(&query, HELIX_MAX_QUERY_BODY_BYTES)?;
     Ok(query)
 }
 
 #[allow(clippy::too_many_arguments)]
-#[register]
+#[query]
 fn insert_file_version_graph_route(
     workspace_id: String,
     file_id: String,
@@ -329,7 +346,7 @@ fn validate_graph_identity(
 }
 
 fn validate_query_payload_size(
-    query: &DynamicQueryRequest,
+    query: &QueryRequest,
     max_payload_bytes: usize,
 ) -> Result<(), String> {
     let payload_bytes = query
@@ -414,97 +431,129 @@ fn file_chunk_params(chunk: &FileChunkNode) -> ParamObject {
     ])
 }
 
-#[register]
-pub fn create_document_indexes() -> WriteBatch {
-    write_batch()
-        .var_as(
-            "file_id_unique",
-            g().create_index_if_not_exists(IndexSpec::node_unique_equality(
-                QUARRY_FILE_LABEL,
-                "file_id",
-            )),
-        )
-        .var_as(
-            "file_workspace_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                QUARRY_FILE_LABEL,
-                "workspace_id",
-            )),
-        )
-        .var_as(
-            "file_display_name",
-            g().create_index_if_not_exists(IndexSpec::node_text(
-                QUARRY_FILE_LABEL,
-                "display_name",
-                None::<&str>,
-            )),
-        )
-        .var_as(
-            "version_id_unique",
-            g().create_index_if_not_exists(IndexSpec::node_unique_equality(
-                FILE_VERSION_LABEL,
-                "version_id",
-            )),
-        )
-        .var_as(
-            "version_workspace_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                FILE_VERSION_LABEL,
-                "workspace_id",
-            )),
-        )
-        .var_as(
-            "version_file_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(FILE_VERSION_LABEL, "file_id")),
-        )
-        .var_as(
-            "version_content_sha256",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                FILE_VERSION_LABEL,
-                "content_sha256",
-            )),
-        )
-        .var_as(
-            "chunk_id_unique",
-            g().create_index_if_not_exists(IndexSpec::node_unique_equality(
-                FILE_CHUNK_LABEL,
-                "chunk_id",
-            )),
-        )
-        .var_as(
-            "chunk_workspace_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                FILE_CHUNK_LABEL,
-                "workspace_id",
-            )),
-        )
-        .var_as(
-            "chunk_file_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(FILE_CHUNK_LABEL, "file_id")),
-        )
-        .var_as(
-            "chunk_version_id",
-            g().create_index_if_not_exists(IndexSpec::node_equality(
-                FILE_CHUNK_LABEL,
-                "version_id",
-            )),
-        )
-        .var_as(
-            "chunk_embedding",
-            g().create_index_if_not_exists(IndexSpec::node_vector(
-                FILE_CHUNK_LABEL,
-                "embedding",
-                Some("workspace_id"),
-            )),
-        )
-        .var_as(
-            "chunk_text",
-            g().create_index_if_not_exists(IndexSpec::node_text(
-                FILE_CHUNK_LABEL,
-                "text",
-                Some("workspace_id"),
-            )),
-        )
+pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
+    QueryRequest::write(
+        write_batch()
+            .var_as(
+                "file_id_unique",
+                g().create_index_if_not_exists(IndexSpec::node_unique_equality(
+                    QUARRY_FILE_LABEL,
+                    "file_id",
+                )),
+            )
+            .var_as(
+                "file_workspace_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    QUARRY_FILE_LABEL,
+                    "workspace_id",
+                )),
+            )
+            .var_as(
+                "file_display_name",
+                g().create_index_if_not_exists(IndexSpec::node_text(
+                    QUARRY_FILE_LABEL,
+                    "display_name",
+                    None::<&str>,
+                )),
+            )
+            .var_as(
+                "version_id_unique",
+                g().create_index_if_not_exists(IndexSpec::node_unique_equality(
+                    FILE_VERSION_LABEL,
+                    "version_id",
+                )),
+            )
+            .var_as(
+                "version_workspace_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_VERSION_LABEL,
+                    "workspace_id",
+                )),
+            )
+            .var_as(
+                "version_file_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_VERSION_LABEL,
+                    "file_id",
+                )),
+            )
+            .var_as(
+                "version_content_sha256",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_VERSION_LABEL,
+                    "content_sha256",
+                )),
+            )
+            .var_as(
+                "chunk_id_unique",
+                g().create_index_if_not_exists(IndexSpec::node_unique_equality(
+                    FILE_CHUNK_LABEL,
+                    "chunk_id",
+                )),
+            )
+            .var_as(
+                "chunk_workspace_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_CHUNK_LABEL,
+                    "workspace_id",
+                )),
+            )
+            .var_as(
+                "chunk_file_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_CHUNK_LABEL,
+                    "file_id",
+                )),
+            )
+            .var_as(
+                "chunk_version_id",
+                g().create_index_if_not_exists(IndexSpec::node_equality(
+                    FILE_CHUNK_LABEL,
+                    "version_id",
+                )),
+            )
+            .var_as(
+                "chunk_embedding",
+                g().create_index_if_not_exists(IndexSpec::node_vector(
+                    FILE_CHUNK_LABEL,
+                    "embedding",
+                    vector_dimension,
+                    VectorDistanceMetric::Cosine,
+                    Some("workspace_id"),
+                )),
+            )
+            .var_as(
+                "chunk_text",
+                g().create_index_if_not_exists(IndexSpec::node_text(
+                    FILE_CHUNK_LABEL,
+                    "text",
+                    Some("workspace_id"),
+                )),
+            )
+            .returning([
+                "file_id_unique",
+                "file_workspace_id",
+                "file_display_name",
+                "version_id_unique",
+                "version_workspace_id",
+                "version_file_id",
+                "version_content_sha256",
+                "chunk_id_unique",
+                "chunk_workspace_id",
+                "chunk_file_id",
+                "chunk_version_id",
+                "chunk_embedding",
+                "chunk_text",
+            ]),
+    )
+}
+
+pub fn get_document_index_operation(operation_id: String) -> QueryRequest {
+    QueryRequest::read(
+        read_batch()
+            .var_as("status", g().get_index_operation(operation_id))
+            .returning(["status"]),
+    )
 }
 
 pub(super) fn file_projection() -> Vec<PropertyProjection> {

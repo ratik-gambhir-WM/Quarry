@@ -15,6 +15,10 @@ mod http_integration_tests;
 #[path = "../tests/integration/support.rs"]
 mod integration_support;
 
+#[cfg(test)]
+#[path = "../tests/integration/helix_v3_compatibility_tests.rs"]
+mod helix_v3_compatibility_tests;
+
 pub use app::bootstrap::{bootstrap, Application};
 pub use app::config::AppConfig;
 pub use app::http::create_router;
