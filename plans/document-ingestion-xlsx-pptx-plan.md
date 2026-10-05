@@ -44,11 +44,17 @@ particular, a graph write is one atomic, version-scoped request and
 can expand substantially beyond their compressed OOXML input, and an
 embedding is serialized on every chunk. The implementation must therefore
 preflight the exact final v3 graph request after embeddings are attached but
-before SQLite is committed. An over-limit Office document is a safe rejected
-ingestion result, not a SQLite-success/Helix-failure that an identical retry
-cannot repair. This preflight does not split a document graph, weaken the
-atomic-write invariant, or change the existing recovery behavior for an
-otherwise failed post-commit projection.
+before SQLite is committed. Build one immutable prepared-persistence/graph
+plan from the validated document, chunks, selected `file_id`, deterministic
+version ID, and one stable `indexed_at` value. It owns the SQLite input, the
+predicted persisted identity, and the final graph nodes used to construct the
+preflight query. SQLite must then confirm that identity before the retained,
+already-preflighted graph nodes are submitted. Do not reconstruct graph nodes
+or generate another timestamp after SQLite commits. An over-limit Office
+document is a safe rejected ingestion result, not a SQLite-success/Helix-
+failure that an identical retry cannot repair. This preflight does not split a
+document graph, weaken the atomic-write invariant, or change the existing
+recovery behavior for an otherwise failed post-commit projection.
 
 ## Scope and decisions
 
@@ -167,7 +173,12 @@ Update `backend/src/domains/documents/formats/powerpoint.rs` similarly:
    remove the temporary file on every success and error path. Never store,
    return, log, or treat that temporary path as the uploaded document's local
    path. Use a small RAII cleanup helper (or a vetted existing dependency if
-   one is already available) rather than a timestamp-only filename.
+   one is already available) rather than a timestamp-only filename. The
+   byte-parser error boundary must replace every staging, `PptxContainer`, and
+   ZIP error with a safe format-level message before it reaches a job result or
+   tracing; it must not include the staging path, a caller path, or
+   parser-library detail. Test both success and failure cleanup, including that
+   a returned parse error cannot reveal the private staging path.
 3. Retain the current visual ordering of slide elements and extraction of
    text, lists, and tables. Add a stable `Slide N` boundary to canonical
    extracted text and retain slide-number ranges on chunks (using the existing
@@ -188,21 +199,31 @@ Update `backend/src/domains/documents/formats/powerpoint.rs` similarly:
 ### 3. Bound untrusted OOXML work before parsing
 
 Before handing XLSX or PPTX bytes to Calamine, `pptx-to-md`, or a temporary
-file, add a narrow shared OOXML archive validator in the document-format
-layer. It should use the already direct `zip` dependency to inspect the
-central directory without extracting arbitrary members and enforce explicit,
-tested limits for entry count and cumulative declared uncompressed size (use
-the existing 256-MiB decoded-content safety budget as the starting policy).
-It should also verify the expected package roots:
+file, extract the existing Office ZIP inspection policy from
+`assistant::chat::upload` into a neutral shared helper, then use that one
+helper from both the chat upload and document-format paths. It should use the
+already direct `zip` dependency to inspect the central directory without
+extracting arbitrary members and enforce explicit, tested limits for entry
+count, per-entry declared uncompressed size, cumulative declared uncompressed
+size, and a bounded `[Content_Types].xml` read. Require both the expected
+package roots and the corresponding OpenXML content-type marker:
 
 - XLSX: `[Content_Types].xml` and `xl/workbook.xml`;
 - PPTX: `[Content_Types].xml` and `ppt/presentation.xml`.
 
-This is an additional parser safety boundary; it does not replace the current
-50-MiB multipart limits or parser-level validation. Return generic safe
-messages and never include archive member contents in logs/errors. Keep the
-validator scoped to newly exposed OOXML formats unless a separately tested
-hardening change deliberately expands it to DOCX.
+Set the Office document policy to at most 128 MiB of declared uncompressed
+content per package, and add a shared two-permit Office parsing gate around
+inspection, parsing, and PPTX staging cleanup. The normal document-job
+concurrency is eight, so this bounds concurrent Office archive expansion to
+256 MiB rather than allowing eight independent 256-MiB expansions. Keep the
+gate internal to document ingestion and acquire it before `spawn_blocking` so
+waiting does not consume a blocking-pool worker. This is an additional parser
+safety boundary; it does not replace the current 50-MiB multipart limits or
+parser-level validation. Return generic safe messages and never include
+archive member contents in logs/errors. The shared helper must preserve the
+chat route's existing DOCX/PPTX/XLSX validation behavior; any changed limit or
+content-type rule requires its existing chat tests to be updated in the same
+change.
 
 ### 4. Wire the new assemblies into document ingestion and preflight the v3 graph
 
@@ -226,16 +247,17 @@ Modify `backend/src/domains/documents/formats/mod.rs` and
    Tokio worker. Keep image validation/description and OpenAI calls in their
    established async paths.
 5. After `embed_chunks` supplies every Office chunk embedding, but before
-   `DocumentStore::persist` is called, preflight the exact graph request that
-   would be submitted to Helix. Reuse the v3 writer's
-   `insert_file_version_graph` construction/size validation through a narrow
-   index-writer API; do not estimate from raw OOXML bytes or duplicate query
-   serialization in ingestion. Build it from the same validated persistence
-   input and deterministic file/version/chunk identities that the later
-   SQLite-and-Helix path consumes, so the preflight and actual write cannot
-   drift. If the request exceeds `HELIX_MAX_QUERY_BODY_BYTES`, return a safe
-   processing failure before canonical persistence. Do not split chunks over
-   several writes, raise the cap, or reimplement a retry loop for this case.
+   `DocumentStore::persist` is called, create the prepared-persistence/graph
+   plan described above and preflight its exact graph request. Reuse the v3
+   writer's `insert_file_version_graph` construction/size validation through a
+   narrow index-writer API; do not estimate from raw OOXML bytes or duplicate
+   query serialization in ingestion. The plan must retain the exact graph
+   nodes used for preflight, including its one `indexed_at` value; after SQLite
+   persists the retained SQLite input, verify its returned identity equals the
+   plan's predicted identity, then submit those retained nodes. If the request
+   exceeds `HELIX_MAX_QUERY_BODY_BYTES`, return a safe processing failure
+   before canonical persistence. Do not split chunks over several writes,
+   raise the cap, or reimplement a retry loop for this case.
 6. Keep the document model, SQLite schema, and Helix graph shape unchanged.
    Persistence already derives XLSX/PPTX MIME types from
    `shared::file_policy`; extend focused tests to prove the parser
@@ -304,9 +326,13 @@ Update `frontend/src/components/data-room/UploadFilesModal.tsx`:
 
 The web and desktop adapters already send opaque `File` bytes to the same
 multipart routes. Keep their public TypeScript API unchanged. Add coverage
-that verifies XLSX/PPTX names and MIME fallbacks survive both adapter mappings
-instead of adding a format-specific Tauri command. The Tauri relay's filename,
-base64, request-size, and MIME-syntax checks remain in force.
+that verifies XLSX/PPTX names and bytes survive both adapter mappings instead
+of adding a format-specific Tauri command. Do not add or require an
+extension-to-MIME fallback: browser file types may be empty, the desktop relay
+uses its existing generic `application/octet-stream` fallback, and the Axum
+ingestion boundary intentionally selects by safe filename extension rather
+than multipart MIME. The Tauri relay's filename, base64, request-size, and
+MIME-syntax checks remain in force.
 
 ## Tests and verification
 
@@ -332,11 +358,15 @@ base64, request-size, and MIME-syntax checks remain in force.
    derive canonical XLSX/PPTX MIME types, and fail before an embedding call
    when parsing fails. Add a text-dense synthetic Office assembly with final
    embeddings that crosses the actual v3 serialized-query cap; assert the
-   same `insert_file_version_graph` preflight rejects it before
-   `DocumentStore::persist`, without splitting it or attempting a Helix write.
-   Keep a near-limit case to prove ordinary Office graph writes retain the
-   normal atomic file/version/chunk structure. Assert that no parser performs
-   blocking work on the async executor.
+   prepared graph preflight rejects it before `DocumentStore::persist`, without
+   splitting it or attempting a Helix write. Keep a near-limit case to prove
+   that preflight and the submitted graph use identical retained nodes and
+   `indexed_at`, while ordinary Office graph writes retain the normal atomic
+   file/version/chunk structure. Assert that no parser performs blocking work
+   on the async executor. Cover the two-permit Office parsing gate and the
+   shared Office ZIP helper's entry, per-entry, total-size, root, and
+   content-type bounds; retain the chat-upload coverage after extracting that
+   helper.
 5. Extend `backend/tests/integration/http_tests.rs` multipart boundary cases
    for accepted XLSX/PPTX names, rejected legacy names, and existing body/user
    validations. Confirm both `/api/v1` and temporary `/api` compatibility
@@ -363,10 +393,12 @@ base64, request-size, and MIME-syntax checks remain in force.
    existing image/PDF/DOCX behavior.
 2. Update `frontend/tests/api/httpQuarryApi.test.ts` and
    `frontend/tests/api/tauriQuarryApi.test.ts` to prove both files use the
-   existing deal-scoped process-file endpoints, preserve exact filenames, and
-   send the expected bytes/MIME through `FormData` and the Tauri multipart
-   payload. Keep the PDF response assertion unchanged: the viewer consumes
-   `application/pdf`, not the Office MIME type.
+   existing deal-scoped process-file endpoints and preserve exact filenames and
+   bytes through `FormData` and the Tauri multipart payload. Include an empty
+   browser MIME-type case that preserves the existing generic desktop fallback
+   and prove server ingestion still chooses by filename extension; do not add
+   an XLSX/PPTX MIME fallback. Keep the PDF response assertion unchanged: the
+   viewer consumes `application/pdf`, not the Office MIME type.
 3. Manually inspect web and desktop Data Room upload/preview with sanitized
    small XLSX and PPTX samples and a configured LibreOffice executable:
    selection, upload job processing/completion, document-list refresh,

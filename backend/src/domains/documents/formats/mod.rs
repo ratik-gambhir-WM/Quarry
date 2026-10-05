@@ -14,6 +14,8 @@ use std::{
 use self::{
     docx::{parse_docx_chunks_from_bytes, DocxAssembly},
     pdf::{parse_pdf_by_bytes, PdfDocumentAssembly},
+    powerpoint::{parse_powerpoint_chunks_from_bytes, PowerpointAssembly},
+    spreadsheet::{parse_spreadsheet_chunks_from_bytes, SpreadsheetAssembly},
 };
 
 #[derive(Debug)]
@@ -28,12 +30,24 @@ pub enum QuarryFile {
         path: Option<PathBuf>,
         file_name: String,
     },
+    Powerpoint {
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        file_name: String,
+    },
+    Spreadsheet {
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        file_name: String,
+    },
 }
 
 #[derive(Debug)]
 pub enum ParsedQuarryFile {
     Pdf(PdfDocumentAssembly),
     Docx(DocxAssembly),
+    Powerpoint(PowerpointAssembly),
+    Spreadsheet(SpreadsheetAssembly),
 }
 
 /// Reads filesystem metadata from an already-open file without consuming it.
@@ -89,6 +103,26 @@ impl QuarryFile {
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Docx(assembly))
             }
+            Self::Powerpoint {
+                bytes,
+                path,
+                file_name,
+            } => {
+                let mut assembly =
+                    parse_powerpoint_chunks_from_bytes(&bytes, path.as_deref(), user_id)?;
+                assembly.document.file_name = file_name;
+                Ok(ParsedQuarryFile::Powerpoint(assembly))
+            }
+            Self::Spreadsheet {
+                bytes,
+                path,
+                file_name,
+            } => {
+                let mut assembly =
+                    parse_spreadsheet_chunks_from_bytes(&bytes, path.as_deref(), user_id)?;
+                assembly.document.file_name = file_name;
+                Ok(ParsedQuarryFile::Spreadsheet(assembly))
+            }
         }
     }
 
@@ -113,6 +147,16 @@ impl QuarryFile {
                 file_name,
             }),
             "docx" => Ok(Self::Docx {
+                bytes,
+                path,
+                file_name,
+            }),
+            "pptx" => Ok(Self::Powerpoint {
+                bytes,
+                path,
+                file_name,
+            }),
+            "xlsx" => Ok(Self::Spreadsheet {
                 bytes,
                 path,
                 file_name,

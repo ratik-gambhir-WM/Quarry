@@ -240,6 +240,33 @@ describe("httpQuarryApi", () => {
     expect((request.body as FormData).get("userId")).toBe("analyst@example.com");
   });
 
+  it("preserves XLSX and PPTX names and bytes through the process-file form", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(Response.json({ filename: "model.xlsx", jobId: "job-1" }, { status: 202 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const files = [
+      new File([new Uint8Array([1, 2, 3])], "model.XLSX", { type: "" }),
+      new File([new Uint8Array([4, 5, 6])], "board.pptx", { type: "" }),
+    ];
+
+    for (const file of files) {
+      await httpQuarryApi.startProcessFile("DEAL / 1", "analyst@example.com", file);
+    }
+
+    for (const [index, file] of files.entries()) {
+      const request = fetchMock.mock.calls[index][1] as RequestInit;
+      expect(fetchMock.mock.calls[index][0]).toBe("/api/v1/deals/DEAL%20%2F%201/documents/process_file");
+      const uploaded = (request.body as FormData).get("files");
+      expect(uploaded).toBeInstanceOf(File);
+      const uploadedFile = uploaded as File;
+      expect(uploadedFile.name).toBe(file.name);
+      expect(Array.from(new Uint8Array(await uploadedFile.arrayBuffer()))).toEqual(
+        Array.from(new Uint8Array(await file.arrayBuffer())),
+      );
+    }
+  });
+
   it("lists stored deal documents and reads PDF bytes and raw text", async () => {
     const pdfBytes = new TextEncoder().encode("%PDF-1.4\npreview");
     const fetchMock = vi

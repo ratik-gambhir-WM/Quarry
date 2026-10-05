@@ -46,9 +46,9 @@ fn chunk(index: i64) -> FileChunkNode {
 }
 
 #[test]
-fn builds_one_atomic_version_graph_write() {
-    let query = insert_file_version_graph(file(), version(), vec![chunk(1), chunk(2)]).unwrap();
-    let BatchQuery::Write(batch) = query.query() else {
+fn builds_bounded_version_graph_writes() {
+    let graph = insert_file_version_graph(file(), version(), vec![chunk(1), chunk(2)]).unwrap();
+    let BatchQuery::Write(batch) = graph.setup_query.query() else {
         panic!("expected a write batch");
     };
 
@@ -58,39 +58,43 @@ fn builds_one_atomic_version_graph_write() {
             .iter()
             .filter(|entry| matches!(entry, BatchEntry::ForEach { param, .. } if param == "chunks"))
             .count(),
-        1
+        0
     );
-    assert_eq!(query.request_type(), QueryRequestType::Write);
-    assert!(query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES);
+    assert_eq!(graph.setup_query.request_type(), QueryRequestType::Write);
+    assert!(graph.setup_query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES);
+    assert_eq!(graph.chunk_queries.len(), 1);
+    let chunk_query = &graph.chunk_queries[0];
+    assert_eq!(chunk_query.request_type(), QueryRequestType::Write);
+    assert!(chunk_query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES);
     assert!(matches!(
-        query
+        chunk_query
             .parameters()
             .and_then(|parameters| parameters.get("chunks")),
         Some(QueryValue::Array(values)) if values.len() == 2
     ));
 
-    let json = query.to_json_string().unwrap();
+    let setup_json = graph.setup_query.to_json_string().unwrap();
+    let chunk_json = chunk_query.to_json_string().unwrap();
     for value in [
         QUARRY_FILE_LABEL,
         FILE_VERSION_LABEL,
-        FILE_CHUNK_LABEL,
         HAS_VERSION_LABEL,
         CURRENT_VERSION_LABEL,
-        HAS_CHUNK_LABEL,
     ] {
-        assert!(json.contains(value));
+        assert!(setup_json.contains(value));
     }
-    assert!(!json.contains("\"Chunk\""));
-    assert!(!json.contains("document_id"));
-    assert!(!json.contains("ingestion_complete"));
+    for value in [FILE_CHUNK_LABEL, HAS_CHUNK_LABEL] {
+        assert!(chunk_json.contains(value));
+    }
+    assert!(!setup_json.contains("\"Chunk\""));
+    assert!(!chunk_json.contains("document_id"));
+    assert!(!chunk_json.contains("ingestion_complete"));
 }
 
 #[test]
 fn cleanup_is_scoped_to_the_indexed_version() {
-    let json = insert_file_version_graph(file(), version(), vec![chunk(1)])
-        .unwrap()
-        .to_json_string()
-        .unwrap();
+    let graph = insert_file_version_graph(file(), version(), vec![chunk(1)]).unwrap();
+    let json = graph.setup_query.to_json_string().unwrap();
 
     assert!(json.contains("removed_version_chunks"));
     assert!(json.contains("version_id"));
@@ -108,13 +112,32 @@ fn rejects_mismatched_graph_identity() {
 }
 
 #[test]
-fn rejects_an_oversized_atomic_request_without_splitting() {
+fn rejects_a_chunk_that_cannot_fit_in_its_own_request() {
     let mut oversized = chunk(1);
     oversized.text = "x".repeat(HELIX_MAX_QUERY_BODY_BYTES);
 
     let error = insert_file_version_graph(file(), version(), vec![oversized]).unwrap_err();
-    assert!(error.contains("atomic Helix file graph query"));
+    assert!(error.contains("Helix file chunk batch query"));
     assert!(error.contains(&HELIX_MAX_QUERY_BODY_BYTES.to_string()));
+}
+
+#[test]
+fn splits_large_graph_chunks_into_individually_safe_requests() {
+    let chunks = (1..=3)
+        .map(|index| {
+            let mut chunk = chunk(index);
+            chunk.text = "x".repeat(900_000);
+            chunk
+        })
+        .collect();
+
+    let graph = insert_file_version_graph(file(), version(), chunks).unwrap();
+
+    assert!(graph.chunk_queries.len() > 1);
+    assert!(graph
+        .chunk_queries
+        .iter()
+        .all(|query| query.to_json_bytes().unwrap().len() <= HELIX_MAX_QUERY_BODY_BYTES));
 }
 
 #[test]

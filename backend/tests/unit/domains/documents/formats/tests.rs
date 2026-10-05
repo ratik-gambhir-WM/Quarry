@@ -34,3 +34,21 @@ fn parser_requires_user_scope() {
 
     assert_eq!(error, "user_id cannot be empty");
 }
+
+#[test]
+fn upload_dispatch_selects_modern_office_formats_case_insensitively() {
+    let spreadsheet = QuarryFile::from_bytes("model.XLSX", b"bytes".to_vec()).unwrap();
+    let presentation = QuarryFile::from_bytes("board.PpTx", b"bytes".to_vec()).unwrap();
+
+    assert!(matches!(
+        spreadsheet,
+        QuarryFile::Spreadsheet { path: None, .. }
+    ));
+    assert!(matches!(
+        presentation,
+        QuarryFile::Powerpoint { path: None, .. }
+    ));
+    assert!(QuarryFile::from_bytes("legacy.xls", b"bytes".to_vec()).is_err());
+    assert!(QuarryFile::from_bytes("legacy.ppt", b"bytes".to_vec()).is_err());
+    assert!(QuarryFile::from_bytes("notes.txt", b"bytes".to_vec()).is_err());
+}

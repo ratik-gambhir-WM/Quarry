@@ -1112,6 +1112,58 @@ async fn process_file_accepts_image_uploads_at_the_handler_boundary() {
 }
 
 #[tokio::test]
+async fn process_file_accepts_modern_office_extensions_on_both_api_mounts() {
+    for (path, filename) in [
+        (
+            "/api/v1/deals/DEAL-PATH/documents/process_file",
+            "model.XLSX",
+        ),
+        ("/api/deals/DEAL-PATH/documents/process_file", "board.pptx"),
+    ] {
+        const BOUNDARY: &str = "quarry-office-upload-boundary";
+        let multipart = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\nbytes\r\n--{BOUNDARY}--\r\n"
+        );
+        let response = test_router()
+            .oneshot(
+                Request::post(path)
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={BOUNDARY}"),
+                    )
+                    .body(Body::from(multipart))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED, "{filename}");
+    }
+}
+
+#[tokio::test]
+async fn process_file_rejects_legacy_office_extensions_at_the_handler_boundary() {
+    for filename in ["legacy.xls", "legacy.ppt"] {
+        const BOUNDARY: &str = "quarry-legacy-office-upload-boundary";
+        let multipart = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\n\r\nbytes\r\n--{BOUNDARY}--\r\n"
+        );
+        let response = test_router()
+            .oneshot(
+                Request::post("/api/v1/deals/DEAL-PATH/documents/process_file")
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={BOUNDARY}"),
+                    )
+                    .body(Body::from(multipart))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{filename}");
+    }
+}
+
+#[tokio::test]
 async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
     const BOUNDARY: &str = "quarry-blank-document-user";
     let multipart = format!(

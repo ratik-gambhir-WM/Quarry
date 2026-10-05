@@ -1,11 +1,13 @@
-use std::{io::Read, path::Path};
+use std::path::Path;
 
 use axum::extract::Multipart;
-use zip::ZipArchive;
 
 use crate::{
     app::http::error::{AppError, AppResult},
-    shared::file_policy::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
+    shared::{
+        file_policy::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
+        office_zip::{validate_office_package, OfficeDocumentKind},
+    },
 };
 
 use super::model::{
@@ -14,10 +16,6 @@ use super::model::{
 };
 
 const MAX_FILES: usize = 20;
-const MAX_ZIP_ENTRIES: usize = 2_048;
-const MAX_ZIP_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_ZIP_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
-const MAX_CONTENT_TYPES_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub struct ChatUpload {
@@ -288,15 +286,15 @@ fn validate_upload(raw: RawUpload) -> AppResult<ChatUpload> {
         {
             ("application/msword", ChatUploadKind::File)
         }
-        "docx" if valid_office_zip(&raw.bytes, OfficeFamily::Word)? => (
+        "docx" if valid_office_zip(&raw.bytes, OfficeDocumentKind::Word) => (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ChatUploadKind::File,
         ),
-        "pptx" if valid_office_zip(&raw.bytes, OfficeFamily::PowerPoint)? => (
+        "pptx" if valid_office_zip(&raw.bytes, OfficeDocumentKind::PowerPoint) => (
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ChatUploadKind::File,
         ),
-        "xlsx" if valid_office_zip(&raw.bytes, OfficeFamily::Excel)? => (
+        "xlsx" if valid_office_zip(&raw.bytes, OfficeDocumentKind::Spreadsheet) => (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ChatUploadKind::File,
         ),
@@ -402,63 +400,8 @@ fn skip_sub_blocks(bytes: &[u8], offset: &mut usize) -> bool {
     }
 }
 
-enum OfficeFamily {
-    Word,
-    PowerPoint,
-    Excel,
-}
-
-fn valid_office_zip(bytes: &[u8], family: OfficeFamily) -> AppResult<bool> {
-    let cursor = std::io::Cursor::new(bytes);
-    let mut archive = match ZipArchive::new(cursor) {
-        Ok(archive) => archive,
-        Err(_) => return Ok(false),
-    };
-    if archive.len() > MAX_ZIP_ENTRIES {
-        return Ok(false);
-    }
-    let expected = match family {
-        OfficeFamily::Word => "word/document.xml",
-        OfficeFamily::PowerPoint => "ppt/presentation.xml",
-        OfficeFamily::Excel => "xl/workbook.xml",
-    };
-    let mut has_expected = false;
-    let mut content_types = None;
-    let mut total = 0u64;
-    for index in 0..archive.len() {
-        let entry = archive
-            .by_index(index)
-            .map_err(|_| AppError::bad_request("invalid Office archive"))?;
-        if entry.size() > MAX_ZIP_ENTRY_BYTES {
-            return Ok(false);
-        }
-        total = total
-            .checked_add(entry.size())
-            .ok_or_else(|| AppError::bad_request("Office archive is too large"))?;
-        if total > MAX_ZIP_TOTAL_BYTES {
-            return Ok(false);
-        }
-        if entry.name() == expected {
-            has_expected = true;
-        }
-        if entry.name() == "[Content_Types].xml" {
-            if entry.size() > MAX_CONTENT_TYPES_BYTES as u64 {
-                return Ok(false);
-            }
-            let mut text = String::new();
-            entry
-                .take(MAX_CONTENT_TYPES_BYTES as u64 + 1)
-                .read_to_string(&mut text)
-                .map_err(|_| AppError::bad_request("invalid Office content types"))?;
-            content_types = Some(text);
-        }
-    }
-    let marker = match family {
-        OfficeFamily::Word => "wordprocessingml.document",
-        OfficeFamily::PowerPoint => "presentationml.presentation",
-        OfficeFamily::Excel => "spreadsheetml.sheet",
-    };
-    Ok(has_expected && content_types.is_some_and(|types| types.contains(marker)))
+fn valid_office_zip(bytes: &[u8], kind: OfficeDocumentKind) -> bool {
+    validate_office_package(bytes, kind).is_ok()
 }
 
 #[cfg(test)]
