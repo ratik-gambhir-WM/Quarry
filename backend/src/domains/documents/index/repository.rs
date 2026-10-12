@@ -138,20 +138,17 @@ impl DocumentIndexWriter {
         &self,
         prepared: PreparedDocumentGraph,
     ) -> Result<Value, RepositoryError> {
-        let setup_result = self
-            .helix
-            .execute_write_query(
+        self.helix
+            .execute_write_query::<Value>(
                 "helix.file_version.insert_setup",
                 prepared.graph_write.setup_query,
             )
             .await
             .map_err(RepositoryError::storage)?;
         let batch_count = prepared.graph_write.chunk_queries.len();
-        let mut last_result = setup_result;
         for (batch_index, query) in prepared.graph_write.chunk_queries.into_iter().enumerate() {
-            last_result = self
-                .helix
-                .execute_write_query("helix.file_version.insert_chunk_batch", query)
+            self.helix
+                .execute_write_query::<Value>("helix.file_version.insert_chunk_batch", query)
                 .await
                 .map_err(|error| {
                     RepositoryError::storage(format!(
@@ -160,7 +157,17 @@ impl DocumentIndexWriter {
                     ))
                 })?;
         }
-        Ok(last_result)
+        self.helix
+            .execute_write_query(
+                "helix.file_version.publish",
+                prepared.graph_write.publish_query,
+            )
+            .await
+            .map_err(|error| {
+                RepositoryError::storage(format!(
+                    "failed to publish Helix file version after indexing {batch_count} chunk batch(es): {error}"
+                ))
+            })
     }
 }
 

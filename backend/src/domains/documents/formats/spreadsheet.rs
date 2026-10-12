@@ -1,12 +1,14 @@
 use std::{
     fs,
-    io::Cursor,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
 };
 
 use calamine::{open_workbook_auto_from_rs, Data, Reader};
+use roxmltree::Document as XmlDocument;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+use zip::ZipArchive;
 
 use crate::{
     domains::documents::{
@@ -15,9 +17,15 @@ use crate::{
     },
     shared::{
         ids::document_id_from_content,
-        office_zip::{validate_office_package, OfficeDocumentKind},
+        office_zip::{validate_office_package, OfficeDocumentKind, MAX_OFFICE_ZIP_ENTRY_BYTES},
     },
 };
+
+const MAX_EXCEL_COLUMN: u32 = 16_384;
+const MAX_EXCEL_ROW: u32 = 1_048_576;
+// Calamine materializes a dense range from the outermost populated cells. Keep
+// that allocation and the row-by-row text extraction bounded for an upload.
+const MAX_SPREADSHEET_RANGE_CELLS: u64 = 1_000_000;
 
 #[derive(Debug, Clone)]
 pub struct SpreadsheetAssembly {
@@ -37,6 +45,40 @@ struct SheetTextRange {
     name: String,
     start_offset: usize,
     end_offset: usize,
+}
+
+#[derive(Default)]
+struct SpreadsheetCellBounds {
+    first_row: Option<u32>,
+    last_row: Option<u32>,
+    first_column: Option<u32>,
+    last_column: Option<u32>,
+}
+
+impl SpreadsheetCellBounds {
+    fn include(&mut self, row: u32, column: u32) {
+        self.first_row = Some(self.first_row.map_or(row, |first| first.min(row)));
+        self.last_row = Some(self.last_row.map_or(row, |last| last.max(row)));
+        self.first_column = Some(self.first_column.map_or(column, |first| first.min(column)));
+        self.last_column = Some(self.last_column.map_or(column, |last| last.max(column)));
+    }
+
+    fn area(&self) -> Result<u64, String> {
+        let (Some(first_row), Some(last_row), Some(first_column), Some(last_column)) = (
+            self.first_row,
+            self.last_row,
+            self.first_column,
+            self.last_column,
+        ) else {
+            return Ok(0);
+        };
+
+        let row_count = u64::from(last_row - first_row + 1);
+        let column_count = u64::from(last_column - first_column + 1);
+        row_count
+            .checked_mul(column_count)
+            .ok_or_else(|| "Excel worksheet cell range overflows u64".to_string())
+    }
 }
 
 /// Parses an XLSX package from borrowed upload bytes.
@@ -107,6 +149,7 @@ pub fn parse_spreadsheet_chunks_from_bytes(
 }
 
 fn parse_spreadsheet_rows_from_bytes(bytes: &[u8]) -> Result<Vec<SpreadsheetRow>, String> {
+    validate_spreadsheet_cell_ranges(bytes).map_err(|_| "invalid Excel workbook".to_string())?;
     let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes))
         .map_err(|_| "invalid Excel workbook".to_string())?;
     let mut rows = Vec::new();
@@ -125,6 +168,95 @@ fn parse_spreadsheet_rows_from_bytes(bytes: &[u8]) -> Result<Vec<SpreadsheetRow>
     }
 
     Ok(rows)
+}
+
+fn validate_spreadsheet_cell_ranges(bytes: &[u8]) -> Result<(), String> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|_| "invalid Excel workbook".to_string())?;
+    let mut total_range_cells = 0_u64;
+
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| "invalid Excel workbook".to_string())?;
+        if !is_worksheet_entry_name(entry.name()) {
+            continue;
+        }
+
+        let mut worksheet_xml = Vec::new();
+        let bytes_read = (&mut entry)
+            .take(MAX_OFFICE_ZIP_ENTRY_BYTES.saturating_add(1))
+            .read_to_end(&mut worksheet_xml)
+            .map_err(|_| "invalid Excel workbook".to_string())?;
+        if bytes_read as u64 > MAX_OFFICE_ZIP_ENTRY_BYTES {
+            return Err("invalid Excel workbook".to_string());
+        }
+
+        let range_cells = worksheet_cell_range_area(&worksheet_xml)?;
+        total_range_cells = total_range_cells
+            .checked_add(range_cells)
+            .ok_or_else(|| "Excel workbook cell ranges overflow u64".to_string())?;
+        if total_range_cells > MAX_SPREADSHEET_RANGE_CELLS {
+            return Err("Excel workbook cell ranges exceed the supported limit".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn is_worksheet_entry_name(entry_name: &str) -> bool {
+    entry_name.starts_with("xl/worksheets/") && entry_name.ends_with(".xml")
+}
+
+fn worksheet_cell_range_area(worksheet_xml: &[u8]) -> Result<u64, String> {
+    let worksheet_xml =
+        std::str::from_utf8(worksheet_xml).map_err(|_| "invalid Excel workbook".to_string())?;
+    let worksheet =
+        XmlDocument::parse(worksheet_xml).map_err(|_| "invalid Excel workbook".to_string())?;
+    let mut bounds = SpreadsheetCellBounds::default();
+
+    for cell in worksheet
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "c")
+    {
+        let reference = cell
+            .attribute("r")
+            .ok_or_else(|| "Excel cell is missing its coordinate".to_string())?;
+        let (row, column) = excel_cell_coordinate(reference)?;
+        bounds.include(row, column);
+    }
+
+    bounds.area()
+}
+
+fn excel_cell_coordinate(reference: &str) -> Result<(u32, u32), String> {
+    let first_digit = reference
+        .bytes()
+        .position(|byte| byte.is_ascii_digit())
+        .ok_or_else(|| "invalid Excel cell coordinate".to_string())?;
+    let (column_label, row_label) = reference.split_at(first_digit);
+    if column_label.is_empty()
+        || row_label.is_empty()
+        || !column_label.bytes().all(|byte| byte.is_ascii_uppercase())
+        || !row_label.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err("invalid Excel cell coordinate".to_string());
+    }
+
+    let column = column_label.bytes().try_fold(0_u32, |column, byte| {
+        column
+            .checked_mul(26)
+            .and_then(|column| column.checked_add(u32::from(byte - b'A' + 1)))
+            .ok_or_else(|| "Excel column coordinate overflows u32".to_string())
+    })?;
+    let row = row_label
+        .parse::<u32>()
+        .map_err(|_| "invalid Excel row coordinate".to_string())?;
+    if row == 0 || row > MAX_EXCEL_ROW || column == 0 || column > MAX_EXCEL_COLUMN {
+        return Err("Excel cell coordinate is outside worksheet bounds".to_string());
+    }
+
+    Ok((row, column))
 }
 
 fn rows_to_text(rows: Vec<SpreadsheetRow>) -> String {

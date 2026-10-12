@@ -994,6 +994,10 @@ in the current upload path is narrower than the versioned graph shape suggests:
 - The repository and schema support later versions when the caller explicitly reuses a `file_id`,
   but ordinary changed-content upload does not currently identify the earlier logical file and
   therefore does not create version 2.
+- Helix setup can create the immutable version node and replace its chunks, but adds its
+  `HAS_VERSION` and `CURRENT_VERSION` edges only in a final publication write after every bounded
+  chunk batch succeeds. A failed graph write therefore leaves the incomplete version unreferenced
+  and preserves an older published version when one exists.
 
 Vector and keyword search query this projection.
 
@@ -1018,9 +1022,9 @@ completed entirely with repository tooling. `clear_helix` is not part of normal 
 Document persistence is not a distributed transaction:
 
 1. Validate parser-derived identities and chunk invariants.
-2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request plus contiguous chunk-batch requests, and rejects it before SQLite persistence only when the setup request or an individual chunk cannot fit within the 2 MiB writer cap.
+2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence only when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
 3. Commit the logical file/version/blob aggregate in SQLite and confirm the returned identity matches the prepared plan.
-4. Submit the retained, already-preflighted setup request followed by its size-bounded chunk-batch writes through the process-serialized Helix client.
+4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
 5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
 
 The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
@@ -1088,18 +1092,20 @@ sequenceDiagram
     Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
     Ingestion->>AI: embed chunk text
     AI-->>Ingestion: embeddings
-    Ingestion->>H: preflight setup and chunk-batch graph requests
+    Ingestion->>H: preflight setup, chunk-batch, and publication graph requests
     Ingestion->>SQL: transactionally persist file/version/blob
     SQL-->>Ingestion: committed file/version identities
-    Ingestion->>H: insert versioned file graph and bounded chunk batches
+    Ingestion->>H: insert version graph, bounded chunks, then publish it
     H-->>Ingestion: indexed or recoverable error
     Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
 
 PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path.
-Image decoding and document parsing run on blocking workers. XLSX uses a byte-native Calamine
-reader; PPTX reads validated slide XML directly from the uploaded ZIP bytes. A two-permit
+Image decoding and document parsing run on blocking workers. XLSX preflights every worksheet's
+actual cell coordinates before Calamine materializes its dense range; total worksheet range area
+is limited to one million cells per workbook. PPTX resolves slide order from validated presentation
+relationships and reads slide XML directly from the uploaded ZIP bytes. A two-permit
 ingestion-local Office gate covers XLSX/PPTX ZIP inspection and parsing. Before either Office parser
 runs, one shared central-directory inspector (also used by chat attachments) requires the expected
 package root and OOXML content-type marker, permits at most 2,048 entries, 16 MiB per declared
@@ -1112,7 +1118,7 @@ Before calling OpenAI, ingestion groups chunks in their original order into requ
 300,000 aggregate tokens and 2,048 inputs. Independent requests run with a service-wide limit of
 two in flight; their returned vectors are assigned to their original chunk ranges before the
 SQLite/Helix persistence plan is built. The plan validates every Helix request before SQLite
-commits, then executes the graph setup and chunk batches sequentially. Thus an error in any
+commits, then executes graph setup, chunk batches, and final publication sequentially. Thus an error in any
 embedding request leaves no partial document persistence.
 
 ### 10.3 Stored preview

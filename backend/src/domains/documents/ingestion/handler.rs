@@ -35,6 +35,11 @@ pub(crate) struct ProcessFileJobResponse {
     filename: String,
 }
 
+/*
+TODO: We need to enhance performance here for text-heavy documents.
+It works but is pretty slow right now, but I'm going to come back to this
+*/
+
 pub(super) async fn process_documents_handler(
     State(state): State<DocumentIngestionHttpState>,
     Path(deal_id): Path<String>,

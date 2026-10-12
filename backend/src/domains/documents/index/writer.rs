@@ -35,6 +35,7 @@ pub const HELIX_MAX_QUERY_BODY_BYTES: usize = 2_097_152;
 pub(crate) struct FileVersionGraphWrite {
     pub(crate) setup_query: QueryRequest,
     pub(crate) chunk_queries: Vec<QueryRequest>,
+    pub(crate) publish_query: QueryRequest,
 }
 
 pub(crate) fn insert_file_version_graph(
@@ -46,9 +47,11 @@ pub(crate) fn insert_file_version_graph(
 
     let setup_query = setup_file_version_graph_query(&file, &version)?;
     let chunk_queries = chunk_batch_queries(&file, &version, &chunks)?;
+    let publish_query = publish_file_version_graph_query(&file, &version)?;
     Ok(FileVersionGraphWrite {
         setup_query,
         chunk_queries,
+        publish_query,
     })
 }
 
@@ -135,6 +138,39 @@ fn setup_file_version_graph_route(
                 .project(file_version_projection()),
         )
         .var_as(
+            "removed_version_chunks",
+            g().n_with_label(FILE_CHUNK_LABEL)
+                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("version_id", "version_id"))
+                .drop(),
+        )
+        .returning(["file", "version", "removed_version_chunks"])
+}
+
+#[query]
+fn publish_file_version_graph_route(
+    workspace_id: String,
+    file_id: String,
+    version_id: String,
+) -> WriteBatch {
+    let _ = (&workspace_id, &file_id, &version_id);
+
+    write_batch()
+        .var_as(
+            "canonical_file",
+            g().n_with_label(QUARRY_FILE_LABEL)
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
+        )
+        .var_as(
+            "canonical_version",
+            g().n_with_label(FILE_VERSION_LABEL)
+                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("file_id", "file_id"))
+                .where_(Predicate::eq_param("version_id", "version_id")),
+        )
+        .var_as(
             "removed_has_version",
             g().n(NodeRef::var("canonical_file"))
                 .drop_edge_labeled(NodeRef::var("canonical_version"), HAS_VERSION_LABEL),
@@ -165,22 +201,11 @@ fn setup_file_version_graph_route(
                 Vec::<(&str, PropertyInput)>::new(),
             ),
         )
-        .var_as(
-            "removed_version_chunks",
-            g().n_with_label(FILE_CHUNK_LABEL)
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("version_id", "version_id"))
-                .drop(),
-        )
         .returning([
-            "file",
-            "version",
             "removed_has_version",
             "added_has_version",
             "removed_current_version",
             "added_current_version",
-            "removed_version_chunks",
         ])
 }
 
@@ -272,59 +297,86 @@ fn setup_file_version_graph_query(
     Ok(query)
 }
 
+fn publish_file_version_graph_query(
+    file: &FileNode,
+    version: &FileVersionNode,
+) -> Result<QueryRequest, String> {
+    let query = publish_file_version_graph_route(
+        file.workspace_id.clone(),
+        file.file_id.clone(),
+        version.version_id.clone(),
+    )
+    .map_err(|error| format!("failed to construct Helix file-version publish query: {error}"))?;
+    validate_query_payload_size(
+        &query,
+        HELIX_MAX_QUERY_BODY_BYTES,
+        "Helix file-version publish query",
+    )?;
+    Ok(query)
+}
+
 fn chunk_batch_queries(
     file: &FileNode,
     version: &FileVersionNode,
     chunks: &[FileChunkNode],
 ) -> Result<Vec<QueryRequest>, String> {
-    let chunk_params = chunks.iter().map(file_chunk_params).collect::<Vec<_>>();
+    let empty_query = insert_file_version_chunk_batch_query(file, version, Vec::new())?;
+    let empty_payload_bytes = serialized_query_payload_bytes(&empty_query)?;
     let mut queries = Vec::new();
-    let mut batch_start = 0;
+    let mut batch = Vec::new();
+    let mut batch_payload_bytes = empty_payload_bytes;
 
-    while batch_start < chunk_params.len() {
-        let mut low = batch_start + 1;
-        let mut high = chunk_params.len();
-        let mut batch_end = None;
+    for chunk in chunks {
+        let chunk_param = file_chunk_params(chunk);
+        let chunk_payload_bytes = serialized_chunk_param_contribution_bytes(
+            file,
+            version,
+            &chunk_param,
+            empty_payload_bytes,
+        )?;
+        let candidate_payload_bytes = next_chunk_batch_payload_bytes(
+            batch_payload_bytes,
+            !batch.is_empty(),
+            chunk_payload_bytes,
+        )?;
 
-        while low <= high {
-            let candidate_end = low + (high - low) / 2;
-            let candidate = insert_file_version_chunk_batch_query(
-                file,
-                version,
-                &chunk_params[batch_start..candidate_end],
-            )?;
-            if serialized_query_payload_bytes(&candidate)? <= HELIX_MAX_QUERY_BODY_BYTES {
-                batch_end = Some(candidate_end);
-                low = candidate_end + 1;
-            } else {
-                high = candidate_end - 1;
-            }
+        if candidate_payload_bytes <= HELIX_MAX_QUERY_BODY_BYTES {
+            batch.push(chunk_param);
+            batch_payload_bytes = candidate_payload_bytes;
+            continue;
         }
 
-        let Some(batch_end) = batch_end else {
-            let query = insert_file_version_chunk_batch_query(
-                file,
-                version,
-                &chunk_params[batch_start..batch_start + 1],
-            )?;
+        if batch.is_empty() {
+            let query = insert_file_version_chunk_batch_query(file, version, vec![chunk_param])?;
             return Err(oversized_query_error(
                 &query,
                 HELIX_MAX_QUERY_BODY_BYTES,
                 "Helix file chunk batch query",
             )?);
-        };
-        let query = insert_file_version_chunk_batch_query(
-            file,
-            version,
-            &chunk_params[batch_start..batch_end],
-        )?;
+        }
+
+        let query =
+            insert_file_version_chunk_batch_query(file, version, std::mem::take(&mut batch))?;
         validate_query_payload_size(
             &query,
             HELIX_MAX_QUERY_BODY_BYTES,
             "Helix file chunk batch query",
         )?;
         queries.push(query);
-        batch_start = batch_end;
+
+        batch_payload_bytes =
+            next_chunk_batch_payload_bytes(empty_payload_bytes, false, chunk_payload_bytes)?;
+        batch.push(chunk_param);
+    }
+
+    if !batch.is_empty() {
+        let query = insert_file_version_chunk_batch_query(file, version, batch)?;
+        validate_query_payload_size(
+            &query,
+            HELIX_MAX_QUERY_BODY_BYTES,
+            "Helix file chunk batch query",
+        )?;
+        queries.push(query);
     }
 
     Ok(queries)
@@ -333,15 +385,38 @@ fn chunk_batch_queries(
 fn insert_file_version_chunk_batch_query(
     file: &FileNode,
     version: &FileVersionNode,
-    chunks: &[ParamObject],
+    chunks: Vec<ParamObject>,
 ) -> Result<QueryRequest, String> {
     insert_file_version_chunk_batch_route(
         file.workspace_id.clone(),
         file.file_id.clone(),
         version.version_id.clone(),
-        chunks.to_vec(),
+        chunks,
     )
     .map_err(|error| format!("failed to construct Helix file chunk batch query: {error}"))
+}
+
+fn serialized_chunk_param_contribution_bytes(
+    file: &FileNode,
+    version: &FileVersionNode,
+    chunk: &ParamObject,
+    empty_payload_bytes: usize,
+) -> Result<usize, String> {
+    let query = insert_file_version_chunk_batch_query(file, version, vec![chunk.clone()])?;
+    serialized_query_payload_bytes(&query)?
+        .checked_sub(empty_payload_bytes)
+        .ok_or_else(|| "Helix file chunk parameter serialization underflowed usize".to_string())
+}
+
+fn next_chunk_batch_payload_bytes(
+    current_payload_bytes: usize,
+    has_existing_chunks: bool,
+    chunk_payload_bytes: usize,
+) -> Result<usize, String> {
+    current_payload_bytes
+        .checked_add(usize::from(has_existing_chunks))
+        .and_then(|bytes| bytes.checked_add(chunk_payload_bytes))
+        .ok_or_else(|| "Helix file chunk batch payload size overflowed usize".to_string())
 }
 
 fn version_by_immutable_identity() -> Traversal<OnNodes> {

@@ -1920,6 +1920,7 @@ dependencies = [
  "pdf-extract",
  "pptx-to-md",
  "reqwest",
+ "roxmltree",
  "rusqlite",
  "serde",
  "serde_json",

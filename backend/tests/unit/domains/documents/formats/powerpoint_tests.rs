@@ -85,20 +85,52 @@ fn parses_pptx_bytes_into_a_pathless_graph_ready_assembly() {
 }
 
 #[test]
+fn follows_the_presentation_relationship_order_not_the_slide_filenames() {
+    let bytes = pptx_bytes_with_presentation_order(["rId2", "rId1"]);
+
+    let text = parse_powerpoint_from_bytes(&bytes).unwrap();
+    let assembly = parse_powerpoint_chunks_from_bytes(&bytes, None, "user-1").unwrap();
+
+    assert_eq!(text, "Slide 1\nSecond slide\n\n\nSlide 2\nFirst slide\n");
+    assert_eq!(assembly.chunks[0].page_numbers, Some(vec![1, 2]));
+}
+
+#[test]
 fn rejects_invalid_pptx_bytes_with_a_sanitized_error() {
     let error = parse_powerpoint_from_bytes(b"not a PowerPoint").unwrap_err();
     assert_eq!(error, "invalid PowerPoint presentation");
 }
 
 fn pptx_bytes() -> Vec<u8> {
+    pptx_bytes_with_presentation_order(["rId1", "rId2"])
+}
+
+fn pptx_bytes_with_presentation_order(
+    presentation_order: impl IntoIterator<Item = &'static str>,
+) -> Vec<u8> {
     let mut bytes = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut bytes);
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("[Content_Types].xml", options).unwrap();
         zip.write_all(b"<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slides/slide1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/><Override PartName=\"/ppt/slides/slide2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/></Types>").unwrap();
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(b"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"ppt/presentation.xml\"/></Relationships>").unwrap();
         zip.start_file("ppt/presentation.xml", options).unwrap();
-        zip.write_all(b"<p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"/>").unwrap();
+        let slide_ids = presentation_order
+            .into_iter()
+            .enumerate()
+            .map(|(index, relationship_id)| {
+                format!(
+                    "<p:sldId id=\"{}\" r:id=\"{relationship_id}\"/>",
+                    256 + index
+                )
+            })
+            .collect::<String>();
+        zip.write_all(format!("<p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><p:sldIdLst>{slide_ids}</p:sldIdLst></p:presentation>").as_bytes()).unwrap();
+        zip.start_file("ppt/_rels/presentation.xml.rels", options)
+            .unwrap();
+        zip.write_all(b"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide2.xml\"/></Relationships>").unwrap();
         zip.start_file("ppt/slides/slide1.xml", options).unwrap();
         zip.write_all(slide_xml("First slide", 10).as_bytes())
             .unwrap();

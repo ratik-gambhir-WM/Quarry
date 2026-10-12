@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     io::{Cursor, Read},
     path::{Path, PathBuf},
 };
 
 use pptx_to_md::{parse_xml::parse_slide_xml, SlideElement};
+use roxmltree::Document as XmlDocument;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -34,6 +36,16 @@ struct SlideTextRange {
     start_offset: usize,
     end_offset: usize,
 }
+
+const PRESENTATION_ENTRY_NAME: &str = "ppt/presentation.xml";
+const PRESENTATION_RELATIONSHIPS_ENTRY_NAME: &str = "ppt/_rels/presentation.xml.rels";
+const PRESENTATIONML_NAMESPACE: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const OFFICE_DOCUMENT_RELATIONSHIPS_NAMESPACE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const PACKAGE_RELATIONSHIPS_NAMESPACE: &str =
+    "http://schemas.openxmlformats.org/package/2006/relationships";
+const SLIDE_RELATIONSHIP_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
 
 /// Compatibility wrapper for callers that intentionally parse a local PPTX.
 pub fn parse_powerpoint_file(path: &Path) -> Result<String, String> {
@@ -95,20 +107,13 @@ fn parse_powerpoint_text_from_bytes(bytes: &[u8]) -> Result<(String, Vec<SlideTe
         .map_err(|_| "invalid PowerPoint presentation".to_string())?;
     let mut archive = ZipArchive::new(Cursor::new(bytes))
         .map_err(|_| "invalid PowerPoint presentation".to_string())?;
-    let mut slide_entries = Vec::new();
-    for index in 0..archive.len() {
-        let entry = archive
-            .by_index(index)
-            .map_err(|_| "invalid PowerPoint presentation".to_string())?;
-        if let Some(slide_number) = slide_number_from_entry_name(entry.name()) {
-            slide_entries.push((slide_number, entry.name().to_string()));
-        }
-    }
-    slide_entries.sort_by_key(|(slide_number, _)| *slide_number);
+    let slide_entries = presentation_slide_entries(&mut archive)?;
 
     let mut text = String::new();
     let mut slide_ranges = Vec::new();
-    for (slide_number, entry_name) in slide_entries {
+    for (index, entry_name) in slide_entries.into_iter().enumerate() {
+        let slide_number =
+            u32::try_from(index + 1).map_err(|_| "invalid PowerPoint presentation".to_string())?;
         let mut slide_bytes = Vec::new();
         archive
             .by_name(&entry_name)
@@ -140,12 +145,99 @@ fn parse_powerpoint_text_from_bytes(bytes: &[u8]) -> Result<(String, Vec<SlideTe
     }
 }
 
-fn slide_number_from_entry_name(entry_name: &str) -> Option<u32> {
-    entry_name
-        .strip_prefix("ppt/slides/slide")?
-        .strip_suffix(".xml")?
-        .parse()
-        .ok()
+fn presentation_slide_entries(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+) -> Result<Vec<String>, String> {
+    let presentation_xml = read_zip_entry(archive, PRESENTATION_ENTRY_NAME)?;
+    let presentation = parse_presentation_xml(&presentation_xml)?;
+    let relationships = parse_presentation_relationships(&read_zip_entry(
+        archive,
+        PRESENTATION_RELATIONSHIPS_ENTRY_NAME,
+    )?)?;
+    let mut relationship_ids = HashSet::new();
+    let mut entries = Vec::new();
+
+    for slide_id in presentation.descendants().filter(|node| {
+        node.is_element()
+            && node.tag_name().namespace() == Some(PRESENTATIONML_NAMESPACE)
+            && node.tag_name().name() == "sldId"
+    }) {
+        let relationship_id = slide_id
+            .attribute((OFFICE_DOCUMENT_RELATIONSHIPS_NAMESPACE, "id"))
+            .ok_or_else(|| "invalid PowerPoint presentation".to_string())?;
+        if !relationship_ids.insert(relationship_id) {
+            return Err("invalid PowerPoint presentation".to_string());
+        }
+        let target = relationships
+            .get(relationship_id)
+            .ok_or_else(|| "invalid PowerPoint presentation".to_string())?;
+        entries.push(presentation_slide_entry_name(target)?);
+    }
+
+    if entries.is_empty() {
+        return Err("PPTX did not contain readable text".to_string());
+    }
+    Ok(entries)
+}
+
+fn parse_presentation_xml(xml: &[u8]) -> Result<XmlDocument<'_>, String> {
+    let xml =
+        std::str::from_utf8(xml).map_err(|_| "invalid PowerPoint presentation".to_string())?;
+    XmlDocument::parse(xml).map_err(|_| "invalid PowerPoint presentation".to_string())
+}
+
+fn parse_presentation_relationships(xml: &[u8]) -> Result<HashMap<String, String>, String> {
+    let relationships = parse_presentation_xml(xml)?;
+    let mut targets = HashMap::new();
+
+    for relationship in relationships.descendants().filter(|node| {
+        node.is_element()
+            && node.tag_name().namespace() == Some(PACKAGE_RELATIONSHIPS_NAMESPACE)
+            && node.tag_name().name() == "Relationship"
+            && node.attribute("Type") == Some(SLIDE_RELATIONSHIP_TYPE)
+    }) {
+        if relationship.attribute("TargetMode") == Some("External") {
+            return Err("invalid PowerPoint presentation".to_string());
+        }
+        let relationship_id = relationship
+            .attribute("Id")
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "invalid PowerPoint presentation".to_string())?;
+        let target = relationship
+            .attribute("Target")
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "invalid PowerPoint presentation".to_string())?;
+        if targets
+            .insert(relationship_id.to_string(), target.to_string())
+            .is_some()
+        {
+            return Err("invalid PowerPoint presentation".to_string());
+        }
+    }
+
+    Ok(targets)
+}
+
+fn presentation_slide_entry_name(target: &str) -> Result<String, String> {
+    let entry_name = format!("ppt/{target}");
+    if !entry_name.starts_with("ppt/slides/") || !entry_name.ends_with(".xml") {
+        return Err("invalid PowerPoint presentation".to_string());
+    }
+    Ok(entry_name)
+}
+
+fn read_zip_entry(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    entry_name: &str,
+) -> Result<Vec<u8>, String> {
+    let mut entry = archive
+        .by_name(entry_name)
+        .map_err(|_| "invalid PowerPoint presentation".to_string())?;
+    let mut bytes = Vec::new();
+    entry
+        .read_to_end(&mut bytes)
+        .map_err(|_| "invalid PowerPoint presentation".to_string())?;
+    Ok(bytes)
 }
 
 fn ensure_supported_powerpoint_file(path: &Path) -> Result<(), String> {

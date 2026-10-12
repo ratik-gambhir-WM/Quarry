@@ -89,6 +89,19 @@ fn rejects_empty_invalid_and_textless_xlsx_bytes() {
     );
 }
 
+#[test]
+fn rejects_a_sparse_xlsx_before_calamine_materializes_its_dense_range() {
+    let bytes = xlsx_bytes_with_contents(
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>First</t></is></c></row><row r=\"1048576\"><c r=\"XFD1048576\" t=\"inlineStr\"><is><t>Last</t></is></c></row>",
+        "",
+    );
+
+    assert_eq!(
+        parse_spreadsheet_from_bytes(&bytes),
+        Err("invalid Excel workbook".to_string())
+    );
+}
+
 fn xlsx_bytes() -> Vec<u8> {
     xlsx_bytes_with_contents("<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Name</t></is></c><c r=\"B1\" t=\"inlineStr\"><is><t>Amount</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>Acme</t></is></c><c r=\"B2\"><v>42</v></c></row>", "Follow up")
 }
