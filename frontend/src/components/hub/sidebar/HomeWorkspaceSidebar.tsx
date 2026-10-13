@@ -37,6 +37,13 @@ export function HomeWorkspaceSidebarNavigation({
       <nav className="space-y-1">
         <SidebarLink
           homeSection={activeHomeSection}
+          href="/hub"
+          icon="home"
+          label="Home"
+          navigationState={navigationState}
+        />
+        <SidebarLink
+          homeSection={activeHomeSection}
           href="/hub/initiatives/vault"
           icon="folderOpen"
           label="Vault"

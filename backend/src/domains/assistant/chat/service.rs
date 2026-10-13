@@ -10,7 +10,10 @@ use tokio::sync::mpsc;
 use crate::{
     adapters::openai::client::{ChatMessageInput, ChatRole, OpenAiClient, ResponsesFileInput},
     domains::users::UserDirectory,
-    shared::error::{RepositoryError, ServiceError, ServiceResult},
+    shared::{
+        error::{RepositoryError, ServiceError, ServiceResult},
+        prompts::{PromptCatalog, PromptId},
+    },
 };
 
 pub use super::repository::{AssistantThread, AssistantThreadDetail};
@@ -24,7 +27,6 @@ use super::{
     upload::ChatUploadKind,
 };
 
-const DEFAULT_CHAT_INSTRUCTIONS: &str = "You are a helpful assistant.";
 const EVENT_CHANNEL_CAPACITY: usize = 32;
 
 pub struct AssistantChatService {
@@ -32,15 +34,21 @@ pub struct AssistantChatService {
     users: Option<UserDirectory>,
     openai: Option<Arc<OpenAiClient>>,
     model: String,
+    prompts: Arc<PromptCatalog>,
 }
 
 impl AssistantChatService {
-    pub fn new(openai: Option<Arc<OpenAiClient>>, model: String) -> Self {
+    pub fn new(
+        openai: Option<Arc<OpenAiClient>>,
+        model: String,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
         Self {
             repository: None,
             users: None,
             openai,
             model,
+            prompts,
         }
     }
 
@@ -49,12 +57,14 @@ impl AssistantChatService {
         model: String,
         repository: AssistantChatRepository,
         users: UserDirectory,
+        prompts: Arc<PromptCatalog>,
     ) -> Self {
         Self {
             repository: Some(repository),
             users: Some(users),
             openai,
             model,
+            prompts,
         }
     }
 
@@ -65,9 +75,11 @@ impl AssistantChatService {
             .cloned()
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
         let model = input.model.unwrap_or_else(|| self.model.clone());
-        let instructions = input
-            .system_instructions
-            .unwrap_or_else(|| DEFAULT_CHAT_INSTRUCTIONS.to_string());
+        let instructions = input.system_instructions.unwrap_or_else(|| {
+            self.prompts
+                .prompt(PromptId::AssistantChatDefault)
+                .to_string()
+        });
         let context = into_provider_context(input.context);
         let prompt = input.prompt;
         let files = input.files;
@@ -277,9 +289,11 @@ impl AssistantChatService {
         let repository = self.repository()?.clone();
         let user_id = self.user_id(&input.user_email).await?;
         let model = input.model.unwrap_or_else(|| self.model.clone());
-        let instructions = input
-            .system_instructions
-            .unwrap_or_else(|| DEFAULT_CHAT_INSTRUCTIONS.to_string());
+        let instructions = input.system_instructions.unwrap_or_else(|| {
+            self.prompts
+                .prompt(PromptId::AssistantChatDefault)
+                .to_string()
+        });
         let client_request_id = input.request_id.clone();
         let parent_message_id = input.parent_message_id.clone();
         tracing::info!(client_request_id = %client_request_id, thread_id = %input.thread_id, assistant_message_id = %input.assistant_message_id, user_message_id = %input.user_message_id, model = %model, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted run starting");

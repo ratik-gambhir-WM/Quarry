@@ -4,7 +4,11 @@ use crate::domains::assistant::chat::repository::AssistantMessage;
 
 #[test]
 fn unavailable_capability_fails_before_streaming() {
-    let service = AssistantChatService::new(None, "gpt-5.5".to_string());
+    let service = AssistantChatService::new(
+        None,
+        "gpt-5.5".to_string(),
+        crate::integration_support::prompt_catalog(),
+    );
     let result = service.ask(QueryModelInput {
         context: Vec::new(),
         files: Vec::new(),

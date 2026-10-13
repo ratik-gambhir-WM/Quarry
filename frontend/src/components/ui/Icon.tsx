@@ -39,6 +39,7 @@ type IconName =
   | "shield"
   | "sparkles"
   | "settings"
+  | "star"
   | "terminal"
   | "timeline"
   | "upload"
@@ -325,6 +326,12 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M7 4.5h10v15l-5-3.5-5 3.5z" />
+        </svg>
+      );
+    case "star":
+      return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+          <path className={iconClassName} d="m12 3.75 2.55 5.17 5.7.83-4.12 4.02.98 5.68L12 16.77l-5.1 2.68.98-5.68-4.12-4.02 5.7-.83z" />
         </svg>
       );
     case "briefcase":

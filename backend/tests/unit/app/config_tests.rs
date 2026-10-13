@@ -12,6 +12,20 @@ fn default_config_is_local_and_has_a_timeout() {
     assert!(config.openai.is_none());
     assert!(config.wm_ai.is_none());
     assert!(config.diligence_studio.is_none());
+    assert_eq!(config.prompts.directory, PathBuf::from("prompts"));
+}
+
+#[test]
+fn prompt_catalog_directory_defaults_and_rejects_a_blank_override() {
+    let configured =
+        AppConfig::from_values([("QUARRY_PROMPTS_DIR", "  bundled/prompts  ")]).unwrap();
+    assert_eq!(
+        configured.prompts.directory,
+        PathBuf::from("bundled/prompts")
+    );
+    assert!(AppConfig::from_values([("QUARRY_PROMPTS_DIR", " ")])
+        .unwrap_err()
+        .contains("QUARRY_PROMPTS_DIR"));
 }
 
 #[test]

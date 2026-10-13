@@ -1,6 +1,5 @@
 pub mod docx;
 pub mod image;
-pub mod image_prompt;
 pub mod pdf;
 pub mod powerpoint;
 pub mod spreadsheet;

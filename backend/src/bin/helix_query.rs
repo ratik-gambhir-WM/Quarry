@@ -1,7 +1,8 @@
 use std::{env, process};
 
 use quarry_backend::{
-    adapters::openai::{client::OpenAiClient, helix_prompt::HELIX_QUERY_EXAMPLE_PROMPT},
+    adapters::openai::client::OpenAiClient,
+    shared::prompts::{PromptCatalog, PromptId},
     AppConfig,
 };
 
@@ -25,7 +26,14 @@ async fn main() {
         eprintln!("error: OpenAI capability is not configured");
         process::exit(1);
     };
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai);
+    let prompts = match PromptCatalog::load(&config.prompts.directory) {
+        Ok(prompts) => std::sync::Arc::new(prompts),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    };
+    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts.clone());
 
     let result = match args.get(1).map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => {
@@ -50,7 +58,11 @@ async fn main() {
             None => Err("missing content to embed".to_string()),
         },
         Some("response") => client
-            .gen_model_response(Some(HELIX_QUERY_EXAMPLE_PROMPT), None, None)
+            .gen_model_response(
+                Some(prompts.prompt(PromptId::HelixQueryExample)),
+                None,
+                None,
+            )
             .await
             .map(|_t| {}),
 

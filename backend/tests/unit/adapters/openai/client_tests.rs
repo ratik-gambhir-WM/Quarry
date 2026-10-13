@@ -338,6 +338,7 @@ fn test_responses_url_seam_is_constructor_injected() {
         reqwest::Client::new(),
         "test-key",
         "http://127.0.0.1:1/v1/responses",
+        crate::integration_support::prompt_catalog(),
     );
     assert_eq!(
         client.responses_url.as_ref(),

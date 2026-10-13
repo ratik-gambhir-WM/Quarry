@@ -10,11 +10,16 @@ use crate::{
         http::create_router,
         migrations,
     },
+    shared::prompts::PromptCatalog,
 };
 
 pub(crate) struct TestApplication {
     pub router: Router,
     pub sqlite: SqliteClient,
+}
+
+pub(crate) fn prompt_catalog() -> Arc<PromptCatalog> {
+    Arc::new(PromptCatalog::load(std::path::Path::new("prompts")).unwrap())
 }
 
 pub(crate) fn test_application() -> Result<TestApplication, BootstrapError> {
@@ -23,7 +28,13 @@ pub(crate) fn test_application() -> Result<TestApplication, BootstrapError> {
     migrations::migrate(&sqlite).map_err(BootstrapError::Migration)?;
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    let api = assemble_api(&config, sqlite.clone(), helix, reqwest::Client::new());
+    let api = assemble_api(
+        &config,
+        sqlite.clone(),
+        helix,
+        reqwest::Client::new(),
+        prompt_catalog(),
+    );
     let router = create_router(api, &config.http);
     Ok(TestApplication { router, sqlite })
 }

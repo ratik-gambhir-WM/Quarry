@@ -6,10 +6,13 @@ use std::{
 use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::documents::{
-        formats::{image_prompt::IMAGE_DESCRIPTION_PROMPT, text_chunking::token_bounded_ranges},
+        formats::text_chunking::token_bounded_ranges,
         model::{Document, DocumentChunk},
     },
-    shared::{file_policy::infer_supported_image_mime_type, ids::document_id_from_content},
+    shared::{
+        file_policy::infer_supported_image_mime_type, ids::document_id_from_content,
+        prompts::PromptId,
+    },
 };
 use base64::{engine::general_purpose, Engine as _};
 use image::{
@@ -81,7 +84,7 @@ pub async fn describe_image(
     }];
     let description = openai_client
         .gen_model_response_with_files(
-            Some(IMAGE_DESCRIPTION_PROMPT),
+            Some(openai_client.prompts().prompt(PromptId::ImageDescription)),
             None,
             Some(DEFAULT_IMAGE_DESCRIPTION_MODEL),
             Some(&file_inputs),

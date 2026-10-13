@@ -17,7 +17,6 @@ use crate::{
     domains::documents::{
         formats::{
             image::{build_image_assembly, validate_image_by_bytes},
-            image_prompt::IMAGE_DESCRIPTION_PROMPT,
             ParsedQuarryFile, QuarryFile,
         },
         index::repository::{DocumentIndexReader, DocumentIndexWriter},
@@ -28,6 +27,7 @@ use crate::{
         error::{ServiceError, ServiceResult},
         file_policy::infer_supported_image_mime_type,
         ids::{document_id_from_content, sha256_hex},
+        prompts::PromptId,
     },
 };
 
@@ -554,7 +554,7 @@ async fn describe_image(
     }];
     let description = openai_client
         .gen_model_response_with_files(
-            Some(IMAGE_DESCRIPTION_PROMPT),
+            Some(openai_client.prompts().prompt(PromptId::ImageDescription)),
             None,
             Some(description_model),
             Some(&file_inputs),
