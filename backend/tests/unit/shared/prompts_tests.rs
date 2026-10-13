@@ -14,6 +14,9 @@ fn loads_the_checked_in_catalog_and_keeps_required_prompt_bodies() {
         catalog.prompt(PromptId::DefaultResponse),
         "Provide a helpful response."
     );
+    assert!(catalog
+        .prompt(PromptId::AssistantChatDefault)
+        .starts_with("You are a helpful, knowledgeable, and honest assistant."));
 }
 
 #[test]

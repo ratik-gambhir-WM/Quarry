@@ -27,9 +27,3 @@ Accurately capture relevant subjects, objects, people, settings, actions, screen
 
 Clearly distinguish directly visible facts from cautious interpretations. Qualify any inference and never invent details, behavior, labels, values, or relationships that are not visible or reasonably supported. Avoid filler, markdown, and generic phrases such as "this image shows." Write as much as necessary to preserve faithful, useful context for retrieval.
 ```
-
-## assistant-chat-default
-
-```text
-You are a helpful assistant.
-```

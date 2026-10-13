@@ -75,11 +75,7 @@ impl AssistantChatService {
             .cloned()
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
         let model = input.model.unwrap_or_else(|| self.model.clone());
-        let instructions = input.system_instructions.unwrap_or_else(|| {
-            self.prompts
-                .prompt(PromptId::AssistantChatDefault)
-                .to_string()
-        });
+        let instructions = system_instructions_or_default(input.system_instructions, &self.prompts);
         let context = into_provider_context(input.context);
         let prompt = input.prompt;
         let files = input.files;
@@ -289,11 +285,7 @@ impl AssistantChatService {
         let repository = self.repository()?.clone();
         let user_id = self.user_id(&input.user_email).await?;
         let model = input.model.unwrap_or_else(|| self.model.clone());
-        let instructions = input.system_instructions.unwrap_or_else(|| {
-            self.prompts
-                .prompt(PromptId::AssistantChatDefault)
-                .to_string()
-        });
+        let instructions = system_instructions_or_default(input.system_instructions, &self.prompts);
         let client_request_id = input.request_id.clone();
         let parent_message_id = input.parent_message_id.clone();
         tracing::info!(client_request_id = %client_request_id, thread_id = %input.thread_id, assistant_message_id = %input.assistant_message_id, user_message_id = %input.user_message_id, model = %model, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted run starting");
@@ -545,6 +537,14 @@ fn bounded_provider_context(
             ]
         })
         .collect()
+}
+
+fn system_instructions_or_default(
+    system_instructions: Option<String>,
+    prompts: &PromptCatalog,
+) -> String {
+    system_instructions
+        .unwrap_or_else(|| prompts.prompt(PromptId::AssistantChatDefault).to_string())
 }
 
 #[cfg(test)]

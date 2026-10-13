@@ -739,7 +739,9 @@ normalize the earlier client bug that stored a user message as its own parent, a
 transcripts to load without rewriting local data. Conflicting message-ID reuse is rejected before
 insertion. Observed failures and disconnects retain buffered partial text; process termination can
 still leave a `streaming` row because schema v8 has no checkpoint/recovery worker. The legacy route
-remains mounted under both API prefixes for compatibility.
+remains mounted under both API prefixes for compatibility. When a client does not provide
+`systemInstructions`, both chat contracts use the server-owned `assistant-chat-default` catalog
+prompt; a validated client instruction still overrides it to support future user-created prompts.
 
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
@@ -853,7 +855,7 @@ state.
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
-| `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, query defaults, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
+| `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, default system-prompt selection, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
 | `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |

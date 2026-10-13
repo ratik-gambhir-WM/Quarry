@@ -12,6 +12,7 @@ const CATALOG_ASSETS: &[&str] = &[
     "company_research.md",
     "diligence_review.md",
     "system/research_agent.md",
+    "system/assistant_chat.md",
 ];
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PromptId {
@@ -68,10 +69,10 @@ impl PromptId {
 
     const fn asset(self) -> &'static str {
         match self {
-            Self::DefaultResponse
-            | Self::DefaultInstructions
-            | Self::ImageDescription
-            | Self::AssistantChatDefault => "system/research_agent.md",
+            Self::DefaultResponse | Self::DefaultInstructions | Self::ImageDescription => {
+                "system/research_agent.md"
+            }
+            Self::AssistantChatDefault => "system/assistant_chat.md",
             Self::HelixQueryExample => "company_research.md",
             Self::DealExtractionSystem | Self::DealExtractionRequest => "diligence_review.md",
             Self::SummarySystem

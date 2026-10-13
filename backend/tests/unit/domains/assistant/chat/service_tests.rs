@@ -20,6 +20,26 @@ fn unavailable_capability_fails_before_streaming() {
 }
 
 #[test]
+fn uses_the_catalog_default_when_the_client_omits_system_instructions() {
+    let prompts = crate::integration_support::prompt_catalog();
+
+    assert_eq!(
+        system_instructions_or_default(None, prompts.as_ref()),
+        prompts.prompt(PromptId::AssistantChatDefault)
+    );
+}
+
+#[test]
+fn preserves_client_system_instructions_for_future_custom_prompts() {
+    let prompts = crate::integration_support::prompt_catalog();
+
+    assert_eq!(
+        system_instructions_or_default(Some("Be concise.".to_string()), prompts.as_ref()),
+        "Be concise."
+    );
+}
+
+#[test]
 fn persisted_context_follows_the_retried_response_branch() {
     let context = bounded_provider_context(
         vec![
