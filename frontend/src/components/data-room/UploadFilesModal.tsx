@@ -32,7 +32,17 @@ type UploadEntry = {
 };
 
 const maxFileBytes = 50 * 1024 * 1024;
-const supportedExtensions = new Set(["pdf", "docx", "png", "jpg", "jpeg", "webp", "gif"]);
+const supportedExtensions = new Set([
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+]);
 
 export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -281,7 +291,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
           </p>
           <DialogTitle className="text-2xl font-semibold text-text-main">Upload files</DialogTitle>
           <DialogDescription className="text-[13px] leading-5 text-muted">
-            Choose PDF, DOCX, PNG, JPEG, WebP, or GIF files, then select which ones to process.
+            Choose PDF, DOCX, Excel, PowerPoint, PNG, JPEG, WebP, or GIF files, then select which ones to process.
           </DialogDescription>
           <button
             aria-label="Close upload files dialog"
@@ -296,7 +306,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <input
-            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif"
+            accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
             multiple
             onChange={handleFileSelection}

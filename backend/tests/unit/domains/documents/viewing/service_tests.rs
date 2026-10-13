@@ -27,6 +27,20 @@ fn renders_docx_fallback_pdf_when_office_conversion_is_unavailable() {
 }
 
 #[test]
+fn routes_xlsx_and_pptx_previews_through_the_existing_office_converter() {
+    for extension in ["xlsx", "pptx"] {
+        let pdf =
+            render_office_bytes_as_pdf(extension, "source", b"Office source", |actual, bytes| {
+                assert_eq!(actual, extension);
+                assert_eq!(bytes, b"Office source");
+                render_text_as_pdf("preview", "Converted Office preview")
+            })
+            .unwrap();
+        validate_pdf_bytes(&pdf, "the converted PDF preview").unwrap();
+    }
+}
+
+#[test]
 fn renders_an_uploaded_image_as_a_one_page_pdf() {
     let image = RgbImage::from_pixel(120, 60, image::Rgb([20, 80, 160]));
     let mut encoded = Cursor::new(Vec::new());

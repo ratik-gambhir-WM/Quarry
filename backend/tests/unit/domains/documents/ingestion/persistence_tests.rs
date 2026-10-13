@@ -1,4 +1,9 @@
 use super::*;
+use crate::{
+    adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+    app::migrations::migrate,
+};
+use std::sync::Arc;
 
 const OWNER: &str = "analyst@example.com";
 
@@ -48,6 +53,65 @@ fn document_chunk(document: &Document) -> DocumentChunk {
     }
 }
 
+fn test_index_writer() -> DocumentIndexWriter {
+    DocumentIndexWriter::new(Arc::new(
+        HelixClient::with_config("http://127.0.0.1:6969", None).unwrap(),
+    ))
+}
+
+fn dense_chunks(document: &Document) -> Vec<DocumentChunk> {
+    (1..=450)
+        .map(|sequence_number| DocumentChunk {
+            chunk_id: format!("chunk-{sequence_number}"),
+            document_id: document.document_id.clone(),
+            user_id: document.user_id.clone(),
+            text: "x".repeat(5_000),
+            embedding: Some(vec![0.125; 1_536]),
+            sequence_number,
+            page_numbers: None,
+            start_offset: usize::try_from(sequence_number - 1).unwrap() * 5_000,
+            end_offset: usize::try_from(sequence_number).unwrap() * 5_000,
+            token_count: 800,
+            content_hash: format!("hash-{sequence_number}"),
+            section_title: None,
+        })
+        .collect()
+}
+
+fn test_document_store() -> (SqliteClient, DocumentStore) {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    migrate(&sqlite).unwrap();
+    sqlite
+        .with_connection(|connection| {
+            connection.execute(
+                "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
+                [OWNER],
+            )?;
+            let user_id = connection.last_insert_rowid();
+            connection.execute(
+                r#"
+                INSERT INTO deals (
+                    deal_id, user_id, deal_name, status, start_date, close_date,
+                    transaction_type, target_company, primary_buyer, deal_sponsor
+                ) VALUES ('DEAL-1', ?1, 'Project Test', 'Active', '2026-01-01', '2026-02-01',
+                          'Buy-side', 'Target', 'Buyer', 'Test Capital')
+                "#,
+                [user_id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    (sqlite.clone(), DocumentStore::new(sqlite))
+}
+
+fn persisted_file_count(sqlite: &SqliteClient) -> i64 {
+    sqlite
+        .with_connection(|connection| {
+            connection.query_row("SELECT COUNT(*) FROM quarry_files", [], |row| row.get(0))
+        })
+        .unwrap()
+}
+
 #[test]
 fn build_file_node_maps_the_insert_blob_result() {
     let document = document("logical-file", OWNER, "report.pdf", b"file node");
@@ -94,6 +158,77 @@ fn build_file_version_node_maps_supported_image_mime_types() {
 
         assert_eq!(version_node.mime_type, expected_mime_type);
     }
+}
+
+#[test]
+fn persistence_input_derives_canonical_modern_office_mime_types() {
+    for (filename, expected_mime_type) in [
+        (
+            "model.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        (
+            "board.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+    ] {
+        let bytes = b"office bytes";
+        let document = document("logical-office", OWNER, filename, bytes);
+        let input = build_file_persistence_input("DEAL-1", &document, bytes.to_vec()).unwrap();
+
+        assert_eq!(input.mime_type, expected_mime_type);
+        assert_eq!(
+            input.version_id,
+            file_version_id(&document.file_id, &document.content_hash)
+        );
+    }
+}
+
+#[test]
+fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
+    let writer = test_index_writer();
+    let bytes = b"office bytes";
+    let document = document("logical-office", OWNER, "model.xlsx", bytes);
+    let chunk = document_chunk(&document);
+    let prepared = prepare_document_persistence(
+        &writer,
+        "DEAL-1",
+        &document,
+        std::slice::from_ref(&chunk),
+        bytes.to_vec(),
+    )
+    .unwrap();
+    assert_eq!(
+        prepared.graph.version_node.indexed_at,
+        prepared.file_persistence.timestamp
+    );
+    assert_eq!(
+        prepared.graph.chunk_nodes[0].created_at,
+        prepared.file_persistence.timestamp
+    );
+
+    let dense_chunks = dense_chunks(&document);
+    prepare_document_persistence(&writer, "DEAL-1", &document, &dense_chunks, bytes.to_vec())
+        .expect("large documents should be split into Helix-safe chunk writes");
+}
+
+#[test]
+fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
+    let (sqlite, _files) = test_document_store();
+    let writer = test_index_writer();
+    let bytes = b"office bytes".to_vec();
+    let document = document("logical-office", OWNER, "model.xlsx", &bytes);
+
+    prepare_document_persistence(
+        &writer,
+        "DEAL-1",
+        &document,
+        &dense_chunks(&document),
+        bytes,
+    )
+    .expect("preflight should not reject a graph that can be split into safe writes");
+
+    assert_eq!(persisted_file_count(&sqlite), 0);
 }
 
 #[test]

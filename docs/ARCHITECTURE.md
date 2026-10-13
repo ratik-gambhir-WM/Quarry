@@ -482,7 +482,7 @@ operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/image upload jobs, populated file-review grid, PDF/text preview (including PDF-rendered image previews), explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, starter prompts, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -687,10 +687,10 @@ method allowlist.
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
 | GET | `/deals/{deal_id}/documents` | List current logical documents | SQLite source |
-| GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or rendered DOCX/image preview |
+| GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
-| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/PNG/JPEG/WebP/single-frame GIF; multipart `userId` and `files` |
-| POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Returns 202 `{jobId, filename}` |
+| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `userId` and `files` |
+| POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Same supported formats; returns 202 `{jobId, filename}` |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
 | POST | `/documents/search/vector` | Vector search Helix chunks | Client supplies `workspaceId`, vector, limit |
 | POST | `/documents/search/keyword` | Keyword search Helix chunks | Client supplies `workspaceId`, text, limit |
@@ -985,7 +985,7 @@ text is stored as ordinary chunk text with section path `Image description`, and
 embedding is stored on the same chunk. Identity behavior
 in the current upload path is narrower than the versioned graph shape suggests:
 
-- PDF, DOCX, and image parsers assign a new random `file_id` on each parse.
+- PDF, DOCX, XLSX, PPTX, and image parsers assign a new random `file_id` on each parse.
 - `document_id` is deterministic from workspace/user identity plus content hash.
 - Ingestion looks up the current SQLite version by deal, workspace, and exact content hash. A match
   reuses its `file_id`; otherwise the parsed random `file_id` becomes a new logical file.
@@ -994,6 +994,10 @@ in the current upload path is narrower than the versioned graph shape suggests:
 - The repository and schema support later versions when the caller explicitly reuses a `file_id`,
   but ordinary changed-content upload does not currently identify the earlier logical file and
   therefore does not create version 2.
+- Helix setup can create the immutable version node and replace its chunks, but adds its
+  `HAS_VERSION` and `CURRENT_VERSION` edges only in a final publication write after every bounded
+  chunk batch succeeds. A failed graph write therefore leaves the incomplete version unreferenced
+  and preserves an older published version when one exists.
 
 Vector and keyword search query this projection.
 
@@ -1018,16 +1022,18 @@ completed entirely with repository tooling. `clear_helix` is not part of normal 
 Document persistence is not a distributed transaction:
 
 1. Validate parser-derived identities and chunk invariants.
-2. Commit the logical file/version/blob aggregate in SQLite.
-3. Build versioned Helix nodes from the committed identity.
-4. Insert the graph/index.
-5. If Helix fails, return an error naming the already committed file/version.
+2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence only when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
+3. Commit the logical file/version/blob aggregate in SQLite and confirm the returned identity matches the prepared plan.
+4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
+5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
 
 The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
 the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert. Once a
 `file_id` is selected, version and graph-chunk identities are reproducible. General recovery from
 SQLite without the original bytes remains an operational design, not implemented tooling; deleting
-the SQLite record to conceal a Helix failure would violate source ownership.
+the SQLite record to conceal a Helix failure would violate source ownership. A single oversized
+chunk is rejected before canonical persistence; documents whose individual chunks fit are split
+across Helix graph writes so a large XLSX/PPTX file can still be indexed.
 
 ### 9.4 Ephemeral state
 
@@ -1070,15 +1076,15 @@ sequenceDiagram
     participant UI as React UI
     participant API as Axum handler/job service
     participant Ingestion as Document ingestion service
-    participant Parser as PDF/DOCX parser + image validator/assembler
+    participant Parser as PDF/DOCX/XLSX/PPTX parser + image validator/assembler
     participant AI as OpenAI vision + embeddings
     participant SQL as SQLite
     participant H as Helix
 
-    UI->>API: multipart dealId path + userId + PDF/DOCX/image
+    UI->>API: multipart dealId path + userId + PDF/DOCX/XLSX/PPTX/image
     API-->>UI: 202 jobId (job path) or waits (batch path)
     API->>Ingestion: process upload/job
-    Ingestion->>Parser: parse PDF/DOCX or validate image bytes
+    Ingestion->>Parser: parse PDF/DOCX/XLSX/PPTX or validate image bytes
     Parser-->>Ingestion: normalized chunks or validated image
     Ingestion->>AI: describe validated image bytes (image inputs only)
     AI-->>Ingestion: image description
@@ -1086,25 +1092,42 @@ sequenceDiagram
     Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
     Ingestion->>AI: embed chunk text
     AI-->>Ingestion: embeddings
+    Ingestion->>H: preflight setup, chunk-batch, and publication graph requests
     Ingestion->>SQL: transactionally persist file/version/blob
     SQL-->>Ingestion: committed file/version identities
-    Ingestion->>H: insert versioned file graph and chunks
+    Ingestion->>H: insert version graph, bounded chunks, then publish it
     H-->>Ingestion: indexed or recoverable error
     Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
 
-PDF, DOCX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path. Image
-decoding runs on a blocking worker with a 20,000-pixel per-dimension limit and a 256 MiB decoder
-allocation limit plus a 16-million-pixel decoded-image limit before OpenAI receives the bytes.
-Spreadsheet and PowerPoint parser helpers remain isolated from document ingestion.
+PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path.
+Image decoding and document parsing run on blocking workers. XLSX preflights every worksheet's
+actual cell coordinates before Calamine materializes its dense range; total worksheet range area
+is limited to one million cells per workbook. PPTX resolves slide order from validated presentation
+relationships and reads slide XML directly from the uploaded ZIP bytes. A two-permit
+ingestion-local Office gate covers XLSX/PPTX ZIP inspection and parsing. Before either Office parser
+runs, one shared central-directory inspector (also used by chat attachments) requires the expected
+package root and OOXML content-type marker, permits at most 2,048 entries, 16 MiB per declared
+entry, and 128 MiB total declared uncompressed content. Image decoding retains its 20,000-pixel
+per-dimension limit, 256 MiB decoder allocation limit, and 16-million-pixel decoded-image limit
+before OpenAI receives the bytes.
+
+Document chunks use the `cl100k_base` tokenizer used by the configured `text-embedding-3` models.
+Before calling OpenAI, ingestion groups chunks in their original order into requests of at most
+300,000 aggregate tokens and 2,048 inputs. Independent requests run with a service-wide limit of
+two in flight; their returned vectors are assigned to their original chunk ranges before the
+SQLite/Helix persistence plan is built. The plan validates every Helix request before SQLite
+commits, then executes graph setup, chunk batches, and final publication sequentially. Thus an error in any
+embedding request leaves no partial document persistence.
 
 ### 10.3 Stored preview
 
 1. The frontend lists current documents by deal from SQLite.
-2. A PDF request returns original PDF bytes or converts a supported stored DOCX/image source to
-   PDF. Image previews preserve aspect ratio on one portrait or landscape letter-sized page and
-   share the bounded in-memory preview cache.
+2. A PDF request returns original PDF bytes or converts a supported stored DOCX/XLSX/PPTX/image
+   source to PDF. Office conversion remains an on-demand bounded in-memory cache entry, never a
+   persisted derivative; image previews preserve aspect ratio on one portrait or landscape
+   letter-sized page and share that bounded cache.
 3. A text request parses the stored PDF/DOCX into canonical raw text. Image descriptions are
    searchable Helix chunk text, not exposed by this raw-text endpoint.
 4. The frontend's Extend UI editor renders the bytes through EmbedPDF/PDFium and keeps annotation
@@ -1418,7 +1441,8 @@ layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
 Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
 router composition, schema migration and constraints, SQLite transactions/concurrency,
 repositories, services, router contracts,
-multipart boundaries, parsing/chunking, Helix query construction and v3 response mapping,
+multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP limits,
+graph-request preflight, Helix query construction and v3 response mapping,
 OpenAI/WM mapping, stored previews, Diligence Studio URL/payload/delete/import/template-document
 validation, bounded declared and streamed template bodies, template service error mapping, template
 HTTP headers/status/body, and isolated SharePoint behavior.

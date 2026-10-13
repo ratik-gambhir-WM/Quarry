@@ -1,4 +1,24 @@
 use super::*;
+use tiktoken_rs::cl100k_base;
+
+#[test]
+fn ranges_count_tokens_with_the_openai_embedding_encoding() {
+    let text = "Quarry 🏗️ analyzes evidence.";
+
+    let ranges = token_bounded_ranges(text);
+    let expected_token_count = cl100k_base()
+        .expect("cl100k tokenizer data should be valid")
+        .count_with_special_tokens(text);
+
+    assert_eq!(
+        ranges,
+        vec![TokenChunkRange {
+            start_offset: 0,
+            end_offset: text.len(),
+            token_count: expected_token_count,
+        }]
+    );
+}
 
 #[test]
 fn ranges_are_contiguous_utf8_slices() {

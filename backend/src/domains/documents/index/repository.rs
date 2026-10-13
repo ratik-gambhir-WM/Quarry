@@ -26,7 +26,7 @@ use crate::{
         },
         writer::{
             create_document_indexes, get_document_index_operation, insert_file_version_graph,
-            DOCUMENT_INDEX_NAMES,
+            FileVersionGraphWrite, DOCUMENT_INDEX_NAMES,
         },
     },
     shared::error::RepositoryError,
@@ -63,6 +63,38 @@ pub struct DocumentIndexWriter {
     helix: Arc<HelixClient>,
 }
 
+/// Immutable Helix graph writes that have passed exact request-size validation.
+/// The setup query clears the version's previous chunks; each following query
+/// adds one bounded chunk batch for that version.
+pub(crate) struct PreparedDocumentGraph {
+    pub(crate) file_node: FileNode,
+    pub(crate) version_node: FileVersionNode,
+    pub(crate) chunk_nodes: Vec<FileChunkNode>,
+    graph_write: FileVersionGraphWrite,
+}
+
+impl PreparedDocumentGraph {
+    pub(crate) fn matches_identity(
+        &self,
+        workspace_id: &str,
+        file_id: &str,
+        display_name: &str,
+        version_id: &str,
+    ) -> bool {
+        self.file_node.workspace_id == workspace_id
+            && self.file_node.file_id == file_id
+            && self.file_node.display_name == display_name
+            && self.version_node.workspace_id == workspace_id
+            && self.version_node.file_id == file_id
+            && self.version_node.version_id == version_id
+            && self.chunk_nodes.iter().all(|chunk| {
+                chunk.workspace_id == workspace_id
+                    && chunk.file_id == file_id
+                    && chunk.version_id == version_id
+            })
+    }
+}
+
 impl DocumentIndexWriter {
     pub fn new(helix: Arc<HelixClient>) -> Self {
         Self { helix }
@@ -81,9 +113,61 @@ impl DocumentIndexWriter {
         version_node: FileVersionNode,
         chunk_nodes: Vec<FileChunkNode>,
     ) -> Result<Value, RepositoryError> {
-        insert_document_graph(&self.helix, file_node, version_node, chunk_nodes)
+        let prepared = self.preflight_graph(file_node, version_node, chunk_nodes)?;
+        self.insert_prepared_graph(prepared).await
+    }
+
+    pub(crate) fn preflight_graph(
+        &self,
+        file_node: FileNode,
+        version_node: FileVersionNode,
+        chunk_nodes: Vec<FileChunkNode>,
+    ) -> Result<PreparedDocumentGraph, RepositoryError> {
+        let graph_write =
+            insert_file_version_graph(file_node.clone(), version_node.clone(), chunk_nodes.clone())
+                .map_err(RepositoryError::storage)?;
+        Ok(PreparedDocumentGraph {
+            file_node,
+            version_node,
+            chunk_nodes,
+            graph_write,
+        })
+    }
+
+    pub(crate) async fn insert_prepared_graph(
+        &self,
+        prepared: PreparedDocumentGraph,
+    ) -> Result<Value, RepositoryError> {
+        self.helix
+            .execute_write_query::<Value>(
+                "helix.file_version.insert_setup",
+                prepared.graph_write.setup_query,
+            )
             .await
-            .map_err(RepositoryError::storage)
+            .map_err(RepositoryError::storage)?;
+        let batch_count = prepared.graph_write.chunk_queries.len();
+        for (batch_index, query) in prepared.graph_write.chunk_queries.into_iter().enumerate() {
+            self.helix
+                .execute_write_query::<Value>("helix.file_version.insert_chunk_batch", query)
+                .await
+                .map_err(|error| {
+                    RepositoryError::storage(format!(
+                        "failed to index Helix chunk batch {} of {batch_count}: {error}",
+                        batch_index + 1,
+                    ))
+                })?;
+        }
+        self.helix
+            .execute_write_query(
+                "helix.file_version.publish",
+                prepared.graph_write.publish_query,
+            )
+            .await
+            .map_err(|error| {
+                RepositoryError::storage(format!(
+                    "failed to publish Helix file version after indexing {batch_count} chunk batch(es): {error}"
+                ))
+            })
     }
 }
 
@@ -167,18 +251,6 @@ impl DocumentSearchIndex {
             .await
             .map_err(RepositoryError::storage)
     }
-}
-
-async fn insert_document_graph(
-    helix: &HelixClient,
-    file_node: FileNode,
-    version_node: FileVersionNode,
-    chunk_nodes: Vec<FileChunkNode>,
-) -> Result<Value, String> {
-    let query = insert_file_version_graph(file_node, version_node, chunk_nodes)?;
-    helix
-        .execute_write_query("helix.file_version.insert", query)
-        .await
 }
 
 const DOCUMENT_INDEX_READINESS_TIMEOUT: Duration = Duration::from_secs(60);

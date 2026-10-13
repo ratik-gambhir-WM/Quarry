@@ -1,7 +1,7 @@
 use crate::domains::documents::{
     index::{
         model::{FileChunkNode, FileNode, FileVersionNode},
-        repository::DocumentIndexWriter,
+        repository::{DocumentIndexWriter, PreparedDocumentGraph},
     },
     model::{Document, DocumentChunk},
     store::{
@@ -22,6 +22,15 @@ pub struct DocumentPersistenceResult {
     pub insert_document_chunk_result: Value,
 }
 
+/// Immutable SQLite input and graph request prepared before canonical
+/// persistence. The graph request is built once, with one timestamp, and has
+/// already passed the writer's exact serialized-size preflight.
+struct PreparedDocumentPersistence {
+    expected_identity: PersistedFileIdentity,
+    file_persistence: FilePersistenceInput,
+    graph: PreparedDocumentGraph,
+}
+
 pub(crate) async fn persist_document_and_chunks(
     files: &DocumentStore,
     index: &DocumentIndexWriter,
@@ -30,16 +39,68 @@ pub(crate) async fn persist_document_and_chunks(
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
 ) -> Result<DocumentPersistenceResult, String> {
-    ensure_document_graph_invariants(&document, &chunks)?;
-    let file_persistence = build_file_persistence_input(deal_id, &document, file_bytes)?;
+    let prepared = prepare_document_persistence(index, deal_id, &document, &chunks, file_bytes)?;
+    persist_prepared_document_and_chunks(files, index, prepared).await
+}
+
+fn prepare_document_persistence(
+    index: &DocumentIndexWriter,
+    deal_id: &str,
+    document: &Document,
+    chunks: &[DocumentChunk],
+    file_bytes: Vec<u8>,
+) -> Result<PreparedDocumentPersistence, String> {
+    ensure_document_graph_invariants(document, chunks)?;
+    let file_persistence = build_file_persistence_input(deal_id, document, file_bytes)?;
+    let expected_identity = PersistedFileIdentity {
+        file_id: file_persistence.file_id.clone(),
+        workspace_id: file_persistence.workspace_id.clone(),
+        display_name: file_persistence.display_name.clone(),
+        version_id: file_persistence.version_id.clone(),
+    };
+    let (file_node, version_node, chunk_nodes) = build_helix_graph_nodes_at(
+        &expected_identity,
+        document,
+        chunks,
+        &file_persistence.timestamp,
+    )?;
+    let graph = index
+        .preflight_graph(file_node, version_node, chunk_nodes)
+        .map_err(|error| error.to_string())?;
+    Ok(PreparedDocumentPersistence {
+        expected_identity,
+        file_persistence,
+        graph,
+    })
+}
+
+async fn persist_prepared_document_and_chunks(
+    files: &DocumentStore,
+    index: &DocumentIndexWriter,
+    prepared: PreparedDocumentPersistence,
+) -> Result<DocumentPersistenceResult, String> {
     let insert_blob_result = files
-        .persist(file_persistence)
+        .persist(prepared.file_persistence)
         .await
         .map_err(|error| error.to_string())?;
-    let (file_node, version_node, chunk_nodes) =
-        build_helix_graph_nodes(&insert_blob_result, &document, &chunks)?;
+    if insert_blob_result != prepared.expected_identity {
+        return Err(
+            "committed SQLite identity does not match the prepared ingestion plan".to_string(),
+        );
+    }
+    if !prepared.graph.matches_identity(
+        &insert_blob_result.workspace_id,
+        &insert_blob_result.file_id,
+        &insert_blob_result.display_name,
+        &insert_blob_result.version_id,
+    ) {
+        return Err(
+            "prepared Helix graph identity does not match the committed SQLite identity"
+                .to_string(),
+        );
+    }
     let insert_document_chunk_result = index
-        .insert_graph(file_node, version_node, chunk_nodes)
+        .insert_prepared_graph(prepared.graph)
         .await
         .map_err(|error| error.to_string())
     .map_err(|error| {
@@ -140,10 +201,25 @@ pub(crate) fn build_file_persistence_input(
     })
 }
 
+#[cfg(test)]
 fn build_helix_graph_nodes(
     insert_blob_result: &PersistedFileIdentity,
     document: &Document,
     chunks: &[DocumentChunk],
+) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
+    build_helix_graph_nodes_at(
+        insert_blob_result,
+        document,
+        chunks,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+}
+
+fn build_helix_graph_nodes_at(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+    chunks: &[DocumentChunk],
+    indexed_at: &str,
 ) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
     ensure_document_graph_invariants(document, chunks)?;
     if insert_blob_result.workspace_id != document.user_id
@@ -162,7 +238,7 @@ fn build_helix_graph_nodes(
     }
 
     let file_node = build_file_node(insert_blob_result);
-    let version_node = build_file_version_node(insert_blob_result, document)?;
+    let version_node = build_file_version_node_at(insert_blob_result, document, indexed_at)?;
     let chunk_nodes = chunks
         .iter()
         .map(|chunk| build_file_chunk_node(insert_blob_result, &version_node, chunk))
@@ -178,9 +254,22 @@ fn build_file_node(insert_blob_result: &PersistedFileIdentity) -> FileNode {
     }
 }
 
+#[cfg(test)]
 fn build_file_version_node(
     insert_blob_result: &PersistedFileIdentity,
     document: &Document,
+) -> Result<FileVersionNode, String> {
+    build_file_version_node_at(
+        insert_blob_result,
+        document,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+}
+
+fn build_file_version_node_at(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+    indexed_at: &str,
 ) -> Result<FileVersionNode, String> {
     let mime_type = document_mime_type(Path::new(&document.file_name))
         .ok_or_else(|| format!("unsupported file type for `{}`", document.file_name))?
@@ -196,7 +285,7 @@ fn build_file_version_node(
         content_sha256: document.content_hash.clone(),
         byte_size,
         index_generation: insert_blob_result.version_id.clone(),
-        indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        indexed_at: indexed_at.to_string(),
     })
 }
 

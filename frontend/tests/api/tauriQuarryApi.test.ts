@@ -181,6 +181,51 @@ describe("createTauriQuarryApi", () => {
     });
   });
 
+  it("relays XLSX and PPTX process-file bytes without requiring a browser MIME type", async () => {
+    const postMultipart = vi.fn().mockResolvedValue({ filename: "model.xlsx", jobId: "job-1" });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart,
+      subscribeJob: vi.fn(),
+    });
+
+    await api.startProcessFile(
+      "DEAL / 1",
+      " analyst@example.com ",
+      new File([new Uint8Array([1, 2, 3])], "model.XLSX", { type: "" }),
+    );
+    await api.startProcessFile(
+      "DEAL / 1",
+      " analyst@example.com ",
+      new File([new Uint8Array([4, 5, 6])], "board.pptx", { type: "" }),
+    );
+
+    expect(postMultipart).toHaveBeenNthCalledWith(1, {
+      fields: [{ name: "userId", value: "analyst@example.com" }],
+      files: [{
+        dataBase64: "AQID",
+        fieldName: "files",
+        filename: "model.XLSX",
+        mimeType: "application/octet-stream",
+      }],
+      path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
+    });
+    expect(postMultipart).toHaveBeenNthCalledWith(2, {
+      fields: [{ name: "userId", value: "analyst@example.com" }],
+      files: [{
+        dataBase64: "BAUG",
+        fieldName: "files",
+        filename: "board.pptx",
+        mimeType: "application/octet-stream",
+      }],
+      path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
+    });
+  });
+
   it("sends deal metadata links through the desktop multipart relay", async () => {
     const postMultipart = vi.fn().mockResolvedValue({});
     const api = createTauriQuarryApi({

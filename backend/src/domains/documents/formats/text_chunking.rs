@@ -1,4 +1,4 @@
-use tiktoken_rs::o200k_base;
+use tiktoken_rs::cl100k_base;
 
 pub const MAX_TOKEN_CHUNK: usize = 800;
 
@@ -15,7 +15,10 @@ pub fn token_bounded_ranges(text: &str) -> Vec<TokenChunkRange> {
         return Vec::new();
     }
 
-    let tokenizer = o200k_base().expect("o200k tokenizer data should be valid");
+    // Quarry sends these chunks to OpenAI's text-embedding-3 models, which use
+    // cl100k_base. Counting with the embedding tokenizer keeps both the
+    // per-chunk and aggregate request bounds aligned with the provider.
+    let tokenizer = cl100k_base().expect("cl100k tokenizer data should be valid");
     let boundaries = text
         .char_indices()
         .map(|(offset, _)| offset)

@@ -35,6 +35,11 @@ pub(crate) struct ProcessFileJobResponse {
     filename: String,
 }
 
+/*
+TODO: We need to enhance performance here for text-heavy documents.
+It works but is pretty slow right now, but I'm going to come back to this
+*/
+
 pub(super) async fn process_documents_handler(
     State(state): State<DocumentIngestionHttpState>,
     Path(deal_id): Path<String>,
@@ -179,7 +184,7 @@ async fn collect_document_upload(
     let user_id = normalize_required_request_value(user_id.unwrap_or_default(), "userId")?;
     if files.is_empty() {
         return Err(AppError::bad_request(
-            "at least one PDF, DOCX, PNG, JPEG, WebP, or GIF upload is required",
+            "at least one PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, or GIF upload is required",
         ));
     }
     Ok((user_id, files))
@@ -202,10 +207,10 @@ fn validate_document_upload_filename(filename: &str) -> AppResult<()> {
         .map(str::to_ascii_lowercase);
     if !matches!(
         extension.as_deref(),
-        Some("pdf" | "docx" | "png" | "jpg" | "jpeg" | "webp" | "gif")
+        Some("pdf" | "docx" | "xlsx" | "pptx" | "png" | "jpg" | "jpeg" | "webp" | "gif")
     ) {
         return Err(AppError::bad_request(format!(
-            "upload `{filename}` must be a PDF, DOCX, PNG, JPEG, WebP, or GIF file"
+            "upload `{filename}` must be a PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, or GIF file"
         )));
     }
     Ok(())
