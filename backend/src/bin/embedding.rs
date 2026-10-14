@@ -1,5 +1,7 @@
 use anyhow::{Error, Result};
-use quarry_backend::{adapters::openai::client::OpenAiClient, AppConfig};
+use quarry_backend::{
+    adapters::openai::client::OpenAiClient, shared::prompts::PromptCatalog, AppConfig,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,7 +21,11 @@ async fn main() -> Result<()> {
 
         "Security controls are applied across identity, network, application, and data layers. Users authenticate through an enterprise identity provider, while APIs are protected using token-based authorization and role-based access policies. Sensitive information is encrypted in transit and at rest, secrets are stored in a managed vault, and audit logs are retained for operational monitoring, compliance reviews, and incident investigation.",
     ];
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai);
+    let prompts = std::sync::Arc::new(
+        PromptCatalog::load(&config.prompts.directory)
+            .map_err(|error| Error::msg(error.to_string()))?,
+    );
+    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts);
     let embeddings = client
         .gen_embeddings(&chunks, Some("text-embedding-3-small"))
         .await

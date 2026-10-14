@@ -1,11 +1,11 @@
 use base64::{engine::general_purpose, Engine as _};
 use quarry_backend::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
-    domains::{
-        documents::parse_docx_from_path,
-        summaries::{build_basic_document_summary_prompt, CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT},
+    domains::{documents::parse_docx_from_path, summaries::build_basic_document_summary_prompt},
+    shared::{
+        file_policy::CollectedFile,
+        prompts::{PromptCatalog, PromptId},
     },
-    shared::file_policy::CollectedFile,
     AppConfig,
 };
 use std::{
@@ -99,8 +99,11 @@ async fn summarize_dir(path: String) -> Result<(), String> {
         .openai
         .as_ref()
         .ok_or_else(|| "OpenAI capability is not configured".to_string())?;
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai);
-    let prompt = build_basic_document_summary_prompt(&root, &files, &skipped_files);
+    let prompts = std::sync::Arc::new(
+        PromptCatalog::load(&config.prompts.directory).map_err(|error| error.to_string())?,
+    );
+    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts.clone());
+    let prompt = build_basic_document_summary_prompt(&prompts, &root, &files, &skipped_files);
     let file_inputs: Vec<ResponsesFileInput<'_>> = files
         .iter()
         .map(|file| ResponsesFileInput::FileData {
@@ -113,7 +116,7 @@ async fn summarize_dir(path: String) -> Result<(), String> {
     let summary = client
         .gen_model_response_with_files(
             Some(&prompt),
-            Some(CLI_DOCUMENT_SUMMARY_SYSTEM_PROMPT),
+            Some(prompts.prompt(PromptId::CliSummarySystem)),
             Some(&openai.document_summary_model),
             Some(&file_inputs),
         )

@@ -41,6 +41,7 @@ use crate::{
         templates::{self, service::TemplateService},
         users::{self, repository::UserRepository, service::UserService, UserDirectory},
     },
+    shared::prompts::{PromptCatalog, PromptCatalogError},
 };
 
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
@@ -55,6 +56,8 @@ pub struct Application {
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
+    #[error("failed to load prompt catalog: {0}")]
+    PromptCatalog(PromptCatalogError),
     #[error("failed to create SQLite directory: {0}")]
     SqliteDirectory(std::io::Error),
     #[error("failed to open SQLite database: {0}")]
@@ -70,6 +73,9 @@ pub enum BootstrapError {
 }
 
 pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError> {
+    let prompts = Arc::new(
+        PromptCatalog::load(&config.prompts.directory).map_err(BootstrapError::PromptCatalog)?,
+    );
     let sqlite = open_sqlite(&config.sqlite.path)?;
     migrations::migrate(&sqlite).map_err(BootstrapError::Migration)?;
 
@@ -83,7 +89,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let http = reqwest::Client::builder()
         .build()
         .map_err(BootstrapError::HttpClient)?;
-    let api = assemble_api(&config, sqlite, helix, http);
+    let api = assemble_api(&config, sqlite, helix, http, prompts);
     let bind_address = config.http.bind_address;
     let router = create_router(api, &config.http);
     Ok(Application {
@@ -97,6 +103,7 @@ pub(crate) fn assemble_api(
     sqlite: SqliteClient,
     document_index: Arc<HelixClient>,
     http: reqwest::Client,
+    prompts: Arc<PromptCatalog>,
 ) -> Router {
     let users_repository = UserRepository::new(sqlite.clone());
     let deals_repository = DealRepository::new(sqlite.clone());
@@ -104,10 +111,13 @@ pub(crate) fn assemble_api(
     let document_index_reader = DocumentIndexReader::new(document_index.clone());
     let document_index_writer = DocumentIndexWriter::new(document_index.clone());
     let document_search_index = DocumentSearchIndex::new(document_index);
-    let openai = config
-        .openai
-        .as_ref()
-        .map(|openai_config| Arc::new(OpenAiClient::from_config(http.clone(), openai_config)));
+    let openai = config.openai.as_ref().map(|openai_config| {
+        Arc::new(OpenAiClient::from_config(
+            http.clone(),
+            openai_config,
+            prompts.clone(),
+        ))
+    });
     let office = OfficeConverter::new(config.data_room.office_executable.clone());
     let wm_clients = config.wm_ai.as_ref().map(|wm| WmAiClients {
         files: FileUploadServiceClient::new(
@@ -143,6 +153,7 @@ pub(crate) fn assemble_api(
             .as_ref()
             .map(|config| config.deal_extraction_model.clone())
             .unwrap_or_else(|| DEFAULT_DEAL_EXTRACTION_MODEL.to_string()),
+        prompts.clone(),
     ));
     let data_rooms = Arc::new(DataRoomService::new(
         DataRoomSourceReader::new(deals_repository),
@@ -179,6 +190,7 @@ pub(crate) fn assemble_api(
             .as_ref()
             .map(|config| config.document_summary_model.clone())
             .unwrap_or_else(|| DEFAULT_DOCUMENT_SUMMARY_MODEL.to_string()),
+        prompts.clone(),
     ));
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
@@ -192,6 +204,7 @@ pub(crate) fn assemble_api(
             .unwrap_or_else(|| "gpt-5.5".to_string()),
         AssistantChatRepository::new(sqlite),
         user_directory,
+        prompts,
     ));
 
     Router::new()
@@ -218,3 +231,7 @@ fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {
     }
     SqliteClient::open(path).map_err(BootstrapError::SqliteOpen)
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/app/bootstrap_tests.rs"]
+mod tests;

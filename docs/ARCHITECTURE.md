@@ -57,9 +57,10 @@ Build-time aliases select the router and runtime adapter:
   to the same Axum `/api/v1` routes.
 
 The backend is an explicit modular monolith. `AppConfig` parses process configuration once;
-`app::bootstrap` opens and migrates SQLite, constructs concrete adapters, assembles domain
-services, and merges routers whose private state has already been bound by the owning feature.
-There is no global application state or repository service locator.
+`app::bootstrap` validates and loads the Markdown prompt catalog before opening SQLite, then
+constructs concrete adapters, assembles domain services, and merges routers whose private state
+has already been bound by the owning feature. There is no global application state or repository
+service locator.
 
 SQLite is the canonical store for users, deals, logical files, immutable file versions, and
 file bytes. Helix is the versioned document graph and search projection. Document ingestion
@@ -155,6 +156,7 @@ Quarry/
 │   ├── package-lock.json             npm lockfile
 │   └── vite.config.ts                build-mode composition root
 ├── backend/
+│   ├── prompts/                      startup-validated server-side model prompt catalog
 │   ├── src/
 │   │   ├── app/                      configuration, composition, migrations, HTTP shell
 │   │   ├── domains/                  product modules with feature-owned routes and state
@@ -356,8 +358,9 @@ global state or query-cache library.
   profile theme picker.
 - `WorkspaceProvider` owns workspace session and deal-resource state for `/hub/*`.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
-- Workspace shells render their route-specific sidebar navigation directly. The Deal Room and
-  non-Assistant Deal Hub headers identify the active sidebar without fixture-backed alternate
+- Workspace shells render their route-specific sidebar navigation directly. The normal home
+  sidebar starts with Home (`/hub`) followed by Vault. The Deal Room and non-Assistant Deal Hub
+  headers identify the active sidebar without fixture-backed alternate
   spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
   initially selects Chat. Deal Hub restores the normal home navigation in the same sidebar without
   leaving the Assistant route or unmounting its conversation; Chat shows the persisted regular
@@ -400,10 +403,11 @@ global state or query-cache library.
   the workspace sidebar with the Data Room explorer, it passes current-document page-count,
   requested-page, and focus capabilities to the explorer's quick actions. This preserves
   current-document page jumps without coupling the reusable search UI to the editor implementation.
-- `DataRoomQuickActions` owns the Synthesis Canvas panel's open state and editable draft, and
-  invokes its owning route's existing upload-modal callback from the animated Upload icon. The
-  floating panel is a frontend-local scaffold: its text survives panel close/reopen during the
-  current Data Room route mount, but is neither persisted nor connected to an API.
+- `DataRoomQuickActions` owns the Synthesis Canvas panel's open state and invokes its owning
+  route's existing upload-modal callback from the animated Upload icon. Its Synthesis Canvas panel
+  reuses the Assistant runtime and thread view with a panel-local provider keyed by workspace email;
+  the header's previous-chat picker selects the same persisted assistant threads as the Assistant
+  route. Closing the panel preserves that provider for the current Data Room explorer mount.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Its keyed deal boundary initializes those local
   values for a new deal without render-derived effects. The Deliverables summary links to a
@@ -482,11 +486,11 @@ operational failures.
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry and Diligence Studio; each template can be deleted from the app-scoped upstream catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without an upstream-generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and an editable local Synthesis Canvas placeholder panel | Review/search content is partly fixture-derived; Synthesis Canvas text is not persisted and has no API integration; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, starter prompts, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
+| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
-| Initiative Vault | Activity stream | Static data |
+| Initiative Vault | Static ReUI Vault table with a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
 | Account/profile | Navigates immediately, displays a destination skeleton while fetching, then shows the fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Workspace email moves through router/UI state; profile data is request-local and this is not an auth session |
 
@@ -514,10 +518,12 @@ documents. The toolbar distributes bare animated Upload, Pencil Square (Synthesi
 and Document Magnifying Glass (Search) icons evenly across the sidebar. Upload opens the existing
 Data Room file-upload modal through the ReUI dialog primitives, including focus trapping and a
 scrollable body; Notes remains an unpersisted placeholder, while Search exposes fixture-backed
-results. Synthesis Canvas opens a draggable, resizable floating panel with a route-local unsaved
-text draft. The Search floating panel opens centered within the usable Data Room surface without a
-backdrop. Its title bar supports dragging, it remains above sticky file-review chrome, and each
-panel restores focus to its originating sidebar action when closed.
+results. Synthesis Canvas opens a draggable, resizable floating Assistant chat panel. Its header
+offers a New chat action and a dropdown list of persisted previous chats, while its body reuses the
+Assistant thread viewport and composer. The Search
+floating panel opens centered within the usable Data Room surface without a backdrop. Its title bar
+supports dragging, it remains above sticky file-review chrome, and each panel restores focus to its
+originating sidebar action when closed.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
@@ -733,7 +739,9 @@ normalize the earlier client bug that stored a user message as its own parent, a
 transcripts to load without rewriting local data. Conflicting message-ID reuse is rejected before
 insertion. Observed failures and disconnects retain buffered partial text; process termination can
 still leave a `streaming` row because schema v8 has no checkpoint/recovery worker. The legacy route
-remains mounted under both API prefixes for compatibility.
+remains mounted under both API prefixes for compatibility. When a client does not provide
+`systemInstructions`, both chat contracts use the server-owned `assistant-chat-default` catalog
+prompt; a validated client instruction still overrides it to support future user-created prompts.
 
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
@@ -816,7 +824,8 @@ result properties are currently snake_case because their Rust DTO lacks a rename
 flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
-    Bootstrap --> Sqlite[Open SQLite and run schema v8 migration]
+    Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
+    Prompts --> Sqlite[Open SQLite and run schema v8 migration]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -846,7 +855,7 @@ state.
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
-| `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, query defaults, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
+| `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, default system-prompt selection, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
 | `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
@@ -1202,6 +1211,7 @@ pins it to the loopback API.
 | `QUARRY_REQUEST_TIMEOUT_SECONDS` | `120`; must be positive |
 | `QUARRY_DATABASE_PATH` | explicit SQLite file |
 | `QUARRY_DATA_DIR` | fallback directory for `quarry.sqlite3` |
+| `QUARRY_PROMPTS_DIR` | `prompts`; relative to the backend process working directory; must contain the four startup-validated catalog assets |
 | `HELIX_URL` | `http://127.0.0.1:6969`; origin only (no `/v2/query` path, credentials, query, or fragment) |
 | `HELIX_API_KEY` | optional secret |
 | `HELIX_VECTOR_DIMENSION` | `1536`; must be a positive integer; configures both the Helix vector index and the OpenAI embeddings request |
@@ -1262,8 +1272,8 @@ If any OpenAI setting is present, `OPENAI_API_KEY` is required:
 
 The assembled services currently use chat, deal extraction, embedding, document summary, and image
 description settings.
-Assistant chat defaults `OPENAI_CHAT_MODEL` to `gpt-5.5` and defaults instructions to
-`You are a helpful assistant.` when the request omits its override.
+Assistant chat defaults `OPENAI_CHAT_MODEL` to `gpt-5.5` and obtains its default instructions
+from the startup-loaded server-side Markdown prompt catalog when the request omits its override.
 Document ingestion injects `OPENAI_IMAGE_DESCRIPTION_MODEL` into the image parser; image uploads
 therefore require the optional OpenAI capability just as the existing embedding stage does.
 
@@ -1400,7 +1410,7 @@ Coverage currently includes:
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
   viewer mount preservation, and generic requested-page navigation
 - Data Room explorer quick-action placement, direct Upload/Search/Synthesis Canvas access,
-  synthesis editing and focus restoration, and persistence across file-preview selection
+  shared Assistant chat rendering, previous-chat selection, and focus restoration
 - Data Room tree flattening and illustrative file-review row mapping
 - Data Room file-review search expansion, filtering, dismissal, and focus restoration
 - Deliverables-to-templates route navigation, template pagination, loading/empty/error/retry states,
@@ -1419,7 +1429,7 @@ Coverage currently includes:
   bundle-budget validation
 - Assistant stream-adapter ordering, authoritative completion, sanitized failures, synchronous
   terminal cleanup, cancellation, completed-pair context bounds, previous-chat history loading
-  skeletons, composer/suggestion behavior, incremental Markdown, retry/stop states, reduced motion,
+  skeletons, composer behavior, incremental Markdown, retry/stop states, reduced motion,
   and fill-layout notice composition
 
 There is no browser end-to-end suite or visual regression suite.

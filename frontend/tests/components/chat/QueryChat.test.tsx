@@ -52,13 +52,14 @@ describe("QueryChat", () => {
 
     expect(screen.getByRole("heading", { name: "How can I help you today?" })).toBeTruthy();
     expect(screen.getAllByRole("textbox", { name: "Message input" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /Summarize deal risks/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Summarize deal risks/ })).toBeNull();
     const composer = screen.getByRole("textbox", { name: "Message input" });
     const composerRoot = composer.closest('[data-slot="query-composer"]');
     expect(composerRoot?.hasAttribute("data-compact")).toBe(false);
     expect(composer.getAttribute("rows")).toBe("2");
 
-    await user.click(screen.getByRole("button", { name: /Summarize deal risks/ }));
+    await user.type(composer, "Summarize the most important deal risks and open questions.");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(queryModel).toHaveBeenCalledWith(
       {

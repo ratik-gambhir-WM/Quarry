@@ -18,11 +18,12 @@ describe("HomeWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const labels = ["Vault", "Research", "Assistant", "Topics", "Workspace", "Deals", "Notebook", "Templates", "Logs"];
+    const labels = ["Home", "Vault", "Research", "Assistant", "Topics", "Workspace", "Deals", "Notebook", "Templates", "Logs"];
     for (let index = 1; index < labels.length; index += 1) {
       expect(markup.indexOf(`>${labels[index - 1]}<`)).toBeLessThan(markup.indexOf(`>${labels[index]}<`));
     }
 
+    expect(markup).toContain('href="/hub"');
     expect(markup).toContain('href="/hub/deals"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('href="/hub/logs"');
@@ -35,6 +36,24 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).not.toContain("Active deals actions");
     expect(markup).not.toContain('href="/hub/deals/project-alpha"');
     expect(markup).not.toContain("Quick Chat");
+  });
+
+  it("links Home to the Hub route and marks it active at the route root", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/hub"]}>
+        <HomeWorkspaceSidebar
+          activeHomeSection="hub"
+          deals={workspaceDeals}
+          initiatives={[]}
+          tools={workspaceTools}
+        />
+      </MemoryRouter>,
+    );
+
+    const homeLink = markup.match(/<a\b[^>]*href="\/hub"[^>]*>[\s\S]*?<\/a>/)?.[0];
+
+    expect(homeLink).toContain('aria-current="page"');
+    expect(homeLink).toContain(">Home<");
   });
 
   it("selects the Assistant link with the assistant home-section key", () => {

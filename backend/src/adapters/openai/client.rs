@@ -11,8 +11,8 @@ use chrono::Utc;
 use serde_json::{json, Value};
 
 use crate::{
-    adapters::openai::prompts::{DEFAULT_RESPONSES_PROMPT, DEFAULT_SYSTEM_INSTRUCTIONS},
     app::config::OpenAiConfig,
+    shared::prompts::{PromptCatalog, PromptId},
 };
 
 const DEFAULT_RESPONSES_MODEL: &str = "gpt-5.5";
@@ -36,6 +36,7 @@ pub struct OpenAiClient {
     api_key: Arc<str>,
     responses_url: Arc<str>,
     embedding_dimensions: NonZeroUsize,
+    prompts: Arc<PromptCatalog>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,12 +93,17 @@ pub enum ResponsesFileInput<'a> {
 }
 
 impl OpenAiClient {
-    pub fn new(http_client: reqwest::Client, api_key: impl Into<String>) -> Self {
+    pub fn new(
+        http_client: reqwest::Client,
+        api_key: impl Into<String>,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
         Self {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(OPENAI_RESPONSES_URL),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            prompts,
         }
     }
 
@@ -106,22 +112,33 @@ impl OpenAiClient {
         http_client: reqwest::Client,
         api_key: impl Into<String>,
         responses_url: impl Into<String>,
+        prompts: Arc<PromptCatalog>,
     ) -> Self {
         Self {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(responses_url.into()),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            prompts,
         }
     }
 
-    pub fn from_config(http_client: reqwest::Client, config: &OpenAiConfig) -> Self {
+    pub fn from_config(
+        http_client: reqwest::Client,
+        config: &OpenAiConfig,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
         Self {
             http_client,
             api_key: Arc::from(config.api_key.expose()),
             responses_url: Arc::from(OPENAI_RESPONSES_URL),
             embedding_dimensions: config.embedding_dimensions,
+            prompts,
         }
+    }
+
+    pub fn prompts(&self) -> &PromptCatalog {
+        &self.prompts
     }
 
     pub async fn gen_model_response(
@@ -141,9 +158,11 @@ impl OpenAiClient {
         model: Option<&str>,
         file_inputs: Option<&[ResponsesFileInput<'_>]>,
     ) -> Result<String, String> {
-        let prompt = prompt.unwrap_or(DEFAULT_RESPONSES_PROMPT).trim();
+        let prompt = prompt
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultResponse))
+            .trim();
         let system_instructions = system_instructions
-            .unwrap_or(DEFAULT_SYSTEM_INSTRUCTIONS)
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultInstructions))
             .trim();
         let model = model.unwrap_or(DEFAULT_RESPONSES_MODEL).trim();
 
@@ -219,9 +238,11 @@ impl OpenAiClient {
     where
         F: FnMut(&str) + Send,
     {
-        let prompt = prompt.unwrap_or(DEFAULT_RESPONSES_PROMPT).trim();
+        let prompt = prompt
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultResponse))
+            .trim();
         let system_instructions = system_instructions
-            .unwrap_or(DEFAULT_SYSTEM_INSTRUCTIONS)
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultInstructions))
             .trim();
         let model = model.unwrap_or(DEFAULT_RESPONSES_MODEL).trim();
 

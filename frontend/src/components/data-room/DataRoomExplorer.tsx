@@ -73,6 +73,7 @@ export function DataRoomExplorer({
           <div className="flex min-h-full flex-col gap-3">
             <DataRoomQuickActions
               documentSearch={documentSearch}
+              email={email}
               onUploadNewFile={onUploadNewFile}
             />
 

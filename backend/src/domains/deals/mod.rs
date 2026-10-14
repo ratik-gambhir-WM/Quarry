@@ -1,4 +1,3 @@
-pub(crate) mod extraction;
 pub(crate) mod extraction_handler;
 pub(crate) mod handler;
 pub(crate) mod repository;

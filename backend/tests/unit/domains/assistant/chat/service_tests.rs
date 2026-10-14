@@ -4,7 +4,11 @@ use crate::domains::assistant::chat::repository::AssistantMessage;
 
 #[test]
 fn unavailable_capability_fails_before_streaming() {
-    let service = AssistantChatService::new(None, "gpt-5.5".to_string());
+    let service = AssistantChatService::new(
+        None,
+        "gpt-5.5".to_string(),
+        crate::integration_support::prompt_catalog(),
+    );
     let result = service.ask(QueryModelInput {
         context: Vec::new(),
         files: Vec::new(),
@@ -13,6 +17,26 @@ fn unavailable_capability_fails_before_streaming() {
         system_instructions: None,
     });
     assert!(matches!(result, Err(ServiceError::Unavailable(_))));
+}
+
+#[test]
+fn uses_the_catalog_default_when_the_client_omits_system_instructions() {
+    let prompts = crate::integration_support::prompt_catalog();
+
+    assert_eq!(
+        system_instructions_or_default(None, prompts.as_ref()),
+        prompts.prompt(PromptId::AssistantChatDefault)
+    );
+}
+
+#[test]
+fn preserves_client_system_instructions_for_future_custom_prompts() {
+    let prompts = crate::integration_support::prompt_catalog();
+
+    assert_eq!(
+        system_instructions_or_default(Some("Be concise.".to_string()), prompts.as_ref()),
+        "Be concise."
+    );
 }
 
 #[test]

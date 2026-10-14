@@ -40,6 +40,7 @@ async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
         DealRepository::new(sqlite),
         None,
         "test-model".to_string(),
+        crate::integration_support::prompt_catalog(),
     );
     let user = users
         .create(AddUserInput {
@@ -80,6 +81,7 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
         deals_repository.clone(),
         None,
         "test-model".to_string(),
+        crate::integration_support::prompt_catalog(),
     );
     users
         .create(AddUserInput {

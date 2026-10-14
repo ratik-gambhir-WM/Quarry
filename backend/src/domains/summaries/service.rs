@@ -10,13 +10,14 @@ use walkdir::WalkDir;
 
 use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
-    domains::summaries::prompt::{build_document_summary_prompt, DOCUMENT_SUMMARY_SYSTEM_PROMPT},
+    domains::summaries::prompt::build_document_summary_prompt,
     shared::{
         error::{ServiceError, ServiceResult},
         file_policy::{
             display_relative_path, infer_supported_mime_type, write_summary, CollectedFile,
             MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES,
         },
+        prompts::{PromptCatalog, PromptId},
     },
 };
 
@@ -34,11 +35,20 @@ pub struct SummarizableFile {
 pub struct SummaryService {
     openai: Option<Arc<OpenAiClient>>,
     model: String,
+    prompts: Arc<PromptCatalog>,
 }
 
 impl SummaryService {
-    pub fn new(openai: Option<Arc<OpenAiClient>>, model: String) -> Self {
-        Self { openai, model }
+    pub fn new(
+        openai: Option<Arc<OpenAiClient>>,
+        model: String,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
+        Self {
+            openai,
+            model,
+            prompts,
+        }
     }
 
     pub async fn summarize_dir(&self, path: String) -> ServiceResult<String> {
@@ -140,7 +150,7 @@ impl SummaryService {
             .as_ref()
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
         let root = Path::new(root_label);
-        let prompt = build_document_summary_prompt(root, &files, &skipped_files);
+        let prompt = build_document_summary_prompt(&self.prompts, root, &files, &skipped_files);
         let file_inputs: Vec<ResponsesFileInput<'_>> = files
             .iter()
             .map(|file| ResponsesFileInput::FileData {
@@ -153,7 +163,7 @@ impl SummaryService {
         client
             .gen_model_response_with_files(
                 Some(&prompt),
-                Some(DOCUMENT_SUMMARY_SYSTEM_PROMPT),
+                Some(self.prompts.prompt(PromptId::SummarySystem)),
                 Some(&self.model),
                 Some(&file_inputs),
             )

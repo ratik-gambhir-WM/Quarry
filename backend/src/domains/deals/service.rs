@@ -8,16 +8,13 @@ pub use crate::domains::deals::repository::{Deal, DealMetadata, DealWithMetadata
 use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::{
-        deals::{
-            extraction::{
-                build_deal_extraction_prompt, DealExtractionPromptVariables,
-                DEAL_EXTRACTION_SYSTEM_PROMPT,
-            },
-            repository::{CreateDealRecord, DealRepository, UpsertDealMetadataRecord},
-        },
+        deals::repository::{CreateDealRecord, DealRepository, UpsertDealMetadataRecord},
         users::UserDirectory,
     },
-    shared::error::{ServiceError, ServiceResult},
+    shared::{
+        error::{ServiceError, ServiceResult},
+        prompts::{DealExtractionPromptData, PromptCatalog, PromptId},
+    },
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +94,7 @@ pub struct DealService {
     deals: DealRepository,
     openai: Option<Arc<OpenAiClient>>,
     extraction_model: String,
+    prompts: Arc<PromptCatalog>,
 }
 
 impl DealService {
@@ -105,12 +103,14 @@ impl DealService {
         deals: DealRepository,
         openai: Option<Arc<OpenAiClient>>,
         extraction_model: String,
+        prompts: Arc<PromptCatalog>,
     ) -> Self {
         Self {
             users,
             deals,
             openai,
             extraction_model,
+            prompts,
         }
     }
 
@@ -285,15 +285,17 @@ impl DealService {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let prompt = build_deal_extraction_prompt(DealExtractionPromptVariables {
-            deal_id: &deal.deal_id,
-            deal_name: &deal.deal_name,
-            transaction_type: &deal.transaction_type,
-            target_company: &deal.target_company,
-            primary_buyer: &deal.primary_buyer,
-            deal_sponsor: &deal.deal_sponsor,
-            attached_file_manifest: &manifest,
-        });
+        let prompt = self
+            .prompts
+            .render_deal_extraction(DealExtractionPromptData {
+                deal_id: &deal.deal_id,
+                deal_name: &deal.deal_name,
+                transaction_type: &deal.transaction_type,
+                target_company: &deal.target_company,
+                primary_buyer: &deal.primary_buyer,
+                deal_sponsor: &deal.deal_sponsor,
+                attached_file_manifest: &manifest,
+            });
         let file_inputs = files
             .iter()
             .map(|file| ResponsesFileInput::FileData {
@@ -305,7 +307,7 @@ impl DealService {
         let response = client
             .gen_model_response_with_files(
                 Some(&prompt),
-                Some(DEAL_EXTRACTION_SYSTEM_PROMPT),
+                Some(self.prompts.prompt(PromptId::DealExtractionSystem)),
                 Some(&self.extraction_model),
                 Some(&file_inputs),
             )

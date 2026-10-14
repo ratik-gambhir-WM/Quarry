@@ -6,11 +6,16 @@ import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import type { AssistantMessage, Message } from "./chatModel";
 import { MarkdownText } from "./MarkdownText";
-import { queryChatSuggestions } from "./queryChatSuggestions";
 import { useAgentRuntimeContext, useThreadRuntimeState } from "./AgentRuntime";
 import { TypingIndicator } from "./TypingIndicator";
 
-export function QueryChatThread({ contextTruncated }: { contextTruncated: boolean }) {
+export function QueryChatThread({
+  contextTruncated,
+  floatingPanel = false,
+}: {
+  contextTruncated: boolean;
+  floatingPanel?: boolean;
+}) {
   const state = useThreadRuntimeState((snapshot) => snapshot);
   const shouldReduceMotion = useReducedMotion() ?? false;
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -42,15 +47,14 @@ export function QueryChatThread({ contextTruncated }: { contextTruncated: boolea
               <ThreadMessage key={message.id} message={message} />
             ))}
           </div>
-          <div className={cn("relative z-10 flex flex-col", isEmpty ? "gap-3 pb-4 sm:pb-6" : "sticky bottom-0 mt-auto gap-2 bg-[var(--theme-workspace-surface-bottom)] py-3")}>
+          <div className={cn("relative z-10 flex flex-col", isEmpty ? "gap-3 pb-4 sm:pb-6" : "sticky bottom-0 mt-auto gap-2 py-3", !isEmpty && !floatingPanel && "bg-[var(--theme-workspace-surface-bottom)]")}>
             {!isNearBottom && !isEmpty ? (
               <Button aria-label="Scroll to bottom" className="absolute -top-10 self-center rounded-full bg-surface-container-lowest shadow-sm" onClick={() => viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: shouldReduceMotion ? "auto" : "smooth" })} size="icon-sm" title="Scroll to bottom" type="button" variant="outline"><ArrowDown /></Button>
             ) : null}
             {contextTruncated ? <p className="text-center text-xs text-muted" role="status">Older conversation context was omitted to fit this request.</p> : null}
             <motion.div data-query-composer-host layout layoutId="query-chat-composer" transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: "easeOut" }}>
-              <ComposerBar compact={!isEmpty} />
+              <ComposerBar compact={!isEmpty} condensed={floatingPanel} />
             </motion.div>
-            {isEmpty && !state.draft ? <ThreadSuggestions /> : null}
           </div>
         </div>
       </div>
@@ -70,15 +74,10 @@ function ThreadLoadError() {
   return <p className="rounded-xl border border-error/35 bg-error-container/35 p-3 text-sm text-error" role="status">Couldn’t load this chat. Please select it again.</p>;
 }
 
-function ThreadSuggestions() {
-  const runtime = useAgentRuntimeContext();
-  return <div className="flex w-full flex-wrap justify-center gap-2 px-2">{queryChatSuggestions.map((suggestion) => <Button className="h-auto max-w-full gap-1.5 rounded-full border-outline-variant/80 bg-transparent px-3.5 py-2 text-xs font-normal text-on-surface-variant shadow-none sm:text-[13px]" key={suggestion.title} onClick={() => void runtime.send(suggestion.prompt)} type="button" variant="outline"><span>{suggestion.title}</span><span className="hidden text-muted md:inline">{suggestion.label}</span></Button>)}</div>;
-}
-
-function ComposerBar({ compact }: { compact: boolean }) {
+function ComposerBar({ compact, condensed }: { compact: boolean; condensed: boolean }) {
   const runtime = useAgentRuntimeContext();
   const { draft, isPreparingThread, isRunning } = useThreadRuntimeState((state) => state);
-  return <div className={cn("group/query-composer relative flex w-full flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-2 shadow-[0_12px_34px_rgba(7,1,84,0.07)] transition-[border-color,box-shadow,border-radius] focus-within:border-outline/50 focus-within:shadow-[0_14px_38px_rgba(7,1,84,0.1)]", compact && "min-h-14 flex-row items-end rounded-full p-1.5")} data-compact={compact ? "" : undefined} data-slot="query-composer"><textarea aria-label="Message input" autoFocus className={cn("max-h-48 min-h-16 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 text-on-surface outline-none placeholder:text-muted", compact && "min-h-11 px-3.5 py-2.5")} enterKeyHint="send" onChange={(event) => runtime.setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void runtime.send(); } }} placeholder="Send a message..." rows={compact ? 1 : 2} value={draft} /><div className={cn("flex justify-end", compact && "shrink-0 self-center")} data-slot="query-composer-actions">{isRunning ? <Button aria-label="Stop generating" className="rounded-full" onClick={() => runtime.stop()} size="icon-sm" title="Stop generating" type="button"><Square className="fill-current" /></Button> : <Button aria-label="Send message" className="rounded-full" disabled={isPreparingThread || !draft.trim()} onClick={() => void runtime.send()} size="icon-sm" title="Send message" type="button"><ArrowUp /></Button>}</div></div>;
+  return <div className={cn("group/query-composer relative flex w-full flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-2 shadow-[0_12px_34px_rgba(7,1,84,0.07)] transition-[border-color,box-shadow,border-radius] focus-within:border-outline/50 focus-within:shadow-[0_14px_38px_rgba(7,1,84,0.1)]", compact && (condensed ? "min-h-[2.625rem] flex-row items-end rounded-full p-1" : "min-h-14 flex-row items-end rounded-full p-1.5"))} data-compact={compact ? "" : undefined} data-slot="query-composer"><textarea aria-label="Message input" autoFocus className={cn("max-h-48 min-h-16 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 text-on-surface outline-none placeholder:text-muted", compact && (condensed ? "min-h-[1.875rem] px-3.5 py-[0.1875rem]" : "min-h-11 px-3.5 py-2.5"))} enterKeyHint="send" onChange={(event) => runtime.setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void runtime.send(); } }} placeholder="Send a message..." rows={compact ? 1 : 2} value={draft} /><div className={cn("flex justify-end", compact && "shrink-0 self-center")} data-slot="query-composer-actions">{isRunning ? <Button aria-label="Stop generating" className="rounded-full" onClick={() => runtime.stop()} size="icon-sm" title="Stop generating" type="button"><Square className="fill-current" /></Button> : <Button aria-label="Send message" className="rounded-full" disabled={isPreparingThread || !draft.trim()} onClick={() => void runtime.send()} size="icon-sm" title="Send message" type="button"><ArrowUp /></Button>}</div></div>;
 }
 
 function ThreadMessage({ message }: { message: Message }) {

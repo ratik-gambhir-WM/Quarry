@@ -2,10 +2,32 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DataRoomQuickActions } from "@/components/data-room/DataRoomQuickActions";
 
+const { api } = vi.hoisted(() => ({
+  api: {
+    createAssistantThread: vi.fn(),
+    deleteAssistantThread: vi.fn(),
+    getAssistantThread: vi.fn(),
+    listAssistantThreads: vi.fn(),
+    queryModel: vi.fn(),
+    runAssistantThread: vi.fn(),
+  },
+}));
+
+vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
+
 afterEach(cleanup);
+
+beforeEach(() => {
+  api.createAssistantThread.mockReset();
+  api.deleteAssistantThread.mockReset();
+  api.getAssistantThread.mockReset();
+  api.listAssistantThreads.mockReset();
+  api.queryModel.mockReset();
+  api.runAssistantThread.mockReset();
+});
 
 describe("DataRoomQuickActions", () => {
   it("renders evenly distributed Upload, Synthesis Canvas, Notes, and Search actions", () => {
@@ -74,7 +96,7 @@ describe("DataRoomQuickActions", () => {
     await waitFor(() => expect(searchTrigger).toBe(document.activeElement));
   });
 
-  it("keeps the Synthesis Canvas draft while the panel is closed", async () => {
+  it("shows the Assistant chat interface in the Synthesis Canvas", async () => {
     const user = userEvent.setup();
 
     render(
@@ -90,15 +112,79 @@ describe("DataRoomQuickActions", () => {
 
     const trigger = screen.getByRole("button", { name: "Open Synthesis Canvas" });
     await user.click(trigger);
-    const notes = await screen.findByRole("textbox", { name: "Notes" });
-    await user.type(notes, "Compare customer concentration.");
+
+    expect(await screen.findByRole("heading", { name: "How can I help you today?" })).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBe(document.activeElement);
+    expect(screen.queryByRole("button", { name: /Summarize deal risks/ })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Close Synthesis Canvas" }));
     await waitFor(() => expect(trigger).toBe(document.activeElement));
+  });
 
-    await user.click(trigger);
-    expect(await screen.findByRole("textbox", { name: "Notes" })).toHaveProperty(
-      "value",
-      "Compare customer concentration.",
+  it("selects a previous Assistant chat from the panel header", async () => {
+    const user = userEvent.setup();
+    const thread = {
+      createdAt: "2026-10-12 10:00:00",
+      lastMessageAt: "2026-10-12 10:01:00",
+      status: "regular" as const,
+      threadId: "thread-1",
+      title: "Customer concentration review",
+      updatedAt: "2026-10-12 10:01:00",
+    };
+    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [thread] });
+    api.getAssistantThread.mockResolvedValue({
+      ...thread,
+      messages: [
+        {
+          completedAt: "2026-10-12 10:00:01",
+          content: "What customer concentration risk do you see?",
+          createdAt: "2026-10-12 10:00:00",
+          messageId: "message-1",
+          model: null,
+          parentMessageId: null,
+          role: "user" as const,
+          sequence: 1,
+          status: "completed" as const,
+          threadId: thread.threadId,
+        },
+        {
+          completedAt: "2026-10-12 10:01:01",
+          content: "The largest customer is the primary concentration risk.",
+          createdAt: "2026-10-12 10:01:00",
+          messageId: "message-2",
+          model: "gpt-5.5",
+          parentMessageId: "message-1",
+          role: "assistant" as const,
+          sequence: 2,
+          status: "completed" as const,
+          threadId: thread.threadId,
+        },
+      ],
+    });
+
+    render(
+      <DataRoomQuickActions
+        documentSearch={{
+          currentFileName: "Synthetic_Terms.pdf",
+          currentPageCount: 3,
+          onActivateResult: vi.fn(),
+        }}
+        email="analyst@example.com"
+        onUploadNewFile={vi.fn()}
+      />,
     );
+
+    await user.click(screen.getByRole("button", { name: "Open Synthesis Canvas" }));
+    await user.click(await screen.findByRole("button", { name: "Select previous chat" }));
+    await user.click(await screen.findByRole("menuitem", { name: thread.title }));
+
+    expect(await screen.findByText("The largest customer is the primary concentration risk.")).not.toBeNull();
+    expect(api.getAssistantThread).toHaveBeenCalledWith(thread.threadId, "analyst@example.com");
+
+    const composer = screen.getByRole("textbox", { name: "Message input" });
+    const composerRoot = composer.closest('[data-slot="query-composer"]');
+    const composerDock = composerRoot?.parentElement?.parentElement;
+    expect(composerRoot?.className).toContain("min-h-[2.625rem]");
+    expect(composer.className).toContain("min-h-[1.875rem]");
+    expect(composerDock?.className).not.toContain("bg-[var(--theme-workspace-surface-bottom)]");
   });
 });

@@ -238,10 +238,12 @@ async fn query_model_streams_the_typed_lifecycle_without_buffering() {
         reqwest::Client::new(),
         "test-key",
         format!("http://{address}/v1/responses"),
+        crate::integration_support::prompt_catalog(),
     );
     let service = crate::domains::assistant::chat::service::AssistantChatService::new(
         Some(Arc::new(client)),
         "gpt-5.5".to_string(),
+        crate::integration_support::prompt_catalog(),
     );
     let api = crate::domains::assistant::chat::route::routes(Arc::new(service));
     let app = crate::app::http::create_router(api, &crate::AppConfig::default().http);

@@ -78,7 +78,8 @@ fn embedding_batches_reject_a_chunk_larger_than_one_request() {
 
 #[tokio::test]
 async fn image_description_requires_a_configured_model_before_calling_openai() {
-    let client = OpenAiClient::new(reqwest::Client::new(), "test-key");
+    let prompts = crate::integration_support::prompt_catalog();
+    let client = OpenAiClient::new(reqwest::Client::new(), "test-key", prompts.clone());
 
     let error = describe_image(b"image bytes", "image/png", &client, "   ")
         .await
@@ -89,7 +90,8 @@ async fn image_description_requires_a_configured_model_before_calling_openai() {
 
 #[tokio::test]
 async fn image_uploads_are_validated_before_the_service_requests_a_description() {
-    let client = OpenAiClient::new(reqwest::Client::new(), "test-key");
+    let prompts = crate::integration_support::prompt_catalog();
+    let client = OpenAiClient::new(reqwest::Client::new(), "test-key", prompts.clone());
     let result = parse_document(
         UploadedDocument {
             filename: "evidence.png".to_string(),

@@ -107,6 +107,11 @@ pub struct DiligenceStudioConfig {
 }
 
 #[derive(Clone, Debug)]
+pub struct PromptConfig {
+    pub directory: PathBuf,
+}
+
+#[derive(Clone, Debug)]
 pub struct AppConfig {
     pub http: HttpConfig,
     pub sqlite: SqliteConfig,
@@ -116,6 +121,7 @@ pub struct AppConfig {
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
     pub diligence_studio: Option<DiligenceStudioConfig>,
+    pub prompts: PromptConfig,
 }
 
 impl AppConfig {
@@ -149,6 +155,7 @@ impl AppConfig {
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
             diligence_studio: parse_diligence_studio_config(&values)?,
+            prompts: parse_prompt_config(&values)?,
         })
     }
 }
@@ -185,8 +192,22 @@ impl Default for AppConfig {
                 ),
             },
             diligence_studio: None,
+            prompts: PromptConfig {
+                directory: PathBuf::from("prompts"),
+            },
         }
     }
+}
+
+fn parse_prompt_config(values: &HashMap<String, String>) -> Result<PromptConfig, String> {
+    let directory = match values.get("QUARRY_PROMPTS_DIR") {
+        Some(value) if value.trim().is_empty() => {
+            return Err("QUARRY_PROMPTS_DIR must not be blank".to_string());
+        }
+        Some(value) => PathBuf::from(value.trim()),
+        None => PathBuf::from("prompts"),
+    };
+    Ok(PromptConfig { directory })
 }
 
 fn parse_diligence_studio_config(
