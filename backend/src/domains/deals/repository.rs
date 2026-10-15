@@ -1,30 +1,34 @@
-use rusqlite::Row;
-use serde::Serialize;
-
+pub use super::model::{Deal, DealFields};
+use super::model::{DealParty, DiligenceScope, PartyRole};
 use crate::{
     adapters::sqlite::{
-        client::SqliteClient,
-        query::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlQuery},
+        client::{SqliteClient, SqliteClientError, SqliteTransaction},
+        query::{Condition, ConflictUpdate, SqlBuilder},
     },
+    domains::companies::company_from_row,
     shared::error::RepositoryError,
 };
-
-const DEAL_COLUMNS: [&str; 10] = [
+use rusqlite::Row;
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+const DEAL_COLUMNS: [&str; 14] = [
     "deal_id",
     "user_id",
     "deal_name",
+    "deal_code",
+    "engagement_type",
+    "transaction_type",
     "status",
     "start_date",
-    "close_date",
-    "transaction_type",
-    "target_company",
-    "primary_buyer",
-    "deal_sponsor",
+    "expected_close_date",
+    "actual_close_date",
+    "engagement_completed_date",
+    "archived_at",
+    "created_at",
+    "updated_at",
 ];
-
-const DEAL_METADATA_COLUMNS: [&str; 8] = [
+const METADATA_COLUMNS: [&str; 7] = [
     "deal_id",
-    "user_id",
     "key_questions_json",
     "local_path",
     "sharepoint_link",
@@ -32,27 +36,10 @@ const DEAL_METADATA_COLUMNS: [&str; 8] = [
     "fact_sheet_link",
     "rl_link",
 ];
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Deal {
-    pub deal_id: String,
-    pub user_id: i64,
-    pub deal_name: String,
-    pub status: String,
-    pub start_date: String,
-    pub close_date: String,
-    pub transaction_type: String,
-    pub target_company: String,
-    pub primary_buyer: String,
-    pub deal_sponsor: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealMetadata {
     pub deal_id: String,
-    pub user_id: i64,
     pub key_questions_json: String,
     pub local_path: Option<String>,
     pub sharepoint_link: Option<String>,
@@ -60,7 +47,16 @@ pub struct DealMetadata {
     pub fact_sheet_link: Option<String>,
     pub rl_link: Option<String>,
 }
-
+#[derive(Debug, Clone)]
+pub struct UpsertDealMetadataRecord {
+    pub deal_id: String,
+    pub key_questions_json: String,
+    pub local_path: Option<String>,
+    pub sharepoint_link: Option<String>,
+    pub sow_link: Option<String>,
+    pub fact_sheet_link: Option<String>,
+    pub rl_link: Option<String>,
+}
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealWithMetadata {
@@ -68,262 +64,463 @@ pub struct DealWithMetadata {
     pub deal: Deal,
     pub metadata: Option<DealMetadata>,
 }
-
 pub struct CreateDealRecord {
     pub deal_id: String,
     pub user_id: i64,
-    pub deal_name: String,
-    pub status: String,
-    pub start_date: String,
-    pub close_date: String,
-    pub transaction_type: String,
-    pub target_company: String,
-    pub primary_buyer: String,
-    pub deal_sponsor: String,
-}
-
-pub struct UpsertDealMetadataRecord {
-    pub deal_id: String,
-    pub user_id: i64,
-    pub key_questions_json: String,
+    pub fields: DealFields,
     pub local_path: Option<String>,
     pub sharepoint_link: Option<String>,
-    pub sow_link: Option<String>,
-    pub fact_sheet_link: Option<String>,
-    pub rl_link: Option<String>,
 }
-
 #[derive(Clone)]
 pub struct DealRepository {
     sqlite: SqliteClient,
 }
-
 impl DealRepository {
     pub fn new(sqlite: SqliteClient) -> Self {
         Self { sqlite }
     }
-
-    pub async fn create(&self, record: CreateDealRecord) -> Result<Deal, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || create_deal(&sqlite, &record)).await
+    pub async fn create(
+        &self,
+        record: CreateDealRecord,
+    ) -> Result<DealWithMetadata, RepositoryError> {
+        self.sqlite
+            .transaction_async(move |tx| {
+                if !tx
+                    .read(
+                        SqlBuilder::select("deals")
+                            .and_where(Condition::equal("deal_id", &record.deal_id))
+                            .build(),
+                    )?
+                    .is_empty()
+                {
+                    return Ok(Err(RepositoryError::Conflict(
+                        "dealId already exists".into(),
+                    )));
+                }
+                if let Err(error) = validate_companies(tx, record.user_id, &record.fields)? {
+                    return Ok(Err(error));
+                }
+                let now = chrono::Utc::now().to_rfc3339();
+                let insert = SqlBuilder::insert_into("deals")
+                    .value("deal_id", &record.deal_id)
+                    .value("user_id", record.user_id)
+                    .value("deal_name", record.fields.deal_name.trim())
+                    .value("deal_code", record.fields.deal_code.as_deref())
+                    .value("engagement_type", record.fields.engagement_type.code())
+                    .value("transaction_type", record.fields.transaction_type.code())
+                    .value("status", record.fields.status.code())
+                    .value("start_date", record.fields.start_date.as_deref())
+                    .value(
+                        "expected_close_date",
+                        record.fields.expected_close_date.as_deref(),
+                    )
+                    .value(
+                        "actual_close_date",
+                        record.fields.actual_close_date.as_deref(),
+                    )
+                    .value(
+                        "engagement_completed_date",
+                        record.fields.engagement_completed_date.as_deref(),
+                    )
+                    .value("created_at", &now)
+                    .value("updated_at", &now)
+                    .build();
+                tx.write(insert)?;
+                tx.write(
+                    SqlBuilder::insert_into("deal_metadata")
+                        .value("deal_id", &record.deal_id)
+                        .value("local_path", record.local_path.as_deref())
+                        .value("sharepoint_link", record.sharepoint_link.as_deref())
+                        .build(),
+                )?;
+                replace_children(tx, &record.deal_id, &record.fields)?;
+                Ok(Ok(load_one(tx, &record.deal_id)?.ok_or_else(|| {
+                    SqliteClientError::transaction_aborted("created deal missing")
+                })?))
+            })
+            .await
+            .map_err(storage)?
     }
-
-    pub async fn by_id(&self, deal_id: String) -> Result<Option<Deal>, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || deal_by_id(&sqlite, &deal_id)).await
+    pub async fn update(
+        &self,
+        id: String,
+        fields: DealFields,
+    ) -> Result<DealWithMetadata, RepositoryError> {
+        self.sqlite
+            .transaction_async(move |tx| {
+                let Some(existing) = load_one(tx, &id)? else {
+                    return Ok(Err(RepositoryError::NotFound("deal not found".into())));
+                };
+                if let Err(error) = validate_companies(tx, existing.deal.user_id, &fields)? {
+                    return Ok(Err(error));
+                }
+                tx.write(
+                    SqlBuilder::update("deals")
+                        .set("deal_name", fields.deal_name.trim())
+                        .set("deal_code", fields.deal_code.as_deref())
+                        .set("engagement_type", fields.engagement_type.code())
+                        .set("transaction_type", fields.transaction_type.code())
+                        .set("status", fields.status.code())
+                        .set("start_date", fields.start_date.as_deref())
+                        .set("expected_close_date", fields.expected_close_date.as_deref())
+                        .set("actual_close_date", fields.actual_close_date.as_deref())
+                        .set(
+                            "engagement_completed_date",
+                            fields.engagement_completed_date.as_deref(),
+                        )
+                        .set("updated_at", chrono::Utc::now().to_rfc3339())
+                        .and_where(Condition::equal("deal_id", &id))
+                        .build(),
+                )?;
+                replace_children(tx, &id, &fields)?;
+                Ok(Ok(load_one(tx, &id)?.ok_or_else(|| {
+                    SqliteClientError::transaction_aborted("updated deal missing")
+                })?))
+            })
+            .await
+            .map_err(storage)?
     }
-
     pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || list_deals(&sqlite)).await
+        self.sqlite
+            .transaction_async(|tx| load(tx, None))
+            .await
+            .map_err(storage)
     }
-
     pub async fn with_metadata(
         &self,
-        deal_id: String,
+        id: String,
     ) -> Result<Option<DealWithMetadata>, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || get_deal_with_metadata(&sqlite, &deal_id)).await
+        self.sqlite
+            .transaction_async(move |tx| load_one(tx, &id))
+            .await
+            .map_err(storage)
     }
-
-    pub async fn metadata(&self, deal_id: String) -> Result<Option<DealMetadata>, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || get_deal_metadata_by_deal_id(&sqlite, &deal_id)).await
+    pub async fn by_id(&self, id: String) -> Result<Option<Deal>, RepositoryError> {
+        Ok(self
+            .with_metadata(id)
+            .await?
+            .map(|aggregate| aggregate.deal))
     }
-
+    pub async fn metadata(&self, id: String) -> Result<Option<DealMetadata>, RepositoryError> {
+        self.sqlite
+            .read_one_with_async(
+                SqlBuilder::select("deal_metadata")
+                    .columns(METADATA_COLUMNS)
+                    .and_where(Condition::equal("deal_id", id))
+                    .build(),
+                metadata_from_row,
+            )
+            .await
+            .map_err(storage)
+    }
+    pub async fn archive(&self, id: String) -> Result<Option<Deal>, RepositoryError> {
+        self.sqlite
+            .transaction_async(move |tx| {
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.write(
+                    SqlBuilder::update("deals")
+                        .set("archived_at", &now)
+                        .set("updated_at", &now)
+                        .and_where(Condition::equal("deal_id", &id))
+                        .and_where(Condition::is_null("archived_at"))
+                        .build(),
+                )?;
+                Ok(load_one(tx, &id)?.map(|a| a.deal))
+            })
+            .await
+            .map_err(storage)
+    }
     pub async fn upsert_metadata(
         &self,
         record: UpsertDealMetadataRecord,
     ) -> Result<DealMetadata, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || upsert_deal_metadata(&sqlite, &record)).await
+        serde_json::from_str::<Vec<String>>(&record.key_questions_json)
+            .map_err(|_| RepositoryError::invalid("key questions must be an array of strings"))?;
+        self.sqlite
+            .transaction_async(move |tx| {
+                tx.write(
+                    SqlBuilder::insert_into("deal_metadata")
+                        .value("deal_id", &record.deal_id)
+                        .value("key_questions_json", &record.key_questions_json)
+                        .value("local_path", record.local_path.as_deref())
+                        .value("sharepoint_link", record.sharepoint_link.as_deref())
+                        .value("sow_link", record.sow_link.as_deref())
+                        .value("fact_sheet_link", record.fact_sheet_link.as_deref())
+                        .value("rl_link", record.rl_link.as_deref())
+                        .on_conflict_update(
+                            ConflictUpdate::new(["deal_id"])
+                                .set_excluded("key_questions_json")
+                                .set_excluded("local_path")
+                                .set_excluded("sharepoint_link")
+                                .set_excluded("sow_link")
+                                .set_excluded("fact_sheet_link")
+                                .set_excluded("rl_link"),
+                        )
+                        .build(),
+                )?;
+                tx.read_with(
+                    SqlBuilder::select("deal_metadata")
+                        .columns(METADATA_COLUMNS)
+                        .and_where(Condition::equal("deal_id", &record.deal_id))
+                        .build(),
+                    metadata_from_row,
+                )?
+                .pop()
+                .ok_or_else(|| SqliteClientError::transaction_aborted("metadata missing"))
+            })
+            .await
+            .map_err(storage)
     }
-
-    pub async fn archive(&self, deal_id: String) -> Result<Option<Deal>, RepositoryError> {
-        let sqlite = self.sqlite.clone();
-        run_blocking(move || archive_deal(&sqlite, &deal_id)).await
+}
+fn validate_companies(
+    tx: &SqliteTransaction<'_>,
+    owner: i64,
+    fields: &DealFields,
+) -> Result<Result<(), RepositoryError>, SqliteClientError> {
+    if fields.parties.is_empty() {
+        return Ok(Ok(()));
     }
-}
-
-async fn run_blocking<T>(
-    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, RepositoryError>
-where
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|error| RepositoryError::BlockingWorker(error.to_string()))?
-        .map_err(RepositoryError::storage)
-}
-
-fn create_deal(sqlite: &SqliteClient, record: &CreateDealRecord) -> Result<Deal, String> {
-    let query = build_query(
-        SqlBuilder::insert_into("deals")
-            .value("deal_id", &record.deal_id)
-            .value("user_id", record.user_id)
-            .value("deal_name", &record.deal_name)
-            .value("status", &record.status)
-            .value("start_date", &record.start_date)
-            .value("close_date", &record.close_date)
-            .value("transaction_type", &record.transaction_type)
-            .value("target_company", &record.target_company)
-            .value("primary_buyer", &record.primary_buyer)
-            .value("deal_sponsor", &record.deal_sponsor)
+    let companies = tx.read_with(
+        SqlBuilder::select("companies")
+            .and_where(Condition::in_values(
+                "company_id",
+                fields.parties.iter().map(|p| p.company_id.as_str()),
+            ))
             .build(),
-        "deal insert",
+        company_from_row,
     )?;
-    sqlite
-        .write(&query)
-        .map_err(|error| format!("failed to insert deal: {error}"))?;
-    deal_by_id(sqlite, &record.deal_id)?
-        .ok_or_else(|| format!("inserted deal `{}` could not be loaded", record.deal_id))
+    let ids: HashSet<_> = companies.iter().map(|c| c.company_id.as_str()).collect();
+    if fields
+        .parties
+        .iter()
+        .any(|p| !ids.contains(p.company_id.as_str()))
+    {
+        return Ok(Err(RepositoryError::NotFound(
+            "referenced company not found".into(),
+        )));
+    }
+    if companies.iter().any(|c| c.user_id != owner) {
+        return Ok(Err(RepositoryError::Conflict(
+            "company and deal must have the same owner".into(),
+        )));
+    }
+    Ok(Ok(()))
 }
-
-fn list_deals(sqlite: &SqliteClient) -> Result<Vec<DealWithMetadata>, String> {
-    let query = build_query(
-        SqlBuilder::select("deals")
-            .columns(DEAL_COLUMNS)
-            .order_by("close_date", SortDirection::Ascending)
-            .order_by("deal_id", SortDirection::Ascending)
-            .build(),
-        "deal list select",
-    )?;
-    let deals = sqlite
-        .read_with(&query, deal_from_row)
-        .map_err(|error| format!("failed to list deals: {error}"))?
+fn replace_children(
+    tx: &SqliteTransaction<'_>,
+    id: &str,
+    fields: &DealFields,
+) -> Result<(), SqliteClientError> {
+    let existing = tx
+        .read_with(
+            SqlBuilder::select("deal_parties")
+                .and_where(Condition::equal("deal_id", id))
+                .build(),
+            |r| {
+                Ok((
+                    (
+                        r.get::<_, String>("company_id")?,
+                        r.get::<_, String>("role")?,
+                    ),
+                    r.get::<_, String>("deal_party_id")?,
+                ))
+            },
+        )?
         .into_iter()
-        .filter(|deal| !deal.status.eq_ignore_ascii_case("archived"));
-
-    deals
-        .map(|deal| {
-            let metadata = get_deal_metadata_by_deal_id(sqlite, &deal.deal_id)?;
-            Ok(DealWithMetadata { deal, metadata })
-        })
-        .collect()
+        .collect::<HashMap<_, _>>();
+    for table in ["deal_parties", "deal_scopes"] {
+        tx.write(
+            SqlBuilder::delete_from(table)
+                .and_where(Condition::equal("deal_id", id))
+                .build(),
+        )?;
+    }
+    for party in &fields.parties {
+        let party_id = existing
+            .get(&(party.company_id.clone(), party.role.code().to_string()))
+            .cloned()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        tx.write(
+            SqlBuilder::insert_into("deal_parties")
+                .value("deal_party_id", party_id)
+                .value("deal_id", id)
+                .value("company_id", &party.company_id)
+                .value("role", party.role.code())
+                .value("notes", party.notes.as_deref())
+                .build(),
+        )?;
+    }
+    for scope in &fields.scopes {
+        tx.write(
+            SqlBuilder::insert_into("deal_scopes")
+                .value("deal_id", id)
+                .value("scope", scope.code())
+                .build(),
+        )?;
+    }
+    Ok(())
 }
-
-fn get_deal_with_metadata(
-    sqlite: &SqliteClient,
-    deal_id: &str,
-) -> Result<Option<DealWithMetadata>, String> {
-    let Some(deal) = deal_by_id(sqlite, deal_id)? else {
-        return Ok(None);
+fn load_one(
+    tx: &SqliteTransaction<'_>,
+    id: &str,
+) -> Result<Option<DealWithMetadata>, SqliteClientError> {
+    Ok(load(tx, Some(id))?.pop())
+}
+// Read each collection in bounded batches under one snapshot, without per-deal queries.
+fn load(
+    tx: &SqliteTransaction<'_>,
+    id: Option<&str>,
+) -> Result<Vec<DealWithMetadata>, SqliteClientError> {
+    let mut builder = SqlBuilder::select("deals").columns(DEAL_COLUMNS);
+    builder = if let Some(id) = id {
+        builder.and_where(Condition::equal("deal_id", id))
+    } else {
+        builder.and_where(Condition::is_null("archived_at"))
     };
-    let metadata = get_deal_metadata_by_deal_id(sqlite, deal_id)?;
-    Ok(Some(DealWithMetadata { deal, metadata }))
+    let mut deals = tx.read_with(builder.build(), deal_from_row)?;
+    if deals.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids = deals
+        .iter()
+        .map(|deal| deal.deal_id.as_str())
+        .collect::<Vec<_>>();
+    let metadata = read_batches(tx, "deal_metadata", "deal_id", &ids, metadata_from_row)?
+        .into_iter()
+        .map(|metadata| (metadata.deal_id.clone(), metadata))
+        .collect::<HashMap<_, _>>();
+    let parties = read_batches(tx, "deal_parties", "deal_id", &ids, |row| {
+        Ok((
+            row.get::<_, String>("deal_id")?,
+            row.get::<_, String>("deal_party_id")?,
+            row.get::<_, String>("company_id")?,
+            enum_from_row::<PartyRole>(row, "role")?,
+            row.get::<_, Option<String>>("notes")?,
+        ))
+    })?;
+    let scopes = read_batches(tx, "deal_scopes", "deal_id", &ids, |row| {
+        Ok((
+            row.get::<_, String>("deal_id")?,
+            enum_from_row::<DiligenceScope>(row, "scope")?,
+        ))
+    })?;
+    let company_ids = parties
+        .iter()
+        .map(|party| party.2.as_str())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let companies = read_batches(
+        tx,
+        "companies",
+        "company_id",
+        &company_ids,
+        company_from_row,
+    )?
+    .into_iter()
+    .map(|company| (company.company_id.clone(), company))
+    .collect::<HashMap<_, _>>();
+    let mut party_map: HashMap<String, Vec<DealParty>> = HashMap::new();
+    for (deal_id, deal_party_id, company_id, role, notes) in parties {
+        let company = companies
+            .get(&company_id)
+            .ok_or_else(|| SqliteClientError::transaction_aborted("party company missing"))?
+            .clone();
+        party_map.entry(deal_id).or_default().push(DealParty {
+            deal_party_id,
+            company_id,
+            role,
+            notes,
+            company,
+        });
+    }
+    let mut scope_map: HashMap<String, Vec<DiligenceScope>> = HashMap::new();
+    for (id, scope) in scopes {
+        scope_map.entry(id).or_default().push(scope);
+    }
+    for deal in &mut deals {
+        deal.parties = party_map.remove(&deal.deal_id).unwrap_or_default();
+        deal.parties.sort_by(|a, b| {
+            (a.role, &a.company.name, &a.company_id).cmp(&(b.role, &b.company.name, &b.company_id))
+        });
+        deal.scopes = scope_map.remove(&deal.deal_id).unwrap_or_default();
+        deal.scopes.sort();
+    }
+    deals.sort_by(|a, b| {
+        let a_date = a
+            .actual_close_date
+            .as_ref()
+            .or(a.expected_close_date.as_ref());
+        let b_date = b
+            .actual_close_date
+            .as_ref()
+            .or(b.expected_close_date.as_ref());
+        (a_date.is_none(), a_date, &a.deal_id).cmp(&(b_date.is_none(), b_date, &b.deal_id))
+    });
+    Ok(deals
+        .into_iter()
+        .map(|deal| DealWithMetadata {
+            metadata: metadata.get(&deal.deal_id).cloned(),
+            deal,
+        })
+        .collect())
+}
+fn read_batches<T>(
+    tx: &SqliteTransaction<'_>,
+    table: &str,
+    column: &str,
+    ids: &[&str],
+    mapper: fn(&Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>, SqliteClientError> {
+    let mut records = Vec::new();
+    for batch in ids.chunks(500) {
+        records.extend(
+            tx.read_with(
+                SqlBuilder::select(table)
+                    .and_where(Condition::in_values(column, batch.iter().copied()))
+                    .build(),
+                mapper,
+            )?,
+        );
+    }
+    Ok(records)
 }
 
-fn get_deal_metadata_by_deal_id(
-    sqlite: &SqliteClient,
-    deal_id: &str,
-) -> Result<Option<DealMetadata>, String> {
-    let query = build_query(
-        SqlBuilder::select("deal_metadata")
-            .columns(DEAL_METADATA_COLUMNS)
-            .and_where(Condition::equal("deal_id", deal_id))
-            .build(),
-        "deal metadata select",
-    )?;
-    sqlite
-        .read_one_with(&query, deal_metadata_from_row)
-        .map_err(|error| format!("failed to read deal metadata: {error}"))
+fn storage(e: SqliteClientError) -> RepositoryError {
+    RepositoryError::storage(e.to_string())
 }
-
-fn upsert_deal_metadata(
-    sqlite: &SqliteClient,
-    record: &UpsertDealMetadataRecord,
-) -> Result<DealMetadata, String> {
-    let query = build_query(
-        SqlBuilder::insert_into("deal_metadata")
-            .value("deal_id", &record.deal_id)
-            .value("user_id", record.user_id)
-            .value("key_questions_json", &record.key_questions_json)
-            .value("local_path", record.local_path.as_deref())
-            .value("sharepoint_link", record.sharepoint_link.as_deref())
-            .value("sow_link", record.sow_link.as_deref())
-            .value("fact_sheet_link", record.fact_sheet_link.as_deref())
-            .value("rl_link", record.rl_link.as_deref())
-            .on_conflict_update(
-                ConflictUpdate::new(["deal_id"])
-                    .set_excluded("user_id")
-                    .set_excluded("key_questions_json")
-                    .set_excluded("local_path")
-                    .set_excluded("sharepoint_link")
-                    .set_excluded("sow_link")
-                    .set_excluded("fact_sheet_link")
-                    .set_excluded("rl_link"),
-            )
-            .build(),
-        "deal metadata upsert",
-    )?;
-    sqlite
-        .write(&query)
-        .map_err(|error| format!("failed to upsert deal metadata: {error}"))?;
-    get_deal_metadata_by_deal_id(sqlite, &record.deal_id)?.ok_or_else(|| {
-        format!(
-            "upserted metadata for deal `{}` could not be loaded",
-            record.deal_id
-        )
+fn enum_from_row<T: serde::de::DeserializeOwned>(
+    row: &Row<'_>,
+    column: &str,
+) -> rusqlite::Result<T> {
+    let value: String = row.get(column)?;
+    serde_json::from_value(serde_json::Value::String(value)).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     })
 }
-
-fn archive_deal(sqlite: &SqliteClient, deal_id: &str) -> Result<Option<Deal>, String> {
-    let query = build_query(
-        SqlBuilder::update("deals")
-            .set("status", "Archived")
-            .and_where(Condition::equal("deal_id", deal_id))
-            .build(),
-        "deal archive update",
-    )?;
-    let updated = sqlite
-        .write(&query)
-        .map_err(|error| format!("failed to archive deal: {error}"))?;
-    if updated.rows_affected == 0 {
-        return Ok(None);
-    }
-    deal_by_id(sqlite, deal_id)
-}
-
-fn deal_by_id(sqlite: &SqliteClient, deal_id: &str) -> Result<Option<Deal>, String> {
-    let query = build_query(
-        SqlBuilder::select("deals")
-            .columns(DEAL_COLUMNS)
-            .and_where(Condition::equal("deal_id", deal_id))
-            .build(),
-        "deal select",
-    )?;
-    sqlite
-        .read_one_with(&query, deal_from_row)
-        .map_err(|error| format!("failed to read deal: {error}"))
-}
-
-fn build_query(
-    query: Result<SqlQuery, crate::adapters::sqlite::query::SqlBuilderError>,
-    operation: &str,
-) -> Result<SqlQuery, String> {
-    query.map_err(|error| format!("failed to build {operation}: {error}"))
-}
-
 fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
     Ok(Deal {
         deal_id: row.get("deal_id")?,
         user_id: row.get("user_id")?,
         deal_name: row.get("deal_name")?,
-        status: row.get("status")?,
+        deal_code: row.get("deal_code")?,
+        engagement_type: enum_from_row(row, "engagement_type")?,
+        transaction_type: enum_from_row(row, "transaction_type")?,
+        status: enum_from_row(row, "status")?,
         start_date: row.get("start_date")?,
-        close_date: row.get("close_date")?,
-        transaction_type: row.get("transaction_type")?,
-        target_company: row.get("target_company")?,
-        primary_buyer: row.get("primary_buyer")?,
-        deal_sponsor: row.get("deal_sponsor")?,
+        expected_close_date: row.get("expected_close_date")?,
+        actual_close_date: row.get("actual_close_date")?,
+        engagement_completed_date: row.get("engagement_completed_date")?,
+        archived_at: row.get("archived_at")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+        parties: Vec::new(),
+        scopes: Vec::new(),
     })
 }
-
-fn deal_metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
+fn metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
     Ok(DealMetadata {
         deal_id: row.get("deal_id")?,
-        user_id: row.get("user_id")?,
         key_questions_json: row.get("key_questions_json")?,
         local_path: row.get("local_path")?,
         sharepoint_link: row.get("sharepoint_link")?,
@@ -332,3 +529,7 @@ fn deal_metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
         rl_link: row.get("rl_link")?,
     })
 }
+
+#[cfg(test)]
+#[path = "../../../tests/integration/domains/deals/repository_tests.rs"]
+mod tests;

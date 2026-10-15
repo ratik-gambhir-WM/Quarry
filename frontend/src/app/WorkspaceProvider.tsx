@@ -1,3 +1,5 @@
+import type { Company } from "../data/dealModel";
+import type { SaveDealResponse, SaveDealMetadataResponse } from "../data/dealExtraction";
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../data/workspace";
@@ -15,6 +17,8 @@ type WorkspaceContextValue = {
   initiatives: WorkspaceSidebarTool[];
   navigationState?: WorkspaceLocationState;
   retryDeals: () => void;
+  saveCompanyResult: (company: Company) => void;
+  saveDealResult: (result: SaveDealResponse | SaveDealMetadataResponse) => void;
   tools: WorkspaceSidebarTool[];
 };
 
@@ -22,17 +26,19 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children, dataSource }: { children: ReactNode; dataSource?: string }) {
   const { email, navigationState } = useWorkspaceSession();
-  const { resource, retry } = useWorkspaceDeals(dataSource);
+  const { resource, retry, saveDealResult, saveCompanyResult } = useWorkspaceDeals(dataSource);
 
   return (
     <WorkspaceContext.Provider
       value={{
-        deals: resource.status === "success" ? resource.deals : [],
+        deals: resource.status === "success" ? resource.deals.filter((deal) => !deal.persisted?.archivedAt) : [],
         dealsResource: resource,
         email,
         initiatives: workspaceInitiatives,
         navigationState,
         retryDeals: retry,
+        saveDealResult,
+        saveCompanyResult,
         tools: workspaceTools,
       }}
     >

@@ -27,13 +27,13 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
                 connection.execute(
                     r#"
                     INSERT INTO deals (
-                        deal_id, user_id, deal_name, status, start_date, close_date,
-                        transaction_type, target_company, primary_buyer, deal_sponsor
+                        deal_id, user_id, deal_name, status, created_at, updated_at, engagement_type, transaction_type
                     ) VALUES (?1, ?2, 'Project Test', ?3, '2026-01-01', '2026-02-01',
-                              'Buy-side', 'Target', 'Buyer', 'Test Capital')
+                              'buy_side', 'unknown')
                     "#,
-                    rusqlite::params![deal_id, user_id, status],
+                    rusqlite::params![deal_id, user_id, "active"],
                 )?;
+                if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id])?; }
             }
             Ok(())
         })

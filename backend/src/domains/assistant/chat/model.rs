@@ -166,3 +166,11 @@ fn validate_preserved_text(name: &str, value: String, max_chars: usize) -> AppRe
 #[cfg(test)]
 #[path = "../../../../tests/unit/domains/assistant/chat/model_tests.rs"]
 mod tests;
+
+#[derive(Clone, Debug, Default)]
+pub enum ThreadScope {
+    #[default]
+    All,
+    Freeform,
+    Deal(String),
+}

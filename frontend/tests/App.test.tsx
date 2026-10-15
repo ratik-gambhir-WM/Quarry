@@ -1,3 +1,4 @@
+import { testDeal } from "@/test/fixtures/deals";
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -107,16 +108,4 @@ function HistoryControls() {
   );
 }
 
-const persistedDeal: PersistedDeal = {
-  closeDate: "2026-12-31",
-  dealId: "project-alpha",
-  dealName: "Project Alpha",
-  dealSponsor: "Sponsor",
-  metadata: null,
-  primaryBuyer: "Buyer",
-  startDate: "2026-09-01",
-  status: "Active",
-  targetCompany: "Target",
-  transactionType: "Buy-side",
-  userId: 1,
-};
+const persistedDeal: PersistedDeal = { ...testDeal({ dealId: "project-alpha" }), metadata: null };

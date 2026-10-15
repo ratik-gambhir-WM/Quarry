@@ -8,3 +8,5 @@ pub mod summaries;
 pub mod system;
 pub mod templates;
 pub mod users;
+
+pub mod companies;

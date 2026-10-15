@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::app::http::error::{AppError, AppResult};
 
 use super::{
-    service::{AssistantChatService, AssistantThread, AssistantThreadDetail},
+    service::{AssistantChatService, AssistantThread, AssistantThreadDetail, ThreadScope},
     upload::{collect_persistent_query_upload, collect_query_upload},
 };
 
@@ -59,6 +59,8 @@ pub(super) struct ThreadListQuery {
     archived: Option<bool>,
     limit: Option<usize>,
     before: Option<String>,
+    scope: Option<String>,
+    deal_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +74,7 @@ pub(super) struct OwnerQuery {
 pub(super) struct CreateThreadInput {
     user_email: String,
     thread_id: Option<String>,
+    deal_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,7 +96,23 @@ pub(super) async fn list_threads_handler(
     Query(query): Query<ThreadListQuery>,
 ) -> AppResult<Json<ThreadListResponse>> {
     validate_user_email(&query.user_email)?;
-    let limit = query.limit.unwrap_or(30).clamp(1, 100);
+    let limit = query.limit.unwrap_or(30);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::bad_request("invalid thread page size"));
+    }
+    let scope = match (query.scope.as_deref().unwrap_or("all"), query.deal_id) {
+        ("all", None) => ThreadScope::All,
+        ("freeform", None) => ThreadScope::Freeform,
+        ("deal", Some(id)) => {
+            validate_deal_id(&id)?;
+            ThreadScope::Deal(id)
+        }
+        _ => {
+            return Err(AppError::bad_request(
+                "invalid thread scope/dealId combination",
+            ))
+        }
+    };
     let threads = state
         .assistant_chat
         .list_threads(
@@ -101,6 +120,7 @@ pub(super) async fn list_threads_handler(
             query.archived.unwrap_or(false),
             limit + 1,
             query.before,
+            scope,
         )
         .await
         .map_err(AppError::from)?;
@@ -123,9 +143,12 @@ pub(super) async fn create_thread_handler(
         .thread_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     validate_identifier("threadId", &thread_id)?;
+    if let Some(id) = &input.deal_id {
+        validate_deal_id(id)?;
+    }
     let thread = state
         .assistant_chat
-        .create_thread(&input.user_email, thread_id)
+        .create_thread(&input.user_email, thread_id, input.deal_id)
         .await
         .map_err(AppError::from)?;
     Ok((StatusCode::CREATED, Json(thread)))
@@ -313,4 +336,16 @@ fn query_sse(
                 .text("keep-alive"),
         ),
     )
+}
+
+fn validate_deal_id(id: &str) -> AppResult<()> {
+    if !id.starts_with("DEAL-")
+        || id.len() > 64
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err(AppError::bad_request("invalid dealId"));
+    }
+    Ok(())
 }

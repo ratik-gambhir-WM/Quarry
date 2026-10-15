@@ -3,7 +3,7 @@ use serde::Serialize;
 use crate::{
     adapters::sqlite::{
         client::{SqlRow, SqliteClient, SqliteClientError, SqliteTransaction},
-        query::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlQuery, SqlValue},
+        query::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlValue},
     },
     domains::documents::store::model::{
         ExistingFileVersion, FilePersistenceInput, PersistedFileIdentity,
@@ -97,8 +97,7 @@ async fn list_current_deal_documents(
         .and_where(Condition::equal("quarry_file_versions.is_current", true))
         .order_by("quarry_files.display_name", SortDirection::Ascending)
         .order_by("quarry_files.file_id", SortDirection::Ascending)
-        .build()
-        .map_err(|error| format!("failed to build deal document list query: {error}"))?;
+        .build();
     let rows = sqlite
         .read_async(query)
         .await
@@ -141,8 +140,7 @@ async fn get_current_deal_document_blob(
         .and_where(Condition::equal("quarry_files.file_id", file_id))
         .and_where(Condition::is_null("quarry_files.deleted_at"))
         .and_where(Condition::equal("quarry_file_versions.is_current", true))
-        .build()
-        .map_err(|error| format!("failed to build document blob query: {error}"))?;
+        .build();
     let row = sqlite
         .read_one_async(query)
         .await
@@ -191,8 +189,7 @@ async fn find_current_sqlite_file_by_content_hash(
             "quarry_file_versions.content_sha256",
             content_sha256,
         ))
-        .build()
-        .map_err(|error| format!("failed to build deal attachment lookup: {error}"))?;
+        .build();
     let rows = sqlite
         .read_async(query)
         .await
@@ -254,16 +251,13 @@ fn validate_deal_ownership(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::select("deals")
-            .columns(["deals.status", "users.email"])
-            .inner_join("users", "deals.user_id", "users.id")
-            .and_where(Condition::equal("deals.deal_id", &input.deal_id))
-            .build(),
-        "deal ownership select",
-    )?;
+    let query = SqlBuilder::select("deals")
+        .columns(["deals.archived_at", "users.email"])
+        .inner_join("users", "deals.user_id", "users.id")
+        .and_where(Condition::equal("deals.deal_id", &input.deal_id))
+        .build();
     let row = transaction
-        .read_one(&query)
+        .read_one(query)
         .map_err(|error| error.context("failed to read deal ownership"))?
         .ok_or_else(|| {
             SqliteClientError::transaction_aborted(format!(
@@ -271,8 +265,7 @@ fn validate_deal_ownership(
                 input.deal_id
             ))
         })?;
-    let status = required_text(&row, "status")?;
-    if status.trim().eq_ignore_ascii_case("archived") {
+    if matches!(row.get("archived_at"), Some(SqlValue::Text(_))) {
         return Err(SqliteClientError::transaction_aborted(format!(
             "deal `{}` is archived",
             input.deal_id
@@ -292,15 +285,12 @@ fn validate_existing_quarry_file(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::select("quarry_files")
-            .columns(["deal_id", "workspace_id", "deleted_at"])
-            .and_where(Condition::equal("file_id", &input.file_id))
-            .build(),
-        "existing quarry file select",
-    )?;
+    let query = SqlBuilder::select("quarry_files")
+        .columns(["deal_id", "workspace_id", "deleted_at"])
+        .and_where(Condition::equal("file_id", &input.file_id))
+        .build();
     let Some(row) = transaction
-        .read_one(&query)
+        .read_one(query)
         .map_err(|error| error.context("failed to read existing quarry file"))?
     else {
         return Ok(());
@@ -331,30 +321,27 @@ fn upsert_quarry_file(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::insert_into("quarry_files")
-            .value("file_id", &input.file_id)
-            .value("deal_id", &input.deal_id)
-            .value("workspace_id", &input.workspace_id)
-            .value("display_name", &input.display_name)
-            .value("source_uri", input.source_uri.clone())
-            .value("metadata_json", &input.metadata_json)
-            .value("created_at", &input.timestamp)
-            .value("updated_at", &input.timestamp)
-            .value("deleted_at", Option::<String>::None)
-            .on_conflict_update(
-                ConflictUpdate::new(["file_id"])
-                    .set_excluded("display_name")
-                    .set_excluded("source_uri")
-                    .set_excluded("metadata_json")
-                    .set_excluded("updated_at"),
-            )
-            .build(),
-        "quarry_files upsert",
-    )?;
+    let query = SqlBuilder::insert_into("quarry_files")
+        .value("file_id", &input.file_id)
+        .value("deal_id", &input.deal_id)
+        .value("workspace_id", &input.workspace_id)
+        .value("display_name", &input.display_name)
+        .value("source_uri", input.source_uri.clone())
+        .value("metadata_json", &input.metadata_json)
+        .value("created_at", &input.timestamp)
+        .value("updated_at", &input.timestamp)
+        .value("deleted_at", Option::<String>::None)
+        .on_conflict_update(
+            ConflictUpdate::new(["file_id"])
+                .set_excluded("display_name")
+                .set_excluded("source_uri")
+                .set_excluded("metadata_json")
+                .set_excluded("updated_at"),
+        )
+        .build();
     require_one_row(
         transaction
-            .write(&query)
+            .write(query)
             .map_err(|error| error.context("failed to upsert quarry file"))?
             .rows_affected,
         "quarry_files upsert",
@@ -365,16 +352,13 @@ fn find_existing_file_version(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<Option<ExistingFileVersion>, SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::select("quarry_file_versions")
-            .columns(["version_id", "byte_size", "is_current"])
-            .and_where(Condition::equal("file_id", &input.file_id))
-            .and_where(Condition::equal("content_sha256", &input.content_sha256))
-            .build(),
-        "existing file version select",
-    )?;
+    let query = SqlBuilder::select("quarry_file_versions")
+        .columns(["version_id", "byte_size", "is_current"])
+        .and_where(Condition::equal("file_id", &input.file_id))
+        .and_where(Condition::equal("content_sha256", &input.content_sha256))
+        .build();
     transaction
-        .read_one(&query)
+        .read_one(query)
         .map_err(|error| error.context("failed to read existing file version"))?
         .map(|row| {
             let is_current = required_integer(&row, "is_current")?;
@@ -403,15 +387,12 @@ fn verify_idempotent_version_and_blob(
             input.file_id
         )));
     }
-    let query = build_transaction_query(
-        SqlBuilder::select("quarry_file_blobs")
-            .column("file_bytes")
-            .and_where(Condition::equal("version_id", &existing.version_id))
-            .build(),
-        "existing file blob select",
-    )?;
+    let query = SqlBuilder::select("quarry_file_blobs")
+        .column("file_bytes")
+        .and_where(Condition::equal("version_id", &existing.version_id))
+        .build();
     let row = transaction
-        .read_one(&query)
+        .read_one(query)
         .map_err(|error| error.context("failed to read existing file blob"))?
         .ok_or_else(|| {
             SqliteClientError::transaction_aborted(format!(
@@ -437,17 +418,14 @@ fn make_existing_version_current(
         return Ok(());
     }
     clear_current_file_version(transaction, input)?;
-    let query = build_transaction_query(
-        SqlBuilder::update("quarry_file_versions")
-            .set("is_current", true)
-            .and_where(Condition::equal("version_id", &existing.version_id))
-            .and_where(Condition::equal("file_id", &input.file_id))
-            .build(),
-        "existing file version current update",
-    )?;
+    let query = SqlBuilder::update("quarry_file_versions")
+        .set("is_current", true)
+        .and_where(Condition::equal("version_id", &existing.version_id))
+        .and_where(Condition::equal("file_id", &input.file_id))
+        .build();
     require_one_row(
         transaction
-            .write(&query)
+            .write(query)
             .map_err(|error| error.context("failed to make existing file version current"))?
             .rows_affected,
         "existing file version current update",
@@ -458,17 +436,14 @@ fn next_file_version_number(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<i64, SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::select("quarry_file_versions")
-            .column("version_number")
-            .and_where(Condition::equal("file_id", &input.file_id))
-            .order_by("version_number", SortDirection::Descending)
-            .limit(1)
-            .build(),
-        "latest file version select",
-    )?;
+    let query = SqlBuilder::select("quarry_file_versions")
+        .column("version_number")
+        .and_where(Condition::equal("file_id", &input.file_id))
+        .order_by("version_number", SortDirection::Descending)
+        .limit(1)
+        .build();
     let latest = transaction
-        .read_one(&query)
+        .read_one(query)
         .map_err(|error| error.context("failed to read latest file version"))?
         .map(|row| required_integer(&row, "version_number"))
         .transpose()?;
@@ -491,16 +466,13 @@ fn clear_current_file_version(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::update("quarry_file_versions")
-            .set("is_current", false)
-            .and_where(Condition::equal("file_id", &input.file_id))
-            .and_where(Condition::equal("is_current", true))
-            .build(),
-        "current file version clear",
-    )?;
+    let query = SqlBuilder::update("quarry_file_versions")
+        .set("is_current", false)
+        .and_where(Condition::equal("file_id", &input.file_id))
+        .and_where(Condition::equal("is_current", true))
+        .build();
     let rows_affected = transaction
-        .write(&query)
+        .write(query)
         .map_err(|error| error.context("failed to clear current file version"))?
         .rows_affected;
     if rows_affected > 1 {
@@ -517,23 +489,20 @@ fn insert_quarry_file_version(
     input: &FilePersistenceInput,
     version_number: i64,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::insert_into("quarry_file_versions")
-            .value("version_id", &input.version_id)
-            .value("file_id", &input.file_id)
-            .value("version_number", version_number)
-            .value("original_filename", &input.display_name)
-            .value("mime_type", &input.mime_type)
-            .value("content_sha256", &input.content_sha256)
-            .value("byte_size", input.byte_size)
-            .value("is_current", true)
-            .value("created_at", &input.timestamp)
-            .build(),
-        "quarry_file_versions insert",
-    )?;
+    let query = SqlBuilder::insert_into("quarry_file_versions")
+        .value("version_id", &input.version_id)
+        .value("file_id", &input.file_id)
+        .value("version_number", version_number)
+        .value("original_filename", &input.display_name)
+        .value("mime_type", &input.mime_type)
+        .value("content_sha256", &input.content_sha256)
+        .value("byte_size", input.byte_size)
+        .value("is_current", true)
+        .value("created_at", &input.timestamp)
+        .build();
     require_one_row(
         transaction
-            .write(&query)
+            .write(query)
             .map_err(|error| error.context("failed to insert quarry file version"))?
             .rows_affected,
         "quarry_file_versions insert",
@@ -544,16 +513,13 @@ fn insert_quarry_file_blob(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::insert_into("quarry_file_blobs")
-            .value("version_id", &input.version_id)
-            .value("file_bytes", input.file_bytes.clone())
-            .build(),
-        "quarry_file_blobs insert",
-    )?;
+    let query = SqlBuilder::insert_into("quarry_file_blobs")
+        .value("version_id", &input.version_id)
+        .value("file_bytes", input.file_bytes.clone())
+        .build();
     require_one_row(
         transaction
-            .write(&query)
+            .write(query)
             .map_err(|error| error.context("failed to insert quarry file blob"))?
             .rows_affected,
         "quarry_file_blobs insert",
@@ -564,29 +530,26 @@ fn read_back_persisted_file_identity(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<PersistedFileIdentity, SqliteClientError> {
-    let query = build_transaction_query(
-        SqlBuilder::select("quarry_files")
-            .columns([
-                "quarry_files.file_id",
-                "quarry_files.workspace_id",
-                "quarry_files.display_name",
-                "quarry_file_versions.version_id",
-            ])
-            .inner_join(
-                "quarry_file_versions",
-                "quarry_files.file_id",
-                "quarry_file_versions.file_id",
-            )
-            .and_where(Condition::equal("quarry_files.file_id", &input.file_id))
-            .and_where(Condition::equal(
-                "quarry_file_versions.version_id",
-                &input.version_id,
-            ))
-            .build(),
-        "persisted file identity read-back",
-    )?;
+    let query = SqlBuilder::select("quarry_files")
+        .columns([
+            "quarry_files.file_id",
+            "quarry_files.workspace_id",
+            "quarry_files.display_name",
+            "quarry_file_versions.version_id",
+        ])
+        .inner_join(
+            "quarry_file_versions",
+            "quarry_files.file_id",
+            "quarry_file_versions.file_id",
+        )
+        .and_where(Condition::equal("quarry_files.file_id", &input.file_id))
+        .and_where(Condition::equal(
+            "quarry_file_versions.version_id",
+            &input.version_id,
+        ))
+        .build();
     let rows = transaction
-        .read(&query)
+        .read(query)
         .map_err(|error| error.context("failed to read back persisted file identity"))?;
     if rows.len() != 1 {
         return Err(SqliteClientError::transaction_aborted(format!(
@@ -611,15 +574,6 @@ fn read_back_persisted_file_identity(
         ));
     }
     Ok(identity)
-}
-
-fn build_transaction_query(
-    query: Result<SqlQuery, crate::adapters::sqlite::query::SqlBuilderError>,
-    operation: &str,
-) -> Result<SqlQuery, SqliteClientError> {
-    query.map_err(|error| {
-        SqliteClientError::transaction_aborted(format!("failed to build {operation}: {error}"))
-    })
 }
 
 fn require_one_row(rows_affected: usize, operation: &str) -> Result<(), SqliteClientError> {

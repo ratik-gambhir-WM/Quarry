@@ -22,3 +22,7 @@ mod helix_v3_compatibility_tests;
 pub use app::bootstrap::{bootstrap, Application};
 pub use app::config::AppConfig;
 pub use app::http::create_router;
+
+#[cfg(test)]
+#[path = "../tests/integration/deal_company_http_tests.rs"]
+mod deal_company_http_tests;

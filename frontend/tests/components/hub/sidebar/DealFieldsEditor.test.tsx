@@ -1,0 +1,47 @@
+// @vitest-environment happy-dom
+import { useState } from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DealFieldsEditor } from "@/components/hub/sidebar/DealFieldsEditor";
+import { testCompany, testDealInput } from "@/test/fixtures/deals";
+import type { DealFields } from "@/data/dealModel";
+const { api } = vi.hoisted(() => ({ api: { listCompanies: vi.fn(), createCompany: vi.fn(), updateCompany: vi.fn() } }));
+vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
+function Editor() {
+  const [fields, setFields] = useState<DealFields>(testDealInput());
+  return <><DealFieldsEditor userEmail="owner@example.com" fields={fields} onChange={setFields} /><output data-testid="fields">{JSON.stringify(fields)}</output></>;
+}
+describe("DealFieldsEditor", () => {
+  it("reuses a company for several roles, clears optional dates, and removes assignments", async () => {
+    const user = userEvent.setup();
+    api.listCompanies.mockResolvedValue({ companies: [testCompany("Reusable")], hasMore: false });
+    render(<Editor />);
+    await user.click(await screen.findByRole("button", { name: "Add Reusable" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Role for company 1" }), "buyer");
+    await user.click(screen.getByRole("button", { name: "Add Reusable" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Role for company 2" }), "portfolio_company");
+    fireEvent.change(screen.getByLabelText("Expected close (optional)"), { target: { value: "2026-12-01" } });
+    fireEvent.change(screen.getByLabelText("Expected close (optional)"), { target: { value: "" } });
+    const fields: DealFields = JSON.parse(screen.getByTestId("fields").textContent ?? "{}");
+    expect(fields.expectedCloseDate).toBeNull();
+    expect(fields.parties.map((p) => p.role)).toEqual(["buyer", "portfolio_company"]);
+    expect(fields.parties[0]?.companyId).toBe(fields.parties[1]?.companyId);
+    await user.click(screen.getByRole("button", { name: "Remove company role 1" }));
+    expect(JSON.parse(screen.getByTestId("fields").textContent ?? "{}").parties).toHaveLength(1);
+  });
+  it("explicitly creates a saved directory entry and exposes failures with retry", async () => {
+    const user = userEvent.setup();
+    api.listCompanies.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue({ companies: [], hasMore: false });
+    api.createCompany.mockResolvedValue(testCompany("New Company"));
+    render(<Editor />);
+    await user.click(await screen.findByRole("button", { name: "Retry companies" }));
+    await screen.findByText(/No matching companies/);
+    await user.click(screen.getByRole("button", { name: "Create company" }));
+    await user.type(screen.getByLabelText("Company name"), "New Company");
+    await user.click(screen.getByRole("button", { name: "Save company" }));
+    await waitFor(() => expect(api.createCompany).toHaveBeenCalledWith({ userEmail: "owner@example.com", name: "New Company", website: null, industry: null, description: null }));
+    expect(await screen.findByText(/remains available if you cancel/)).toBeTruthy();
+  });
+});

@@ -1,4 +1,45 @@
 use super::*;
+use crate::adapters::sqlite::client::SqliteClientError;
+
+fn build_error(result: Result<SqlQuery, SqliteClientError>) -> SqlBuilderError {
+    match result.unwrap_err() {
+        SqliteClientError::QueryBuild(error) => error,
+        error => panic!("expected query construction error, got {error}"),
+    }
+}
+
+#[test]
+fn all_builders_preserve_construction_error_sources() {
+    use std::error::Error;
+
+    let cases = [
+        (
+            SqlBuilder::select("").build(),
+            SqlBuilderError::EmptyIdentifier,
+        ),
+        (
+            SqlBuilder::insert_into("users").build(),
+            SqlBuilderError::MissingInsertValues,
+        ),
+        (
+            SqlBuilder::update("users").build(),
+            SqlBuilderError::MissingUpdateAssignments,
+        ),
+        (
+            SqlBuilder::delete_from("users").build(),
+            SqlBuilderError::MissingCondition("DELETE"),
+        ),
+    ];
+
+    for (result, expected) in cases {
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<SqlBuilderError>(),
+            Some(&expected)
+        );
+        assert!(matches!(error, SqliteClientError::QueryBuild(_)));
+    }
+}
 
 #[test]
 fn builds_parameterized_selects() {
@@ -132,30 +173,34 @@ fn supports_bound_conflict_updates_and_do_nothing() {
 #[test]
 fn validates_conflict_updates() {
     assert_eq!(
-        SqlBuilder::insert_into("users")
-            .value("email", "ada@example.com")
-            .on_conflict_update(ConflictUpdate::new(Vec::<String>::new()).set_excluded("email"))
-            .build(),
-        Err(SqlBuilderError::MissingConflictTarget)
+        build_error(
+            SqlBuilder::insert_into("users")
+                .value("email", "ada@example.com")
+                .on_conflict_update(ConflictUpdate::new(Vec::<String>::new()).set_excluded("email"))
+                .build()
+        ),
+        SqlBuilderError::MissingConflictTarget
     );
     assert_eq!(
-        SqlBuilder::insert_into("users")
-            .value("email", "ada@example.com")
-            .on_conflict_update(ConflictUpdate::new(["email"]))
-            .build(),
-        Err(SqlBuilderError::MissingConflictAssignments)
+        build_error(
+            SqlBuilder::insert_into("users")
+                .value("email", "ada@example.com")
+                .on_conflict_update(ConflictUpdate::new(["email"]))
+                .build()
+        ),
+        SqlBuilderError::MissingConflictAssignments
     );
 }
 
 #[test]
 fn update_and_delete_require_explicit_scope() {
     assert_eq!(
-        SqlBuilder::update("users").set("active", false).build(),
-        Err(SqlBuilderError::MissingCondition("UPDATE"))
+        build_error(SqlBuilder::update("users").set("active", false).build()),
+        SqlBuilderError::MissingCondition("UPDATE")
     );
     assert_eq!(
-        SqlBuilder::delete_from("users").build(),
-        Err(SqlBuilderError::MissingCondition("DELETE"))
+        build_error(SqlBuilder::delete_from("users").build()),
+        SqlBuilderError::MissingCondition("DELETE")
     );
 
     assert!(SqlBuilder::delete_from("users")
@@ -226,21 +271,26 @@ fn builds_aliased_joins_with_composable_on_conditions() {
 #[test]
 fn validates_join_conditions() {
     assert_eq!(
-        SqlBuilder::select("users")
-            .join(JoinClause::inner("profiles"))
-            .build(),
-        Err(SqlBuilderError::MissingJoinCondition {
+        build_error(
+            SqlBuilder::select("users")
+                .join(JoinClause::inner("profiles"))
+                .build()
+        ),
+        SqlBuilderError::MissingJoinCondition {
             join_type: "INNER",
             table: "profiles".to_string(),
-        })
+        }
     );
     assert_eq!(
-        SqlBuilder::select("users")
-            .join(JoinClause::cross("roles").on(JoinCondition::equal("users.role_id", "roles.id")),)
-            .build(),
-        Err(SqlBuilderError::UnexpectedCrossJoinCondition(
-            "roles".to_string()
-        ))
+        build_error(
+            SqlBuilder::select("users")
+                .join(
+                    JoinClause::cross("roles")
+                        .on(JoinCondition::equal("users.role_id", "roles.id")),
+                )
+                .build()
+        ),
+        SqlBuilderError::UnexpectedCrossJoinCondition("roles".to_string())
     );
 
     let cross_join = SqlBuilder::select("users")

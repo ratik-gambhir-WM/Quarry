@@ -7,6 +7,7 @@ import { DataRoomQuickActions } from "./DataRoomQuickActions";
 import type { DataRoomDocumentSearchProps } from "./document-search/DataRoomDocumentSearch";
 
 type DataRoomExplorerProps = {
+  dealId: string;
   dealName: string;
   dealRoomPath: string;
   documentSearch: Omit<DataRoomDocumentSearchProps, "finalFocusEl" | "trigger">;
@@ -21,6 +22,7 @@ type DataRoomExplorerProps = {
 };
 
 export function DataRoomExplorer({
+  dealId,
   dealName,
   dealRoomPath,
   documentSearch,
@@ -71,7 +73,7 @@ export function DataRoomExplorer({
       {({ collapsed }) =>
         collapsed ? null : (
           <div className="flex min-h-full flex-col gap-3">
-            <DataRoomQuickActions
+            <DataRoomQuickActions dealId={dealId}
               documentSearch={documentSearch}
               email={email}
               onUploadNewFile={onUploadNewFile}

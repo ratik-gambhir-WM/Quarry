@@ -50,6 +50,16 @@ export function DealSummaryCard({ deal }: DealSummaryCardProps) {
           <p className="max-w-[58rem] text-[14px] leading-7 text-text-main/86 sm:text-[15px]">
             {deal.summary}
           </p>
+          {deal.metrics.length ? (
+            <dl aria-label="Deal details" className="grid grid-cols-1 gap-4 border-t border-outline-variant/70 pt-5 sm:grid-cols-2">
+              {deal.metrics.map((metric) => (
+                <div key={metric.label}>
+                  <dt className="text-xs text-muted">{metric.label}</dt>
+                  <dd className="mt-1 text-sm font-medium text-text-main">{metric.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
         </div>
       </WorkspaceCard>
 

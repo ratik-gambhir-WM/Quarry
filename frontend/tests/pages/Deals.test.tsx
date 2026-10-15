@@ -11,7 +11,7 @@ const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
-    api: { listDeals },
+    api: { listDeals, listCompanies: async () => ({ companies: [], hasMore: false }) },
     platform: {},
     target: "web",
   },
@@ -112,18 +112,20 @@ describe("Deals", () => {
     expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeTruthy();
     expect(document.querySelector(".modal-backdrop")).toBeNull();
     expect(dealIdInput.getAttribute("data-slot")).toBe("input");
-    expect(within(dialog).getByLabelText("Status").textContent).toContain("Active");
+    expect((within(dialog).getByLabelText("Status") as HTMLSelectElement).value).toBe("pipeline");
     for (const label of [
       "Deal name",
-      "Start date",
-      "Close date",
+      "Start date (optional)",
+      "Expected close (optional)",
+      "Actual close (optional)",
+      "Engagement completed (optional)",
+      "Engagement type",
       "Transaction type",
-      "Target company",
-      "Primary buyer",
-      "Deal sponsor",
     ]) {
       expect(within(dialog).getByLabelText(label)).toBeTruthy();
     }
+    expect(within(dialog).queryByRole("textbox", { name: "Search company directory" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Create company" })).toBeNull();
     expect(within(dialog).queryByLabelText("SharePoint link")).toBeNull();
     await waitFor(() => expect(dealIdInput).toBe(document.activeElement));
 

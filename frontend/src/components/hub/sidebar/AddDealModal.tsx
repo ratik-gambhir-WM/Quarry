@@ -21,38 +21,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../ui/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel } from "../../ui/field";
+import { Field, FieldError, FieldLabel } from "../../ui/field";
 import { Icon } from "../../ui/Icon";
 import { Input } from "../../ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../ui/select";
-import { TransactionTypePicker } from "./DealTypePicker";
+
+import { DealCompanyRolesEditor, DealDetailsEditor, DealFieldsEditor } from "./DealFieldsEditor";
+import type { DealFields } from "../../../data/dealModel";
+import type { SavedDeal } from "../../../data/dealExtraction";
+import { useWorkspace } from "../../../app/WorkspaceProvider";
 
 type AddDealModalProps = {
   email?: string;
+  initialDeal?: SavedDeal;
   onClose: () => void;
 };
 
-type AddDealFormState = {
-  closeDate: string;
-  dealId: string;
-  dealName: string;
-  dealSponsor: string;
-  factSheetLink: string;
-  localPath: string;
-  primaryBuyer: string;
-  rlLink: string;
-  sharepointLink: string;
-  sowLink: string;
-  startDate: string;
-  status: string;
-  targetCompany: string;
-  transactionType: string;
+type AddDealFormState = DealFields & {
+  dealId: string; factSheetLink: string; localPath: string; rlLink: string; sharepointLink: string; sowLink: string;
 };
 
 type SourceFileSelection = File | LocalDealSourceFile;
@@ -63,20 +48,9 @@ type SelectedSourceFiles = {
 };
 
 const emptyForm: AddDealFormState = {
-  closeDate: "",
-  dealId: "",
-  dealName: "",
-  dealSponsor: "",
-  factSheetLink: "",
-  localPath: "",
-  primaryBuyer: "",
-  rlLink: "",
-  sharepointLink: "",
-  sowLink: "",
-  startDate: "",
-  status: "Active",
-  targetCompany: "",
-  transactionType: "",
+  dealId: "", dealName: "", dealCode: null, engagementType: "buy_side", transactionType: "unknown", status: "pipeline",
+  startDate: null, expectedCloseDate: null, actualCloseDate: null, engagementCompletedDate: null,
+  parties: [], scopes: [], factSheetLink: "", localPath: "", rlLink: "", sharepointLink: "", sowLink: "",
 };
 
 const emptySourceFiles: SelectedSourceFiles = {
@@ -84,13 +58,22 @@ const emptySourceFiles: SelectedSourceFiles = {
   sowFile: null,
 };
 
-export function AddDealModal({ email, onClose }: AddDealModalProps) {
+export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps) {
   const navigate = useNavigate();
-  const [form, setForm] = useState(emptyForm);
+  const returnFocusRef = useRef(
+    document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : null,
+  );
+  const { saveDealResult, saveCompanyResult } = useWorkspace();
+  const [form, setForm] = useState<AddDealFormState>(() => initialDeal ? { ...emptyForm, ...initialDeal } : emptyForm);
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(null);
   const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] = useState(emptySourceFiles);
-  const [step, setStep] = useState<"details" | "sources">("details");
+  const [step, setStep] = useState<"details" | "companies" | "sources">("details");
+  const [companyFormOpen, setCompanyFormOpen] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [fieldError, setFieldError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -117,14 +100,33 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (step === "details") {
-      await createCoreDeal();
+    if (isSubmitting || (!initialDeal && companyFormOpen)) return;
+    if (initialDeal) {
+      await saveDeal(false);
+    } else if (step === "details") {
+      changeStep("companies");
+    } else if (step === "companies") {
+      changeStep("sources");
     } else {
-      await saveSources();
+      await saveDeal(true);
     }
   }
 
-  async function createCoreDeal() {
+  function changeStep(next: typeof step) {
+    setStep(next);
+    setSubmitError("");
+    window.requestAnimationFrame(() => {
+      titleRef.current?.focus();
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    });
+  }
+
+  function updateDealFields(fields: DealFields) {
+    setForm((current) => ({ ...current, ...fields }));
+    setSubmitError("");
+  }
+
+  async function saveDeal(includeMetadata: boolean) {
     if (!email) {
       setSubmitError("Sign in again before adding a deal.");
       return;
@@ -135,62 +137,65 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
     }
     setIsSubmitting(true);
     setSubmitError("");
+    let savedCore = createdDeal;
     try {
-      const response = await runtime.api.createDeal(buildSaveDealInput(form, email));
-      setCreatedDeal(response);
-      setStep("sources");
+      if (!savedCore) {
+        const input = buildSaveDealInput(form, email);
+        savedCore = initialDeal ? await runtime.api.updateDeal(initialDeal.dealId, editableFields(input)) : await runtime.api.createDeal(input);
+        saveDealResult(savedCore);
+        if (!initialDeal) setCreatedDeal(savedCore);
+      }
+      if (initialDeal) { onClose(); return; }
+      if (includeMetadata) await saveSources(savedCore);
+      else finishWithoutMetadata(savedCore);
     } catch (error) {
-      setSubmitError(errorMessage(error));
+      if (savedCore && !initialDeal) {
+        setSubmitError(`Deal created, but metadata could not be saved. Retry Finish deal or skip metadata. ${errorMessage(error)}`);
+      } else {
+        if (!initialDeal) changeStep("companies");
+        setSubmitError(errorMessage(error));
+      }
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function saveSources() {
-    if (!createdDeal) return;
-    setIsSubmitting(true);
-    setSubmitError("");
-    try {
-      const selections = [
-        selectedSourceFiles.sowFile,
-        selectedSourceFiles.projectTimelineFile,
-      ].filter((file): file is SourceFileSelection => file !== null);
-      const uploads = localDataRoom && selections.length > 0
-        ? (
-            await runtime.platform.readDealSourceFiles({
-              paths: selections.filter(isLocalDealSourceFile).map((file) => file.path),
-              rootPath: localDataRoom.rootPath,
-            })
-          ).map(localFileContentsToFile)
-        : selections.filter((file): file is File => file instanceof File);
-      const response = await runtime.api.saveDealMetadata(createdDeal.deal.dealId, {
-        factSheetLink: optionalLink(form.factSheetLink),
-        files: uploads,
-        rlLink: optionalLink(form.rlLink),
-        sharepointLink: optionalLink(form.sharepointLink),
-        sowLink: optionalLink(form.sowLink),
-      });
-      navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
-        state: {
-          email,
-          result: response,
-          sowSourceName: sourceFileName(selectedSourceFiles.sowFile),
-        } satisfies DealExtractionLocationState,
-      });
-    } catch (error) {
-      setSubmitError(errorMessage(error));
-    } finally {
-      setIsSubmitting(false);
-    }
+  async function saveSources(core: SaveDealResponse) {
+    const selections = [
+      selectedSourceFiles.sowFile,
+      selectedSourceFiles.projectTimelineFile,
+    ].filter((file): file is SourceFileSelection => file !== null);
+    const uploads = localDataRoom && selections.length > 0
+      ? (
+          await runtime.platform.readDealSourceFiles({
+            paths: selections.filter(isLocalDealSourceFile).map((file) => file.path),
+            rootPath: localDataRoom.rootPath,
+          })
+        ).map(localFileContentsToFile)
+      : selections.filter((file): file is File => file instanceof File);
+    const response = await runtime.api.saveDealMetadata(core.deal.dealId, {
+      factSheetLink: optionalLink(form.factSheetLink),
+      files: uploads,
+      rlLink: optionalLink(form.rlLink),
+      sharepointLink: optionalLink(form.sharepointLink),
+      sowLink: optionalLink(form.sowLink),
+    });
+    saveDealResult(response);
+    navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
+      state: {
+        email,
+        result: response,
+        sowSourceName: sourceFileName(selectedSourceFiles.sowFile),
+      } satisfies DealExtractionLocationState,
+    });
   }
 
-  function skipMetadata() {
-    if (!createdDeal) return;
-    navigate(`/hub/deals/${encodeURIComponent(createdDeal.deal.dealId)}`, {
+  function finishWithoutMetadata(core: SaveDealResponse) {
+    navigate(`/hub/deals/${encodeURIComponent(core.deal.dealId)}`, {
       state: {
         email,
         result: {
-          ...createdDeal,
+          ...core,
           extraction: { keyQuestions: [] },
           files: [],
         },
@@ -207,6 +212,12 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
     >
       <DialogContent
         className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+        onCloseAutoFocus={(event) => {
+          if (returnFocusRef.current?.isConnected) {
+            event.preventDefault();
+            returnFocusRef.current.focus();
+          }
+        }}
         onEscapeKeyDown={(event) => {
           if (isSubmitting) event.preventDefault();
         }}
@@ -215,37 +226,44 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
         }}
         showCloseButton={false}
       >
-        <form className="flex min-h-0 flex-col" onSubmit={handleSubmit}>
-          <DialogHeader className="relative gap-1 border-b border-border px-6 py-5 pr-14">
+        <form className="flex max-h-[calc(100vh-2rem)] min-h-0 flex-col" onSubmit={handleSubmit}>
+          <DialogHeader className="relative shrink-0 gap-1 border-b border-border px-6 py-5 pr-14">
             <DialogDescription className="order-first text-xs font-medium uppercase tracking-[0.12em]">
-              Active Deals
+              {initialDeal ? "Active Deals" : `Step ${step === "details" ? 1 : step === "companies" ? 2 : 3} of 3`}
             </DialogDescription>
-            <DialogTitle className="text-xl font-semibold">
-              {step === "sources" ? "Add deal metadata" : "Add deal"}
+            <DialogTitle ref={titleRef} tabIndex={-1} className="text-xl font-semibold">
+              {initialDeal ? "Edit deal" : step === "sources" ? "Add deal metadata" : step === "companies" ? "Assign companies and roles" : "Add deal"}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="min-h-0 overflow-y-auto px-6 py-5">
-            {step === "details" ? (
-              <DealDetailsStep
-                error={fieldError}
-                form={form}
-                isSubmitting={isSubmitting}
-                onChooseLocalFolder={chooseLocalFolder}
-                onUpdateField={updateField}
-              />
-            ) : (
-              <SourceFilesStep
-                availableFiles={localDataRoom?.files ?? null}
-                form={form}
-                onChange={(field, file) => {
-                  setSelectedSourceFiles((current) => ({ ...current, [field]: file }));
-                  setSubmitError("");
-                }}
-                onUpdateField={updateField}
-                selected={selectedSourceFiles}
-              />
-            )}
+          <div ref={scrollRef} className="min-h-0 overflow-y-auto px-6 py-5">
+            <div hidden={step !== "details"}>
+              <fieldset className="grid gap-4" disabled={isSubmitting || step !== "details"}>
+                {!initialDeal ? <DealTextField id="add-deal-id" label="Deal ID" maxLength={64} onValueChange={(value) => updateField("dealId", value)} placeholder="DEAL-000184" value={form.dealId} /> : null}
+                {initialDeal ? <DealFieldsEditor onCompanySaved={saveCompanyResult} userEmail={email ?? ""} fields={form} initialCompanies={initialDeal.parties.map((p) => p.company)} onChange={updateDealFields} /> : <DealDetailsEditor fields={form} onChange={updateDealFields} />}
+                {!initialDeal && runtime.target === "desktop" ? <LocalFolderField disabled={isSubmitting} error={fieldError} onChoose={chooseLocalFolder} value={form.localPath} /> : null}
+              </fieldset>
+            </div>
+            {!initialDeal ? <div hidden={step !== "companies"}>
+              <fieldset disabled={isSubmitting || step !== "companies"}>
+                <DealCompanyRolesEditor onCompanyFormChange={setCompanyFormOpen} onCompanySaved={saveCompanyResult} userEmail={email ?? ""} fields={form} onChange={updateDealFields} />
+                {companyFormOpen ? <p className="mt-3 text-sm text-muted-foreground">Save or cancel the company before continuing.</p> : null}
+              </fieldset>
+            </div> : null}
+            {step === "sources" ? (
+              <fieldset disabled={isSubmitting}>
+                <SourceFilesStep
+                  availableFiles={localDataRoom?.files ?? null}
+                  form={form}
+                  onChange={(field, file) => {
+                    setSelectedSourceFiles((current) => ({ ...current, [field]: file }));
+                    setSubmitError("");
+                  }}
+                  onUpdateField={updateField}
+                  selected={selectedSourceFiles}
+                />
+              </fieldset>
+            ) : null}
 
             {submitError ? (
               <p
@@ -264,25 +282,26 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
                   Cancel
                 </Button>
               </DialogClose>
-            ) : (
-              <Button disabled={isSubmitting} onClick={skipMetadata} type="button" variant="outline">
+            ) : <Button disabled={isSubmitting || companyFormOpen || Boolean(createdDeal)} onClick={() => changeStep(step === "sources" ? "companies" : "details")} type="button" variant="outline">Back</Button>}
+            {step === "sources" ? (
+              <Button disabled={isSubmitting} onClick={() => void saveDeal(false)} type="button" variant="outline">
                 Skip metadata
               </Button>
-            )}
-            <Button className="min-w-28" disabled={isSubmitting} type="submit">
+            ) : null}
+            <Button className="min-w-28" disabled={isSubmitting || (!initialDeal && companyFormOpen)} type="submit">
               {isSubmitting ? (
                 <span
                   aria-hidden="true"
                   className="size-3.5 rounded-full border-2 border-on-action/30 border-t-on-action motion-safe:animate-spin"
                 />
               ) : null}
-              {isSubmitting ? "Saving..." : step === "details" ? "Next" : "Finish deal"}
+              {isSubmitting ? "Saving..." : initialDeal ? "Save deal" : step === "sources" ? "Finish deal" : "Next"}
             </Button>
           </DialogFooter>
         </form>
         <DialogClose asChild>
           <Button
-            aria-label="Close add deal dialog"
+            aria-label={initialDeal ? "Close edit deal dialog" : "Close add deal dialog"}
             className="absolute right-4 top-4"
             disabled={isSubmitting}
             size="icon-sm"
@@ -294,99 +313,6 @@ export function AddDealModal({ email, onClose }: AddDealModalProps) {
         </DialogClose>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DealDetailsStep({
-  error,
-  form,
-  isSubmitting,
-  onChooseLocalFolder,
-  onUpdateField,
-}: {
-  error: string;
-  form: AddDealFormState;
-  isSubmitting: boolean;
-  onChooseLocalFolder: () => void;
-  onUpdateField: (field: keyof AddDealFormState, value: string) => void;
-}) {
-  return (
-    <FieldGroup className="gap-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <DealTextField
-          id="add-deal-id"
-          label="Deal ID"
-          onValueChange={(value) => onUpdateField("dealId", value)}
-          placeholder="DEAL-000184"
-          value={form.dealId}
-        />
-        <DealTextField
-          id="add-deal-name"
-          label="Deal name"
-          onValueChange={(value) => onUpdateField("dealName", value)}
-          placeholder="Acme acquisition of WidgetCo"
-          value={form.dealName}
-        />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <SelectField
-          label="Status"
-          onChange={(value) => onUpdateField("status", value)}
-          options={["Active", "Pipeline", "On Hold", "Closed"]}
-          value={form.status}
-        />
-        <DealTextField
-          id="add-deal-start-date"
-          label="Start date"
-          onValueChange={(value) => onUpdateField("startDate", value)}
-          placeholder="2026-02-14"
-          type="date"
-          value={form.startDate}
-        />
-        <DealTextField
-          id="add-deal-close-date"
-          label="Close date"
-          onValueChange={(value) => onUpdateField("closeDate", value)}
-          placeholder="2026-05-01"
-          type="date"
-          value={form.closeDate}
-        />
-      </div>
-      <TransactionTypePicker
-        error={!form.transactionType ? error : ""}
-        onChange={(value) => onUpdateField("transactionType", value)}
-        value={form.transactionType}
-      />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <DealTextField
-          autoComplete="organization"
-          id="add-deal-target-company"
-          label="Target company"
-          onValueChange={(value) => onUpdateField("targetCompany", value)}
-          placeholder="Target"
-          value={form.targetCompany}
-        />
-        <DealTextField
-          autoComplete="organization"
-          id="add-deal-primary-buyer"
-          label="Primary buyer"
-          onValueChange={(value) => onUpdateField("primaryBuyer", value)}
-          placeholder="CVS"
-          value={form.primaryBuyer}
-        />
-        <DealTextField
-          autoComplete="organization"
-          id="add-deal-sponsor"
-          label="Deal sponsor"
-          onValueChange={(value) => onUpdateField("dealSponsor", value)}
-          placeholder="Thoma Bravo"
-          value={form.dealSponsor}
-        />
-      </div>
-      {runtime.target === "desktop" ? (
-        <LocalFolderField disabled={isSubmitting} error={error} onChoose={onChooseLocalFolder} value={form.localPath} />
-      ) : null}
-    </FieldGroup>
   );
 }
 
@@ -421,37 +347,6 @@ function DealTextField({
         {...props}
       />
       <FieldError>{error}</FieldError>
-    </Field>
-  );
-}
-
-function SelectField({
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  options: string[];
-  value: string;
-}) {
-  const id = `add-deal-${label.toLowerCase().replace(/\s+/g, "-")}`;
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Select onValueChange={onChange} required value={value}>
-        <SelectTrigger className="w-full" id={id}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper">
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </Field>
   );
 }
@@ -534,7 +429,7 @@ function SourceFilesStep({ availableFiles, form, onChange, onUpdateField, select
         />
         <DealTextField
           id="add-deal-rl-link"
-          label="RL link"
+          label="Request list link"
           onValueChange={(value) => onUpdateField("rlLink", value)}
           optional
           placeholder="https://example.com/request-list"
@@ -567,21 +462,19 @@ function SourceFileOption({ file }: { file: SourceFileSelection }) {
   return <span className="flex min-w-0 flex-1 items-center gap-3"><Icon className="h-4 w-4 shrink-0 text-primary" name={fileIcon(name)} /><span className="min-w-0 flex-1 truncate text-[13px] font-bold text-text-main">{name}</span><span className="text-[11px] text-muted">{formatFileSize(size)}</span></span>;
 }
 
-function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDealInput {
+function editableFields(form: DealFields): DealFields {
   return {
-    closeDate: form.closeDate,
-    dealId: form.dealId.trim(),
-    dealName: form.dealName.trim(),
-    dealSponsor: form.dealSponsor.trim(),
-    localPath: runtime.target === "desktop" ? form.localPath.trim() : null,
-    primaryBuyer: form.primaryBuyer.trim(),
-    sharepointLink: null,
-    startDate: form.startDate,
-    status: form.status,
-    targetCompany: form.targetCompany.trim(),
-    transactionType: form.transactionType,
-    userEmail,
+    dealName: form.dealName.trim(), dealCode: form.dealCode?.trim() || null,
+    engagementType: form.engagementType, transactionType: form.transactionType, status: form.status,
+    startDate: form.startDate, expectedCloseDate: form.expectedCloseDate, actualCloseDate: form.actualCloseDate,
+    engagementCompletedDate: form.engagementCompletedDate,
+    parties: form.parties.map(({ companyId, role, notes }) => ({ companyId, role, notes })),
+    scopes: form.scopes,
   };
+}
+function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDealInput {
+  return { ...editableFields(form), dealId: form.dealId.trim(), userEmail,
+    localPath: runtime.target === "desktop" ? form.localPath.trim() || null : null, sharepointLink: null };
 }
 
 function optionalLink(value: string) {

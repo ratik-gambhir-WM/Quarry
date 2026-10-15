@@ -145,9 +145,11 @@ request -> router -> handler -> service -> repository/client
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current schema version is 6. Startup migration recreates older schemas by dropping and
-  rebuilding tables. Never point migration experiments or `cargo run` at valuable local data
-  without an explicit backup and user authorization.
+- The current schema marker is 9. Startup creates an empty database or validates/reuses the
+  current layout; incompatible schemas fail without deleting records. The explicit offline
+  `reset_development --discard <absolute-database-path>` utility is destructive and must never
+  run automatically at startup. Run it only for a deliberately selected, drained disposable
+  database, paired with a fresh isolated Helix store. Do not discard valuable local data.
 - `cargo run --bin clear_helix` deletes graph data. Run it only under the explicit, backed-up,
   drained rollout procedure in `docs/ARCHITECTURE.md` and only when the user has authorized that
   operation.

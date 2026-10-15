@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ColumnDef, ColumnPinningState, PaginationState, SortingState } from "@tanstack/react-table";
 import { useTable } from "@tanstack/react-table";
@@ -29,14 +29,13 @@ type DealsTableProps = {
   onReset: () => void;
 };
 
-export function DealsTable({ deals, navigationState, onReset }: DealsTableProps) {
+export function DealsTable(props: DealsTableProps) {
+  return <DealsTableState key={props.deals.map((deal) => deal.id).join("|")} {...props} />;
+}
+function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
   const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ end: [], start: ["deal"] });
-
-  useEffect(() => {
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
-  }, [deals]);
 
   const columns = useMemo<ColumnDef<DataGridFeatures, DealPortfolioView>[]>(
     () => [
@@ -74,7 +73,8 @@ export function DealsTable({ deals, navigationState, onReset }: DealsTableProps)
       textColumn("status", "Status", 125),
       textColumn("type", "Type", 120),
       textColumn("sponsor", "Sponsor", 110, (value) => String(value ?? "—")),
-      textColumn("closeDate", "Target close", 130, (value) => formatShortUtcDate(typeof value === "string" ? value : undefined)),
+      textColumn("engagement", "Engagement", 120),
+      { id: "closeDate", accessorFn: (deal) => deal.closeDate, header: "Transaction close", cell: ({ row }) => <span>{row.original.closeDateLabel}: {formatShortUtcDate(row.original.closeDate)}</span>, size: 180, sortUndefined: "last" },
       textColumn("openQuestionCount", "Open questions", 155),
     ],
     [navigationState],

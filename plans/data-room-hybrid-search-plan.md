@@ -2,6 +2,11 @@
 
 ## Status, decision, and scope
 
+Refreshed 2026-10-15 against the live working tree, including uncommitted
+deal/company, schema-9, and deal-linked Assistant changes. Hybrid search,
+advanced criteria, deal-scoped Helix indexes, and backfill/rebuild tooling are
+still proposed; none is marked complete by this refresh.
+
 This is a proposed implementation plan, not the current product contract. The
 live code and [architecture](../docs/ARCHITECTURE.md) remain authoritative until
 the implementation is complete.
@@ -41,7 +46,9 @@ embeddings.
 | API | Keyword search accepts workspace ID, text, and limit. Vector search accepts a client-supplied embedding. | These are low-level calls, not a deal-scoped, authorization-ready product contract. |
 | UI | QuarryApi, HTTP, and Tauri adapters expose the low-level endpoints. DataRoomDocumentSearch filters deterministic fixture excerpts for the current PDF. | There is no genuine semantic search, cross-document result, or search before opening a document. |
 | Scope | SQLite quarry_files records both deal_id and workspace_id. Helix nodes carry only workspace_id. | A user can own multiple deals, so an owner-scoped top-K cannot accurately retrieve the selected deal. |
-| Operations | There is no general SQLite-to-Helix rebuild tool; clear_helix is destructive. | Graph schema/index changes need a safe reindex before the feature may be enabled. |
+| Deal model | Schema 9 has typed engagement/transaction/status fields, reusable owner-scoped companies, deal parties/scopes, and archive timestamps. | Use stable deal ID and canonical user ownership, never deal name, company name/role, status, or portfolio Current/Historic grouping as a search partition. |
+| Assistant | Synthesis Canvas uses persisted deal-linked threads; DealContextReader supplies bounded deal reference data. | Thread association is not document retrieval or authenticated access; preserve it while changing search. |
+| Operations | Schema 9 is initialized only for an empty database; compatible layouts are reused and incompatible layouts fail safely. There is no general Helix backfill/rebuild tool. | Add bounded ownership backfill and prove index population; neither reset_development nor clear_helix is a search migration. |
 
 Two facts make a frontend-only implementation incorrect:
 
@@ -50,6 +57,33 @@ Two facts make a frontend-only implementation incorrect:
 2. The current partition is the normalized owner email, not the deal. Filtering
    a limited owner-wide result set in Axum can lose good in-deal matches and
    hides an important authorization boundary.
+
+### Recent changes and implementation anchors
+
+- Search is now reached through the explorer's four-action toolbar in
+  [DataRoomQuickActions](../frontend/src/components/data-room/DataRoomQuickActions.tsx).
+  [DataRoomWorkspace](../frontend/src/components/data-room/DataRoomWorkspace.tsx)
+  supplies the panel boundary and current preview page/focus callbacks. The
+  explorer mounts only with a selected preview; the unselected view keeps the
+  Deal Room sidebar and file-review table. A search trigger in the unselected
+  view remains new work.
+- The fixture adapter is
+  [document-search/DataRoomDocumentSearch.tsx](../frontend/src/components/data-room/document-search/DataRoomDocumentSearch.tsx),
+  with records under [fixtures/data-room/documentSearch.ts](../frontend/src/fixtures/data-room/documentSearch.ts).
+  Its filename-based availability check and page-only target must become stable
+  file/version identities. The file-review table's local filter is a separate
+  control and must not be presented as semantic document search.
+- [SQLite document persistence](../backend/src/domains/documents/store/sqlite.rs)
+  now resolves ownership through `deals.user_id -> users.email` and rejects
+  ingestion into an archived deal. Do not recreate the removed duplicated
+  metadata owner field. Search needs its own narrow canonical read collaborator;
+  the existing deal reference reader returns serialized chat context, not
+  document identities or an authorization decision.
+- The [permanent deletion proposal](deal-permanent-deletion-api-plan.md) shares
+  the need for graph deal ownership, resumable backfill, and canonical liveness
+  checks. It is a design dependency, not implemented behavior. Coordinate one
+  ownership rollout; do not independently add competing migrations or assume
+  its deletion ledger, lifecycle gate, or remote write fence already exists.
 
 ## Research basis and recommendation
 
@@ -254,7 +288,7 @@ compatibility/version decision.
       -> Axum handler validates path and JSON
       -> DocumentSearchService
            -> canonical deal/access lookup
-           -> canonicalizes/validates structured criteria
+           -> consumes validated canonical criteria
            -> OpenAiClient embeds positive intent once when required
            -> DocumentSearchIndex issues bounded, predicate-aware Helix reads
            -> rechecks anchor, validates current version, collapses, RRFs, shapes excerpt
@@ -268,7 +302,8 @@ Maintain the repository dependency direction:
   configuration remains in AppConfig/bootstrap.
 - The handler extracts and validates transport input. It does not construct a
   client or rank candidates. Json remains the last body-consuming extractor.
-- The search service owns criteria canonicalization, availability policy, one
+- The handler owns transport criteria normalization and validation through a
+  pure shared criteria helper. The search service owns availability policy, one
   query embedding, candidate orchestration, anchor/identity verification, pure
   ranking, and result shaping. Clone Arc values before awaits, bound provider
   concurrency/timeouts, and hold no lock across await.
@@ -276,7 +311,14 @@ Maintain the repository dependency direction:
   receives typed body predicates. It must not know HTTP DTOs, OpenAI, UI labels,
   or RRF policy.
 - The canonical document/deal collaborator confirms that the deal is active
-  and supplies enough metadata to reject stale/deleted hits. Once real identity
+  and supplies owner workspace plus current, non-deleted file/version metadata
+  through bounded batch reads. Derive workspace from canonical ownership; accept
+  no client workspace or company scope on the new endpoint. Reject mismatched
+  graph identities before excerpts are returned. Recheck deal/file liveness
+  before returning an in-flight response, so archive/removal cannot expose stale
+  hits. Once the deletion lifecycle gate exists, honor its barrier as well.
+  Archived deals return 404 under this initial active-Data-Room policy; completed
+  or cancelled engagements are not automatically archived. Once real identity
   exists, a deal-access policy must bind the authenticated principal before
   retrieval. Current caller-supplied email is development isolation, not
   authorization.
@@ -321,11 +363,26 @@ Do not duplicate every filename/full document into chunks merely to obtain
 title search. Keep raw chunk text for excerpts and use the indexed file title
 as the third retrieval source.
 
-### Safe reindex is a prerequisite
+### Safe ownership backfill and index population are prerequisites
 
-Existing graph nodes lack deal_id, so new indexes cannot search them correctly.
-Before enabling the UI, implement an operator-only, resumable rebuild service
-or command that:
+Existing graph nodes lack deal_id. Prefer an operator-only, bounded, resumable
+property backfill from canonical SQLite file ownership, shared with the deletion
+rollout. Retain workspace/file/version/chunk identities, chunk text, embeddings,
+and published edges. Cover historical, soft-deleted, and unpublished/partial
+nodes for ownership reconciliation, while search continues to admit only live,
+current, published versions. Never infer deal ownership from matching content
+hashes, filenames, company names, or chat associations.
+
+Drain writers, verify backups and the selected environment, support dry-run,
+checkpoint batches, and make retry idempotent. Missing or contradictory canonical
+ownership is reported and suppressed from search rather than guessed or silently
+purged. Prove on the pinned Helix target whether additive v2 indexes populate
+existing nodes after the property update. Keep old indexes until parity passes.
+A reader-first transition may tolerate absent deal properties only for canonical
+reconciliation; absent/mismatched ownership never qualifies a search candidate.
+
+If index population requires rewriting nodes, or parser/chunk/model changes
+require new content projection, implement a separate safe rebuild path that:
 
 1. reads current, non-deleted SQLite documents and canonical blobs only from a
    disposable or explicitly authorized environment;
@@ -338,7 +395,11 @@ or command that:
 5. verifies identity/count parity plus keyword and semantic fixtures before
    traffic is enabled.
 
-This is not authorization to run clear_helix. The command needs a documented
+Neither backfill nor rebuild may invoke reset_development or clear_helix.
+Schema 9 must be preserved; if durable tooling checkpoints need SQLite tables,
+design a targeted data-preserving upgrade from the then-current marker and
+coordinate it with deletion's proposed ledger upgrade. Do not reserve marker 10
+independently in both plans. The command needs a documented
 backup, approval, retry, and rollback procedure. A per-file graph rewrite can
 briefly leave that file without chunks after a failure; retry it and keep the
 feature disabled until parity passes.
@@ -364,7 +425,8 @@ feature disabled until parity passes.
    it increases embedding/storage cost and forces reindex. OpenAI's 800-token,
    400-token-overlap default is a reference point, not a Quarry mandate.
    [OpenAI retrieval chunking](https://developers.openai.com/api/docs/guides/retrieval)
-5. Write the safe rebuild operational design before changing graph models. Stop
+5. Write the shared ownership-backfill, index-population, and conditional rebuild
+   operational design before changing graph models. Stop
    if Helix cannot accurately express deal/current-version retrieval.
 6. Specify one shared criteria normalizer/matcher and publish its fixture table
    before wiring UI fields. Decide the concrete term-count, phrase-length, and
@@ -387,17 +449,19 @@ feature disabled until parity passes.
    response dimensions. It receives the canonical positive intent only; the
    browser supplies neither vector nor model.
 4. Refactor DocumentSearchService to depend on the index, canonical
-   deal/document collaborator, and optional embedding client. Canonicalize
-   criteria once, run independent eligible lexical/title reads while creating
-   the query embedding where useful, then retrieve semantic candidates,
+   deal/document collaborator, and optional embedding client. Consume criteria
+   validated once by the handler/helper, run independent eligible lexical/title
+   reads while creating the query embedding where useful, then retrieve semantic candidates,
    recheck anchors/identities, collapse, fuse, and shape bounded excerpts.
    Keyword mode makes no OpenAI call.
 5. Add the deal-scoped route in the documents-search router and preserve thin
    handlers/sanitized error mapping. Invalid criteria, an exclusion-only
    request, or unavailable exact-phrase capability have explicit client-safe
    errors rather than silent broadening.
-6. Implement, test, and approve the rebuild. Enable the new endpoint/UI behind
-   server configuration only after parity checks pass.
+6. Implement and test the shared backfill and any required rebuild. Document
+   explicit operator authorization for the selected environment, without running
+   either as startup behavior. Enable the endpoint/UI behind validated server
+   configuration only after ownership/index/current-version parity passes.
 
 ### Phase 2: shared React and desktop integration
 
@@ -410,13 +474,21 @@ feature disabled until parity passes.
    Use a disclosure with labelled inputs, descriptions of AND/OR/exclusion
    behavior, and a visible This Data Room scope. Do not retain a runtime
    fixture fallback.
-3. Move coordination to DataRoomWorkspace, where deal ID, stored nodes,
-   selection, preview handle, and the panel boundary meet. Render the trigger
-   in both unselected and selected states.
+3. Extend the coordination already in DataRoomWorkspace, where deal ID, stored
+   nodes, selection, preview handle, and the panel boundary meet. Keep the explorer
+   quick-action trigger for selected previews and add an unselected-view trigger
+   without replacing the Deal Room sidebar. Use one deal-keyed request/result
+   owner; selecting or closing a preview must not reset the submitted search.
+   Closing/switching the deal invalidates requests and clears retained results.
 4. On activation locate the stored node by file ID, select it with
    useDocumentSession, then request a page only if the loaded viewer has a
    valid page count. Show an unavailable state if the indexed file disappeared.
-5. Preserve existing dialog focus, keyboard, drag, token, and motion behavior.
+5. Preserve the Upload callback, the existing Notes placeholder, and Synthesis
+   Canvas's provider keyed by user and deal, persisted thread picker, and
+   immutable thread association.
+   Search must not inject retrieved document text into chat implicitly; any future
+   grounded-chat integration needs a separate explicit contract. Preserve existing
+   dialog focus, keyboard, drag, token, and motion behavior.
    Copy must say Search this Data Room, accurately state indexed-document
    scope, and avoid promising phrase/Boolean behavior until the capability
    spike has passed.
@@ -467,14 +539,22 @@ feature disabled until parity passes.
 - Helix compatibility tests: v2 DDL readiness and correctly scoped title,
   keyword, vector, all/any/none, and exact-phrase results; historical and
   other-deal chunks never return.
-- Rebuild tests: dry run, idempotent retry, interrupted resume, one-file
-  failure reporting, and SQLite preservation, all with temporary databases.
+- Backfill/rebuild tests: dry run, idempotent retry, interrupted resume,
+  historical/partial nodes, missing/mismatched ownership, v2 population/parity,
+  one-file failure reporting, stable IDs/embedding preservation for property-only
+  updates, and SQLite preservation, all with temporary databases.
+- Lifecycle tests: archived/missing deals, status versus archive distinctions,
+  shared companies across deals, same bytes in different deals, and in-flight
+  liveness rechecks. When deletion lands, test its barrier during search and
+  backfill/rebuild so neither stale results nor tooling can resurrect content.
 - Frontend tests: contract/adapters, advanced-disclosure labels/instructions,
   basic and structured draft submission, loading/empty/no-index/error/retry,
   stale result suppression, badges, escaped positive-term/phrase highlighting,
   cross-document activation, page validation, deleted result,
   keyboard/focus/accessibility, reduced motion, narrow viewport behavior, and
-  the unavailable Entire Project state until Phase 4 lands.
+  the unavailable Entire Project state until Phase 4 lands. Cover both selected
+  and unselected triggers, result retention across preview changes, user/deal
+  switches, and unchanged Upload/Synthesis Canvas thread behavior.
 
 Run the repository-native gates from their build roots:
 
@@ -529,9 +609,11 @@ recommends continuous evaluation with representative cases.
 
 ### Privacy, observability, and resilience
 
-- Keep OPENAI_API_KEY server-side. Query text, query embeddings, excerpts,
-  filenames, and document text never go into Tauri arguments, Vite variables,
-  browser storage, analytics payloads, or logs.
+- Keep OPENAI_API_KEY server-side. Query text/criteria and bounded results must
+  cross the existing validated HTTP/Tauri JSON relay for desktop search; do not
+  prohibit that required transport. Query embeddings remain server-side. Never
+  put provider secrets in IPC, and never persist query/document values in Vite
+  variables, browser storage, analytics payloads, or logs.
 - Treat structured criteria as query text for privacy and redaction. Only the
   canonical positive intent may reach the embedding provider; excluded terms
   stay within the server's retrieval/matching path.
@@ -558,8 +640,9 @@ recommends continuous evaluation with representative cases.
    explicit rather than silently degraded.
 4. Cross-document selection and valid PDF-page navigation work; non-PDF and
    unavailable results are safe and truthful.
-5. Existing documents pass safe rebuild and parity gates. No destructive Helix
-   clearing or canonical SQLite deletion is used.
+5. Existing documents pass ownership backfill, index-population, and any needed
+   rebuild/parity gates. No destructive Helix clearing or canonical SQLite
+   deletion is used.
 6. There is no runtime fixture fallback. Both frontend adapters and relevant
    backend/frontend/Tauri tests pass with manual accessibility inspection.
 7. The implementation updates docs/ARCHITECTURE.md for API, graph/index,
@@ -569,3 +652,11 @@ recommends continuous evaluation with representative cases.
 8. Entire Project remains unavailable until Phase 4's project ownership,
    authorization, route, retrieval, and cross-Data-Room navigation criteria
    are complete; it is never shipped as a broad workspace search.
+
+## Architecture impact of this refresh
+
+Architecture impact: none — this updates proposed work against the current
+implementation without changing routes, runtime boundaries, schema, or behavior.
+The relevant architecture sections were rechecked; implementation must update
+the canonical architecture as described in completion criterion 7. No migration,
+backfill, rebuild, reset, or external integration was executed for this refresh.

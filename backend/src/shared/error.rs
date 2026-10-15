@@ -3,6 +3,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
     InvalidData(String),
     #[error("{0}")]
     Storage(String),
@@ -54,7 +58,12 @@ impl ServiceError {
 
 impl From<RepositoryError> for ServiceError {
     fn from(error: RepositoryError) -> Self {
-        Self::Internal(error.to_string())
+        match error {
+            RepositoryError::NotFound(message) => Self::NotFound(message),
+            RepositoryError::Conflict(message) => Self::Conflict(message),
+            RepositoryError::InvalidData(message) => Self::Validation(message),
+            error => Self::Internal(error.to_string()),
+        }
     }
 }
 

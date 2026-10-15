@@ -63,3 +63,19 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+it("keeps a saved aggregate when an older list finishes, while retaining other deals", async () => {
+  const request = deferred<import("@/contracts/quarryApi").PersistedDeal[]>();
+  listDeals.mockReturnValueOnce(request.promise);
+  const { testDeal, testMetadata } = await import("@/test/fixtures/deals");
+  const older = testDeal({ dealName: "Old" });
+  const saved = testDeal({ dealName: "Edited" });
+  const other = testDeal({ dealId: "DEAL-OTHER" });
+  const { result } = renderHook(() => useWorkspaceDeals("api"));
+  act(() => result.current.saveDealResult({ deal: saved, metadata: testMetadata() }));
+  request.resolve([{ ...older, metadata: null }, { ...other, metadata: null }]);
+  await waitFor(() => {
+    const resource = result.current.resource;
+    expect(resource.status === "success" && resource.deals.map((d) => d.room.name)).toEqual(["Edited", "Project Alpha"]);
+  });
+});

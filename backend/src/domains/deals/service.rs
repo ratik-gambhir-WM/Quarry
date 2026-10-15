@@ -17,19 +17,14 @@ use crate::{
     },
 };
 
+pub use super::model::DealFields;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDealInput {
     pub deal_id: String,
-    pub deal_name: String,
-    pub status: String,
-    pub start_date: String,
-    pub close_date: String,
-    pub transaction_type: String,
-    pub target_company: String,
-    pub primary_buyer: String,
-    pub deal_sponsor: String,
     pub user_email: String,
+    #[serde(flatten)]
+    pub fields: DealFields,
     pub local_path: Option<String>,
     pub sharepoint_link: Option<String>,
 }
@@ -134,40 +129,39 @@ impl DealService {
 
     pub async fn create(&self, input: SaveDealInput) -> ServiceResult<SaveDealResponse> {
         let user_email = input.user_email.trim().to_string();
-        let user = self.users.by_email(&user_email).await?.ok_or_else(|| {
-            ServiceError::validation(format!("user not found for email `{user_email}`"))
-        })?;
-        let deal = self
+        let user = self
+            .users
+            .by_email(&user_email)
+            .await?
+            .ok_or_else(|| ServiceError::not_found("user not found"))?;
+        validate_target_rule(&input.fields)?;
+        let aggregate = self
             .deals
             .create(CreateDealRecord {
-                deal_id: input.deal_id.trim().to_string(),
+                deal_id: input.deal_id,
                 user_id: user.id,
-                deal_name: input.deal_name.trim().to_string(),
-                status: input.status.trim().to_string(),
-                start_date: input.start_date.trim().to_string(),
-                close_date: input.close_date.trim().to_string(),
-                transaction_type: input.transaction_type.trim().to_string(),
-                target_company: input.target_company.trim().to_string(),
-                primary_buyer: input.primary_buyer.trim().to_string(),
-                deal_sponsor: input.deal_sponsor.trim().to_string(),
-            })
-            .await
-            .map_err(|error| ServiceError::validation(error.to_string()))?;
-        let metadata = self
-            .deals
-            .upsert_metadata(UpsertDealMetadataRecord {
-                deal_id: deal.deal_id.clone(),
-                user_id: deal.user_id,
-                key_questions_json: "[]".to_string(),
+                fields: input.fields,
                 local_path: trim_optional_owned(input.local_path),
                 sharepoint_link: trim_optional_owned(input.sharepoint_link),
-                sow_link: None,
-                fact_sheet_link: None,
-                rl_link: None,
             })
-            .await
-            .map_err(|error| ServiceError::validation(error.to_string()))?;
+            .await?;
+        let deal = aggregate.deal;
+        let metadata = aggregate
+            .metadata
+            .ok_or_else(|| ServiceError::internal("created metadata missing"))?;
         Ok(SaveDealResponse { deal, metadata })
+    }
+
+    pub async fn update(&self, id: &str, fields: DealFields) -> ServiceResult<SaveDealResponse> {
+        validate_target_rule(&fields)?;
+        let aggregate = self.deals.update(id.to_string(), fields).await?;
+        let metadata = aggregate
+            .metadata
+            .ok_or_else(|| ServiceError::internal("deal metadata missing"))?;
+        Ok(SaveDealResponse {
+            deal: aggregate.deal,
+            metadata,
+        })
     }
 
     pub async fn save_metadata(
@@ -202,7 +196,6 @@ impl DealService {
             .deals
             .upsert_metadata(UpsertDealMetadataRecord {
                 deal_id: deal.deal_id.clone(),
-                user_id: deal.user_id,
                 key_questions_json: existing_metadata.key_questions_json,
                 local_path: existing_metadata.local_path,
                 sharepoint_link,
@@ -244,7 +237,6 @@ impl DealService {
             .deals
             .upsert_metadata(UpsertDealMetadataRecord {
                 deal_id: deal.deal_id.clone(),
-                user_id: deal.user_id,
                 key_questions_json,
                 local_path: metadata.local_path,
                 sharepoint_link: metadata.sharepoint_link,
@@ -290,10 +282,15 @@ impl DealService {
             .render_deal_extraction(DealExtractionPromptData {
                 deal_id: &deal.deal_id,
                 deal_name: &deal.deal_name,
-                transaction_type: &deal.transaction_type,
-                target_company: &deal.target_company,
-                primary_buyer: &deal.primary_buyer,
-                deal_sponsor: &deal.deal_sponsor,
+                transaction_type: deal.transaction_type.label(),
+                engagement_type: deal.engagement_type.label(),
+                parties: &party_context(deal),
+                scopes: &deal
+                    .scopes
+                    .iter()
+                    .map(|s| s.label())
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 attached_file_manifest: &manifest,
             });
         let file_inputs = files
@@ -349,3 +346,33 @@ fn updated_optional_value(submitted: Option<String>, existing: Option<String>) -
 #[cfg(test)]
 #[path = "../../../tests/integration/domains/deals/service_tests.rs"]
 mod tests;
+
+fn validate_target_rule(fields: &DealFields) -> ServiceResult<()> {
+    use super::model::{DealStatus, PartyRole, TransactionType};
+    if matches!(fields.status, DealStatus::Active | DealStatus::Completed)
+        && matches!(
+            fields.transaction_type,
+            TransactionType::PlatformAcquisition
+                | TransactionType::AddOnAcquisition
+                | TransactionType::StrategicAcquisition
+        )
+        && fields
+            .parties
+            .iter()
+            .filter(|p| p.role == PartyRole::Target)
+            .count()
+            != 1
+    {
+        return Err(ServiceError::validation(
+            "active or completed acquisitions require exactly one target",
+        ));
+    }
+    Ok(())
+}
+pub(super) fn party_context(deal: &Deal) -> String {
+    deal.parties
+        .iter()
+        .map(|p| format!("{}: {}", p.role.label(), p.company.name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}

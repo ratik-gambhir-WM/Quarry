@@ -1,3 +1,4 @@
+import type { DealParty } from "../../data/dealModel";
 import type {
   DealResource,
   WorkspaceDeal,
@@ -18,9 +19,10 @@ export const workspaceDeals: WorkspaceDeal[] = [
     colorClassName: "bg-primary",
     complete: true,
     portfolio: {
-      status: "Completed",
-      targetCompany: "Alpha Corp",
-      transactionType: "Manufacturing acquisition",
+      engagementType: "buy_side",
+      status: "completed",
+      parties: [fixtureParty("Alpha Corp")],
+      transactionType: "strategic_acquisition",
     },
     room: {
       id: "project-alpha",
@@ -90,9 +92,10 @@ export const workspaceDeals: WorkspaceDeal[] = [
   {
     colorClassName: "bg-[#6b87c8]",
     portfolio: {
-      status: "Under Review",
-      targetCompany: "Beta Holdings",
-      transactionType: "Platform acquisition",
+      engagementType: "buy_side",
+      status: "active",
+      parties: [fixtureParty("Beta Holdings")],
+      transactionType: "platform_acquisition",
     },
     room: {
       id: "project-beta",
@@ -162,8 +165,10 @@ export const workspaceDeals: WorkspaceDeal[] = [
   {
     colorClassName: "bg-muted",
     portfolio: {
-      status: "Risk Watch",
-      transactionType: "Merger",
+      engagementType: "buy_side",
+      status: "on_hold",
+      transactionType: "merger",
+      parties: [],
     },
     room: {
       id: "logistics-merger",
@@ -404,3 +409,8 @@ export const workspaceInsights: WorkspaceInsight[] = workspaceInsightRecords.map
   analyzedAtLabel: "Analyzed today",
   confidenceLabel: insight.image ? "92%" : index % 2 === 0 ? "96%" : "94%",
 }));
+
+function fixtureParty(name: string): DealParty {
+  return { companyId: `demo-${name}`, dealPartyId: `demo-party-${name}`, role: "target", notes: null,
+    company: { companyId: `demo-${name}`, userId: 0, name, website: null, industry: null, description: null, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" } };
+}
