@@ -264,7 +264,7 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
 
     let behavior_tests = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/unit/domains/documents/store/sqlite_tests.rs"),
+            .join("tests/integration/domains/documents/store/sqlite_tests.rs"),
     )
     .unwrap();
     assert!(

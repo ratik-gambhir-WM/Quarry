@@ -165,7 +165,7 @@ Quarry/
 │   │   └── bin/                      operational and diagnostic utility binaries
 │   ├── tests/
 │   │   ├── unit/                     unit tests mirroring backend/src
-│   │   └── integration/              cross-module router and architecture suites
+│   │   └── integration/              persistence, transport, router, and architecture suites
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
 │   ├── .env                          ignored local runtime configuration
@@ -359,7 +359,9 @@ global state or query-cache library.
 - `WorkspaceProvider` owns workspace session and deal-resource state for `/hub/*`.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
-  sidebar starts with Home (`/hub`) followed by Vault. The Deal Room and non-Assistant Deal Hub
+  sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
+  Workspace section containing Deals and Notebook. Vault's section rail includes Documents,
+  Links, Prompts, Notes, Tasks, and Templates. The Deal Room and non-Assistant Deal Hub
   headers identify the active sidebar without fixture-backed alternate
   spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
   initially selects Chat. Deal Hub restores the normal home navigation in the same sidebar without
@@ -1437,10 +1439,10 @@ There is no browser end-to-end suite or visual regression suite.
 ### 14.2 Backend test model
 
 `autotests = false` means Rust tests are included explicitly. Unit test bodies live under
-`backend/tests/unit/` in a tree that mirrors `backend/src/`; owning source modules retain only
-`#[cfg(test)] #[path = ...] mod tests;` hooks so those separate files can still exercise private
-items. Cross-module router and repository-architecture suites live under
-`backend/tests/integration/` and are included from the crate root. The architecture suite verifies
+`backend/tests/unit/` in a tree that mirrors `backend/src/`. Persistence, local-server transport,
+and cross-module suites live under `backend/tests/integration/`. Owning source modules retain only
+`#[cfg(test)] #[path = ...] mod tests;` hooks where tests need private items; router and architecture
+suites are included from the crate root. The architecture suite verifies
 the source/test separation and mirrored unit-test layout; adding a file under `backend/tests/`
 without an inclusion hook will not make Cargo execute it.
 
@@ -1613,7 +1615,7 @@ current-state reference.
 | Product use cases and owned persistence | `backend/src/domains/` |
 | Concrete infrastructure | `backend/src/adapters/` |
 | Cross-domain primitives | `backend/src/shared/` |
-| Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/unit/app/migrations_tests.rs`](../backend/tests/unit/app/migrations_tests.rs) |
+| Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/integration/app/migrations_tests.rs`](../backend/tests/integration/app/migrations_tests.rs) |
 | Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs) |
 | Versioned graph rollout and recovery | [Helix versioned file graph](#92-helix-versioned-file-graph) |
 

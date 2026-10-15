@@ -660,5 +660,5 @@ fn invalid_row_value(column: &str, expected: &str) -> SqliteClientError {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/documents/store/sqlite_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/store/sqlite_tests.rs"]
 mod tests;

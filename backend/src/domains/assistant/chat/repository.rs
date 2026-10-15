@@ -638,5 +638,5 @@ fn now_timestamp() -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/assistant/chat/repository_tests.rs"]
+#[path = "../../../../tests/integration/domains/assistant/chat/repository_tests.rs"]
 mod tests;

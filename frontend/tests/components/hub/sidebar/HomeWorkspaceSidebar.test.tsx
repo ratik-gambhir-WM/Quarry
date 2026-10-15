@@ -6,7 +6,7 @@ import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 import { HomeWorkspaceSidebar } from "@/components/hub/sidebar/HomeWorkspaceSidebar";
 
 describe("HomeWorkspaceSidebar", () => {
-  it("renders the canonical portfolio hierarchy and keeps Logs in the bottom utility group", () => {
+  it("renders Assistant below Vault and keeps Workspace and Logs in their respective groups", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/hub/deals"]}>
         <HomeWorkspaceSidebar
@@ -18,7 +18,7 @@ describe("HomeWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const labels = ["Home", "Vault", "Research", "Assistant", "Topics", "Workspace", "Deals", "Notebook", "Templates", "Logs"];
+    const labels = ["Home", "Vault", "Assistant", "Workspace", "Deals", "Notebook", "Logs"];
     for (let index = 1; index < labels.length; index += 1) {
       expect(markup.indexOf(`>${labels[index - 1]}<`)).toBeLessThan(markup.indexOf(`>${labels[index]}<`));
     }
@@ -30,6 +30,9 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).toContain('href="/hub/assistant"');
     expect(markup).toContain('d="M21 2H3v16h5v4l4-4h5l4-4V2z"');
     expect(markup).toContain("Deal Hub");
+    expect(markup).not.toContain(">Research<");
+    expect(markup).not.toContain(">Topics<");
+    expect(markup).not.toContain(">Templates<");
     expect(markup).not.toContain("Switch sidebar");
     expect(markup).not.toContain('d="M8.5 4v16');
     expect(markup).not.toContain("Active Deals");

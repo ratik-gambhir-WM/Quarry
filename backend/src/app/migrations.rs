@@ -312,5 +312,5 @@ fn migrate_version_7_to_8(connection: &mut Connection) -> Result<(), MigrationEr
 }
 
 #[cfg(test)]
-#[path = "../../tests/unit/app/migrations_tests.rs"]
+#[path = "../../tests/integration/app/migrations_tests.rs"]
 mod tests;

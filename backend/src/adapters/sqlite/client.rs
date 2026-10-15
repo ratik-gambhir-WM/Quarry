@@ -390,5 +390,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/adapters/sqlite/client_tests.rs"]
+#[path = "../../../tests/integration/adapters/sqlite/client_tests.rs"]
 mod tests;

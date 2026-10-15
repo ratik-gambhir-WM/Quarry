@@ -131,5 +131,5 @@ const fn helix_error_kind(error: &HelixError) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/adapters/helix/client_tests.rs"]
+#[path = "../../../tests/integration/adapters/helix/client_tests.rs"]
 mod tests;

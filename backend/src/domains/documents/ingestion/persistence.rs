@@ -473,5 +473,5 @@ fn normalized_workspace_identity(value: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/documents/ingestion/persistence_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/ingestion/persistence_tests.rs"]
 mod tests;

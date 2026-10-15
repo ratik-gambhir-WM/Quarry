@@ -49,9 +49,6 @@ export function HomeWorkspaceSidebarNavigation({
           label="Vault"
           navigationState={navigationState}
         />
-      </nav>
-
-      <SidebarSection title="Research">
         <SidebarLink
           homeSection={activeHomeSection}
           href="/hub/assistant"
@@ -59,8 +56,7 @@ export function HomeWorkspaceSidebarNavigation({
           label="Assistant"
           navigationState={navigationState}
         />
-        <SidebarLink icon="search" label="Topics" />
-      </SidebarSection>
+      </nav>
 
       <SidebarSection title="Workspace">
         <SidebarLink
@@ -71,7 +67,6 @@ export function HomeWorkspaceSidebarNavigation({
           navigationState={navigationState}
         />
         <SidebarLink icon="bookOpen" label="Notebook" />
-        <SidebarLink icon="layers" label="Templates" />
       </SidebarSection>
 
       <div className="mt-3 border-t border-outline-variant/70 pt-3">

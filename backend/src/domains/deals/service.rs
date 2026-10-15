@@ -347,5 +347,5 @@ fn updated_optional_value(submitted: Option<String>, existing: Option<String>) -
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/domains/deals/service_tests.rs"]
+#[path = "../../../tests/integration/domains/deals/service_tests.rs"]
 mod tests;

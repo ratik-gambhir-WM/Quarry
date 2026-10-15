@@ -804,5 +804,5 @@ pub(super) fn file_chunk_projection() -> Vec<PropertyProjection> {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/documents/index/writer_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/index/writer_tests.rs"]
 mod tests;

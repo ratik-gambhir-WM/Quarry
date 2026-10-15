@@ -2,6 +2,7 @@ import { VaultTable } from "../components/hub/VaultTable";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { Icon } from "../components/ui/Icon";
+import { LayersIcon } from "../components/ui/layers";
 
 const vaultSections = [
   { icon: "doc", label: "Documents" },
@@ -9,6 +10,7 @@ const vaultSections = [
   { icon: "sparkles", label: "Prompts" },
   { icon: "listAlt", label: "Notes" },
   { icon: "checkCircle", label: "Tasks" },
+  { icon: "layers", label: "Templates" },
 ] as const;
 
 export function VaultPage() {
@@ -31,7 +33,11 @@ export function VaultPage() {
                   data-active={index === 0 ? "true" : undefined}
                   key={label}
                 >
-                  <Icon className="h-4 w-4 shrink-0" name={icon} />
+                  {icon === "layers" ? (
+                    <LayersIcon className="h-4 w-4 shrink-0" size={16} />
+                  ) : (
+                    <Icon className="h-4 w-4 shrink-0" name={icon} />
+                  )}
                   <span>{label}</span>
                 </li>
               ))}

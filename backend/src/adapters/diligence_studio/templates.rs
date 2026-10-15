@@ -645,5 +645,5 @@ fn invalid_error(message: &str) -> SlideTemplateClientError {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/adapters/diligence_studio/templates_tests.rs"]
+#[path = "../../../tests/integration/adapters/diligence_studio/templates_tests.rs"]
 mod tests;
