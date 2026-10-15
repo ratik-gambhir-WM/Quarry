@@ -380,13 +380,17 @@ global state or query-cache library.
   dynamically imports `fixtures/workspace/portfolio.ts` and the shell visibly labels the result
   as demo data. The provider uses a local external resource store; create/update responses replace
   cached aggregates, and pending older lists cannot overwrite those writes. Shared company edits
-  refresh linked cached deal summaries. API-backed deals retain their typed persisted fields for
+  refresh linked cached deal summaries and overlay pending list results, including deals not yet
+  loaded into the cache. API-backed deals retain their typed persisted fields for
   editing. Creation and editing share optional date, engagement/transaction, scope, and company-role
   controls; company search is bounded, stale results are ignored, and directory creation is explicit.
   Directory entries remain saved when a deal form is cancelled or its write fails. Completed and
   cancelled engagements are Historic; pipeline, active, and on-hold engagements are Current.
   Transaction closing never changes engagement status. Views show all companies for each role and
   distinguish expected close, actual close, and engagement completion.
+  The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
+  type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
+  Missing values and unavailable links display `N/A`; external links open in a separate tab.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
@@ -1019,7 +1023,10 @@ There is no historical migration/translation ladder. `PRAGMA user_version = 9` i
 marker. Startup creates the final schema only when there are no application tables and the marker
 is zero; this initializer has no DROP statements. Current layouts are validated and reused without
 erasing data. Any incompatible marker/layout fails startup. All aggregate reads use one transaction
-snapshot with bounded batch queries; they do not fetch children separately for every deal.
+snapshot: deals `LEFT JOIN` their optional metadata, then bounded batches fetch parties joined to
+companies and scopes separately. These reads run sequentially on the same transaction connection
+inside the blocking pool; spawning Tokio tasks would still serialize on the shared connection lock.
+They do not fetch children separately for every deal or multiply parties by scopes in a combined join.
 
 The offline `reset_development` binary requires `--discard` and an existing, absolute disposable
 SQLite path. It drops dependent tables and recreates the final schema in one controlled transaction,
@@ -1132,7 +1139,8 @@ selected sources; company forms must be saved or cancelled before continuing. Co
 is deferred until **Finish deal** (or **Skip metadata**), followed by the metadata request when
 included. A failed metadata request keeps the created core response for retry without duplicating
 the deal; earlier steps are then locked because the core fields have already been persisted.
-Editing an existing deal retains the combined details-and-companies form. The desktop flow can
+Editing an existing deal retains the combined details-and-companies form and also requires saving
+or cancelling an open company form before submitting the deal. The desktop flow can
 authorize an optional local folder during the first step; selecting one disables the mutually
 exclusive SharePoint field.
 Both transports send the link fields and files through the same multipart Axum endpoint. A stored

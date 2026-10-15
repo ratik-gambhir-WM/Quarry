@@ -371,74 +371,111 @@ fn load(
     tx: &SqliteTransaction<'_>,
     id: Option<&str>,
 ) -> Result<Vec<DealWithMetadata>, SqliteClientError> {
-    let mut builder = SqlBuilder::select("deals").columns(DEAL_COLUMNS);
+    let mut builder = SqlBuilder::select("deals")
+        .columns(DEAL_COLUMNS.map(|column| format!("deals.{column}")))
+        .columns(
+            METADATA_COLUMNS[1..]
+                .iter()
+                .map(|column| format!("deal_metadata.{column}")),
+        )
+        .left_join("deal_metadata", "deals.deal_id", "deal_metadata.deal_id");
     builder = if let Some(id) = id {
-        builder.and_where(Condition::equal("deal_id", id))
+        builder.and_where(Condition::equal("deals.deal_id", id))
     } else {
-        builder.and_where(Condition::is_null("archived_at"))
+        builder.and_where(Condition::is_null("deals.archived_at"))
     };
-    let mut deals = tx.read_with(builder.build(), deal_from_row)?;
+    let mut deals = tx.read_with(builder.build(), |row| {
+        // key_questions_json is NOT NULL on a metadata row, but nullable after the LEFT JOIN.
+        let metadata = if row
+            .get::<_, Option<String>>("key_questions_json")?
+            .is_some()
+        {
+            Some(metadata_from_row(row)?)
+        } else {
+            None
+        };
+        Ok(DealWithMetadata {
+            deal: deal_from_row(row)?,
+            metadata,
+        })
+    })?;
     if deals.is_empty() {
         return Ok(Vec::new());
     }
     let ids = deals
         .iter()
-        .map(|deal| deal.deal_id.as_str())
+        .map(|aggregate| aggregate.deal.deal_id.as_str())
         .collect::<Vec<_>>();
-    let metadata = read_batches(tx, "deal_metadata", "deal_id", &ids, metadata_from_row)?
-        .into_iter()
-        .map(|metadata| (metadata.deal_id.clone(), metadata))
-        .collect::<HashMap<_, _>>();
-    let parties = read_batches(tx, "deal_parties", "deal_id", &ids, |row| {
-        Ok((
-            row.get::<_, String>("deal_id")?,
-            row.get::<_, String>("deal_party_id")?,
-            row.get::<_, String>("company_id")?,
-            enum_from_row::<PartyRole>(row, "role")?,
-            row.get::<_, Option<String>>("notes")?,
-        ))
-    })?;
-    let scopes = read_batches(tx, "deal_scopes", "deal_id", &ids, |row| {
-        Ok((
-            row.get::<_, String>("deal_id")?,
-            enum_from_row::<DiligenceScope>(row, "scope")?,
-        ))
-    })?;
-    let company_ids = parties
-        .iter()
-        .map(|party| party.2.as_str())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let companies = read_batches(
-        tx,
-        "companies",
-        "company_id",
-        &company_ids,
-        company_from_row,
-    )?
-    .into_iter()
-    .map(|company| (company.company_id.clone(), company))
-    .collect::<HashMap<_, _>>();
     let mut party_map: HashMap<String, Vec<DealParty>> = HashMap::new();
-    for (deal_id, deal_party_id, company_id, role, notes) in parties {
-        let company = companies
-            .get(&company_id)
-            .ok_or_else(|| SqliteClientError::transaction_aborted("party company missing"))?
-            .clone();
-        party_map.entry(deal_id).or_default().push(DealParty {
-            deal_party_id,
-            company_id,
-            role,
-            notes,
-            company,
-        });
-    }
     let mut scope_map: HashMap<String, Vec<DiligenceScope>> = HashMap::new();
-    for (id, scope) in scopes {
-        scope_map.entry(id).or_default().push(scope);
+    // Both child reads use this transaction's connection and snapshot, off the Tokio worker.
+    for batch in ids.chunks(500) {
+        let parties = tx.read_with(
+            SqlBuilder::select("deal_parties")
+                .columns([
+                    "deal_parties.deal_id",
+                    "deal_parties.deal_party_id",
+                    "deal_parties.role",
+                    "deal_parties.notes",
+                ])
+                .columns(
+                    [
+                        "company_id",
+                        "user_id",
+                        "name",
+                        "website",
+                        "industry",
+                        "description",
+                        "created_at",
+                        "updated_at",
+                    ]
+                    .map(|column| format!("companies.{column}")),
+                )
+                .inner_join(
+                    "companies",
+                    "deal_parties.company_id",
+                    "companies.company_id",
+                )
+                .and_where(Condition::in_values(
+                    "deal_parties.deal_id",
+                    batch.iter().copied(),
+                ))
+                .build(),
+            |row| {
+                let company = company_from_row(row)?;
+                Ok((
+                    row.get::<_, String>("deal_id")?,
+                    DealParty {
+                        deal_party_id: row.get("deal_party_id")?,
+                        company_id: company.company_id.clone(),
+                        role: enum_from_row::<PartyRole>(row, "role")?,
+                        notes: row.get("notes")?,
+                        company,
+                    },
+                ))
+            },
+        )?;
+        for (id, party) in parties {
+            party_map.entry(id).or_default().push(party);
+        }
+        let scopes = tx.read_with(
+            SqlBuilder::select("deal_scopes")
+                .columns(["deal_id", "scope"])
+                .and_where(Condition::in_values("deal_id", batch.iter().copied()))
+                .build(),
+            |row| {
+                Ok((
+                    row.get::<_, String>("deal_id")?,
+                    enum_from_row::<DiligenceScope>(row, "scope")?,
+                ))
+            },
+        )?;
+        for (id, scope) in scopes {
+            scope_map.entry(id).or_default().push(scope);
+        }
     }
-    for deal in &mut deals {
+    for aggregate in &mut deals {
+        let deal = &mut aggregate.deal;
         deal.parties = party_map.remove(&deal.deal_id).unwrap_or_default();
         deal.parties.sort_by(|a, b| {
             (a.role, &a.company.name, &a.company_id).cmp(&(b.role, &b.company.name, &b.company_id))
@@ -447,6 +484,7 @@ fn load(
         deal.scopes.sort();
     }
     deals.sort_by(|a, b| {
+        let (a, b) = (&a.deal, &b.deal);
         let a_date = a
             .actual_close_date
             .as_ref()
@@ -457,33 +495,7 @@ fn load(
             .or(b.expected_close_date.as_ref());
         (a_date.is_none(), a_date, &a.deal_id).cmp(&(b_date.is_none(), b_date, &b.deal_id))
     });
-    Ok(deals
-        .into_iter()
-        .map(|deal| DealWithMetadata {
-            metadata: metadata.get(&deal.deal_id).cloned(),
-            deal,
-        })
-        .collect())
-}
-fn read_batches<T>(
-    tx: &SqliteTransaction<'_>,
-    table: &str,
-    column: &str,
-    ids: &[&str],
-    mapper: fn(&Row<'_>) -> rusqlite::Result<T>,
-) -> Result<Vec<T>, SqliteClientError> {
-    let mut records = Vec::new();
-    for batch in ids.chunks(500) {
-        records.extend(
-            tx.read_with(
-                SqlBuilder::select(table)
-                    .and_where(Condition::in_values(column, batch.iter().copied()))
-                    .build(),
-                mapper,
-            )?,
-        );
-    }
-    Ok(records)
+    Ok(deals)
 }
 
 fn storage(e: SqliteClientError) -> RepositoryError {

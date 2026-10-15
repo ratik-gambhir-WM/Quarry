@@ -4,7 +4,7 @@ import type { ColumnDef, ColumnPinningState, PaginationState, SortingState } fro
 import { useTable } from "@tanstack/react-table";
 import type { DealPortfolioView } from "../../data/dealsView";
 import { getDealRoomPath, type WorkspaceLocationState } from "../../data/workspace";
-import { formatShortUtcDate } from "../../lib/formatters";
+import { ArrowUpRight } from "lucide-react";
 import { DataGrid, DataGridContainer, dataGridFeatures, type DataGridFeatures } from "../reui/data-grid/data-grid";
 import { DataGridColumnHeader } from "../reui/data-grid/data-grid-column-header";
 import { DataGridPagination } from "../reui/data-grid/data-grid-pagination";
@@ -42,7 +42,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
       {
         accessorKey: "name",
         id: "deal",
-        header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Deal" />,
+        header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Project name" />,
         cell: ({ row }) => {
           const deal = row.original;
           return (
@@ -55,27 +55,25 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
                     state={navigationState}
                     to={getDealRoomPath(deal.id)}
                   >
-                    {deal.name}
+                    {deal.name.trim() || "N/A"}
                   </Link>
                 </ViewTransition>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {deal.targetCompany ?? "Target company unavailable"}
-                </span>
               </div>
             </ViewTransition>
           );
         },
         minSize: 180,
-        size: 200,
-        meta: { headerTitle: "Deal" },
+        size: 220,
+        meta: { fillWidth: true, headerTitle: "Project name" },
       },
-      textColumn("lifecycle", "Lifecycle", 110),
       textColumn("status", "Status", 125),
-      textColumn("type", "Type", 120),
-      textColumn("sponsor", "Sponsor", 110, (value) => String(value ?? "—")),
-      textColumn("engagement", "Engagement", 120),
-      { id: "closeDate", accessorFn: (deal) => deal.closeDate, header: "Transaction close", cell: ({ row }) => <span>{row.original.closeDateLabel}: {formatShortUtcDate(row.original.closeDate)}</span>, size: 180, sortUndefined: "last" },
-      textColumn("openQuestionCount", "Open questions", 155),
+      textColumn("targetCompany", "Target", 170),
+      textColumn("portfolioCompany", "PortCo", 170),
+      textColumn("engagement", "Engagement type", 150),
+      textColumn("sponsor", "PE sponsor", 170),
+      linkColumn("sowHref", "SOW", 85),
+      linkColumn("factSheetHref", "Fact sheet", 100),
+      linkColumn("sharepointHref", "SharePoint", 110),
     ],
     [navigationState],
   );
@@ -115,15 +113,43 @@ function textColumn(
   accessorKey: keyof DealPortfolioView,
   title: string,
   size: number,
-  format: (value: DealPortfolioView[keyof DealPortfolioView]) => string | number = (value) => String(value ?? "—"),
 ): ColumnDef<DataGridFeatures, DealPortfolioView> {
   return {
     accessorKey,
     header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title={title} />,
-    cell: ({ row }) => <span>{format(row.original[accessorKey])}</span>,
+    cell: ({ row }) => <span title={String(row.original[accessorKey] ?? "").trim() || "N/A"}>{String(row.original[accessorKey] ?? "").trim() || "N/A"}</span>,
     minSize: 110,
     size,
-    meta: { fillWidth: accessorKey === "type", headerTitle: title },
+    meta: { headerTitle: title },
+  };
+}
+
+function linkColumn(
+  accessorKey: "sowHref" | "factSheetHref" | "sharepointHref",
+  title: string,
+  size: number,
+): ColumnDef<DataGridFeatures, DealPortfolioView> {
+  return {
+    accessorKey,
+    header: title,
+    cell: ({ row }) => {
+      const href = row.original[accessorKey];
+      return href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${title} for ${row.original.name}`}
+          className="inline-flex items-center gap-1 rounded-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {title}<ArrowUpRight aria-hidden="true" className="size-3.5" />
+        </a>
+      ) : <span className="text-muted-foreground">N/A</span>;
+    },
+    enableSorting: false,
+    minSize: size,
+    size,
+    meta: { headerTitle: title },
   };
 }
 

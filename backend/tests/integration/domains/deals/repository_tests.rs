@@ -118,6 +118,8 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
     let listed = repo.list().await.unwrap();
     assert_eq!(listed.len(), 2);
     for row in listed {
+        assert_eq!(row.deal.parties.len(), 4);
+        assert_eq!(row.deal.scopes.len(), 2);
         assert_eq!(
             row.deal
                 .parties
@@ -141,6 +143,107 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
         );
     }
     assert_eq!(updated.deal.scopes.len(), 2);
+}
+
+#[tokio::test]
+async fn joined_reads_keep_deals_without_metadata_or_children() {
+    let (sqlite, repo, directory, owner) = fixture().await;
+    create(&repo, owner, "DEAL-EMPTY", fields()).await.unwrap();
+    sqlite
+        .write_async(
+            SqlBuilder::delete_from("deal_metadata")
+                .and_where(Condition::equal("deal_id", "DEAL-EMPTY"))
+                .build(),
+        )
+        .await
+        .unwrap();
+    let company = company(&directory, owner, "Reusable").await;
+    let mut input = fields();
+    input
+        .parties
+        .push(crate::domains::deals::model::PartyInput {
+            company_id: company.company_id.clone(),
+            role: PartyRole::Buyer,
+            notes: Some("Deal notes".into()),
+        });
+    input.scopes = vec![DiligenceScope::CorporateIt, DiligenceScope::Sdlc];
+    create(&repo, owner, "DEAL-FULL", input).await.unwrap();
+    let metadata = repo
+        .upsert_metadata(UpsertDealMetadataRecord {
+            deal_id: "DEAL-FULL".into(),
+            key_questions_json: "[\"Question?\"]".into(),
+            local_path: None,
+            sharepoint_link: Some("https://example.sharepoint.com/sites/test".into()),
+            sow_link: Some("https://example.com/sow".into()),
+            fact_sheet_link: None,
+            rl_link: Some("https://example.com/request-list".into()),
+        })
+        .await
+        .unwrap();
+    let listed = repo.list().await.unwrap();
+    assert_eq!(listed.len(), 2);
+    let empty = &listed[0];
+    assert_eq!(empty.deal.deal_id, "DEAL-EMPTY");
+    assert!(empty.metadata.is_none());
+    assert!(empty.deal.parties.is_empty());
+    assert!(empty.deal.scopes.is_empty());
+    assert!(repo
+        .with_metadata("DEAL-EMPTY".into())
+        .await
+        .unwrap()
+        .unwrap()
+        .metadata
+        .is_none());
+    let full = &listed[1];
+    assert_eq!(
+        serde_json::to_value(&full.metadata).unwrap(),
+        serde_json::to_value(&metadata).unwrap()
+    );
+    assert_eq!(full.deal.parties.len(), 1);
+    let party = &full.deal.parties[0];
+    assert_eq!(party.notes.as_deref(), Some("Deal notes"));
+    assert_eq!(party.role, PartyRole::Buyer);
+    assert_eq!(
+        serde_json::to_value(&party.company).unwrap(),
+        serde_json::to_value(&company).unwrap()
+    );
+    assert_eq!(
+        full.deal.scopes,
+        vec![DiligenceScope::CorporateIt, DiligenceScope::Sdlc]
+    );
+}
+
+#[tokio::test]
+async fn joined_children_round_trip_across_the_deal_batch_boundary() {
+    let (_, repo, directory, owner) = fixture().await;
+    let company = company(&directory, owner, "Shared company").await;
+    let mut input = fields();
+    input
+        .parties
+        .push(crate::domains::deals::model::PartyInput {
+            company_id: company.company_id.clone(),
+            role: PartyRole::Target,
+            notes: None,
+        });
+    input.scopes = vec![DiligenceScope::CorporateIt, DiligenceScope::Sdlc];
+    for index in 0..501 {
+        create(&repo, owner, &format!("DEAL-{index:04}"), input.clone())
+            .await
+            .unwrap();
+    }
+    let listed = repo.list().await.unwrap();
+    assert_eq!(listed.len(), 501);
+    for (index, aggregate) in listed.iter().enumerate() {
+        assert_eq!(aggregate.deal.deal_id, format!("DEAL-{index:04}"));
+        assert_eq!(
+            aggregate.metadata.as_ref().unwrap().deal_id,
+            aggregate.deal.deal_id
+        );
+        assert_eq!(aggregate.deal.parties.len(), 1);
+        assert_eq!(aggregate.deal.parties[0].company_id, company.company_id);
+        assert_eq!(aggregate.deal.parties[0].company.name, company.name);
+        assert_eq!(aggregate.deal.scopes, input.scopes);
+    }
 }
 #[tokio::test]
 async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {

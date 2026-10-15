@@ -3,6 +3,8 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getWorkspaceDataSource, useWorkspaceDeals } from "@/hooks/useWorkspaceDeals";
+import type { PersistedDeal } from "@/contracts/quarryApi";
+import { testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
 
 const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
 
@@ -37,6 +39,37 @@ describe("useWorkspaceDeals", () => {
 
   it("rejects invalid composition values", () => {
     expect(() => getWorkspaceDataSource("fixtures")).toThrow("Invalid VITE_WORKSPACE_DATA_SOURCE");
+  });
+
+  it.each([false, true])("preserves company edits across a pending list (saved aggregate: %s)", async (saveAggregate) => {
+    const request = deferred<PersistedDeal[]>();
+    listDeals.mockReturnValueOnce(request.promise);
+    const party = testParty("Old company", "target");
+    const deal = testDeal({ parties: [party] });
+    const other = testDeal({ dealId: "DEAL-OTHER", parties: [party] });
+    const unrelated = testDeal({ dealId: "DEAL-UNRELATED" });
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    if (saveAggregate) {
+      act(() => result.current.saveDealResult({ deal, metadata: testMetadata() }));
+    }
+    act(() => result.current.saveCompanyResult({ ...party.company, name: "Renamed company" }));
+    if (saveAggregate) {
+      const resource = result.current.resource;
+      expect(resource.status === "success" && resource.deals[0]?.room.summary).toContain("Renamed company");
+    }
+    await act(async () => {
+      request.resolve([deal, other, unrelated].map((entry) => ({ ...entry, metadata: null })));
+      await request.promise;
+    });
+    const resource = result.current.resource;
+    expect(resource.status).toBe("success");
+    if (resource.status !== "success") throw new Error("expected loaded deals");
+    expect(resource.deals).toHaveLength(3);
+    for (const linked of resource.deals.filter((entry) => entry.room.id !== unrelated.dealId)) {
+      expect(linked.persisted?.parties[0]?.company.name).toBe("Renamed company");
+      expect(linked.room.summary).toContain("Renamed company");
+    }
+    expect(resource.deals.find((entry) => entry.room.id === unrelated.dealId)?.persisted).toEqual({ ...unrelated, metadata: null });
   });
 
   it("ignores an API completion after the selected data source changes", async () => {

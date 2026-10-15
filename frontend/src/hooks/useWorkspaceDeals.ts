@@ -30,6 +30,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
   let resource: WorkspaceDealsResource = { status: "loading" };
   let generation = 0;
   const writesDuringLoad = new Map<string, WorkspaceDeal>();
+  const companiesDuringLoad = new Map<string, Company>();
   let pendingLoad = false;
   const listeners = new Set<() => void>();
   const publish = (next: WorkspaceDealsResource) => { resource = next; for (const listener of listeners) listener(); };
@@ -37,6 +38,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
     const request = ++generation;
     pendingLoad = true;
     writesDuringLoad.clear();
+    companiesDuringLoad.clear();
     publish({ status: "loading" });
     let source: WorkspaceDataSource;
     try { source = getWorkspaceDataSource(dataSourceValue); }
@@ -48,8 +50,13 @@ function createDealsStore(dataSourceValue: string | undefined) {
       if (request !== generation) return;
       pendingLoad = false;
       const merged = [...writesDuringLoad.values(), ...next.deals.filter((deal) => !writesDuringLoad.has(deal.room.id))];
-      publish({ ...next, deals: merged });
+      const deals = merged.map((deal) => {
+        for (const company of companiesDuringLoad.values()) deal = withCompany(deal, company);
+        return deal;
+      });
+      publish({ ...next, deals });
       writesDuringLoad.clear();
+      companiesDuringLoad.clear();
     }).catch((error: unknown) => {
       if (request === generation) publish({ status: "error", message: error instanceof Error ? error.message : String(error) });
     });
@@ -60,13 +67,9 @@ function createDealsStore(dataSourceValue: string | undefined) {
     getSnapshot: () => resource,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     saveCompany: (company: Company) => {
+      if (pendingLoad) companiesDuringLoad.set(company.companyId, company);
       if (resource.status !== "success") return;
-      const updated = resource.deals.map((deal) => {
-        if (!deal.persisted || !deal.persisted.parties.some((p) => p.companyId === company.companyId)) return deal;
-        const persisted = { ...deal.persisted, parties: deal.persisted.parties.map((p) => p.companyId === company.companyId ? { ...p, company } : p) };
-        const rebuilt = buildWorkspaceDealFromPersisted(persisted, deal.persistedMetadata ?? null);
-        return { ...rebuilt, room: { ...rebuilt.room, keyQuestions: deal.room.keyQuestions, resources: deal.room.resources } };
-      });
+      const updated = resource.deals.map((deal) => withCompany(deal, company));
       publish({ ...resource, deals: updated });
     },
     save: (result: SaveDealResponse | SaveDealMetadataResponse) => {
@@ -76,6 +79,13 @@ function createDealsStore(dataSourceValue: string | undefined) {
       publish({ status: "success", source: "server", deals: [deal, ...existing.filter((d) => d.room.id !== deal.room.id)] });
     },
   };
+}
+
+function withCompany(deal: WorkspaceDeal, company: Company): WorkspaceDeal {
+  if (!deal.persisted || !deal.persisted.parties.some((p) => p.companyId === company.companyId)) return deal;
+  const persisted = { ...deal.persisted, parties: deal.persisted.parties.map((p) => p.companyId === company.companyId ? { ...p, company } : p) };
+  const rebuilt = buildWorkspaceDealFromPersisted(persisted, deal.persistedMetadata ?? null);
+  return { ...rebuilt, room: { ...rebuilt.room, keyQuestions: deal.room.keyQuestions, resources: deal.room.resources } };
 }
 export function useWorkspaceDeals(dataSourceValue: string | undefined = import.meta.env.VITE_WORKSPACE_DATA_SOURCE) {
   const store = useMemo(() => createDealsStore(dataSourceValue), [dataSourceValue]);

@@ -7,9 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testCompany, testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
 import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
 
-const { createDeal, createCompany, updateDeal, saveDealMetadata, listCompanies } = vi.hoisted(() => ({
+const { createDeal, createCompany, updateCompany, updateDeal, saveDealMetadata, listCompanies } = vi.hoisted(() => ({
   createDeal: vi.fn(),
   createCompany: vi.fn(),
+  updateCompany: vi.fn(),
   updateDeal: vi.fn(),
   listCompanies: vi.fn(),
   saveDealMetadata: vi.fn(),
@@ -17,13 +18,13 @@ const { createDeal, createCompany, updateDeal, saveDealMetadata, listCompanies }
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
-    api: { createDeal, createCompany, updateDeal, saveDealMetadata, listCompanies },
+    api: { createDeal, createCompany, updateCompany, updateDeal, saveDealMetadata, listCompanies },
     platform: {},
     target: "web",
   },
 }));
 
-vi.mock("@/app/WorkspaceProvider", () => ({ useWorkspace: () => ({ saveDealResult: vi.fn() }) }));
+vi.mock("@/app/WorkspaceProvider", () => ({ useWorkspace: () => ({ saveDealResult: vi.fn(), saveCompanyResult: vi.fn() }) }));
 
 afterEach(cleanup);
 
@@ -32,6 +33,7 @@ describe("AddDealModal", () => {
     listCompanies.mockResolvedValue({ companies: [], hasMore: false });
     createDeal.mockReset();
     createCompany.mockReset();
+    updateCompany.mockReset();
     updateDeal.mockReset();
     saveDealMetadata.mockReset();
     createDeal.mockResolvedValue({ deal: savedDeal, metadata: emptyMetadata });
@@ -41,6 +43,46 @@ describe("AddDealModal", () => {
       files: [],
       metadata: emptyMetadata,
     });
+  });
+
+  it.each(["create", "edit"] as const)("blocks deal submission until a %s company draft is cancelled", async (mode) => {
+    const user = userEvent.setup();
+    const company = testCompany("Reusable");
+    listCompanies.mockResolvedValue({ companies: [company], hasMore: false });
+    updateDeal.mockResolvedValue({ deal: savedDeal, metadata: emptyMetadata });
+    const onClose = vi.fn();
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" initialDeal={savedDeal} onClose={onClose} /></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: mode === "create" ? "Create company" : "Edit shared company Reusable" }));
+    fireEvent.change(screen.getByLabelText("Company name"), { target: { value: "Unsaved company" } });
+    expect(screen.getByRole("button", { name: "Save deal" }).hasAttribute("disabled")).toBe(true);
+    const form = screen.getByRole("button", { name: "Save deal" }).closest("form");
+    if (!form) throw new Error("expected the deal form");
+    fireEvent.submit(form);
+    expect(updateDeal).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel company" }));
+    await user.click(screen.getByRole("button", { name: "Save deal" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("waits for a company save before submitting its new assignment", async () => {
+    const user = userEvent.setup();
+    const company = testCompany("New company");
+    let finishSave: ((value: typeof company) => void) | undefined;
+    createCompany.mockReturnValue(new Promise<typeof company>((resolve) => { finishSave = resolve; }));
+    updateDeal.mockResolvedValue({ deal: savedDeal, metadata: emptyMetadata });
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" initialDeal={savedDeal} onClose={vi.fn()} /></MemoryRouter>);
+    await user.click(screen.getByRole("button", { name: "Create company" }));
+    await user.type(screen.getByLabelText("Company name"), company.name);
+    await user.click(screen.getByRole("button", { name: "Save company" }));
+    expect(screen.getByRole("button", { name: "Save deal" }).hasAttribute("disabled")).toBe(true);
+    if (!finishSave) throw new Error("company save was not started");
+    finishSave(company);
+    await screen.findByRole("combobox", { name: "Role for company 1" });
+    await user.click(screen.getByRole("button", { name: "Save deal" }));
+    await waitFor(() => expect(updateDeal).toHaveBeenCalledWith(savedDeal.dealId, expect.objectContaining({
+      parties: [{ companyId: company.companyId, role: "target", notes: null }],
+    })));
   });
 
   it("edits a persisted party without sending read-only company or relationship fields", async () => {

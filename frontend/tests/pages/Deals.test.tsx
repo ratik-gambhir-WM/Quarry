@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider } from "@/app/WorkspaceProvider";
 import { Deals } from "@/pages/Deals";
+import { testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
 
 const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
 
@@ -33,6 +34,34 @@ describe("Deals", () => {
     listDeals.mockClear();
     listDeals.mockResolvedValue([]);
     window.sessionStorage.clear();
+  });
+
+  it("shows project details and safe quick links, with N/A for missing values", async () => {
+    const full = testDeal({ parties: [testParty("Target Co", "target"), testParty("Portfolio Co", "portfolio_company"), testParty("Equity Sponsor", "pe_sponsor")] });
+    const missing = testDeal({ dealId: "DEAL-MISSING", dealName: "Missing details" });
+    listDeals.mockResolvedValue([
+      { ...full, metadata: { ...testMetadata(), sowLink: "https://example.com/sow", factSheetLink: "https://example.com/fact-sheet", sharepointLink: "https://example.sharepoint.com/sites/deal" } },
+      { ...missing, metadata: { ...testMetadata(missing.dealId), sowLink: "javascript:alert(1)", factSheetLink: "http://example.com/fact-sheet", sharepointLink: "https://example.com/not-sharepoint" } },
+    ]);
+    renderDeals("api");
+    const table = await screen.findByRole("table");
+    const headers = within(table).getAllByRole("columnheader").map((header) => header.textContent);
+    expect(headers).toEqual(["Project name", "Status", "Target", "PortCo", "Engagement type", "PE sponsor", "SOW", "Fact sheet", "SharePoint"]);
+    const fullRow = screen.getByRole("link", { name: "Open Project Alpha" }).closest("tr");
+    if (!fullRow) throw new Error("expected the populated deal row");
+    for (const text of ["Pipeline", "Target Co", "Portfolio Co", "Buy-side", "Equity Sponsor"]) {
+      expect(within(fullRow).getByText(text)).toBeTruthy();
+    }
+    for (const [label, href] of [["SOW", "https://example.com/sow"], ["Fact sheet", "https://example.com/fact-sheet"], ["SharePoint", "https://example.sharepoint.com/sites/deal"]]) {
+      const link = within(fullRow).getByRole("link", { name: `Open ${label} for Project Alpha` });
+      expect(link.getAttribute("href")).toBe(href);
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+    const missingRow = screen.getByRole("link", { name: "Open Missing details" }).closest("tr");
+    if (!missingRow) throw new Error("expected the missing-details row");
+    expect(within(missingRow).getAllByText("N/A")).toHaveLength(6);
+    expect(within(missingRow).getAllByRole("link")).toHaveLength(1);
   });
 
   it("defaults to the portfolio table and keeps view choices in one focused menu", async () => {
@@ -177,10 +206,10 @@ describe("Deals", () => {
   });
 });
 
-function renderDeals() {
+function renderDeals(dataSource: "demo" | "api" = "demo") {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/hub/deals", state: { email: "analyst@example.com" } }]}>
-      <WorkspaceProvider dataSource="demo">
+      <WorkspaceProvider dataSource={dataSource}>
         <Deals />
         <LocationProbe />
       </WorkspaceProvider>

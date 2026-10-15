@@ -100,7 +100,7 @@ export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSubmitting || (!initialDeal && companyFormOpen)) return;
+    if (isSubmitting || companyFormOpen) return;
     if (initialDeal) {
       await saveDeal(false);
     } else if (step === "details") {
@@ -240,7 +240,8 @@ export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps)
             <div hidden={step !== "details"}>
               <fieldset className="grid gap-4" disabled={isSubmitting || step !== "details"}>
                 {!initialDeal ? <DealTextField id="add-deal-id" label="Deal ID" maxLength={64} onValueChange={(value) => updateField("dealId", value)} placeholder="DEAL-000184" value={form.dealId} /> : null}
-                {initialDeal ? <DealFieldsEditor onCompanySaved={saveCompanyResult} userEmail={email ?? ""} fields={form} initialCompanies={initialDeal.parties.map((p) => p.company)} onChange={updateDealFields} /> : <DealDetailsEditor fields={form} onChange={updateDealFields} />}
+                {initialDeal ? <DealFieldsEditor onCompanyFormChange={setCompanyFormOpen} onCompanySaved={saveCompanyResult} userEmail={email ?? ""} fields={form} initialCompanies={initialDeal.parties.map((p) => p.company)} onChange={updateDealFields} /> : <DealDetailsEditor fields={form} onChange={updateDealFields} />}
+                {initialDeal && companyFormOpen ? <p className="text-sm text-muted-foreground">Save or cancel the company before continuing.</p> : null}
                 {!initialDeal && runtime.target === "desktop" ? <LocalFolderField disabled={isSubmitting} error={fieldError} onChoose={chooseLocalFolder} value={form.localPath} /> : null}
               </fieldset>
             </div>
@@ -288,7 +289,7 @@ export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps)
                 Skip metadata
               </Button>
             ) : null}
-            <Button className="min-w-28" disabled={isSubmitting || (!initialDeal && companyFormOpen)} type="submit">
+            <Button className="min-w-28" disabled={isSubmitting || companyFormOpen} type="submit">
               {isSubmitting ? (
                 <span
                   aria-hidden="true"

@@ -19,6 +19,10 @@ export type DealPortfolioView = {
   status: string;
   statusCode: DealStatus;
   targetCompany?: string;
+  portfolioCompany?: string;
+  sowHref?: string;
+  factSheetHref?: string;
+  sharepointHref?: string;
   transitionName: string;
   type: string;
 };
@@ -63,6 +67,10 @@ export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
     partySearchText: deal.portfolio.parties.map((p) => `${codeLabel(p.role)} ${p.company.name}`).join(" "),
     closeDateLabel: deal.portfolio.actualCloseDate ? "Actual close" : "Expected close",
     targetCompany: partyNames(deal.portfolio.parties, "target"),
+    portfolioCompany: partyNames(deal.portfolio.parties, "portfolio_company"),
+    sowHref: deal.room.resources.find((resource) => resource.id === "sow")?.href,
+    factSheetHref: deal.room.resources.find((resource) => resource.id === "fact-sheet")?.href,
+    sharepointHref: deal.room.resources.find((resource) => resource.id === "sharepoint")?.href,
     transitionName: getDealTransitionName(deal.room.id),
     type: codeLabel(deal.portfolio.transactionType),
   };
