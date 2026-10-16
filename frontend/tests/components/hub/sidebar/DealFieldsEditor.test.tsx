@@ -14,6 +14,35 @@ function Editor() {
   return <><DealFieldsEditor userEmail="owner@example.com" fields={fields} onChange={setFields} /><output data-testid="fields">{JSON.stringify(fields)}</output></>;
 }
 describe("DealFieldsEditor", () => {
+  it.each(["create", "edit"] as const)("cancels a %s company draft with Enter without saving", async (mode) => {
+    const user = userEvent.setup();
+    api.listCompanies.mockResolvedValue({ companies: [testCompany("Reusable")], hasMore: false });
+    render(<Editor />);
+    await user.click(await screen.findByRole("button", { name: mode === "create" ? "Create company" : "Edit shared company Reusable" }));
+    await user.clear(screen.getByLabelText("Company name"));
+    await user.type(screen.getByLabelText("Company name"), "Unsaved company");
+    screen.getByRole("button", { name: "Cancel company" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("button", { name: "Cancel company" })).toBeNull();
+    expect(api.createCompany).not.toHaveBeenCalled();
+    expect(api.updateCompany).not.toHaveBeenCalled();
+  });
+
+  it.each(["input", "button"] as const)("saves a company once with Enter on its %s without submitting the deal", async (target) => {
+    const user = userEvent.setup();
+    const submitDeal = vi.fn();
+    api.listCompanies.mockResolvedValue({ companies: [], hasMore: false });
+    api.createCompany.mockResolvedValue(testCompany("New company"));
+    render(<form onSubmit={(event) => { event.preventDefault(); submitDeal(); }}><Editor /></form>);
+    await user.click(screen.getByRole("button", { name: "Create company" }));
+    await user.type(screen.getByLabelText("Company name"), "New company");
+    if (target === "button") screen.getByRole("button", { name: "Save company" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findByText(/remains available if you cancel/);
+    expect(api.createCompany).toHaveBeenCalledOnce();
+    expect(submitDeal).not.toHaveBeenCalled();
+  });
+
   it("reuses a company for several roles, clears optional dates, and removes assignments", async () => {
     const user = userEvent.setup();
     api.listCompanies.mockResolvedValue({ companies: [testCompany("Reusable")], hasMore: false });

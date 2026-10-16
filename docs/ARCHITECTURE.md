@@ -381,9 +381,14 @@ global state or query-cache library.
   as demo data. The provider uses a local external resource store; create/update responses replace
   cached aggregates, and pending older lists cannot overwrite those writes. Shared company edits
   refresh linked cached deal summaries and overlay pending list results, including deals not yet
-  loaded into the cache. API-backed deals retain their typed persisted fields for
+  loaded into the cache. Metadata saves retain the selected uploaded SOW filename in the session
+  cache, and core deal edits preserve those resource details. Uploaded filenames are session-only;
+  a fresh load marks the resource available only when its metadata contains a saved link.
+  API-backed deals retain their typed persisted fields for
   editing. Creation and editing share optional date, engagement/transaction, scope, and company-role
   controls; company search is bounded, stale results are ignored, and directory creation is explicit.
+  Enter in a company text input saves that company; Save and Cancel buttons retain their native
+  keyboard activation and do not submit the surrounding deal form.
   Directory entries remain saved when a deal form is cancelled or its write fails. Completed and
   cancelled engagements are Historic; pipeline, active, and on-hold engagements are Current.
   Transaction closing never changes engagement status. Views show all companies for each role and
@@ -424,7 +429,9 @@ global state or query-cache library.
   Closing the panel preserves that provider for the current Data Room explorer mount.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Direct API lookup also resolves archived deals excluded
-  from the default portfolio list. The Overview exposes Edit deal for persisted aggregates. Its keyed deal boundary initializes those local
+  from the default portfolio list. Lookup results enter the shared deal cache so company edits
+  refresh their summaries too; archived records remain excluded from portfolio navigation.
+  The Overview exposes Edit deal for persisted aggregates. Its keyed deal boundary initializes those local
   values for a new deal without render-derived effects. The Deliverables summary links to a
   dedicated template route whose request-scoped external store exposes loading, empty, error/retry, and
   populated states without page-level effect state. The store owns mutually exclusive template

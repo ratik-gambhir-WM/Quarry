@@ -1,5 +1,4 @@
 import { runtime } from "@quarry/runtime";
-import { buildWorkspaceDealFromPersisted } from "../data/dealExtraction";
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { useWorkspace } from "../app/WorkspaceProvider";
@@ -69,7 +68,7 @@ export function DealRoomPage() {
 
   if (!deal && dealsResource.status === "success") {
     return dealsResource.source === "server" && dealId
-      ? <DealRoomLookup key={`${email ?? ""}:${dealId}`} id={dealId} deals={activeDeals} email={email} navigationState={navigationState} />
+      ? <DealRoomLookup key={`${email ?? ""}:${dealId}`} id={dealId} />
       : <Navigate replace state={navigationState} to="/hub" />;
   }
 
@@ -88,17 +87,17 @@ export function DealRoomPage() {
   );
 }
 
-function DealRoomLookup({ id, deals, email, navigationState }: { id: string; deals: WorkspaceDeal[]; email?: string; navigationState?: WorkspaceLocationState }) {
-  const [result, setResult] = useState<{ deal?: WorkspaceDeal; error?: string }>({});
+function DealRoomLookup({ id }: { id: string }) {
+  const { cacheDealResult } = useWorkspace();
+  const [result, setResult] = useState<{ error?: string }>({});
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     void runtime.api.getDeal(id).then((aggregate) => {
-      if (active) setResult({ deal: buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata) });
+      if (active) cacheDealResult(aggregate);
     }).catch((error: unknown) => { if (active) setResult({ error: error instanceof Error ? error.message : String(error) }); });
     return () => { active = false; };
-  }, [attempt, id]);
-  if (result.deal) return <DealRoomWorkspace deal={result.deal} deals={deals} email={email} navigationState={navigationState} />;
+  }, [attempt, cacheDealResult, id]);
   if (result.error) return <section role="alert" className="p-8"><h1>Deal unavailable</h1><p>{result.error}</p><button type="button" onClick={() => { setResult({}); setAttempt((n) => n + 1); }}>Retry deal</button></section>;
   return <WorkspacePageSkeleton label="Loading deal" />;
 }

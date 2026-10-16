@@ -41,6 +41,26 @@ describe("useWorkspaceDeals", () => {
     expect(() => getWorkspaceDataSource("fixtures")).toThrow("Invalid VITE_WORKSPACE_DATA_SOURCE");
   });
 
+  it("retains uploaded SOW details when saving metadata and then editing the deal", async () => {
+    listDeals.mockResolvedValue([]);
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    await waitFor(() => expect(result.current.resource.status).toBe("success"));
+    const deal = testDeal();
+    const metadata = testMetadata();
+    act(() => result.current.saveDealResult({
+      deal, metadata, extraction: { keyQuestions: ["Question?"] },
+      files: [{ filename: "sow.pdf", path: "sow.pdf", relativePath: "sow.pdf", sizeBytes: 10 }],
+    }, "sow.pdf"));
+    const saved = result.current.resource;
+    if (saved.status !== "success") throw new Error("expected loaded deals");
+    expect(saved.deals[0]?.room.resources.find((r) => r.id === "sow")).toMatchObject({ availability: "available", sourceName: "sow.pdf" });
+    act(() => result.current.saveDealResult({ deal: { ...deal, dealName: "Edited deal" }, metadata }));
+    const edited = result.current.resource;
+    if (edited.status !== "success") throw new Error("expected loaded deals");
+    expect(edited.deals[0]?.room.name).toBe("Edited deal");
+    expect(edited.deals[0]?.room.resources.find((r) => r.id === "sow")).toMatchObject({ availability: "available", sourceName: "sow.pdf" });
+  });
+
   it.each([false, true])("preserves company edits across a pending list (saved aggregate: %s)", async (saveAggregate) => {
     const request = deferred<PersistedDeal[]>();
     listDeals.mockReturnValueOnce(request.promise);

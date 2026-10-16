@@ -1,5 +1,6 @@
 import type { Company } from "../data/dealModel";
 import type { SaveDealResponse, SaveDealMetadataResponse } from "../data/dealExtraction";
+import type { PersistedDeal } from "../contracts/quarryApi";
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../data/workspace";
@@ -17,8 +18,9 @@ type WorkspaceContextValue = {
   initiatives: WorkspaceSidebarTool[];
   navigationState?: WorkspaceLocationState;
   retryDeals: () => void;
+  cacheDealResult: (aggregate: PersistedDeal) => void;
   saveCompanyResult: (company: Company) => void;
-  saveDealResult: (result: SaveDealResponse | SaveDealMetadataResponse) => void;
+  saveDealResult: (result: SaveDealResponse | SaveDealMetadataResponse, sowSourceName?: string) => void;
   tools: WorkspaceSidebarTool[];
 };
 
@@ -26,7 +28,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children, dataSource }: { children: ReactNode; dataSource?: string }) {
   const { email, navigationState } = useWorkspaceSession();
-  const { resource, retry, saveDealResult, saveCompanyResult } = useWorkspaceDeals(dataSource);
+  const { resource, retry, cacheDealResult, saveDealResult, saveCompanyResult } = useWorkspaceDeals(dataSource);
 
   return (
     <WorkspaceContext.Provider
@@ -37,6 +39,7 @@ export function WorkspaceProvider({ children, dataSource }: { children: ReactNod
         initiatives: workspaceInitiatives,
         navigationState,
         retryDeals: retry,
+        cacheDealResult,
         saveDealResult,
         saveCompanyResult,
         tools: workspaceTools,

@@ -132,7 +132,13 @@ function CompanyForm({ company, userEmail, onSaved, onCancel }: {
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setPending(false); }
   }
-  return <section onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); if (!pending) void save(); } }} className="grid gap-3 rounded-lg border border-border p-4" aria-label={company ? "Edit shared company" : "Create company"}>
+  return <section onKeyDown={(event) => {
+    if (event.key === "Enter" && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!pending) void save();
+    }
+  }} className="grid gap-3 rounded-lg border border-border p-4" aria-label={company ? "Edit shared company" : "Create company"}>
     <h3 className="text-sm font-semibold">{company ? "Edit shared company" : "Create company"}</h3>
     {company ? <p className="text-xs text-muted-foreground">These details apply to every deal using this company. Role notes belong to this deal only.</p> : null}
     {([ ["name", "Company name"], ["website", "Company website (HTTPS)"], ["industry", "Industry"], ["description", "Description"] ] as const).map(([key, label]) => <label className="grid gap-1 text-sm" key={key}>{label}<Input disabled={pending} maxLength={key === "description" ? 4000 : key === "website" ? 2048 : 300} value={input[key] ?? ""} onChange={(e) => setInput({ ...input, [key]: e.currentTarget.value || (key === "name" ? "" : null) })} /></label>)}

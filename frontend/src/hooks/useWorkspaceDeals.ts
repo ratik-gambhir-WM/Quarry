@@ -1,4 +1,5 @@
 import type { Company } from "../data/dealModel";
+import type { PersistedDeal } from "../contracts/quarryApi";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import { buildWorkspaceDealFromExtractionResult, type SaveDealResponse, type SaveDealMetadataResponse, buildWorkspaceDealFromPersisted } from "../data/dealExtraction";
@@ -34,6 +35,11 @@ function createDealsStore(dataSourceValue: string | undefined) {
   let pendingLoad = false;
   const listeners = new Set<() => void>();
   const publish = (next: WorkspaceDealsResource) => { resource = next; for (const listener of listeners) listener(); };
+  const cache = (deal: WorkspaceDeal) => {
+    if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
+    const existing = resource.status === "success" ? resource.deals : [];
+    publish({ status: "success", source: "server", deals: [deal, ...existing.filter((d) => d.room.id !== deal.room.id)] });
+  };
   const load = () => {
     const request = ++generation;
     pendingLoad = true;
@@ -72,11 +78,13 @@ function createDealsStore(dataSourceValue: string | undefined) {
       const updated = resource.deals.map((deal) => withCompany(deal, company));
       publish({ ...resource, deals: updated });
     },
-    save: (result: SaveDealResponse | SaveDealMetadataResponse) => {
-      const deal = "extraction" in result ? buildWorkspaceDealFromExtractionResult(result) : buildWorkspaceDealFromPersisted(result.deal, result.metadata);
-      if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
-      const existing = resource.status === "success" ? resource.deals : [];
-      publish({ status: "success", source: "server", deals: [deal, ...existing.filter((d) => d.room.id !== deal.room.id)] });
+    cache: (aggregate: PersistedDeal) => cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata)),
+    save: (result: SaveDealResponse | SaveDealMetadataResponse, sowSourceName?: string) => {
+      const deal = "extraction" in result ? buildWorkspaceDealFromExtractionResult(result, sowSourceName) : buildWorkspaceDealFromPersisted(result.deal, result.metadata);
+      // Core deal edits preserve metadata, including source details held only in this session.
+      const previous = resource.status === "success" ? resource.deals.find((d) => d.room.id === deal.room.id) : undefined;
+      if (!("extraction" in result) && previous) deal.room.resources = previous.room.resources;
+      cache(deal);
     },
   };
 }
@@ -91,5 +99,5 @@ export function useWorkspaceDeals(dataSourceValue: string | undefined = import.m
   const store = useMemo(() => createDealsStore(dataSourceValue), [dataSourceValue]);
   const resource = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   useEffect(() => { store.load(); return store.cancel; }, [store]);
-  return { resource, retry: store.load, saveDealResult: store.save, saveCompanyResult: store.saveCompany };
+  return { resource, retry: store.load, cacheDealResult: store.cache, saveDealResult: store.save, saveCompanyResult: store.saveCompany };
 }

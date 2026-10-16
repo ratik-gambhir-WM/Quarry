@@ -180,7 +180,7 @@ export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps)
       sharepointLink: optionalLink(form.sharepointLink),
       sowLink: optionalLink(form.sowLink),
     });
-    saveDealResult(response);
+    saveDealResult(response, sourceFileName(selectedSourceFiles.sowFile));
     navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
       state: {
         email,
