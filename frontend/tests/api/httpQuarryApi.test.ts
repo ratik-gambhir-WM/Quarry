@@ -1,3 +1,4 @@
+import { testDeal, testDealInput, testMetadata } from "@/test/fixtures/deals";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { httpQuarryApi } from "@/api/httpQuarryApi";
 
@@ -152,42 +153,9 @@ describe("httpQuarryApi", () => {
   );
 
   it("saves the core deal and optional metadata through two separate requests", async () => {
-    const input = {
-      closeDate: "2026-05-01",
-      dealId: "DEAL-000184",
-      dealName: "Acme acquisition of WidgetCo",
-      dealSponsor: "Thoma Bravo",
-      localPath: null,
-      primaryBuyer: "CVS",
-      sharepointLink: null,
-      startDate: "2026-02-14",
-      status: "Active",
-      targetCompany: "WidgetCo",
-      transactionType: "Acquisition",
-      userEmail: "analyst@example.com",
-    };
-    const deal = {
-      closeDate: input.closeDate,
-      dealId: input.dealId,
-      dealName: input.dealName,
-      dealSponsor: input.dealSponsor,
-      primaryBuyer: input.primaryBuyer,
-      startDate: input.startDate,
-      status: input.status,
-      targetCompany: input.targetCompany,
-      transactionType: input.transactionType,
-      userId: 1,
-    };
-    const metadata = {
-      dealId: input.dealId,
-      factSheetLink: null,
-      keyQuestionsJson: "[]",
-      localPath: null,
-      rlLink: null,
-      sharepointLink: input.sharepointLink,
-      sowLink: null,
-      userId: 1,
-    };
+    const input = testDealInput();
+    const deal = testDeal();
+    const metadata = testMetadata();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(Response.json({ deal, metadata }, { status: 201 }))
@@ -387,3 +355,23 @@ function templateDocument() {
     },
   };
 }
+
+it("maps company lookup, complete deal replacement, and nullable chat scopes through HTTP", async () => {
+  const company = { companyId: "company/id" };
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json(company)));
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    const input = testDealInput();
+    await httpQuarryApi.createCompany({ userEmail: input.userEmail, name: "Same Name", website: null, industry: null, description: null });
+    await httpQuarryApi.listCompanies(input.userEmail, { query: "A & B", limit: 30, offset: 30 });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/companies?userEmail=analyst%40example.com&query=A+%26+B&limit=30&offset=30", undefined);
+    await httpQuarryApi.updateDeal("DEAL/A", { ...input, parties: [], scopes: [] });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    await httpQuarryApi.createAssistantThread(input.userEmail, "linked", "DEAL/A");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ userEmail: input.userEmail, threadId: "linked", dealId: "DEAL/A" }) }));
+    await httpQuarryApi.listAssistantThreads(input.userEmail, { scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads?userEmail=analyst%40example.com&before=cursor%7C1&scope=deal&dealId=DEAL%2FA", undefined);
+    await httpQuarryApi.createAssistantThread(input.userEmail, undefined, null);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ userEmail: input.userEmail, dealId: null }) }));
+  } finally { vi.unstubAllGlobals(); }
+});

@@ -1,3 +1,4 @@
+import { codeLabel, partyNames, type DealStatus } from "./dealModel";
 import type { WorkspaceDeal } from "./workspace";
 
 export type DealLifecycle = "Current" | "Historic";
@@ -6,6 +7,9 @@ export type DealScope = "all" | "current" | "historic";
 export type DealPortfolioView = {
   buyer?: string;
   closeDate?: string;
+  closeDateLabel: string;
+  engagement: string;
+  partySearchText: string;
   colorClassName: string;
   id: string;
   lifecycle: DealLifecycle;
@@ -13,7 +17,12 @@ export type DealPortfolioView = {
   openQuestionCount: number;
   sponsor?: string;
   status: string;
+  statusCode: DealStatus;
   targetCompany?: string;
+  portfolioCompany?: string;
+  sowHref?: string;
+  factSheetHref?: string;
+  sharepointHref?: string;
   transitionName: string;
   type: string;
 };
@@ -30,18 +39,12 @@ export type DealKanbanLane = {
   title: string;
 };
 
-const knownLaneOrder = ["pipeline", "active", "review", "risk", "historic"] as const;
-const knownLaneTitles: Record<(typeof knownLaneOrder)[number], string> = {
-  active: "Active / In Progress",
-  historic: "Historic / Closed",
-  pipeline: "Pipeline",
-  review: "Under Review",
-  risk: "On Hold / Risk Watch",
-};
+const knownLaneOrder = ["pipeline", "active", "on_hold", "historic"] as const;
+const knownLaneTitles = { pipeline: "Pipeline", active: "Active / In Progress", on_hold: "On hold", historic: "Historic / Closed" };
 
 export function getDealLifecycle(deal: WorkspaceDeal): DealLifecycle {
   const status = normalizeStatus(deal.portfolio.status || deal.room.stageLabel);
-  return deal.complete === true || status === "closed" || status === "completed"
+  return status === "completed" || status === "cancelled"
     ? "Historic"
     : "Current";
 }
@@ -50,18 +53,26 @@ export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
   const status = deal.portfolio.status.trim() || deal.room.stageLabel.trim() || "Unknown";
 
   return {
-    buyer: optionalText(deal.portfolio.primaryBuyer),
-    closeDate: optionalText(deal.portfolio.closeDate),
+    buyer: partyNames(deal.portfolio.parties, "buyer"),
+    closeDate: deal.portfolio.actualCloseDate ?? deal.portfolio.expectedCloseDate,
     colorClassName: deal.colorClassName,
     id: deal.room.id,
     lifecycle: getDealLifecycle(deal),
     name: deal.room.name,
     openQuestionCount: deal.room.keyQuestions.length,
-    sponsor: optionalText(deal.portfolio.dealSponsor),
-    status,
-    targetCompany: optionalText(deal.portfolio.targetCompany),
+    sponsor: partyNames(deal.portfolio.parties, "pe_sponsor"),
+    status: codeLabel(status),
+    statusCode: deal.portfolio.status,
+    engagement: codeLabel(deal.portfolio.engagementType),
+    partySearchText: deal.portfolio.parties.map((p) => `${codeLabel(p.role)} ${p.company.name}`).join(" "),
+    closeDateLabel: deal.portfolio.actualCloseDate ? "Actual close" : "Expected close",
+    targetCompany: partyNames(deal.portfolio.parties, "target"),
+    portfolioCompany: partyNames(deal.portfolio.parties, "portfolio_company"),
+    sowHref: deal.room.resources.find((resource) => resource.id === "sow")?.href,
+    factSheetHref: deal.room.resources.find((resource) => resource.id === "fact-sheet")?.href,
+    sharepointHref: deal.room.resources.find((resource) => resource.id === "sharepoint")?.href,
     transitionName: getDealTransitionName(deal.room.id),
-    type: deal.portfolio.transactionType?.trim() || deal.room.sectorLabel,
+    type: codeLabel(deal.portfolio.transactionType),
   };
 }
 
@@ -106,6 +117,8 @@ export function buildDealSearchText(deal: DealPortfolioView): string {
       deal.type,
       deal.status,
       deal.lifecycle,
+      deal.engagement,
+      deal.partySearchText,
     ]
       .filter(Boolean)
       .join(" "),
@@ -143,24 +156,12 @@ export function getDealTransitionName(id: string): string {
 }
 
 function getDealKanbanLane(deal: DealPortfolioView): Omit<DealKanbanLane, "deals"> {
-  if (deal.lifecycle === "Historic") {
-    return { id: "historic", title: knownLaneTitles.historic };
+  switch (deal.statusCode) {
+    case "completed": case "cancelled": return { id: "historic", title: knownLaneTitles.historic };
+    case "pipeline": return { id: "pipeline", title: knownLaneTitles.pipeline };
+    case "active": return { id: "active", title: knownLaneTitles.active };
+    case "on_hold": return { id: "on_hold", title: knownLaneTitles.on_hold };
   }
-
-  const status = normalizeStatus(deal.status);
-  if (status === "pipeline") return { id: "pipeline", title: knownLaneTitles.pipeline };
-  if (status === "active" || status === "in progress" || status === "in-progress") {
-    return { id: "active", title: knownLaneTitles.active };
-  }
-  if (status === "under review") return { id: "review", title: knownLaneTitles.review };
-  if (status === "on hold" || status === "risk watch" || status === "at risk") {
-    return { id: "risk", title: knownLaneTitles.risk };
-  }
-
-  return {
-    id: `status-${getDealTransitionName(status)}`,
-    title: deal.status || "Unknown",
-  };
 }
 
 function normalizeStatus(value: string): string {
@@ -169,9 +170,4 @@ function normalizeStatus(value: string): string {
 
 function normalizeSearchText(value: string): string {
   return value.trim().toLocaleLowerCase();
-}
-
-function optionalText(value?: string): string | undefined {
-  const normalized = value?.trim();
-  return normalized || undefined;
 }

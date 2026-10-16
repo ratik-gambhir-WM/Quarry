@@ -445,3 +445,20 @@ function templateDocument() {
     },
   };
 }
+
+it("relays company, aggregate updates and nullable/scoped chats with encoded paths", async () => {
+  const get = vi.fn().mockResolvedValue({ companies: [], hasMore: false });
+  const post = vi.fn().mockResolvedValue({});
+  const api = createTauriQuarryApi({ get, post, delete: vi.fn(), getPdf: vi.fn(), postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
+  const fields = { dealName: "Draft", dealCode: null, engagementType: "sell_side" as const, transactionType: "unknown" as const, status: "pipeline" as const, startDate: null, expectedCloseDate: null, actualCloseDate: null, engagementCompletedDate: null, parties: [], scopes: [] };
+  await api.updateDeal("DEAL/A", fields);
+  expect(post).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", fields);
+  await api.listCompanies("owner@example.com", { query: "A & B", limit: 30, offset: 30 });
+  expect(get).toHaveBeenLastCalledWith("/api/v1/companies?userEmail=owner%40example.com&query=A+%26+B&limit=30&offset=30");
+  await api.createAssistantThread("owner@example.com", undefined, null);
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { userEmail: "owner@example.com", dealId: null });
+  await api.createAssistantThread("owner@example.com", "linked", "DEAL/A");
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { userEmail: "owner@example.com", threadId: "linked", dealId: "DEAL/A" });
+  await api.listAssistantThreads("owner@example.com", { scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
+  expect(get).toHaveBeenLastCalledWith("/api/v1/assistant/threads?userEmail=owner%40example.com&before=cursor%7C1&scope=deal&dealId=DEAL%2FA");
+});

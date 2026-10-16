@@ -190,8 +190,10 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
               onSelect={() => void runtime.selectThread(thread.threadId)}
               actionsDisabled={isPreparingThread || isRunning || deletingThreadId !== null}
               title={thread.title}
+              association={thread.dealId ? "Deal" : "Freeform"}
             />
           ))}
+          {runtime.state.nextCursor ? <li><button className="px-3 py-2 text-xs text-sidebar-muted" disabled={isThreadListLoading} type="button" onClick={() => void runtime.loadMoreThreads()}>Load more chats</button></li> : null}
           {isThreadListLoading ? (
             <li className="px-3 py-2 text-xs text-sidebar-muted" role="status">Loading chats…</li>
           ) : null}
@@ -209,6 +211,7 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
 
 function AssistantThreadListItem({
   active,
+  association,
   actionsDisabled,
   deleting,
   onDelete,
@@ -216,6 +219,7 @@ function AssistantThreadListItem({
   title,
 }: {
   active: boolean;
+  association: string;
   actionsDisabled: boolean;
   deleting: boolean;
   onDelete: () => void;
@@ -234,6 +238,7 @@ function AssistantThreadListItem({
       >
         {title || "New chat"}
       </button>
+      <small className="text-xs text-sidebar-muted">{association}</small>
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={`Chat options for ${title || "New chat"}`}

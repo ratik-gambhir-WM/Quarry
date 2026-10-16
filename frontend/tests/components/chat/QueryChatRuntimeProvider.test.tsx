@@ -83,7 +83,7 @@ describe("QueryChatRuntimeProvider", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Persisted answer")).toBeTruthy();
-    expect(api.createAssistantThread).toHaveBeenCalledWith("analyst@example.com");
+    expect(api.createAssistantThread).toHaveBeenCalledWith("analyst@example.com", undefined, null);
     await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledTimes(1));
     const run = api.runAssistantThread.mock.calls[0]?.[0];
     expect(run).toMatchObject({
@@ -281,3 +281,24 @@ function deferred<T>() {
     },
   };
 }
+
+it("keys drafts, pending lists, and new threads by the active deal", async () => {
+  const user = userEvent.setup();
+  const pending = deferred<{ nextCursor: null; threads: [] }>();
+  api.listAssistantThreads.mockReturnValueOnce(pending.promise).mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockResolvedValue({ ...threadMetadata, dealId: "DEAL-B" });
+  api.runAssistantThread.mockImplementation((_input, handlers) => {
+    queueMicrotask(() => handlers.onEvent({ type: "completed", response: "Answer" }));
+    return () => {};
+  });
+  const view = (dealId: string) => <MemoryRouter><QueryChatRuntimeProvider dealId={dealId} scope="deal" onContextTruncated={vi.fn()} userEmail="owner@example.com"><QueryChatThread contextTruncated={false} /></QueryChatRuntimeProvider></MemoryRouter>;
+  const { rerender } = render(view("DEAL-A"));
+  await user.type(screen.getByRole("textbox", { name: "Message input" }), "Draft for A");
+  rerender(view("DEAL-B"));
+  expect((screen.getByRole("textbox", { name: "Message input" }) as HTMLTextAreaElement).value).toBe("");
+  pending.resolve({ nextCursor: null, threads: [] });
+  await waitFor(() => expect(api.listAssistantThreads).toHaveBeenLastCalledWith("owner@example.com", { scope: "deal", dealId: "DEAL-B" }));
+  await user.type(screen.getByRole("textbox", { name: "Message input" }), "Question for B");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(api.createAssistantThread).toHaveBeenCalledWith("owner@example.com", undefined, "DEAL-B"));
+});

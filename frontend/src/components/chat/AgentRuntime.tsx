@@ -4,12 +4,15 @@ import { runtime } from "@quarry/runtime";
 import type {
   AssistantMessage as PersistedAssistantMessage,
   AssistantThread,
+  AssistantThreadListOptions,
   QuarryApi,
 } from "../../contracts/quarryApi";
 import type { AssistantMessage, Message, UserMessage } from "./chatModel";
 import { createModelAdapter } from "./threadModelAdapter";
 
 export type ThreadRuntimeState = {
+  nextCursor: string | null;
+  scopeDealId: string | null;
   copiedMessageId: string | null;
   deletingThreadId: string | null;
   draft: string;
@@ -32,9 +35,12 @@ type AgentRuntimeOptions = {
   >>;
   onContextTruncated: (truncated: boolean) => void;
   userEmail: string;
+  scope?: "all" | "freeform" | "deal";
+  dealId?: string;
 };
 
 type AgentRuntimeValue = {
+  loadMoreThreads(): Promise<void>;
   copy(messageId: string): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
   newChat(): void;
@@ -47,6 +53,8 @@ type AgentRuntimeValue = {
 };
 
 const emptyState: ThreadRuntimeState = {
+  nextCursor: null,
+  scopeDealId: null,
   copiedMessageId: null,
   deletingThreadId: null,
   draft: "",
@@ -62,11 +70,11 @@ const emptyState: ThreadRuntimeState = {
   threads: [],
 };
 
-export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRuntimeOptions): AgentRuntimeValue {
+export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "all", dealId }: AgentRuntimeOptions): AgentRuntimeValue {
   const [state, dispatch] = useReducer(
     (_current: ThreadRuntimeState, next: ThreadRuntimeState) => next,
     userEmail,
-    (email) => ({ ...emptyState, isThreadListLoading: Boolean(email) }),
+    (email) => ({ ...emptyState, isThreadListLoading: Boolean(email), scopeDealId: scope === "deal" ? dealId ?? null : null }),
   );
   const stateRef = useRef(state);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -104,6 +112,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     threadId: string,
     reusesUserMessage = false,
   ) => {
+    if (!mountedRef.current) return;
     const assistantMessage = assistantMessageFor();
     const messages = reusesUserMessage
       ? [...stateRef.current.messages, assistantMessage]
@@ -171,7 +180,8 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     const threadId = selectedThreadId
       ? Promise.resolve(selectedThreadId)
       : createAssistantThread
-        ? createAssistantThread(userEmail).then((thread) => {
+        ? createAssistantThread(userEmail, undefined, scope === "deal" ? dealId : null).then((thread) => {
+            if (!mountedRef.current) return null;
             update({
               selectedThreadId: thread.threadId,
               threads: [thread, ...stateRef.current.threads],
@@ -185,7 +195,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
         logChat("thread.create_failed", { error: errorMessage(error) });
       })
       .finally(() => update({ isPreparingThread: false }));
-  }, [api.createAssistantThread, startRun, update, userEmail]);
+  }, [api.createAssistantThread, startRun, update, userEmail, scope, dealId]);
 
   const setDraft = useCallback((draft: string) => update({ draft }), [update]);
 
@@ -314,7 +324,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
   useEffect(() => {
     if (!userEmail || !api.listAssistantThreads) return;
     let active = true;
-    void api.listAssistantThreads(userEmail)
+    void api.listAssistantThreads(userEmail, { scope, ...(scope === "deal" && dealId ? { dealId } : {}) })
       .then((page) => {
         logChat("thread_list.loaded", { threadCount: page.threads.length });
         if (active) {
@@ -322,6 +332,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
             isThreadListLoading: false,
             threadListError: false,
             threads: mergeThreadPage(page.threads, stateRef.current.threads),
+            nextCursor: page.nextCursor,
           });
         }
       })
@@ -332,7 +343,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     return () => {
       active = false;
     };
-  }, [api, update, userEmail]);
+  }, [api, update, userEmail, scope, dealId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -342,21 +353,33 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail }: AgentRun
     };
   }, []);
 
-  return { copy, deleteThread, newChat, retry, selectThread, send, setDraft, state, stop };
+  const loadMoreThreads = useCallback(async () => {
+    const cursor = stateRef.current.nextCursor;
+    if (!api.listAssistantThreads || !cursor || stateRef.current.isThreadListLoading) return;
+    update({ isThreadListLoading: true });
+    const options: AssistantThreadListOptions = { after: cursor, scope, ...(scope === "deal" && dealId ? { dealId } : {}) };
+    try {
+      const page = await api.listAssistantThreads(userEmail, options);
+      update({ isThreadListLoading: false, threadListError: false, nextCursor: page.nextCursor, threads: mergeThreadPage(page.threads, stateRef.current.threads) });
+    } catch { update({ isThreadListLoading: false, threadListError: true }); }
+  }, [api, userEmail, scope, dealId, update]);
+  return { loadMoreThreads, copy, deleteThread, newChat, retry, selectThread, send, setDraft, state, stop };
 }
 
 const AgentRuntimeContext = createContext<AgentRuntimeValue | null>(null);
 
-export function QueryChatRuntimeProvider({
-  children,
-  onContextTruncated,
-  userEmail,
-}: {
+type ProviderProps = {
   children: ReactNode;
   onContextTruncated: (truncated: boolean) => void;
   userEmail: string;
-}) {
-  const agentRuntime = useAgentRuntime({ api: runtime.api, onContextTruncated, userEmail });
+  scope?: "all" | "freeform" | "deal";
+  dealId?: string;
+};
+export function QueryChatRuntimeProvider(props: ProviderProps) {
+  return <ScopedChatRuntimeProvider key={`${props.userEmail}:${props.scope ?? "all"}:${props.dealId ?? ""}`} {...props} />;
+}
+function ScopedChatRuntimeProvider({ children, ...options }: ProviderProps) {
+  const agentRuntime = useAgentRuntime({ api: runtime.api, ...options });
   return <AgentRuntimeContext.Provider value={agentRuntime}>{children}</AgentRuntimeContext.Provider>;
 }
 

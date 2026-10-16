@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { runtime } from "@quarry/runtime";
+import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { useWorkspace } from "../app/WorkspaceProvider";
 import type { DealRoomOverviewSection } from "../components/deal-room/DealRoomHeader";
@@ -38,8 +39,9 @@ export function DealRoomPage() {
   const extractedDeal = extractionResult && extractionResult.deal.dealId === dealId
     ? buildWorkspaceDealFromExtractionResult(extractionResult, extractionState?.sowSourceName)
     : undefined;
-  const deal = extractedDeal ?? activeDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId);
-  const deals = extractedDeal
+  const cachedDeals = dealsResource.status === "success" ? dealsResource.deals : activeDeals;
+  const deal = cachedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId) ?? extractedDeal;
+  const deals = extractedDeal && !activeDeals.some((d) => d.room.id === dealId)
     ? [extractedDeal, ...activeDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
     : activeDeals;
   const dealNavigationState = extractionResult
@@ -65,7 +67,9 @@ export function DealRoomPage() {
   }
 
   if (!deal && dealsResource.status === "success") {
-    return <Navigate replace state={navigationState} to="/hub" />;
+    return dealsResource.source === "server" && dealId
+      ? <DealRoomLookup key={`${email ?? ""}:${dealId}`} id={dealId} />
+      : <Navigate replace state={navigationState} to="/hub" />;
   }
 
   if (!deal) {
@@ -81,6 +85,21 @@ export function DealRoomPage() {
       navigationState={dealNavigationState}
     />
   );
+}
+
+function DealRoomLookup({ id }: { id: string }) {
+  const { cacheDealResult } = useWorkspace();
+  const [result, setResult] = useState<{ error?: string }>({});
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void runtime.api.getDeal(id).then((aggregate) => {
+      if (active) cacheDealResult(aggregate);
+    }).catch((error: unknown) => { if (active) setResult({ error: error instanceof Error ? error.message : String(error) }); });
+    return () => { active = false; };
+  }, [attempt, cacheDealResult, id]);
+  if (result.error) return <section role="alert" className="p-8"><h1>Deal unavailable</h1><p>{result.error}</p><button type="button" onClick={() => { setResult({}); setAttempt((n) => n + 1); }}>Retry deal</button></section>;
+  return <WorkspacePageSkeleton label="Loading deal" />;
 }
 
 function DealRoomWorkspace({

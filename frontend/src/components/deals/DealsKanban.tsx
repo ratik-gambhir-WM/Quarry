@@ -19,6 +19,8 @@ export function DealsKanban({ deals, onOpenDeal }: DealsKanbanProps) {
       items: lane.deals.map((deal) => ({
         data: {
           closeDate: deal.closeDate,
+          closeDateLabel: deal.closeDateLabel,
+          engagement: deal.engagement,
           colorClassName: deal.colorClassName,
           id: deal.id,
           lifecycle: deal.lifecycle,

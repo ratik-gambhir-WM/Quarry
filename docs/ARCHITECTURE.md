@@ -378,7 +378,24 @@ global state or query-cache library.
 - `useWorkspaceDeals` has explicit loading, success, and error states. Its default `api` mode maps
   server records and exposes a retryable error without fixture fallback. Explicit `demo` mode
   dynamically imports `fixtures/workspace/portfolio.ts` and the shell visibly labels the result
-  as demo data.
+  as demo data. The provider uses a local external resource store; create/update responses replace
+  cached aggregates, and pending older lists cannot overwrite those writes. Shared company edits
+  refresh linked cached deal summaries and overlay pending list results, including deals not yet
+  loaded into the cache. Metadata saves retain the selected uploaded SOW filename in the session
+  cache, and core deal edits preserve those resource details. Uploaded filenames are session-only;
+  a fresh load marks the resource available only when its metadata contains a saved link.
+  API-backed deals retain their typed persisted fields for
+  editing. Creation and editing share optional date, engagement/transaction, scope, and company-role
+  controls; company search is bounded, stale results are ignored, and directory creation is explicit.
+  Enter in a company text input saves that company; Save and Cancel buttons retain their native
+  keyboard activation and do not submit the surrounding deal form.
+  Directory entries remain saved when a deal form is cancelled or its write fails. Completed and
+  cancelled engagements are Historic; pipeline, active, and on-hold engagements are Current.
+  Transaction closing never changes engagement status. Views show all companies for each role and
+  distinguish expected close, actual close, and engagement completion.
+  The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
+  type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
+  Missing values and unavailable links display `N/A`; external links open in a separate tab.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
@@ -407,11 +424,14 @@ global state or query-cache library.
   current-document page jumps without coupling the reusable search UI to the editor implementation.
 - `DataRoomQuickActions` owns the Synthesis Canvas panel's open state and invokes its owning
   route's existing upload-modal callback from the animated Upload icon. Its Synthesis Canvas panel
-  reuses the Assistant runtime and thread view with a panel-local provider keyed by workspace email;
-  the header's previous-chat picker selects the same persisted assistant threads as the Assistant
-  route. Closing the panel preserves that provider for the current Data Room explorer mount.
+  reuses the Assistant runtime and thread view with a panel-local provider keyed by user and deal.
+  Its picker lists only that deal's chats, and new threads persist the active deal association.
+  Closing the panel preserves that provider for the current Data Room explorer mount.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
-  timeline state for URL-backed nested routes. Its keyed deal boundary initializes those local
+  timeline state for URL-backed nested routes. Direct API lookup also resolves archived deals excluded
+  from the default portfolio list. Lookup results enter the shared deal cache so company edits
+  refresh their summaries too; archived records remain excluded from portfolio navigation.
+  The Overview exposes Edit deal for persisted aggregates. Its keyed deal boundary initializes those local
   values for a new deal without render-derived effects. The Deliverables summary links to a
   dedicated template route whose request-scoped external store exposes loading, empty, error/retry, and
   populated states without page-level effect state. The store owns mutually exclusive template
@@ -460,7 +480,10 @@ global state or query-cache library.
   route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
   one runtime owner. It retains locally created threads when the initial remote list resolves late
   and returns a failed history load to an explicit retryable selection state. The provider is keyed by the workspace email to prevent one development
-  profile's client cache from surviving an identity change. A narrow `ModelAdapter` converts
+  profile's client cache from surviving an identity change. Runtime ownership additionally includes
+  chat scope/deal; a switch clears drafts, selected thread, cursor, and pending work. Assistant defaults
+  to All chats, offers Freeform chats, labels associations, and creates freeform chats from New chat.
+  Both pickers support scoped cursor pagination. A narrow `ModelAdapter` converts
   the callback-based stream into cumulative custom thread-message snapshots, treats completion as
   authoritative, and cancels the matching transport exactly once.
   Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
@@ -564,7 +587,8 @@ command names.
 The contract covers:
 
 - user lookup/creation
-- deal create/list/get/archive and metadata extraction
+- typed deal aggregate create/update/list/get/archive and metadata extraction
+- owner-scoped company directory create/search/update
 - deal data-room listing and preview
 - stored document list/PDF/text
 - synchronous and job-based document processing
@@ -681,12 +705,15 @@ method allowlist.
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
 | GET | `/database/status` | Report SQLite status/path | Exposes server path; development-only posture |
-| GET | `/deals` | List persisted deals | Includes metadata when present |
-| POST | `/deals` | Create deal and empty metadata | Validates `DEAL-` ID, dates, user, and source choice |
+| GET | `/deals` | List nonarchived aggregates | Metadata, parties/current companies, scopes; actual then expected close sort key; unknown dates last |
+| POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Typed codes; optional dates/parties; same-owner company references |
+| POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Owner/ID immutable; metadata preserved; unchanged assignments retain row IDs |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
 | POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
-| POST | `/deals/{deal_id}/archive` | Mark a deal archived | Retains associated files |
+| POST | `/deals/{deal_id}/archive` | Set `archivedAt` idempotently | Preserves status, metadata, parties, scopes, files, and linked chats |
+| GET/POST | `/companies` | Search/create the resolved owner's company directory | `{companies, hasMore}`; default 30/max 100; no implicit name/website merge |
+| POST | `/companies/{company_id}/update` | Edit shared company details | Same-owner lookup; reflected in every linked deal; no delete/merge |
 | GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
 | POST | `/deals/{deal_id}/data-room/preview` | Parse/convert a selected relative document | Canonical containment; PDF/DOCX/XLSX/PPTX |
 
@@ -740,10 +767,19 @@ retried prompt, and persists `completed`, `failed`, or `cancelled` terminal cont
 normalize the earlier client bug that stored a user message as its own parent, allowing those
 transcripts to load without rewriting local data. Conflicting message-ID reuse is rejected before
 insertion. Observed failures and disconnects retain buffered partial text; process termination can
-still leave a `streaming` row because schema v8 has no checkpoint/recovery worker. The legacy route
+still leave a `streaming` row because the current schema has no checkpoint/recovery worker. The legacy route
 remains mounted under both API prefixes for compatibility. When a client does not provide
 `systemInstructions`, both chat contracts use the server-owned `assistant-chat-default` catalog
 prompt; a validated client instruction still overrides it to support future user-created prompts.
+
+Threads return `dealId: string | null`. Creation accepts omitted/null for freeform or an existing
+same-owner deal; association is immutable. Lists default to `scope=all`; `scope=freeform` requires
+no deal ID, and `scope=deal` requires one. Owner/status/association/cursor filters precede the page
+limit. New linked runs load bounded current reference data through the injected public
+`DealContextReader`, separate from policy and user instructions. It includes names, typed roles,
+engagement/transaction, and scopes; excludes source paths, credentials, other deals, and documents.
+Completed request replay returns the persisted answer before checking the provider or current
+reference data. Freeform runs receive no implicit deal context; context is not document retrieval.
 
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
@@ -827,7 +863,7 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Sqlite[Open SQLite and run schema v8 migration]
+    Prompts --> Sqlite[Open SQLite and initialize or validate schema v9]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -843,7 +879,7 @@ flowchart TD
 configuration, bootstrap, bind, serve, and graceful shutdown.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
 and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
-owns SQLite schema evolution. Bootstrap passes each domain only its required capabilities and
+owns direct SQLite initialization/validation and the explicitly invoked offline development reset. Bootstrap passes each domain only its required capabilities and
 merges the returned, already-state-bound routers; adding a feature does not widen shared request
 state.
 
@@ -878,7 +914,8 @@ service, model, table, or product capability.
 | Domain ownership | Current maturity |
 | --- | --- |
 | `users` | Implemented development profile creation and lookup; not authentication |
-| `deals` | Implemented deal lifecycle, metadata, source selection, and extraction |
+| `deals` | Implemented typed engagement aggregates, transactional writes, metadata, source selection, extraction, and public context/source readers |
+| `companies` | Implemented per-development-user reusable company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
 | `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and Helix search capabilities |
 | `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
@@ -898,7 +935,7 @@ service, model, table, or product capability.
 
 Each active domain exposes a route builder that binds only its required service state.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, development
-support, user, deal, data-room, document-ingestion, document-viewing, document-search, summary,
+support, user, company, deal, data-room, document-ingestion, document-viewing, document-search, summary,
 research, template, and assistant-chat routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
 same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
 layers provide:
@@ -926,6 +963,13 @@ domain repository error -> domain service error -> AppError -> HTTP status + { "
 response. Built-in Axum extractor rejections do not all use this envelope, so clients must not yet
 assume one universal error schema.
 
+SQLite SELECT, INSERT, UPDATE, and DELETE builders return `Result<SqlQuery, SqliteClientError>`.
+Their `build()` methods only construct parameterized queries and convert validation failures into
+`SqliteClientError::QueryBuild`, preserving the underlying `SqlBuilderError` as the error source.
+Client and transaction execution methods accept that result directly and propagate construction
+errors before executing SQL. A propagated construction or execution error rolls back the transaction;
+repositories map the resulting client error to their storage error at the repository boundary.
+
 ### 8.5 Concurrency and blocking work
 
 - Tokio provides the async runtime and job/watch primitives.
@@ -941,7 +985,7 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 SQLite schema version 8
+### 9.1 SQLite schema marker 9
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -950,19 +994,29 @@ schema currently contains:
 | --- | --- | --- |
 | `app_metadata` | Application metadata key/value | No current service/route consumer |
 | `users` | Development user/profile records and API key | Used by user/deal services |
-| `assistant_threads` | User-owned thread metadata, archive state, and recency | Used by Assistant thread list |
+| `assistant_threads` | User-owned thread metadata, nullable immutable deal association, archive state, and recency | Used by Assistant thread list |
 | `assistant_messages` | Ordered normalized user/assistant messages and terminal run state | Used by Assistant history and canonical context |
 | `reminders` | Reminder records | No current service/route consumer |
-| `deals` | Core deal record and owner reference | Used |
-| `deal_metadata` | Key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
+| `deals` | Engagement/transaction/status codes, optional deal code/dates, owner and audit/archive timestamps | Used |
+| `companies` | Reusable owner-scoped company details; names need not be unique | Used |
+| `deal_parties` | Company roles/notes per deal; unique `(deal_id, company_id, role)` | Used |
+| `deal_scopes` | Typed diligence disciplines per deal | Used |
+| `deal_metadata` | One row per deal with no duplicated owner; string-array key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
 | `quarry_files` | Logical file identity, deal/workspace, soft-delete metadata | Used |
 | `quarry_file_versions` | Immutable version identity/hash/current marker | Used |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 
 Key invariants include:
 
-- deals reference an existing user
-- assistant threads reference an existing user and cascade their messages on deletion
+- deals and companies reference an existing development user with delete restriction
+- atomic deal create/update checks company ownership inside the transaction; cross-owner assignments fail
+- company records have no fixed target/buyer/sponsor flags; one company can have several roles
+- active/completed platform, add-on, or strategic acquisitions require exactly one target at the service boundary;
+  pipeline drafts can have none, and other transaction structures may have multiple targets
+- date-only values are validated at HTTP input; engagement completion cannot precede a known start;
+  transaction closing may precede start, and no date implicitly changes status
+- assistant threads reference a user and optionally a deal; deal deletion is restricted for linked chats;
+  deleting a thread cascades its messages
 - assistant message order and run request IDs are unique within a thread
 - deal metadata has at most one of local path or SharePoint link; both may be absent
 - SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
@@ -972,13 +1026,21 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-There is no migrations directory. `PRAGMA user_version` is the migration marker. Databases below
-version 6 are upgraded by dropping all application tables and recreating the complete version 8
-schema. Version 6 databases are upgraded to version 7 in place by adding the nullable
-`sow_link`, `fact_sheet_link`, and `rl_link` columns to `deal_metadata`; existing rows are
-preserved, then version 7 adds the assistant tables incrementally as version 8. Databases above
-version 8 fail startup. The pre-version-6 rebuild remains deliberately
-destructive and is not a production-safe incremental migration strategy.
+There is no historical migration/translation ladder. `PRAGMA user_version = 9` is a compatibility
+marker. Startup creates the final schema only when there are no application tables and the marker
+is zero; this initializer has no DROP statements. Current layouts are validated and reused without
+erasing data. Any incompatible marker/layout fails startup. All aggregate reads use one transaction
+snapshot: deals `LEFT JOIN` their optional metadata, then bounded batches fetch parties joined to
+companies and scopes separately. These reads run sequentially on the same transaction connection
+inside the blocking pool; spawning Tokio tasks would still serialize on the shared connection lock.
+They do not fetch children separately for every deal or multiply parties by scopes in a combined join.
+
+The offline `reset_development` binary requires `--discard` and an existing, absolute disposable
+SQLite path. It drops dependent tables and recreates the final schema in one controlled transaction,
+checks foreign keys, and restores enforcement even on failure. It is never invoked by startup.
+The deliberate development reset discards all profiles, deals, metadata, chats, documents/versions/
+blobs, and reminders; there is no backfill or conversion. Restarting thereafter preserves new data.
+The operational procedure and model vocabulary are in [Deal/company model](deal-company-model.md).
 
 ### 9.2 Helix versioned file graph
 
@@ -1065,20 +1127,34 @@ None of these mechanisms supports multi-instance coordination or durable recover
 ```text
 Login/profile creates or resolves user
   -> POST /deals validates deal and owner email
-  -> SQLite inserts deal + initial metadata
+  -> one SQLite transaction inserts deal + metadata + parties + scopes and returns a consistent aggregate
   -> optional POST /deals/{id}/metadata saves source links and uploads selected source files
   -> DealService sends files and extraction prompt to OpenAI
   -> parsed key questions update deal_metadata
 ```
 
-After core deal creation, the shared add-deal modal collects optional SharePoint, SOW, fact-sheet,
-and RL links alongside one or two SOW/timeline files. The desktop flow can authorize an optional
-local folder during the first step; selecting one disables the mutually exclusive SharePoint field.
+Deal creation has no Helix or Diligence Studio write. Its entire durable aggregate lives in one
+SQLite transaction, so an invalid reference or failed child insert leaves no deal, metadata,
+assignment, or scope behind. The same applies to scalar/collection replacement on update; metadata
+is retained. Previously and explicitly saved directory companies are independent records. Document
+upload/indexing is a separate operation with the cross-store recovery contract in section 9.3.
+
+The shared add-deal modal has three steps: deal identity/details, company directory selection or
+creation and deal-specific roles, then optional SharePoint, SOW, fact-sheet, and request-list links
+alongside one or two SOW/timeline files. Next and Back preserve the draft, assigned companies, and
+selected sources; company forms must be saved or cancelled before continuing. Core deal creation
+is deferred until **Finish deal** (or **Skip metadata**), followed by the metadata request when
+included. A failed metadata request keeps the created core response for retry without duplicating
+the deal; earlier steps are then locked because the core fields have already been persisted.
+Editing an existing deal retains the combined details-and-companies form and also requires saving
+or cancelling an open company form before submitting the deal. The desktop flow can
+authorize an optional local folder during the first step; selecting one disables the mutually
+exclusive SharePoint field.
 Both transports send the link fields and files through the same multipart Axum endpoint. A stored
 SharePoint URL does not currently trigger a live SharePoint import. Link metadata is committed
 before optional OpenAI extraction, so an extraction failure does not discard the submitted URLs.
-Choosing **Skip metadata** completes the UI flow from the initial deal response without submitting
-links or files entered in the optional metadata step.
+Choosing **Skip metadata** creates the core deal if needed and completes the UI flow without
+submitting links or files entered in the optional metadata step.
 
 ### 10.2 Document ingestion
 
@@ -1539,7 +1615,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
 | User secrets | Plaintext per-user `api_key`, returned but unused by AI services | Sensitive development-only field; server AI uses `OPENAI_API_KEY` |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Local SQLite; destructive pre-v6 migration | Not a production migration/storage strategy |
+| Persistence | Local SQLite; explicit offline development reset with incompatible-schema rejection at startup | No production upgrade/backfill strategy |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

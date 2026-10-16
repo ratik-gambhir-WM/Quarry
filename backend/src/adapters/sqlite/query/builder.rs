@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use super::{QueryKind, SqlQuery, SqlValue};
+use crate::adapters::sqlite::client::SqliteClientError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SqlBuilderError {
@@ -497,7 +498,7 @@ impl SelectBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqlBuilderError> {
+    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
         ensure_unique_columns(&self.columns)?;
         let columns = if self.columns.is_empty() {
@@ -583,9 +584,9 @@ impl InsertBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqlBuilderError> {
+    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         if self.values.is_empty() {
-            return Err(SqlBuilderError::MissingInsertValues);
+            return Err(SqlBuilderError::MissingInsertValues.into());
         }
 
         let table = quote_identifier(&self.table)?;
@@ -651,9 +652,9 @@ impl UpdateBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqlBuilderError> {
+    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         if self.assignments.is_empty() {
-            return Err(SqlBuilderError::MissingUpdateAssignments);
+            return Err(SqlBuilderError::MissingUpdateAssignments.into());
         }
         require_conditions("UPDATE", &self.conditions, self.allow_all_rows)?;
 
@@ -712,7 +713,7 @@ impl DeleteBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqlBuilderError> {
+    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         require_conditions("DELETE", &self.conditions, self.allow_all_rows)?;
 
         let table = quote_identifier(&self.table)?;

@@ -1,18 +1,8 @@
 import type { DealResource, WorkspaceDeal, WorkspaceLocationState } from "./workspace";
 
-export type SaveDealInput = {
-  closeDate: string;
-  dealId: string;
-  dealName: string;
-  dealSponsor: string;
-  localPath: string | null;
-  primaryBuyer: string;
-  sharepointLink: string | null;
-  startDate: string;
-  status: string;
-  targetCompany: string;
-  transactionType: string;
-  userEmail: string;
+import { codeLabel, type DealFields, type DealParty } from "./dealModel";
+export type SaveDealInput = DealFields & {
+  dealId: string; userEmail: string; localPath: string | null; sharepointLink: string | null;
 };
 
 export type DealExtractionSourceFile = {
@@ -45,17 +35,8 @@ export type ReadDealSourceFilesInput = {
   rootPath: string;
 };
 
-export type SavedDeal = {
-  closeDate: string;
-  dealId: string;
-  dealName: string;
-  dealSponsor: string;
-  primaryBuyer: string;
-  startDate: string;
-  status: string;
-  targetCompany: string;
-  transactionType: string;
-  userId: number;
+export type SavedDeal = Omit<DealFields, "parties"> & {
+  dealId: string; userId: number; archivedAt: string | null; createdAt: string; updatedAt: string; parties: DealParty[];
 };
 
 export type SavedDealMetadata = {
@@ -66,7 +47,6 @@ export type SavedDealMetadata = {
   rlLink: string | null;
   sharepointLink: string | null;
   sowLink: string | null;
-  userId: number;
 };
 
 export type SaveDealMetadataInput = {
@@ -125,36 +105,39 @@ function buildWorkspaceDeal(
   files: readonly DealExtractionSourceFile[] = [],
   sowSourceName?: string,
 ): WorkspaceDeal {
-  const normalizedStatus = deal.status.trim().toLowerCase();
-
+  const roleSummary = deal.parties.map((p) => `${codeLabel(p.role)}: ${p.company.name}`).join("; ");
   return {
     colorClassName: "bg-primary",
-    complete: normalizedStatus === "closed" || normalizedStatus === "completed",
+    complete: deal.status === "completed" || deal.status === "cancelled",
+    persisted: deal,
+    persistedMetadata: metadata,
     portfolio: {
-      closeDate: deal.closeDate || undefined,
-      dealSponsor: deal.dealSponsor || undefined,
-      primaryBuyer: deal.primaryBuyer || undefined,
-      startDate: deal.startDate || undefined,
-      status: deal.status || "Unknown",
-      targetCompany: deal.targetCompany || undefined,
-      transactionType: deal.transactionType || undefined,
+      startDate: deal.startDate ?? undefined,
+      expectedCloseDate: deal.expectedCloseDate ?? undefined,
+      actualCloseDate: deal.actualCloseDate ?? undefined,
+      engagementCompletedDate: deal.engagementCompletedDate ?? undefined,
+      engagementType: deal.engagementType,
+      status: deal.status,
+      parties: deal.parties,
+      transactionType: deal.transactionType,
     },
     room: {
       id: deal.dealId,
       keyQuestions: extraction.keyQuestions,
       metrics: [
-        { label: "Start Date", value: deal.startDate },
-        { label: "Close Date", value: deal.closeDate },
-        { label: "Insights Extracted", value: String(extraction.keyQuestions.length) },
+        { label: "Start date", value: deal.startDate ?? "Unavailable" },
+        { label: "Expected close", value: deal.expectedCloseDate ?? "Unavailable" },
+        { label: "Actual close", value: deal.actualCloseDate ?? "Unavailable" },
+        { label: "Engagement completed", value: deal.engagementCompletedDate ?? "Unavailable" },
       ],
       name: deal.dealName,
       overviewSubtitle: `${deal.dealName} Due Diligence Overview`,
       pendingTasks: [],
-      phaseLabel: deal.status,
+      phaseLabel: codeLabel(deal.engagementType),
       resources: buildDealResources(metadata, files, sowSourceName),
-      sectorLabel: deal.transactionType,
-      stageLabel: deal.status,
-      summary: `${deal.targetCompany} is the target company in this ${deal.transactionType.toLowerCase()} opportunity for ${deal.primaryBuyer}, with ${deal.dealSponsor} serving as the deal sponsor. This workspace brings together the available diligence materials, findings, and open questions needed to evaluate the company and support the deal team's review.`,
+      sectorLabel: codeLabel(deal.transactionType),
+      stageLabel: codeLabel(deal.status),
+      summary: `${codeLabel(deal.engagementType)} engagement · ${codeLabel(deal.transactionType)}. ${roleSummary ? `${roleSummary}.` : "Companies are unspecified."}${deal.scopes.length ? ` Scope: ${deal.scopes.map(codeLabel).join(", ")}.` : " Scope is unspecified."}`,
       timeline: [],
     },
   };

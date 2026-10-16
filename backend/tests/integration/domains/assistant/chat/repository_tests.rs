@@ -1,3 +1,4 @@
+use crate::domains::assistant::chat::model::ThreadScope;
 use crate::{
     adapters::sqlite::client::SqliteClient,
     app::migrations,
@@ -31,7 +32,7 @@ async fn repository_fixture() -> (AssistantChatRepository, i64, SqliteClient) {
 async fn run_persists_an_ordered_pair_and_replays_the_same_request_id() {
     let (repository, user_id, _) = repository_fixture().await;
     repository
-        .create_thread(user_id, "thread-1".to_string())
+        .create_thread(user_id, "thread-1".to_string(), None)
         .await
         .unwrap();
     let input = StartRunInput {
@@ -79,7 +80,7 @@ async fn run_persists_an_ordered_pair_and_replays_the_same_request_id() {
 async fn retry_reuses_the_user_message_and_excludes_the_retried_pair_from_context() {
     let (repository, user_id, sqlite) = repository_fixture().await;
     repository
-        .create_thread(user_id, "thread-1".to_string())
+        .create_thread(user_id, "thread-1".to_string(), None)
         .await
         .unwrap();
     let first = StartRunInput {
@@ -148,7 +149,7 @@ async fn retry_reuses_the_user_message_and_excludes_the_retried_pair_from_contex
 async fn run_rejects_reused_message_ids_that_do_not_describe_a_retry() {
     let (repository, user_id, _) = repository_fixture().await;
     repository
-        .create_thread(user_id, "thread-1".to_string())
+        .create_thread(user_id, "thread-1".to_string(), None)
         .await
         .unwrap();
     repository
@@ -222,7 +223,7 @@ async fn run_rejects_reused_message_ids_that_do_not_describe_a_retry() {
 async fn ownership_and_archive_filtering_are_enforced() {
     let (repository, user_id, _) = repository_fixture().await;
     repository
-        .create_thread(user_id, "thread-1".to_string())
+        .create_thread(user_id, "thread-1".to_string(), None)
         .await
         .unwrap();
 
@@ -236,13 +237,13 @@ async fn ownership_and_archive_filtering_are_enforced() {
         .await
         .unwrap());
     assert!(repository
-        .list_threads(user_id, "regular".to_string(), 10, None)
+        .list_threads(user_id, "regular".to_string(), 10, None, ThreadScope::All)
         .await
         .unwrap()
         .is_empty());
     assert_eq!(
         repository
-            .list_threads(user_id, "archived".to_string(), 10, None)
+            .list_threads(user_id, "archived".to_string(), 10, None, ThreadScope::All)
             .await
             .unwrap()
             .len(),
@@ -254,11 +255,11 @@ async fn ownership_and_archive_filtering_are_enforced() {
 async fn thread_pagination_keeps_same_timestamp_ties() {
     let (repository, user_id, sqlite) = repository_fixture().await;
     repository
-        .create_thread(user_id, "thread-a".to_string())
+        .create_thread(user_id, "thread-a".to_string(), None)
         .await
         .unwrap();
     repository
-        .create_thread(user_id, "thread-b".to_string())
+        .create_thread(user_id, "thread-b".to_string(), None)
         .await
         .unwrap();
     sqlite
@@ -272,16 +273,79 @@ async fn thread_pagination_keeps_same_timestamp_ties() {
         .unwrap();
 
     let first_page = repository
-        .list_threads(user_id, "regular".to_string(), 1, None)
+        .list_threads(user_id, "regular".to_string(), 1, None, ThreadScope::All)
         .await
         .unwrap();
     let first = &first_page[0];
     let cursor = format!("{}|{}", first.last_message_at, first.thread_id);
     let second_page = repository
-        .list_threads(user_id, "regular".to_string(), 1, Some(cursor))
+        .list_threads(
+            user_id,
+            "regular".to_string(),
+            1,
+            Some(cursor),
+            ThreadScope::All,
+        )
         .await
         .unwrap();
 
     assert_eq!(second_page.len(), 1);
     assert_ne!(second_page[0].thread_id, first.thread_id);
+}
+
+#[tokio::test]
+async fn scoped_cursor_filters_before_limiting_even_when_recency_is_tied() {
+    let (repository, owner, sqlite) = repository_fixture().await;
+    sqlite.with_connection(|c| c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now'),('DEAL-B',?1,'B','sell_side','unknown','pipeline','now','now')", [owner])).unwrap();
+    for (thread, deal) in [
+        ("z-free", None),
+        ("y-a", Some("DEAL-A")),
+        ("x-b", Some("DEAL-B")),
+        ("w-a", Some("DEAL-A")),
+        ("v-free", None),
+    ] {
+        repository
+            .create_thread(owner, thread.into(), deal.map(str::to_owned))
+            .await
+            .unwrap();
+    }
+    sqlite
+        .with_connection(|c| {
+            c.execute(
+                "UPDATE assistant_threads SET last_message_at='2026-10-15T12:00:00Z'",
+                [],
+            )
+        })
+        .unwrap();
+    for (scope, expected) in [
+        (ThreadScope::Freeform, vec!["z-free", "v-free"]),
+        (ThreadScope::Deal("DEAL-A".into()), vec!["y-a", "w-a"]),
+    ] {
+        let first = repository
+            .list_threads(owner, "regular".into(), 1, None, scope.clone())
+            .await
+            .unwrap();
+        assert_eq!(first[0].thread_id, expected[0]);
+        let cursor = format!("{}|{}", first[0].last_message_at, first[0].thread_id);
+        let next = repository
+            .list_threads(owner, "regular".into(), 1, Some(cursor), scope)
+            .await
+            .unwrap();
+        assert_eq!(next[0].thread_id, expected[1]);
+    }
+    assert!(repository
+        .create_thread(owner, "y-a".into(), None)
+        .await
+        .is_err());
+    assert_eq!(
+        repository
+            .get_thread(owner, "y-a".into())
+            .await
+            .unwrap()
+            .unwrap()
+            .thread
+            .deal_id
+            .as_deref(),
+        Some("DEAL-A")
+    );
 }

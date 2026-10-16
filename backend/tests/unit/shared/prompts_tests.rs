@@ -75,15 +75,13 @@ fn rendering_preserves_the_markdown_template_structure() {
         deal_id: "{{deal_name}}",
         deal_name: "Acme",
         transaction_type: "acquisition",
-        target_company: "Target",
-        primary_buyer: "Buyer",
-        deal_sponsor: "Sponsor",
-        attached_file_manifest: "- {{deal_sponsor}}",
+        engagement_type: "Target",
+        parties: "Buyer",
+        scopes: "Sponsor",
+        attached_file_manifest: "- {{scopes}}",
     });
     assert!(deal.contains("<deal_metadata>\nDeal ID: {{deal_name}}\nDeal name: Acme"));
-    assert!(
-        deal.contains("<attached_file_manifest>\n- {{deal_sponsor}}\n</attached_file_manifest>")
-    );
+    assert!(deal.contains("<attached_file_manifest>\n- {{scopes}}\n</attached_file_manifest>"));
 }
 
 #[test]

@@ -11,12 +11,14 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-use crate::adapters::sqlite::query::{QueryKind, SqlQuery, SqlValue};
+use crate::adapters::sqlite::query::{QueryKind, SqlBuilderError, SqlQuery, SqlValue};
 
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Error)]
 pub enum SqliteClientError {
+    #[error("sqlite query construction failed: {0}")]
+    QueryBuild(#[from] SqlBuilderError),
     #[error("sqlite connection lock was poisoned")]
     ConnectionLockPoisoned,
     #[error("sqlite query failed: {0}")]
@@ -87,14 +89,33 @@ pub struct WriteResult {
 /// Query access scoped to one SQLite transaction and one connection.
 ///
 /// The raw rusqlite transaction stays inside the client layer. Callers can
-/// only execute validated `SqlQuery` values and cannot commit independently.
+/// pass a query builder's `build()` result directly. Construction errors are
+/// propagated before executing SQL. Callers cannot commit independently.
 pub struct SqliteTransaction<'connection> {
     transaction: Transaction<'connection>,
 }
 
 impl SqliteTransaction<'_> {
-    pub fn read(&self, query: &SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
-        ensure_read_query(query)?;
+    pub fn read_with<T>(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+        mapper: impl FnMut(&Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>, SqliteClientError> {
+        let query = query?;
+        ensure_read_query(&query)?;
+        let mut statement = self.transaction.prepare(query.sql())?;
+        let rows = statement
+            .query_map(params_from_iter(query.parameters()), mapper)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn read(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<Vec<SqlRow>, SqliteClientError> {
+        let query = query?;
+        ensure_read_query(&query)?;
         let mut statement = self.transaction.prepare(query.sql())?;
         let rows = statement
             .query_map(params_from_iter(query.parameters()), sql_row_from_row)?
@@ -102,8 +123,12 @@ impl SqliteTransaction<'_> {
         Ok(rows)
     }
 
-    pub fn read_one(&self, query: &SqlQuery) -> Result<Option<SqlRow>, SqliteClientError> {
-        ensure_read_query(query)?;
+    pub fn read_one(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<Option<SqlRow>, SqliteClientError> {
+        let query = query?;
+        ensure_read_query(&query)?;
         Ok(self
             .transaction
             .query_row(
@@ -114,8 +139,12 @@ impl SqliteTransaction<'_> {
             .optional()?)
     }
 
-    pub fn write(&self, query: &SqlQuery) -> Result<WriteResult, SqliteClientError> {
-        ensure_write_query(query)?;
+    pub fn write(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<WriteResult, SqliteClientError> {
+        let query = query?;
+        ensure_write_query(&query)?;
         let rows_affected = self
             .transaction
             .execute(query.sql(), params_from_iter(query.parameters()))?;
@@ -131,6 +160,8 @@ impl SqliteTransaction<'_> {
 /// Synchronous methods are useful inside an existing `spawn_blocking` task.
 /// The `_async` variants move the database work to Tokio's blocking pool so an
 /// Axum handler does not block a runtime worker.
+/// Execution methods accept a query builder's `build()` result directly and
+/// propagate construction errors before accessing the connection.
 #[derive(Clone)]
 pub struct SqliteClient {
     connection: Arc<Mutex<Connection>>,
@@ -192,23 +223,30 @@ impl SqliteClient {
         operation(&mut connection)
     }
 
-    pub fn read(&self, query: &SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
+    pub fn read(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<Vec<SqlRow>, SqliteClientError> {
         self.read_with(query, sql_row_from_row)
     }
 
-    pub fn read_one(&self, query: &SqlQuery) -> Result<Option<SqlRow>, SqliteClientError> {
+    pub fn read_one(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<Option<SqlRow>, SqliteClientError> {
         self.read_one_with(query, sql_row_from_row)
     }
 
     pub fn read_with<T, F>(
         &self,
-        query: &SqlQuery,
+        query: Result<SqlQuery, SqliteClientError>,
         mut map_row: F,
     ) -> Result<Vec<T>, SqliteClientError>
     where
         F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
     {
-        ensure_read_query(query)?;
+        let query = query?;
+        ensure_read_query(&query)?;
         self.with_connection(|connection| {
             let mut statement = connection.prepare(query.sql())?;
             let rows = statement
@@ -220,13 +258,14 @@ impl SqliteClient {
 
     pub fn read_one_with<T, F>(
         &self,
-        query: &SqlQuery,
+        query: Result<SqlQuery, SqliteClientError>,
         mut map_row: F,
     ) -> Result<Option<T>, SqliteClientError>
     where
         F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
     {
-        ensure_read_query(query)?;
+        let query = query?;
+        ensure_read_query(&query)?;
         self.with_connection(|connection| {
             connection
                 .query_row(query.sql(), params_from_iter(query.parameters()), |row| {
@@ -236,8 +275,12 @@ impl SqliteClient {
         })
     }
 
-    pub fn write(&self, query: &SqlQuery) -> Result<WriteResult, SqliteClientError> {
-        ensure_write_query(query)?;
+    pub fn write(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<WriteResult, SqliteClientError> {
+        let query = query?;
+        ensure_write_query(&query)?;
         self.with_connection(|connection| {
             let rows_affected =
                 connection.execute(query.sql(), params_from_iter(query.parameters()))?;
@@ -285,22 +328,25 @@ impl SqliteClient {
         }
     }
 
-    pub async fn read_async(&self, query: SqlQuery) -> Result<Vec<SqlRow>, SqliteClientError> {
+    pub async fn read_async(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<Vec<SqlRow>, SqliteClientError> {
         let client = self.clone();
-        run_blocking(move || client.read(&query)).await
+        run_blocking(move || client.read(query)).await
     }
 
     pub async fn read_one_async(
         &self,
-        query: SqlQuery,
+        query: Result<SqlQuery, SqliteClientError>,
     ) -> Result<Option<SqlRow>, SqliteClientError> {
         let client = self.clone();
-        run_blocking(move || client.read_one(&query)).await
+        run_blocking(move || client.read_one(query)).await
     }
 
     pub async fn read_with_async<T, F>(
         &self,
-        query: SqlQuery,
+        query: Result<SqlQuery, SqliteClientError>,
         map_row: F,
     ) -> Result<Vec<T>, SqliteClientError>
     where
@@ -308,12 +354,12 @@ impl SqliteClient {
         F: for<'row> FnMut(&Row<'row>) -> rusqlite::Result<T> + Send + 'static,
     {
         let client = self.clone();
-        run_blocking(move || client.read_with(&query, map_row)).await
+        run_blocking(move || client.read_with(query, map_row)).await
     }
 
     pub async fn read_one_with_async<T, F>(
         &self,
-        query: SqlQuery,
+        query: Result<SqlQuery, SqliteClientError>,
         map_row: F,
     ) -> Result<Option<T>, SqliteClientError>
     where
@@ -321,12 +367,15 @@ impl SqliteClient {
         F: for<'row> FnMut(&Row<'row>) -> rusqlite::Result<T> + Send + 'static,
     {
         let client = self.clone();
-        run_blocking(move || client.read_one_with(&query, map_row)).await
+        run_blocking(move || client.read_one_with(query, map_row)).await
     }
 
-    pub async fn write_async(&self, query: SqlQuery) -> Result<WriteResult, SqliteClientError> {
+    pub async fn write_async(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+    ) -> Result<WriteResult, SqliteClientError> {
         let client = self.clone();
-        run_blocking(move || client.write(&query)).await
+        run_blocking(move || client.write(query)).await
     }
 
     pub async fn transaction_async<T, F>(&self, operation: F) -> Result<T, SqliteClientError>

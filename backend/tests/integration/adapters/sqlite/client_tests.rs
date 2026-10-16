@@ -36,10 +36,9 @@ fn writes_and_reads_dynamic_rows() {
         .value("name", "Ada")
         .value("role", "admin")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
 
-    let result = client.write(&insert).unwrap();
+    let result = client.write(insert).unwrap();
     assert_eq!(result.rows_affected, 1);
     assert_eq!(result.last_insert_row_id, 1);
 
@@ -47,9 +46,8 @@ fn writes_and_reads_dynamic_rows() {
         .columns(["id", "name", "role", "active"])
         .and_where(Condition::equal("active", true))
         .order_by("id", SortDirection::Ascending)
-        .build()
-        .unwrap();
-    let rows = client.read(&select).unwrap();
+        .build();
+    let rows = client.read(select).unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("id"), Some(&SqlValue::Integer(1)));
@@ -66,17 +64,15 @@ fn reads_rows_into_typed_values() {
         .value("name", "Grace")
         .value("role", Option::<String>::None)
         .value("active", true)
-        .build()
-        .unwrap();
-    client.write(&insert).unwrap();
+        .build();
+    client.write(insert).unwrap();
 
     let select = SqlBuilder::select("users")
         .columns(["id", "name"])
         .and_where(Condition::equal("name", "Grace"))
-        .build()
-        .unwrap();
+        .build();
     let user = client
-        .read_one_with(&select, |row| {
+        .read_one_with(select, |row| {
             Ok((row.get::<_, i64>("id")?, row.get::<_, String>("name")?))
         })
         .unwrap();
@@ -91,14 +87,12 @@ async fn async_methods_run_crud_queries() {
         .value("name", "Lin")
         .value("role", "analyst")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
     client.write_async(insert).await.unwrap();
 
     let select = SqlBuilder::select("users")
         .and_where(Condition::equal("name", "Lin"))
-        .build()
-        .unwrap();
+        .build();
     let row = client.read_one_async(select).await.unwrap().unwrap();
 
     assert_eq!(
@@ -110,9 +104,9 @@ async fn async_methods_run_crud_queries() {
 #[test]
 fn rejects_using_queries_for_the_wrong_operation() {
     let client = test_client();
-    let select = SqlBuilder::select("users").build().unwrap();
+    let select = SqlBuilder::select("users").build();
     assert!(matches!(
-        client.write(&select),
+        client.write(select),
         Err(SqliteClientError::InvalidOperation {
             operation: "write",
             ..
@@ -123,15 +117,126 @@ fn rejects_using_queries_for_the_wrong_operation() {
         .value("name", "Ada")
         .value("role", "admin")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
     assert!(matches!(
-        client.read(&insert),
+        client.read(insert),
         Err(SqliteClientError::InvalidOperation {
             operation: "read",
             ..
         })
     ));
+}
+
+#[test]
+fn construction_errors_reach_all_sync_execution_methods_before_row_mapping() {
+    let client = test_client();
+    assert!(matches!(
+        client.read(SqlBuilder::select("").build()),
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client.read_one(SqlBuilder::select("").build()),
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client.read_with::<(), _>(SqlBuilder::select("").build(), |_| {
+            panic!("invalid queries must not invoke row mappers")
+        }),
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client.read_one_with::<(), _>(SqlBuilder::select("").build(), |_| {
+            panic!("invalid queries must not invoke row mappers")
+        }),
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client.write(SqlBuilder::insert_into("users").build()),
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+}
+
+#[tokio::test]
+async fn construction_errors_reach_all_async_execution_methods_before_row_mapping() {
+    let client = test_client();
+    assert!(matches!(
+        client.read_async(SqlBuilder::select("").build()).await,
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client.read_one_async(SqlBuilder::select("").build()).await,
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client
+            .read_with_async::<(), _>(SqlBuilder::select("").build(), |_| {
+                panic!("invalid queries must not invoke row mappers")
+            })
+            .await,
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client
+            .read_one_with_async::<(), _>(SqlBuilder::select("").build(), |_| {
+                panic!("invalid queries must not invoke row mappers")
+            })
+            .await,
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+    assert!(matches!(
+        client
+            .write_async(SqlBuilder::insert_into("users").build())
+            .await,
+        Err(SqliteClientError::QueryBuild(_))
+    ));
+}
+
+#[tokio::test]
+async fn transaction_rolls_back_prior_writes_on_any_query_construction_error() {
+    let client = test_client();
+    let invalid_queries = [
+        SqlBuilder::select("").build(),
+        SqlBuilder::insert_into("users").build(),
+        SqlBuilder::update("users").build(),
+        SqlBuilder::delete_from("users").build(),
+    ];
+
+    for (index, query) in invalid_queries.into_iter().enumerate() {
+        let error = client
+            .transaction_async(move |tx| {
+                tx.write(
+                    SqlBuilder::insert_into("users")
+                        .value("name", "Rolled back")
+                        .value("active", true)
+                        .build(),
+                )?;
+                // Exercise every transaction execution method with a failed build.
+                match index {
+                    0 => {
+                        tx.read(query)?;
+                    }
+                    1 => {
+                        tx.write(query)?;
+                    }
+                    2 => {
+                        tx.read_one(query)?;
+                    }
+                    3 => {
+                        tx.read_with::<()>(query, |_| panic!("invalid query"))?;
+                    }
+                    _ => unreachable!(),
+                }
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, SqliteClientError::QueryBuild(_)));
+        assert!(client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .is_empty());
+    }
 }
 
 #[test]
@@ -141,23 +246,20 @@ fn executes_join_queries() {
         .value("name", "Ada")
         .value("role", "admin")
         .value("active", true)
-        .build()
-        .unwrap();
-    let user_id = client.write(&insert_user).unwrap().last_insert_row_id;
+        .build();
+    let user_id = client.write(insert_user).unwrap().last_insert_row_id;
     let insert_profile = SqlBuilder::insert_into("profiles")
         .value("user_id", user_id)
         .value("bio", "Mathematician")
-        .build()
-        .unwrap();
-    client.write(&insert_profile).unwrap();
+        .build();
+    client.write(insert_profile).unwrap();
 
     let select = SqlBuilder::select("users")
         .columns(["users.name", "profiles.bio"])
         .left_join("profiles", "users.id", "profiles.user_id")
         .and_where(Condition::equal("users.id", user_id))
-        .build()
-        .unwrap();
-    let row = client.read_one(&select).unwrap().unwrap();
+        .build();
+    let row = client.read_one(select).unwrap().unwrap();
 
     assert_eq!(row.get("name"), Some(&SqlValue::Text("Ada".to_string())));
     assert_eq!(
@@ -173,26 +275,23 @@ fn executes_insert_on_conflict_updates_with_bound_parameters() {
         .value("name", "Ada")
         .value("role", "admin")
         .value("active", true)
-        .build()
-        .unwrap();
-    let user_id = client.write(&insert_user).unwrap().last_insert_row_id;
+        .build();
+    let user_id = client.write(insert_user).unwrap().last_insert_row_id;
 
     for bio in ["Mathematician", "Programmer"] {
         let upsert_profile = SqlBuilder::insert_into("profiles")
             .value("user_id", user_id)
             .value("bio", bio)
             .on_conflict_update(ConflictUpdate::new(["user_id"]).set_excluded("bio"))
-            .build()
-            .unwrap();
-        client.write(&upsert_profile).unwrap();
+            .build();
+        client.write(upsert_profile).unwrap();
     }
 
     let select = SqlBuilder::select("profiles")
         .column("bio")
         .and_where(Condition::equal("user_id", user_id))
-        .build()
-        .unwrap();
-    let profile = client.read_one(&select).unwrap().unwrap();
+        .build();
+    let profile = client.read_one(select).unwrap().unwrap();
     assert_eq!(
         profile.get("bio"),
         Some(&SqlValue::Text("Programmer".to_string()))
@@ -206,18 +305,16 @@ fn transaction_commits_multiple_writes_together() {
         .value("name", "Katherine")
         .value("role", "analyst")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
 
     let user_id = client
         .transaction(|transaction| {
-            let user_id = transaction.write(&insert_user)?.last_insert_row_id;
+            let user_id = transaction.write(insert_user)?.last_insert_row_id;
             let insert_profile = SqlBuilder::insert_into("profiles")
                 .value("user_id", user_id)
                 .value("bio", "Orbital mechanics")
-                .build()
-                .map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))?;
-            transaction.write(&insert_profile)?;
+                .build();
+            transaction.write(insert_profile)?;
             Ok(user_id)
         })
         .unwrap();
@@ -225,10 +322,9 @@ fn transaction_commits_multiple_writes_together() {
     let profile = SqlBuilder::select("profiles")
         .column("bio")
         .and_where(Condition::equal("user_id", user_id))
-        .build()
-        .unwrap();
+        .build();
     assert_eq!(
-        client.read_one(&profile).unwrap().unwrap().get("bio"),
+        client.read_one(profile).unwrap().unwrap().get("bio"),
         Some(&SqlValue::Text("Orbital mechanics".to_string()))
     );
 }
@@ -240,25 +336,23 @@ fn transaction_rolls_back_prior_writes_when_a_later_write_fails() {
         .value("name", "Dorothy")
         .value("role", "admin")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
 
     let error = client
         .transaction(|transaction| {
-            transaction.write(&insert_user)?;
+            transaction.write(insert_user)?;
             let invalid_profile = SqlBuilder::insert_into("profiles")
                 .value("user_id", 999_i64)
                 .value("bio", "must fail")
-                .build()
-                .map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))?;
-            transaction.write(&invalid_profile)?;
+                .build();
+            transaction.write(invalid_profile)?;
             Ok(())
         })
         .unwrap_err();
     assert!(error.to_string().contains("FOREIGN KEY"));
 
-    let users = SqlBuilder::select("users").build().unwrap();
-    assert!(client.read(&users).unwrap().is_empty());
+    let users = SqlBuilder::select("users").build();
+    assert!(client.read(users).unwrap().is_empty());
 }
 
 #[test]
@@ -282,19 +376,18 @@ fn transaction_rolls_back_when_commit_fails() {
     let invalid_child = SqlBuilder::insert_into("children")
         .value("id", 1_i64)
         .value("parent_id", 999_i64)
-        .build()
-        .unwrap();
+        .build();
 
     let error = client
         .transaction(|transaction| {
-            transaction.write(&invalid_child)?;
+            transaction.write(invalid_child)?;
             Ok(())
         })
         .unwrap_err();
 
     assert!(error.to_string().contains("failed to commit"));
-    let children = SqlBuilder::select("children").build().unwrap();
-    assert!(client.read(&children).unwrap().is_empty());
+    let children = SqlBuilder::select("children").build();
+    assert!(client.read(children).unwrap().is_empty());
 }
 
 #[test]
@@ -304,9 +397,8 @@ fn transaction_reads_then_builds_a_dependent_write_on_the_same_connection() {
         .value("name", "First")
         .value("role", "analyst")
         .value("active", true)
-        .build()
-        .unwrap();
-    client.write(&first).unwrap();
+        .build();
+    client.write(first).unwrap();
 
     client
         .transaction(|transaction| {
@@ -314,48 +406,45 @@ fn transaction_reads_then_builds_a_dependent_write_on_the_same_connection() {
                 .column("id")
                 .order_by("id", SortDirection::Descending)
                 .limit(1)
-                .build()
-                .map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))?;
-            let latest_id = match transaction.read_one(&latest)?.unwrap().get("id") {
+                .build();
+            let latest_id = match transaction.read_one(latest)?.unwrap().get("id") {
                 Some(SqlValue::Integer(value)) => *value,
                 value => panic!("unexpected id value: {value:?}"),
             };
             let dependent = SqlBuilder::insert_into("profiles")
                 .value("user_id", latest_id)
                 .value("bio", format!("profile-{latest_id}"))
-                .build()
-                .map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))?;
-            transaction.write(&dependent)?;
+                .build();
+            transaction.write(dependent)?;
             Ok(())
         })
         .unwrap();
 
-    let profiles = SqlBuilder::select("profiles").build().unwrap();
-    assert_eq!(client.read(&profiles).unwrap().len(), 1);
+    let profiles = SqlBuilder::select("profiles").build();
+    assert_eq!(client.read(profiles).unwrap().len(), 1);
 }
 
 #[test]
 fn transaction_preserves_query_kind_validation() {
     let client = test_client();
-    let select = SqlBuilder::select("users").build().unwrap();
+    let select = SqlBuilder::select("users").build();
     let insert = SqlBuilder::insert_into("users")
         .value("name", "Wrong operation")
         .value("role", "analyst")
         .value("active", true)
-        .build()
-        .unwrap();
+        .build();
 
     client
         .transaction(|transaction| {
             assert!(matches!(
-                transaction.write(&select),
+                transaction.write(select),
                 Err(SqliteClientError::InvalidOperation {
                     operation: "write",
                     ..
                 })
             ));
             assert!(matches!(
-                transaction.read_one(&insert),
+                transaction.read_one(insert),
                 Err(SqliteClientError::InvalidOperation {
                     operation: "read",
                     ..
@@ -387,12 +476,9 @@ async fn immediate_transactions_serialize_dependent_version_writers() {
                         .column("version_number")
                         .order_by("version_number", SortDirection::Descending)
                         .limit(1)
-                        .build()
-                        .map_err(|error| {
-                            SqliteClientError::transaction_aborted(error.to_string())
-                        })?;
+                        .build();
                     let version_number = transaction
-                        .read_one(&latest)?
+                        .read_one(latest)?
                         .map(|row| match row.get("version_number") {
                             Some(SqlValue::Integer(value)) => *value + 1,
                             value => panic!("unexpected version value: {value:?}"),
@@ -400,11 +486,8 @@ async fn immediate_transactions_serialize_dependent_version_writers() {
                         .unwrap_or(1);
                     let insert = SqlBuilder::insert_into("versions")
                         .value("version_number", version_number)
-                        .build()
-                        .map_err(|error| {
-                            SqliteClientError::transaction_aborted(error.to_string())
-                        })?;
-                    transaction.write(&insert)?;
+                        .build();
+                    transaction.write(insert)?;
                     Ok(version_number)
                 })
                 .await

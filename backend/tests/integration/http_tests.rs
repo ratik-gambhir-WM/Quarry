@@ -100,7 +100,7 @@ async fn handlers_reject_transport_validation_failures_before_service_calls() {
             Request::post("/api/v1/deals")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"dealId":"DEAL-000184","dealName":"Acme","status":"Active","startDate":"2026-05-01","closeDate":"2026-01-01","transactionType":"Acquisition","targetCompany":"WidgetCo","primaryBuyer":"Buyer","dealSponsor":"Sponsor","userEmail":"analyst@example.com"}"#,
+                    r#"{"dealId":"DEAL-000184","dealName":"Acme","dealCode":null,"status":"pipeline","engagementType":"buy_side","startDate":"2026-05-01","expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":"2026-01-01","transactionType":"unknown","parties":[],"scopes":[],"userEmail":"analyst@example.com"}"#,
                 ))
                 .unwrap(),
         )
@@ -761,13 +761,9 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
                     r#"{
                         "dealId":"DEAL-000184",
                         "dealName":"Acme acquisition of WidgetCo",
-                        "status":"Active",
-                        "startDate":"2026-02-14",
-                        "closeDate":"2026-05-01",
-                        "transactionType":"Acquisition",
-                        "targetCompany":"WidgetCo",
-                        "primaryBuyer":"CVS",
-                        "dealSponsor":"Thoma Bravo",
+                        "status":"pipeline", "dealCode":null, "engagementType":"buy_side",
+                        "startDate":null, "expectedCloseDate":null, "actualCloseDate":null, "engagementCompletedDate":null,
+                        "transactionType":"unknown", "parties":[], "scopes":[],
                         "userEmail":"analyst@example.com",
                         "localPath":null,
                         "sharepointLink":null
@@ -782,7 +778,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
         serde_json::from_slice(&to_bytes(create_deal.into_body(), usize::MAX).await.unwrap())
             .unwrap();
     assert_eq!(created_deal["deal"]["userId"], user_id);
-    assert_eq!(created_deal["metadata"]["userId"], user_id);
+    assert!(created_deal["metadata"].get("userId").is_none());
 
     let get_deal = app
         .clone()
@@ -856,7 +852,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     .unwrap();
     assert_eq!(saved["deal"]["dealId"], "DEAL-000184");
     assert_eq!(saved["deal"]["userId"], user_id);
-    assert_eq!(saved["metadata"]["userId"], user_id);
+    assert!(saved["metadata"].get("userId").is_none());
     assert_eq!(saved["metadata"]["keyQuestionsJson"], "[]");
     assert_eq!(
         saved["metadata"]["sharepointLink"],
@@ -1208,10 +1204,9 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
                 connection.execute(
                     r#"
                     INSERT INTO deals (
-                        deal_id, user_id, deal_name, status, start_date, close_date,
-                        transaction_type, target_company, primary_buyer, deal_sponsor
-                    ) VALUES (?1, ?2, 'Project Test', 'Active', '2026-01-01', '2026-02-01',
-                              'Buy-side', 'Target', 'Buyer', 'Test Capital')
+                        deal_id, user_id, deal_name, status, created_at, updated_at, engagement_type, transaction_type
+                    ) VALUES (?1, ?2, 'Project Test', 'active', '2026-01-01', '2026-02-01',
+                              'buy_side', 'unknown')
                     "#,
                     rusqlite::params![deal_id, user_id],
                 )?;

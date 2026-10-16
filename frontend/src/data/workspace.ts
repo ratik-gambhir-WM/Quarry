@@ -1,3 +1,5 @@
+import type { DealParty, EngagementType, TransactionType, DealStatus } from "./dealModel";
+import type { SavedDeal, SavedDealMetadata } from "./dealExtraction";
 export type WorkspaceLocationState = {
   email?: string;
 };
@@ -71,16 +73,19 @@ export type DealRoomData = {
 };
 
 export type DealPortfolioMetadata = {
-  closeDate?: string;
-  dealSponsor?: string;
-  primaryBuyer?: string;
   startDate?: string;
-  status: string;
-  targetCompany?: string;
-  transactionType?: string;
+  expectedCloseDate?: string;
+  actualCloseDate?: string;
+  engagementCompletedDate?: string;
+  engagementType: EngagementType;
+  status: DealStatus;
+  parties: DealParty[];
+  transactionType: TransactionType;
 };
 
 export type WorkspaceDeal = {
+  persisted?: SavedDeal;
+  persistedMetadata?: SavedDealMetadata | null;
   colorClassName: string;
   complete?: boolean;
   portfolio: DealPortfolioMetadata;

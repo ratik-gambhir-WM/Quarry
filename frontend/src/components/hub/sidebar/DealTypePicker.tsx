@@ -1,41 +1,16 @@
-import { Field, FieldError, FieldLabel } from "../../ui/field";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../ui/select";
+import { codeLabel, transactionTypeOptions, type TransactionType } from "../../../data/dealModel";
 
-export const transactionTypeOptions = ["Acquisition", "Divestiture", "Merger", "Recapitalization", "Growth Equity", "Other"];
+export function CodeSelect<T extends string>({ label, options, value, onChange }: {
+  label: string; options: readonly T[]; value: T; onChange: (value: T) => void;
+}) {
+  return <label className="grid gap-2 text-sm font-medium">{label}
+    <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={value} onChange={(event) => {
+      const selected = options.find((option) => option === event.currentTarget.value);
+      if (selected) onChange(selected);
+    }}>{options.map((option) => <option key={option} value={option}>{codeLabel(option)}</option>)}</select>
+  </label>;
+}
 
-type TransactionTypePickerProps = {
-  error?: string;
-  onChange: (value: string) => void;
-  value: string;
-};
-
-export function TransactionTypePicker({ error = "", onChange, value }: TransactionTypePickerProps) {
-  return (
-    <Field data-invalid={Boolean(error)}>
-      <FieldLabel htmlFor="add-deal-transaction-type">Transaction type</FieldLabel>
-      <Select onValueChange={onChange} required value={value}>
-        <SelectTrigger
-          aria-invalid={Boolean(error)}
-          className="w-full"
-          id="add-deal-transaction-type"
-        >
-          <SelectValue placeholder="Select transaction type" />
-        </SelectTrigger>
-        <SelectContent position="popper">
-          {transactionTypeOptions.map((transactionType) => (
-            <SelectItem key={transactionType} value={transactionType}>
-              {transactionType}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <FieldError>{error}</FieldError>
-    </Field>
-  );
+export function TransactionTypePicker({ value, onChange }: { value: TransactionType; onChange: (value: TransactionType) => void }) {
+  return <CodeSelect label="Transaction type" options={transactionTypeOptions} value={value} onChange={onChange} />;
 }
