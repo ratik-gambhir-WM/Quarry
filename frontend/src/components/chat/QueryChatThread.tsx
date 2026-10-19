@@ -29,6 +29,7 @@ export function QueryChatThread({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <p className="px-4 py-1 text-center text-xs text-muted-foreground">{(state.threads.find((t) => t.threadId === state.selectedThreadId)?.dealId ?? state.scopeDealId) ? `Deal chat · ${state.threads.find((t) => t.threadId === state.selectedThreadId)?.dealId ?? state.scopeDealId}` : "Freeform chat"}</p>
       <div
         className="workspace-scrollbar-hidden relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto"
         data-slot="query-thread-viewport"

@@ -33,6 +33,7 @@ import {
 type DataRoomQuickActionsProps = {
   documentSearch: Omit<DataRoomDocumentSearchProps, "finalFocusEl" | "trigger">;
   email?: string;
+  dealId: string;
   onUploadNewFile: () => void;
 };
 
@@ -61,6 +62,7 @@ function getInitialSynthesisPanelSize() {
 
 export function DataRoomQuickActions({
   documentSearch,
+  dealId,
   email,
   onUploadNewFile,
 }: DataRoomQuickActionsProps) {
@@ -142,7 +144,7 @@ export function DataRoomQuickActions({
           </Button>
         </FloatingPanelTrigger>
         <FloatingPanelContent>
-          <QueryChatRuntimeProvider key={email ?? ""} onContextTruncated={setContextTruncated} userEmail={email ?? ""}>
+          <QueryChatRuntimeProvider dealId={dealId} scope="deal" key={`${email ?? ""}:${dealId}`} onContextTruncated={setContextTruncated} userEmail={email ?? ""}>
             <FloatingPanelHeader>
               <FloatingPanelTitle>Synthesis Canvas</FloatingPanelTitle>
               <SynthesisChatPicker />
@@ -240,6 +242,7 @@ function SynthesisChatPicker() {
         {!isThreadListLoading && !threadListError && threads.length === 0 ? (
           <DropdownMenuLabel>No previous chats yet.</DropdownMenuLabel>
         ) : null}
+        {runtime.state.nextCursor ? <DropdownMenuItem disabled={isThreadListLoading} onSelect={() => void runtime.loadMoreThreads()}>Load more chats</DropdownMenuItem> : null}
         {threads.map((thread) => (
           <DropdownMenuItem
             disabled={actionsDisabled || selectedThreadId === thread.threadId}

@@ -22,8 +22,12 @@ use crate::{
             self,
             chat::{repository::AssistantChatRepository, service::AssistantChatService},
         },
+        companies::{self, repository::CompanyRepository, service::CompanyService},
         data_rooms::{self, service::DataRoomService},
-        deals::{self, repository::DealRepository, service::DealService, DataRoomSourceReader},
+        deals::{
+            self, repository::DealRepository, service::DealService, DataRoomSourceReader,
+            DealContextReader,
+        },
         dev_support,
         documents::{
             index::repository::{DocumentIndexReader, DocumentIndexWriter, DocumentSearchIndex},
@@ -143,6 +147,10 @@ pub(crate) fn assemble_api(
         .map(|studio| Arc::new(DiligenceStudioClient::new(http, studio.base_url.clone())));
 
     let user_directory = UserDirectory::new(users_repository.clone());
+    let companies = Arc::new(CompanyService::new(
+        CompanyRepository::new(sqlite.clone()),
+        user_directory.clone(),
+    ));
     let users = Arc::new(UserService::new(users_repository.clone()));
     let deals = Arc::new(DealService::new(
         user_directory.clone(),
@@ -155,6 +163,7 @@ pub(crate) fn assemble_api(
             .unwrap_or_else(|| DEFAULT_DEAL_EXTRACTION_MODEL.to_string()),
         prompts.clone(),
     ));
+    let deal_context = DealContextReader::new(deals_repository.clone());
     let data_rooms = Arc::new(DataRoomService::new(
         DataRoomSourceReader::new(deals_repository),
         config.data_room.clone(),
@@ -195,23 +204,27 @@ pub(crate) fn assemble_api(
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
     let templates = Arc::new(TemplateService::new(diligence_studio));
-    let assistant_chat = Arc::new(AssistantChatService::with_persistence(
-        openai,
-        config
-            .openai
-            .as_ref()
-            .map(|config| config.chat_model.clone())
-            .unwrap_or_else(|| "gpt-5.5".to_string()),
-        AssistantChatRepository::new(sqlite),
-        user_directory,
-        prompts,
-    ));
+    let assistant_chat = Arc::new(
+        AssistantChatService::with_persistence(
+            openai,
+            config
+                .openai
+                .as_ref()
+                .map(|config| config.chat_model.clone())
+                .unwrap_or_else(|| "gpt-5.5".to_string()),
+            AssistantChatRepository::new(sqlite),
+            user_directory,
+            prompts,
+        )
+        .with_deal_context(deal_context),
+    );
 
     Router::new()
         .merge(system::route::routes(database))
         .merge(dev_support::route::routes())
         .merge(users::route::routes(users))
         .merge(deals::route::routes(deals))
+        .merge(companies::route::routes(companies))
         .merge(data_rooms::route::routes(data_rooms))
         .merge(ingestion::route::routes(document_ingestion, document_jobs))
         .merge(viewing::route::routes(stored_documents))

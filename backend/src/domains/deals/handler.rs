@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::{
     app::http::error::{AppError, AppResult},
     domains::deals::service::{
-        Deal, DealService, DealWithMetadata, SaveDealInput, SaveDealResponse,
+        Deal, DealFields, DealService, DealWithMetadata, SaveDealInput, SaveDealResponse,
     },
 };
 
@@ -28,6 +28,7 @@ pub(super) async fn get_deal_handler(
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<DealWithMetadata>> {
+    validate_deal_id(&deal_id)?;
     state
         .deals
         .get(&deal_id)
@@ -49,41 +50,24 @@ pub(super) async fn create_deal_handler(
         .map_err(AppError::from)
 }
 
-fn validate_deal_input(input: &SaveDealInput) -> AppResult<()> {
-    let required = [
-        ("dealId", input.deal_id.as_str()),
-        ("dealName", input.deal_name.as_str()),
-        ("status", input.status.as_str()),
-        ("startDate", input.start_date.as_str()),
-        ("closeDate", input.close_date.as_str()),
-        ("transactionType", input.transaction_type.as_str()),
-        ("targetCompany", input.target_company.as_str()),
-        ("primaryBuyer", input.primary_buyer.as_str()),
-        ("dealSponsor", input.deal_sponsor.as_str()),
-        ("userEmail", input.user_email.as_str()),
-    ];
-    if let Some((name, _)) = required.iter().find(|(_, value)| value.trim().is_empty()) {
-        return Err(AppError::bad_request(format!("{name} is required")));
-    }
-    if !input.deal_id.starts_with("DEAL-")
-        || input.deal_id.len() > 64
-        || !input
-            .deal_id
+pub(super) fn validate_deal_id(id: &str) -> AppResult<()> {
+    if !id.starts_with("DEAL-")
+        || id.len() > 64
+        || !id
             .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
     {
-        return Err(AppError::bad_request(
-            "dealId must start with DEAL- and contain only letters, numbers, hyphens, and underscores",
-        ));
+        return Err(AppError::bad_request("invalid dealId"));
     }
-    let start_date = parse_date("startDate", &input.start_date)?;
-    let close_date = parse_date("closeDate", &input.close_date)?;
-    if close_date < start_date {
-        return Err(AppError::bad_request(
-            "closeDate cannot be before startDate",
-        ));
+    Ok(())
+}
+fn validate_deal_input(input: &SaveDealInput) -> AppResult<()> {
+    validate_deal_id(&input.deal_id)?;
+    validate_text("userEmail", &input.user_email, 320)?;
+    validate_fields(&input.fields)?;
+    if let Some(path) = &input.local_path {
+        validate_text("localPath", path, 4096)?;
     }
-
     let local_path = trim_optional(input.local_path.as_deref());
     let sharepoint_link = trim_optional(input.sharepoint_link.as_deref());
     if local_path.is_some() && sharepoint_link.is_some() {
@@ -93,9 +77,74 @@ fn validate_deal_input(input: &SaveDealInput) -> AppResult<()> {
     }
     validate_sharepoint_link(sharepoint_link)
 }
+fn validate_text(field: &str, value: &str, max: usize) -> AppResult<()> {
+    if value.trim().is_empty() || value.chars().count() > max || value.chars().any(char::is_control)
+    {
+        return Err(AppError::bad_request(format!("{field} is invalid")));
+    }
+    Ok(())
+}
+fn validate_fields(fields: &DealFields) -> AppResult<()> {
+    validate_text("dealName", &fields.deal_name, 300)?;
+    if let Some(code) = &fields.deal_code {
+        validate_text("dealCode", code, 100)?;
+    }
+    for (name, date) in [
+        ("startDate", &fields.start_date),
+        ("expectedCloseDate", &fields.expected_close_date),
+        ("actualCloseDate", &fields.actual_close_date),
+        ("engagementCompletedDate", &fields.engagement_completed_date),
+    ] {
+        if let Some(date) = date {
+            parse_date(name, date)?;
+        }
+    }
+    if let (Some(start), Some(completed)) = (&fields.start_date, &fields.engagement_completed_date)
+    {
+        if completed < start {
+            return Err(AppError::bad_request(
+                "engagementCompletedDate cannot be before startDate",
+            ));
+        }
+    }
+    if fields.parties.len() > 100 || fields.scopes.len() > 7 {
+        return Err(AppError::bad_request("too many parties or scopes"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for party in &fields.parties {
+        uuid::Uuid::parse_str(&party.company_id)
+            .map_err(|_| AppError::bad_request("invalid companyId"))?;
+        if !seen.insert((&party.company_id, party.role)) {
+            return Err(AppError::bad_request("duplicate party assignment"));
+        }
+        if let Some(notes) = &party.notes {
+            validate_text("notes", notes, 2000)?;
+        }
+    }
+    if fields
+        .scopes
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len()
+        != fields.scopes.len()
+    {
+        return Err(AppError::bad_request("duplicate scope"));
+    }
+    Ok(())
+}
+pub(super) async fn update_deal_handler(
+    State(state): State<DealsHttpState>,
+    Path(id): Path<String>,
+    Json(fields): Json<DealFields>,
+) -> AppResult<Json<SaveDealResponse>> {
+    validate_deal_id(&id)?;
+    validate_fields(&fields)?;
+    Ok(Json(state.deals.update(&id, fields).await?))
+}
 
 pub(super) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
-    if let Some(link) = link {
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text("sharepointLink", link, 2048)?;
         let parsed = reqwest::Url::parse(link)
             .map_err(|_| AppError::bad_request("sharepointLink must be an HTTPS SharePoint URL"))?;
         let is_sharepoint = parsed
@@ -115,12 +164,18 @@ pub(super) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
 }
 
 fn parse_date(field: &str, value: &str) -> AppResult<NaiveDate> {
-    NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
+    if value.len() != 10 || value.as_bytes()[4] != b'-' || value.as_bytes()[7] != b'-' {
+        return Err(AppError::bad_request(format!(
+            "{field} must use YYYY-MM-DD format"
+        )));
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|_| AppError::bad_request(format!("{field} must use YYYY-MM-DD format")))
 }
 
 pub(super) fn validate_https_link(field: &str, link: Option<&str>) -> AppResult<()> {
-    if let Some(link) = link {
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text(field, link, 2048)?;
         let parsed = reqwest::Url::parse(link)
             .map_err(|_| AppError::bad_request(format!("{field} must be an HTTPS URL")))?;
         if parsed.scheme() != "https"
@@ -144,6 +199,7 @@ pub(super) async fn archive_deal_handler(
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<Deal>> {
+    validate_deal_id(&deal_id)?;
     state
         .deals
         .archive(&deal_id)

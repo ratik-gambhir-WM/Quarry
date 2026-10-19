@@ -32,7 +32,7 @@ beforeEach(() => {
 describe("DataRoomQuickActions", () => {
   it("renders evenly distributed Upload, Synthesis Canvas, Notes, and Search actions", () => {
     render(
-      <DataRoomQuickActions
+      <DataRoomQuickActions dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -60,7 +60,7 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions
+      <DataRoomQuickActions dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -78,7 +78,7 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions
+      <DataRoomQuickActions dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -100,7 +100,7 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions
+      <DataRoomQuickActions dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -162,7 +162,7 @@ describe("DataRoomQuickActions", () => {
     });
 
     render(
-      <DataRoomQuickActions
+      <DataRoomQuickActions dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,

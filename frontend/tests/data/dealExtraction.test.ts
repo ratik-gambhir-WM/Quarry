@@ -1,3 +1,4 @@
+import { testDeal, testParty } from "@/test/fixtures/deals";
 import { describe, expect, it } from "vitest";
 import {
   buildDealResources,
@@ -8,18 +9,7 @@ import {
   type SavedDealMetadata,
 } from "@/data/dealExtraction";
 
-const savedDeal: SavedDeal = {
-  closeDate: "2026-09-12",
-  dealId: "DEAL-123",
-  dealName: "Acme",
-  dealSponsor: "Thoma Bravo",
-  primaryBuyer: "Cvs",
-  startDate: "2026-08-03",
-  status: "Active",
-  targetCompany: "Target",
-  transactionType: "Acquisition",
-  userId: 1,
-};
+const savedDeal: SavedDeal = testDeal({ dealId: "DEAL-123", dealName: "Acme", startDate: "2026-08-03", expectedCloseDate: "2026-09-12", status: "active", transactionType: "strategic_acquisition", parties: [testParty("Target", "target"), testParty("Cvs", "buyer"), testParty("Thoma Bravo", "pe_sponsor")] });
 
 const savedMetadata: SavedDealMetadata = {
   dealId: savedDeal.dealId,
@@ -29,37 +19,29 @@ const savedMetadata: SavedDealMetadata = {
   rlLink: "https://example.com/request-list",
   sharepointLink: "https://northwind.sharepoint.com/sites/acme",
   sowLink: "https://example.com/sow",
-  userId: savedDeal.userId,
 };
 
 describe("buildWorkspaceDealFromPersisted", () => {
   it("builds a company-focused diligence description from the deal details", () => {
     const workspaceDeal = buildWorkspaceDealFromPersisted(savedDeal, null);
 
-    expect(workspaceDeal.room.summary).toContain(
-      "Target is the target company in this acquisition opportunity for Cvs",
-    );
-    expect(workspaceDeal.room.summary).toContain(
-      "Thoma Bravo serving as the deal sponsor",
-    );
-    expect(workspaceDeal.room.summary).toContain(
-      "diligence materials, findings, and open questions",
-    );
-    expect(workspaceDeal.portfolio).toEqual({
-      closeDate: "2026-09-12",
-      dealSponsor: "Thoma Bravo",
-      primaryBuyer: "Cvs",
-      startDate: "2026-08-03",
-      status: "Active",
-      targetCompany: "Target",
-      transactionType: "Acquisition",
-    });
+    expect(workspaceDeal.room.summary).toContain("Target: Target");
+    expect(workspaceDeal.room.summary).toContain("Buyer: Cvs");
+    expect(workspaceDeal.room.summary).toContain("PE sponsor: Thoma Bravo");
+    expect(workspaceDeal.portfolio.parties).toEqual(savedDeal.parties);
+    expect(workspaceDeal.room.metrics).toContainEqual({ label: "Actual close", value: "Unavailable" });
   });
 
-  it.each(["Closed", " completed "])("normalizes %s as complete", (status) => {
-    const workspaceDeal = buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null);
-
-    expect(workspaceDeal.complete).toBe(true);
+  it.each(["completed", "cancelled"] as const)("marks %s as historic", (status) => {
+    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null).complete).toBe(true);
+  });
+  it("does not infer engagement completion from a transaction close", () => {
+    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, actualCloseDate: "2026-09-01", status: "active" }, null).complete).toBe(false);
+  });
+  it("describes an unknown pipeline without placeholder companies", () => {
+    const workspace = buildWorkspaceDealFromPersisted(testDeal(), null);
+    expect(workspace.room.summary).toContain("Companies are unspecified");
+    expect(workspace.portfolio.parties).toEqual([]);
   });
 
   it("preserves extracted question order and fresh SOW metadata", () => {

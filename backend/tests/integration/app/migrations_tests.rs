@@ -12,10 +12,9 @@ fn seed_deal(connection: &Connection, deal_id: &str, status: &str) {
         .execute(
             r#"
             INSERT INTO deals (
-                deal_id, user_id, deal_name, status, start_date, close_date,
-                transaction_type, target_company, primary_buyer, deal_sponsor
+                deal_id, user_id, deal_name, status, created_at, updated_at, engagement_type, transaction_type
             ) VALUES (?1, ?2, 'Project Test', ?3, '2026-01-01', '2026-02-01',
-                      'Buy-side', 'Target', 'Buyer', 'Test Capital')
+                      'buy_side', 'unknown')
             "#,
             rusqlite::params![deal_id, user_id, status],
         )
@@ -76,7 +75,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
     let mut connection = Connection::open_in_memory().unwrap();
 
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-000001", "Active");
+    seed_deal(&connection, "DEAL-000001", "active");
     insert_file_aggregate(&connection, "DEAL-000001", "file-1", "version-1");
     run_migrations(&mut connection).unwrap();
 
@@ -88,7 +87,6 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
         table_columns(&connection, "deal_metadata"),
         [
             "deal_id",
-            "user_id",
             "key_questions_json",
             "local_path",
             "sharepoint_link",
@@ -150,7 +148,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
 fn file_schema_enforces_foreign_keys_json_and_one_current_version() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-CONSTRAINTS", "Active");
+    seed_deal(&connection, "DEAL-CONSTRAINTS", "active");
 
     assert!(connection
         .execute(
@@ -201,12 +199,12 @@ fn file_schema_enforces_foreign_keys_json_and_one_current_version() {
 fn deal_archive_retains_files_and_physical_delete_cascades() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-CASCADE", "Active");
+    seed_deal(&connection, "DEAL-CASCADE", "active");
     insert_file_aggregate(&connection, "DEAL-CASCADE", "file-1", "version-1");
 
     connection
         .execute(
-            "UPDATE deals SET status = 'Archived' WHERE deal_id = 'DEAL-CASCADE'",
+            "UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = 'DEAL-CASCADE'",
             [],
         )
         .unwrap();
@@ -226,7 +224,7 @@ fn deal_archive_retains_files_and_physical_delete_cascades() {
 fn file_and_version_deletes_cascade_to_their_children() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-FILE-CASCADE", "Active");
+    seed_deal(&connection, "DEAL-FILE-CASCADE", "active");
     insert_file_aggregate(
         &connection,
         "DEAL-FILE-CASCADE",
@@ -274,269 +272,107 @@ fn file_and_version_deletes_cascade_to_their_children() {
     );
 }
 
-fn create_actual_version_5_database(connection: &Connection) {
-    connection
-        .execute_batch(
-            r#"
-            PRAGMA foreign_keys = ON;
-
-            CREATE TABLE app_metadata (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
+#[test]
+fn incompatible_layouts_are_rejected_without_erasing_records() {
+    for marker in [0, 6, 7, 8, 10] {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("CREATE TABLE users (name TEXT); INSERT INTO users VALUES ('retained');")
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", marker)
+            .unwrap();
+        assert!(run_migrations(&mut connection).is_err());
+        assert_eq!(table_count(&connection, "users"), 1);
+    }
+}
+#[test]
+fn explicit_reset_discards_records_and_reopen_preserves_new_records() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    migrate(&sqlite).unwrap();
+    sqlite
+        .with_connection(|c| {
+            seed_deal(c, "DEAL-OLD", "pipeline");
+            Ok(())
+        })
+        .unwrap();
+    reset_development(&sqlite).unwrap();
+    sqlite
+        .with_connection(|c| {
+            assert_eq!(table_count(c, "users"), 0);
+            assert_eq!(table_count(c, "deals"), 0);
+            assert_eq!(
+                c.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))?,
+                1
             );
-
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                api_key TEXT NOT NULL,
-                role TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE reminders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                reminder TEXT NOT NULL,
-                notes TEXT NOT NULL,
-                date TEXT NOT NULL,
-                link TEXT NOT NULL,
-                time TEXT,
-                deal TEXT,
-                tag TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE deals (
-                deal_id TEXT PRIMARY KEY NOT NULL,
-                deal_name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                start_date TEXT NOT NULL,
-                close_date TEXT NOT NULL,
-                transaction_type TEXT NOT NULL,
-                target_company TEXT NOT NULL,
-                primary_buyer TEXT NOT NULL,
-                deal_sponsor TEXT NOT NULL,
-                CHECK (length(trim(deal_id)) > 0),
-                CHECK (length(trim(deal_name)) > 0),
-                CHECK (length(trim(status)) > 0),
-                CHECK (length(trim(start_date)) > 0),
-                CHECK (length(trim(close_date)) > 0),
-                CHECK (length(trim(transaction_type)) > 0),
-                CHECK (length(trim(target_company)) > 0),
-                CHECK (length(trim(primary_buyer)) > 0),
-                CHECK (length(trim(deal_sponsor)) > 0)
-            );
-
-            CREATE INDEX idx_deals_status ON deals(status);
-            CREATE INDEX idx_deals_transaction_type ON deals(transaction_type);
-            CREATE INDEX idx_deals_close_date ON deals(close_date);
-
-            CREATE TABLE deal_metadata (
-                deal_id TEXT PRIMARY KEY NOT NULL,
-                user_id INTEGER NOT NULL,
-                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
-                local_path TEXT,
-                sharepoint_link TEXT,
-                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
-                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
-                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
-                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
-            );
-
-            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
-            PRAGMA user_version = 5;
-            "#,
-        )
+            seed_deal(c, "DEAL-NEW", "pipeline");
+            Ok(())
+        })
+        .unwrap();
+    migrate(&sqlite).unwrap();
+    sqlite
+        .with_connection(|c| {
+            assert_eq!(table_count(c, "deals"), 1);
+            Ok(())
+        })
         .unwrap();
 }
-
 #[test]
-fn migration_recreates_the_complete_version_8_schema_from_an_actual_version_5_database() {
+fn failed_reset_rolls_back_and_restores_foreign_keys() {
     let mut connection = Connection::open_in_memory().unwrap();
-    create_actual_version_5_database(&connection);
-    connection
-        .execute_batch(
-            r#"
-            INSERT INTO users (first_name, last_name, email, api_key, role)
-            VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
-            INSERT INTO deals (
-                deal_id, deal_name, status, start_date, close_date,
-                transaction_type, target_company, primary_buyer, deal_sponsor
-            ) VALUES (
-                'DEAL-V5', 'Project V5', 'Active', '2026-01-01', '2026-02-01',
-                'Buy-side', 'Target', 'Buyer', 'Test Capital'
-            );
-            INSERT INTO deal_metadata (
-                deal_id, user_id, key_questions_json, local_path, sharepoint_link
-            ) VALUES ('DEAL-V5', 1, '["Why?"]', '/tmp/data-room', NULL);
-            "#,
-        )
-        .unwrap();
-
-    run_migrations(&mut connection).unwrap();
-
+    connection.execute_batch("CREATE TABLE users (name TEXT); INSERT INTO users VALUES ('retained'); CREATE VIEW deals AS SELECT name FROM users;").unwrap();
+    assert!(reset_connection(&mut connection).is_err());
+    assert_eq!(table_count(&connection, "users"), 1);
     assert_eq!(
         connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        1
     );
-    assert_eq!(
-        table_columns(&connection, "deals"),
-        [
-            "deal_id",
-            "user_id",
-            "deal_name",
-            "status",
-            "start_date",
-            "close_date",
-            "transaction_type",
-            "target_company",
-            "primary_buyer",
-            "deal_sponsor",
-        ]
-    );
-    assert_eq!(table_count(&connection, "users"), 0);
-    assert_eq!(table_count(&connection, "deals"), 0);
-    assert_eq!(table_count(&connection, "deal_metadata"), 0);
-    let tables = connection
-        .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert_eq!(
-        tables,
-        [
-            "app_metadata",
-            "assistant_messages",
-            "assistant_threads",
-            "deal_metadata",
-            "deals",
-            "quarry_file_blobs",
-            "quarry_file_versions",
-            "quarry_files",
-            "reminders",
-            "users",
-        ]
-    );
-    assert_eq!(
-        table_columns(&connection, "quarry_file_blobs"),
-        ["version_id", "file_bytes"]
-    );
-    connection
-        .execute_batch(
-            r#"
-            INSERT INTO users (first_name, last_name, email, api_key, role)
-            VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst');
-            INSERT INTO deals (
-                deal_id, user_id, deal_name, status, start_date, close_date,
-                transaction_type, target_company, primary_buyer, deal_sponsor
-            ) VALUES (
-                'DEAL-V6', 1, 'Project V6', 'Active', '2026-01-01', '2026-02-01',
-                'Buy-side', 'Target', 'Buyer', 'Test Capital'
-            )
-            "#,
-        )
-        .unwrap();
 }
-
 #[test]
-fn migration_adds_nullable_deal_links_to_version_6_without_losing_data() {
-    let mut connection = Connection::open_in_memory().unwrap();
-    run_migrations(&mut connection).unwrap();
-    connection
-        .execute_batch(
-            r#"
-            DROP TABLE deal_metadata;
-
-            CREATE TABLE deal_metadata (
-                deal_id TEXT PRIMARY KEY NOT NULL,
-                user_id INTEGER NOT NULL,
-                key_questions_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(key_questions_json)),
-                local_path TEXT,
-                sharepoint_link TEXT,
-                FOREIGN KEY (deal_id) REFERENCES deals(deal_id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
-                CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
-                CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
-                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
-            );
-
-            CREATE INDEX idx_deal_metadata_user_id ON deal_metadata(user_id);
-            PRAGMA user_version = 6;
-            "#,
-        )
-        .unwrap();
-    seed_deal(&connection, "DEAL-V6", "Active");
-    connection
+fn final_model_constraints_and_chat_delete_restrictions_hold() {
+    let mut c = Connection::open_in_memory().unwrap();
+    run_migrations(&mut c).unwrap();
+    seed_deal(&c, "DEAL-1", "pipeline");
+    let owner = c.last_insert_rowid();
+    c.execute("INSERT INTO companies (company_id, user_id, name, created_at, updated_at) VALUES ('c1', ?1, 'Same Name', 'now', 'now'), ('c2', ?1, 'Same Name', 'now', 'now')", [owner]).unwrap();
+    c.execute("INSERT INTO deal_parties VALUES ('p1', 'DEAL-1', 'c1', 'buyer', NULL), ('p2', 'DEAL-1', 'c1', 'portfolio_company', NULL), ('p3', 'DEAL-1', 'c2', 'target', NULL)", []).unwrap();
+    assert!(c
         .execute(
-            r#"
-            INSERT INTO deal_metadata (
-                deal_id, user_id, key_questions_json, local_path, sharepoint_link
-            ) VALUES ('DEAL-V6', 1, '["Why?"]', '/tmp/data-room', NULL)
-            "#,
-            [],
+            "INSERT INTO deal_parties VALUES ('duplicate', 'DEAL-1', 'c1', 'buyer', NULL)",
+            []
         )
-        .unwrap();
-
-    run_migrations(&mut connection).unwrap();
-
-    assert_eq!(
-        connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        8
-    );
-    assert_eq!(
-        table_columns(&connection, "deal_metadata"),
-        [
-            "deal_id",
-            "user_id",
-            "key_questions_json",
-            "local_path",
-            "sharepoint_link",
-            "sow_link",
-            "fact_sheet_link",
-            "rl_link",
-        ]
-    );
-    let metadata = connection
-        .query_row(
-            r#"
-            SELECT key_questions_json, local_path, sow_link, fact_sheet_link, rl_link
-            FROM deal_metadata
-            WHERE deal_id = 'DEAL-V6'
-            "#,
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            },
+        .is_err());
+    assert!(c
+        .execute("DELETE FROM companies WHERE company_id='c1'", [])
+        .is_err());
+    assert!(c.execute("UPDATE deals SET status='Archived'", []).is_err());
+    assert!(c
+        .execute("UPDATE deals SET expected_close_date=''", [])
+        .is_err());
+    assert!(c
+        .execute(
+            "INSERT INTO deal_scopes VALUES ('DEAL-1', 'unsupported')",
+            []
         )
-        .unwrap();
-    assert_eq!(
-        metadata,
-        (
-            "[\"Why?\"]".to_string(),
-            "/tmp/data-room".to_string(),
-            None,
-            None,
-            None,
+        .is_err());
+    assert!(c
+        .execute(
+            "INSERT INTO deal_metadata (deal_id, key_questions_json) VALUES ('DEAL-1', '{}')",
+            []
         )
-    );
+        .is_err());
+    c.execute("INSERT INTO assistant_threads (thread_id, user_id, deal_id, title) VALUES ('linked', ?1, 'DEAL-1', 'Linked'), ('freeform', ?1, NULL, 'Freeform')", [owner]).unwrap();
+    assert!(c
+        .execute("DELETE FROM deals WHERE deal_id='DEAL-1'", [])
+        .is_err());
+    c.execute(
+        "UPDATE deals SET archived_at='now' WHERE deal_id='DEAL-1'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(table_count(&c, "assistant_threads"), 2);
 }
 
 #[test]
@@ -551,7 +387,7 @@ fn disk_database_preserves_file_ownership_across_reopen() {
         database.with_connection_result(run_migrations).unwrap();
         database
             .with_connection(|connection| {
-                seed_deal(connection, "DEAL-PERSISTED", "Active");
+                seed_deal(connection, "DEAL-PERSISTED", "active");
                 insert_file_aggregate(
                     connection,
                     "DEAL-PERSISTED",
@@ -579,4 +415,14 @@ fn disk_database_preserves_file_ownership_across_reopen() {
     }
 
     std::fs::remove_file(database_path).unwrap();
+}
+
+#[test]
+fn a_current_marker_with_missing_tables_is_rejected_without_recreation() {
+    let mut c = Connection::open_in_memory().unwrap();
+    run_migrations(&mut c).unwrap();
+    c.execute("DROP TABLE deal_metadata", []).unwrap();
+    assert!(run_migrations(&mut c).is_err());
+    assert!(!table_columns(&c, "users").is_empty());
+    assert!(table_columns(&c, "deal_metadata").is_empty());
 }

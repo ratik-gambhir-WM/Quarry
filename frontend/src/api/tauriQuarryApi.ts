@@ -1,3 +1,4 @@
+import type { Company, CompanyPage } from "../data/dealModel";
 import type {
   AddUserInput,
   AssistantThread,
@@ -106,11 +107,22 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       ),
     archiveDeal: (dealId) =>
       transport.post<SavedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}/archive`, {}),
-    createAssistantThread: (userEmail, threadId) =>
+    createAssistantThread: (userEmail, threadId, dealId) =>
       transport.post<AssistantThread>("/api/v1/assistant/threads", {
         userEmail,
         ...(threadId ? { threadId } : {}),
+        ...(dealId !== undefined ? { dealId } : {}),
       }),
+    createCompany: (input) => transport.post<Company>("/api/v1/companies", input),
+    updateCompany: (id, input) => transport.post<Company>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input),
+    listCompanies: (userEmail, options = {}) => {
+      const params = new URLSearchParams({ userEmail });
+      if (options.query !== undefined) params.set("query", options.query);
+      if (options.limit !== undefined) params.set("limit", String(options.limit));
+      if (options.offset !== undefined) params.set("offset", String(options.offset));
+      return transport.get<CompanyPage>(`/api/v1/companies?${params}`);
+    },
+    updateDeal: (id, input) => transport.post<SaveDealResponse>(`/api/v1/deals/${encodeURIComponent(id)}/update`, input),
     createDeal: (input: SaveDealInput) =>
       transport.post<SaveDealResponse>("/api/v1/deals", input),
     createUser: (input: AddUserInput) =>
@@ -174,6 +186,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       const parameters = new URLSearchParams({ userEmail });
       if (options.after) parameters.set("before", options.after);
       if (options.archived) parameters.set("archived", "true");
+      if (options.scope) parameters.set("scope", options.scope);
+      if (options.dealId) parameters.set("dealId", options.dealId);
       return transport.get<AssistantThreadPage>(
         `/api/v1/assistant/threads?${parameters.toString()}`,
       );

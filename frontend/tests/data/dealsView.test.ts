@@ -1,3 +1,5 @@
+import { testParty } from "@/test/fixtures/deals";
+import type { DealStatus } from "@/data/dealModel";
 import { describe, expect, it } from "vitest";
 import {
   buildDealKanbanLanes,
@@ -10,17 +12,16 @@ import type { WorkspaceDeal } from "@/data/workspace";
 
 function makeDeal(
   id: string,
-  status: string,
+  status: DealStatus,
   overrides: Partial<WorkspaceDeal> = {},
 ): WorkspaceDeal {
   return {
     colorClassName: "bg-primary",
     portfolio: {
-      dealSponsor: "Northstar Equity",
-      primaryBuyer: "Blue River",
+      engagementType: "sell_side",
+      parties: [testParty("Northstar Equity", "pe_sponsor"), testParty("Blue River", "buyer"), testParty(`${id} Target`, "target"), testParty("Parent Name", "parent_company")],
       status,
-      targetCompany: `${id} Target`,
-      transactionType: "Acquisition",
+      transactionType: "strategic_acquisition",
     },
     room: {
       id,
@@ -42,8 +43,8 @@ function makeDeal(
 
 describe("deals view selectors", () => {
   it("filters scope and search without mutating the source array", () => {
-    const current = makeDeal("Current Deal", "Active");
-    const historic = makeDeal("Historic Deal", "Completed");
+    const current = makeDeal("Current Deal", "active");
+    const historic = makeDeal("Historic Deal", "completed");
     const source = [current, historic];
 
     expect(filterDealPortfolioViews(source, "northSTAR", "current").map((deal) => deal.id)).toEqual([
@@ -56,20 +57,20 @@ describe("deals view selectors", () => {
     expect(getDealCounts(source)).toEqual({ current: 1, historic: 1, total: 2 });
   });
 
-  it("forces completed deals into the final historic lane and preserves unknown statuses", () => {
+  it("maps typed statuses to explicit lanes with historic last", () => {
     const deals = [
-      makeDeal("unknown", "Awaiting IC"),
-      makeDeal("historic", "Active", { complete: true }),
-      makeDeal("pipeline", "Pipeline"),
-      makeDeal("review", "Under Review"),
+      makeDeal("unknown", "on_hold"),
+      makeDeal("historic", "completed"),
+      makeDeal("pipeline", "pipeline"),
+      makeDeal("review", "active"),
     ].map(buildDealPortfolioView);
 
     const lanes = buildDealKanbanLanes(deals);
 
     expect(lanes.map((lane) => lane.title)).toEqual([
       "Pipeline",
-      "Under Review",
-      "Awaiting IC",
+      "Active / In Progress",
+      "On hold",
       "Historic / Closed",
     ]);
     expect(lanes[lanes.length - 1]?.deals.map((deal) => deal.id)).toEqual(["historic"]);

@@ -1,3 +1,4 @@
+import type { Company, CompanyInput, CompanyPage, CompanySearch, DealFields } from "../data/dealModel";
 import type {
   LocalDealDataRoom,
   LocalDealFileContents,
@@ -84,6 +85,7 @@ export type QueryModelInput = {
 };
 
 export type AssistantThread = {
+  dealId: string | null;
   createdAt: string;
   lastMessageAt: string;
   status: "regular" | "archived";
@@ -231,10 +233,15 @@ export type PowerPointExport = {
   warningCount: number;
 };
 
+export type AssistantThreadListOptions = { after?: string; archived?: boolean; scope?: "all" | "freeform" | "deal"; dealId?: string };
 export interface QuarryApi {
+  createCompany(input: CompanyInput): Promise<Company>;
+  updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
+  listCompanies(userEmail: string, options?: CompanySearch): Promise<CompanyPage>;
+  updateDeal(dealId: string, input: DealFields): Promise<SaveDealResponse>;
   archiveAssistantThread(threadId: string, userEmail: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
-  createAssistantThread(userEmail: string, threadId?: string): Promise<AssistantThread>;
+  createAssistantThread(userEmail: string, threadId?: string, dealId?: string | null): Promise<AssistantThread>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
   deleteTemplate(templateId: string): Promise<void>;
@@ -257,7 +264,7 @@ export interface QuarryApi {
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
   listAssistantThreads(
     userEmail: string,
-    options?: { after?: string; archived?: boolean },
+    options?: AssistantThreadListOptions,
   ): Promise<AssistantThreadPage>;
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
   listDeals(): Promise<PersistedDeal[]>;

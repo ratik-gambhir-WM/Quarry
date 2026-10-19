@@ -1,3 +1,5 @@
+import type { Company, CompanyInput, CompanyPage, CompanySearch, DealFields } from "../data/dealModel";
+import type { AssistantThreadListOptions } from "../contracts/quarryApi";
 import type {
   AddUserInput,
   AssistantThread,
@@ -339,6 +341,17 @@ async function postForm<TResponse>(path: string, formData: FormData): Promise<TR
     method: "POST",
   }, summarizeFormData(formData));
 }
+
+function createCompany(input: CompanyInput) { return post<Company, CompanyInput>("/api/v1/companies", input); }
+function updateCompany(id: string, input: CompanyInput) { return post<Company, CompanyInput>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input); }
+function listCompanies(userEmail: string, options: CompanySearch = {}) {
+  const params = new URLSearchParams({ userEmail });
+  if (options.query !== undefined) params.set("query", options.query);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.offset !== undefined) params.set("offset", String(options.offset));
+  return get<CompanyPage>(`/api/v1/companies?${params}`);
+}
+function updateDeal(id: string, input: DealFields) { return post<SaveDealResponse, DealFields>(`/api/v1/deals/${encodeURIComponent(id)}/update`, input); }
 
 function createDeal(input: SaveDealInput) {
   return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
@@ -759,18 +772,20 @@ function assistantThreadPath(threadId: string, suffix = "") {
 
 function listAssistantThreads(
   userEmail: string,
-  options: { after?: string; archived?: boolean } = {},
+  options: AssistantThreadListOptions = {},
 ) {
   const parameters = new URLSearchParams({ userEmail });
   if (options.after) parameters.set("before", options.after);
   if (options.archived) parameters.set("archived", "true");
+  if (options.scope) parameters.set("scope", options.scope);
+  if (options.dealId) parameters.set("dealId", options.dealId);
   return get<AssistantThreadPage>(`/api/v1/assistant/threads?${parameters.toString()}`);
 }
 
-function createAssistantThread(userEmail: string, threadId?: string) {
-  return post<AssistantThread, { threadId?: string; userEmail: string }>(
+function createAssistantThread(userEmail: string, threadId?: string, dealId?: string | null) {
+  return post<AssistantThread, { threadId?: string; userEmail: string; dealId?: string | null }>(
     "/api/v1/assistant/threads",
-    { userEmail, ...(threadId ? { threadId } : {}) },
+    { userEmail, ...(threadId ? { threadId } : {}), ...(dealId !== undefined ? { dealId } : {}) },
   );
 }
 
@@ -814,6 +829,10 @@ export const httpQuarryApi: QuarryApi = {
   archiveDeal,
   createAssistantThread,
   createDeal,
+  updateDeal,
+  createCompany,
+  updateCompany,
+  listCompanies,
   createUser,
   deleteAssistantThread,
   deleteTemplate,

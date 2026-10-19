@@ -11,7 +11,7 @@ describe("DataRoomExplorer", () => {
   it("places evenly distributed Data Room tools above Saved documents", () => {
     render(
       <MemoryRouter>
-        <DataRoomExplorer
+        <DataRoomExplorer dealId="DEAL-000184"
           dealName="Project Alpha"
           dealRoomPath="/hub/deals/project-alpha"
           documentSearch={{

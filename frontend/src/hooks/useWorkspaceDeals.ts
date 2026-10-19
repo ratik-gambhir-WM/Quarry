@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import type { Company } from "../data/dealModel";
+import type { PersistedDeal } from "../contracts/quarryApi";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
-import { buildWorkspaceDealFromPersisted } from "../data/dealExtraction";
+import { buildWorkspaceDealFromExtractionResult, type SaveDealResponse, type SaveDealMetadataResponse, buildWorkspaceDealFromPersisted } from "../data/dealExtraction";
 import type { WorkspaceDeal } from "../data/workspace";
 
 export type WorkspaceDataSource = "api" | "demo";
@@ -23,57 +25,90 @@ export function getWorkspaceDataSource(
   throw new Error(`Invalid VITE_WORKSPACE_DATA_SOURCE value: ${value}. Expected "api" or "demo".`);
 }
 
-export function useWorkspaceDeals(
-  dataSourceValue: string | undefined = import.meta.env.VITE_WORKSPACE_DATA_SOURCE,
-) {
-  const [attempt, setAttempt] = useState(0);
-  const [resource, setResource] = useState<WorkspaceDealsResource>({ status: "loading" });
-  const retry = useCallback(() => setAttempt((current) => current + 1), []);
-
-  useEffect(() => {
-    let active = true;
-    setResource({ status: "loading" });
-
-    let dataSource: WorkspaceDataSource;
-    try {
-      dataSource = getWorkspaceDataSource(dataSourceValue);
-    } catch (error) {
-      setResource({
-        message: error instanceof Error ? error.message : String(error),
-        status: "error",
+// Each provider owns its resource store. Subscription callbacks publish async results;
+// scope/retry changes never set React state from an effect body.
+function createDealsStore(dataSourceValue: string | undefined) {
+  let resource: WorkspaceDealsResource = { status: "loading" };
+  let generation = 0;
+  const writesDuringLoad = new Map<string, WorkspaceDeal>();
+  const companiesDuringLoad = new Map<string, Company>();
+  let pendingLoad = false;
+  const listeners = new Set<() => void>();
+  const publish = (next: WorkspaceDealsResource) => { resource = next; for (const listener of listeners) listener(); };
+  const cache = (deal: WorkspaceDeal) => {
+    if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
+    const existing = resource.status === "success" ? resource.deals : [];
+    publish({ status: "success", source: "server", deals: [deal, ...existing.filter((d) => d.room.id !== deal.room.id)] });
+  };
+  const load = () => {
+    const request = ++generation;
+    pendingLoad = true;
+    writesDuringLoad.clear();
+    companiesDuringLoad.clear();
+    publish({ status: "loading" });
+    let source: WorkspaceDataSource;
+    try { source = getWorkspaceDataSource(dataSourceValue); }
+    catch (error) { publish({ status: "error", message: error instanceof Error ? error.message : String(error) }); return; }
+    const pending = source === "demo"
+      ? import("../fixtures/workspace/portfolio").then(({ workspaceDeals }) => ({ deals: workspaceDeals, source: "demo" as const, status: "success" as const }))
+      : runtime.api.listDeals().then((deals) => ({ deals: deals.map((deal) => buildWorkspaceDealFromPersisted(deal, deal.metadata)), source: "server" as const, status: "success" as const }));
+    void pending.then((next) => {
+      if (request !== generation) return;
+      pendingLoad = false;
+      const merged = [...writesDuringLoad.values(), ...next.deals.filter((deal) => !writesDuringLoad.has(deal.room.id))];
+      const deals = merged.map((deal) => {
+        for (const company of companiesDuringLoad.values()) deal = withCompany(deal, company);
+        return deal;
       });
-      return () => {
-        active = false;
-      };
-    }
-
-    const request = dataSource === "demo"
-      ? import("../fixtures/workspace/portfolio").then(({ workspaceDeals }) => ({
-          deals: workspaceDeals,
-          source: "demo" as const,
-          status: "success" as const,
-        }))
-      : runtime.api.listDeals().then((persisted) => ({
-          deals: persisted.map((deal) => buildWorkspaceDealFromPersisted(deal, deal.metadata)),
-          source: "server" as const,
-          status: "success" as const,
-        }));
-
-    void request.then((nextResource) => {
-      if (active) setResource(nextResource);
+      publish({ ...next, deals });
+      writesDuringLoad.clear();
+      companiesDuringLoad.clear();
     }).catch((error: unknown) => {
-      if (active) {
-        setResource({
-          message: error instanceof Error ? error.message : String(error),
-          status: "error",
-        });
-      }
+      if (request === generation) publish({ status: "error", message: error instanceof Error ? error.message : String(error) });
     });
+  };
+  return {
+    load,
+    cancel: () => { generation++; },
+    getSnapshot: () => resource,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    saveCompany: (company: Company) => {
+      if (pendingLoad) companiesDuringLoad.set(company.companyId, company);
+      if (resource.status !== "success") return;
+      const updated = resource.deals.map((deal) => withCompany(deal, company));
+      publish({ ...resource, deals: updated });
+    },
+    cache: (aggregate: PersistedDeal) => cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata)),
+    save: (result: SaveDealResponse | SaveDealMetadataResponse, sowSourceName?: string) => {
+      const deal = "extraction" in result ? buildWorkspaceDealFromExtractionResult(result, sowSourceName) : buildWorkspaceDealFromPersisted(result.deal, result.metadata);
+      // Core deal edits preserve metadata, including source details held only in this session.
+      const previous = resource.status === "success" ? resource.deals.find((d) => d.room.id === deal.room.id) : undefined;
+      if (!("extraction" in result) && previous) deal.room.resources = previous.room.resources;
+      if ("extraction" in result) {
+        if (result.files.length === 0) {
+          deal.room.keyQuestions = buildWorkspaceDealFromPersisted(result.deal, result.metadata).room.keyQuestions;
+        }
+        const previousSow = previous?.room.resources.find((resource) => resource.id === "sow");
+        if (!sowSourceName && previousSow?.sourceName) {
+          deal.room.resources = deal.room.resources.map((resource) => resource.id === "sow"
+            ? { ...resource, availability: "available", sourceName: previousSow.sourceName }
+            : resource);
+        }
+      }
+      cache(deal);
+    },
+  };
+}
 
-    return () => {
-      active = false;
-    };
-  }, [attempt, dataSourceValue]);
-
-  return { resource, retry };
+function withCompany(deal: WorkspaceDeal, company: Company): WorkspaceDeal {
+  if (!deal.persisted || !deal.persisted.parties.some((p) => p.companyId === company.companyId)) return deal;
+  const persisted = { ...deal.persisted, parties: deal.persisted.parties.map((p) => p.companyId === company.companyId ? { ...p, company } : p) };
+  const rebuilt = buildWorkspaceDealFromPersisted(persisted, deal.persistedMetadata ?? null);
+  return { ...rebuilt, room: { ...rebuilt.room, keyQuestions: deal.room.keyQuestions, resources: deal.room.resources } };
+}
+export function useWorkspaceDeals(dataSourceValue: string | undefined = import.meta.env.VITE_WORKSPACE_DATA_SOURCE) {
+  const store = useMemo(() => createDealsStore(dataSourceValue), [dataSourceValue]);
+  const resource = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  useEffect(() => { store.load(); return store.cancel; }, [store]);
+  return { resource, retry: store.load, cacheDealResult: store.cache, saveDealResult: store.save, saveCompanyResult: store.saveCompany };
 }

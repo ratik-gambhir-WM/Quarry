@@ -61,7 +61,7 @@ export function DataRoomWorkspace({
     <div className="relative flex h-full min-h-0 min-w-0 flex-1">
       {selectedDocument ? (
         <div className="contents" data-workspace-sidebar-replacement>
-          <DataRoomExplorer
+          <DataRoomExplorer dealId={dealId}
             dealName={dealName}
             dealRoomPath={dealRoomPath}
             documentSearch={{

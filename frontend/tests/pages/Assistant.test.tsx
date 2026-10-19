@@ -36,7 +36,7 @@ describe("Assistant", () => {
     render(<Assistant />);
 
     expect(screen.getByText("Assistant chat")).toBeTruthy();
-    expect(screen.getByText("Summarize")).toBeTruthy();
+    expect(screen.getByText("Assistant")).toBeTruthy();
     expect(shellProps).toHaveBeenCalledWith(expect.objectContaining({
       activeHomeSection: "assistant",
       contentMode: "fill",

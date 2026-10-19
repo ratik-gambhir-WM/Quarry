@@ -1,17 +1,16 @@
+use super::model::ThreadScope;
 use serde::Serialize;
 
 use crate::{
     adapters::sqlite::{
         client::{SqlRow, SqliteClient, SqliteClientError},
-        query::{
-            ComparisonOperator, Condition, SortDirection, SqlBuilder, SqlBuilderError, SqlQuery,
-            SqlValue,
-        },
+        query::{ComparisonOperator, Condition, SortDirection, SqlBuilder, SqlValue},
     },
     shared::error::RepositoryError,
 };
 
-const THREAD_COLUMNS: [&str; 6] = [
+const THREAD_COLUMNS: [&str; 7] = [
+    "deal_id",
     "thread_id",
     "title",
     "status",
@@ -35,6 +34,7 @@ const MESSAGE_COLUMNS: [&str; 10] = [
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssistantThread {
+    pub deal_id: Option<String>,
     pub thread_id: String,
     pub title: String,
     pub status: String,
@@ -101,23 +101,31 @@ impl AssistantChatRepository {
         &self,
         user_id: i64,
         thread_id: String,
+        deal_id: Option<String>,
     ) -> Result<AssistantThread, RepositoryError> {
-        let insert = query(
-            SqlBuilder::insert_into("assistant_threads")
-                .value("thread_id", &thread_id)
-                .value("user_id", user_id)
-                .value("title", "New chat")
-                .on_conflict_do_nothing(["thread_id"])
-                .build(),
-            "assistant thread insert",
-        )?;
+        let insert = SqlBuilder::insert_into("assistant_threads")
+            .value("thread_id", &thread_id)
+            .value("user_id", user_id)
+            .value("title", "New chat")
+            .value("deal_id", deal_id.as_deref())
+            .on_conflict_do_nothing(["thread_id"])
+            .build();
         self.sqlite
             .write_async(insert)
             .await
             .map_err(storage("create assistant thread"))?;
-        self.thread_by_id(user_id, thread_id).await?.ok_or_else(|| {
-            RepositoryError::storage("inserted assistant thread could not be loaded")
-        })
+        let thread = self
+            .thread_by_id(user_id, thread_id)
+            .await?
+            .ok_or_else(|| {
+                RepositoryError::Conflict("threadId already belongs to another owner".into())
+            })?;
+        if thread.deal_id != deal_id {
+            return Err(RepositoryError::Conflict(
+                "thread association is immutable".into(),
+            ));
+        }
+        Ok(thread)
     }
 
     pub async fn list_threads(
@@ -126,6 +134,7 @@ impl AssistantChatRepository {
         status: String,
         limit: usize,
         before: Option<String>,
+        scope: ThreadScope,
     ) -> Result<Vec<AssistantThread>, RepositoryError> {
         let mut builder = SqlBuilder::select("assistant_threads")
             .columns(THREAD_COLUMNS)
@@ -134,6 +143,7 @@ impl AssistantChatRepository {
             .order_by("last_message_at", SortDirection::Descending)
             .order_by("thread_id", SortDirection::Descending)
             .limit(limit);
+        builder = apply_scope(builder, &scope);
         if let Some(before) = before {
             if let Some((last_message_at, thread_id)) = before.rsplit_once('|') {
                 if !last_message_at.is_empty() && !thread_id.is_empty() {
@@ -151,6 +161,7 @@ impl AssistantChatRepository {
                             ComparisonOperator::LessThan,
                             thread_id,
                         ));
+                    builder = apply_scope(builder, &scope);
                 } else {
                     builder = builder.and_where(Condition::compare(
                         "last_message_at",
@@ -166,7 +177,7 @@ impl AssistantChatRepository {
                 ));
             }
         }
-        let query = query(builder.build(), "assistant thread list")?;
+        let query = builder.build();
         let rows = self
             .sqlite
             .read_async(query)
@@ -183,14 +194,11 @@ impl AssistantChatRepository {
         let Some(thread) = self.thread_by_id(user_id, thread_id.clone()).await? else {
             return Ok(None);
         };
-        let query = query(
-            SqlBuilder::select("assistant_messages")
-                .columns(MESSAGE_COLUMNS)
-                .and_where(Condition::equal("thread_id", thread_id))
-                .order_by("sequence", SortDirection::Ascending)
-                .build(),
-            "assistant message list",
-        )?;
+        let query = SqlBuilder::select("assistant_messages")
+            .columns(MESSAGE_COLUMNS)
+            .and_where(Condition::equal("thread_id", thread_id))
+            .order_by("sequence", SortDirection::Ascending)
+            .build();
         let rows = self
             .sqlite
             .read_async(query)
@@ -231,15 +239,12 @@ impl AssistantChatRepository {
         value: String,
     ) -> Result<bool, RepositoryError> {
         let updated_at = now_timestamp();
-        let update = query(
-            SqlBuilder::update("assistant_threads")
-                .set(column, value)
-                .set("updated_at", updated_at)
-                .and_where(Condition::equal("thread_id", thread_id))
-                .and_where(Condition::equal("user_id", user_id))
-                .build(),
-            "assistant thread update",
-        )?;
+        let update = SqlBuilder::update("assistant_threads")
+            .set(column, value)
+            .set("updated_at", updated_at)
+            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("user_id", user_id))
+            .build();
         let result = self
             .sqlite
             .write_async(update)
@@ -253,13 +258,10 @@ impl AssistantChatRepository {
         user_id: i64,
         thread_id: String,
     ) -> Result<bool, RepositoryError> {
-        let delete = query(
-            SqlBuilder::delete_from("assistant_threads")
-                .and_where(Condition::equal("thread_id", thread_id))
-                .and_where(Condition::equal("user_id", user_id))
-                .build(),
-            "assistant thread delete",
-        )?;
+        let delete = SqlBuilder::delete_from("assistant_threads")
+            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("user_id", user_id))
+            .build();
         let result = self
             .sqlite
             .write_async(delete)
@@ -271,73 +273,58 @@ impl AssistantChatRepository {
     pub async fn start_run(&self, input: StartRunInput) -> Result<StartRunResult, RepositoryError> {
         self.sqlite
             .transaction_async(move |transaction| {
-                let owned_query = transaction_query(
-                    SqlBuilder::select("assistant_threads")
-                        .columns(["thread_id", "title"])
-                        .and_where(Condition::equal("thread_id", &input.thread_id))
-                        .and_where(Condition::equal("user_id", input.user_id))
-                        .build(),
-                    "assistant thread ownership select",
-                )?;
-                let Some(thread_row) = transaction.read_one(&owned_query)? else {
+                let owned_query = SqlBuilder::select("assistant_threads")
+                    .columns(["thread_id", "title"])
+                    .and_where(Condition::equal("thread_id", &input.thread_id))
+                    .and_where(Condition::equal("user_id", input.user_id))
+                    .build();
+                let Some(thread_row) = transaction.read_one(owned_query)? else {
                     return Err(SqliteClientError::transaction_aborted(
                         "assistant thread was not found",
                     ));
                 };
-                let existing_query = transaction_query(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(MESSAGE_COLUMNS)
-                        .and_where(Condition::equal("thread_id", &input.thread_id))
-                        .and_where(Condition::equal("request_id", &input.request_id))
-                        .build(),
-                    "assistant request id select",
-                )?;
-                if let Some(row) = transaction.read_one(&existing_query)? {
+                let existing_query = SqlBuilder::select("assistant_messages")
+                    .columns(MESSAGE_COLUMNS)
+                    .and_where(Condition::equal("thread_id", &input.thread_id))
+                    .and_where(Condition::equal("request_id", &input.request_id))
+                    .build();
+                if let Some(row) = transaction.read_one(existing_query)? {
                     return Ok(StartRunResult::Existing(transaction_message(row)?));
                 }
                 if input.assistant_message_id == input.user_message_id {
                     return Ok(StartRunResult::Conflict);
                 }
-                let assistant_message_query = transaction_query(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(["message_id"])
-                        .and_where(Condition::equal("message_id", &input.assistant_message_id))
-                        .build(),
-                    "assistant message id select",
-                )?;
-                if transaction.read_one(&assistant_message_query)?.is_some() {
+                let assistant_message_query = SqlBuilder::select("assistant_messages")
+                    .columns(["message_id"])
+                    .and_where(Condition::equal("message_id", &input.assistant_message_id))
+                    .build();
+                if transaction.read_one(assistant_message_query)?.is_some() {
                     return Ok(StartRunResult::Conflict);
                 }
-                let user_message_query = transaction_query(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(MESSAGE_COLUMNS)
-                        .and_where(Condition::equal("message_id", &input.user_message_id))
-                        .build(),
-                    "assistant user message id select",
-                )?;
-                let existing_user_sequence = match transaction.read_one(&user_message_query)? {
+                let user_message_query = SqlBuilder::select("assistant_messages")
+                    .columns(MESSAGE_COLUMNS)
+                    .and_where(Condition::equal("message_id", &input.user_message_id))
+                    .build();
+                let existing_user_sequence = match transaction.read_one(user_message_query)? {
                     Some(row) => {
                         let message = transaction_message(row)?;
                         let parent_matches = if message.parent_message_id.as_deref()
                             == Some(message.message_id.as_str())
                         {
-                            let previous_assistant_query = transaction_query(
-                                SqlBuilder::select("assistant_messages")
-                                    .columns(["message_id"])
-                                    .and_where(Condition::equal("thread_id", &input.thread_id))
-                                    .and_where(Condition::equal("role", "assistant"))
-                                    .and_where(Condition::compare(
-                                        "sequence",
-                                        ComparisonOperator::LessThan,
-                                        message.sequence,
-                                    ))
-                                    .order_by("sequence", SortDirection::Descending)
-                                    .limit(1)
-                                    .build(),
-                                "assistant previous message select",
-                            )?;
+                            let previous_assistant_query = SqlBuilder::select("assistant_messages")
+                                .columns(["message_id"])
+                                .and_where(Condition::equal("thread_id", &input.thread_id))
+                                .and_where(Condition::equal("role", "assistant"))
+                                .and_where(Condition::compare(
+                                    "sequence",
+                                    ComparisonOperator::LessThan,
+                                    message.sequence,
+                                ))
+                                .order_by("sequence", SortDirection::Descending)
+                                .limit(1)
+                                .build();
                             let expected_parent = transaction
-                                .read_one(&previous_assistant_query)?
+                                .read_one(previous_assistant_query)?
                                 .map(|row| transaction_text(&row, "message_id"))
                                 .transpose()?;
                             expected_parent == input.parent_message_id
@@ -356,17 +343,14 @@ impl AssistantChatRepository {
                     }
                     None => None,
                 };
-                let latest_query = transaction_query(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(["sequence"])
-                        .and_where(Condition::equal("thread_id", &input.thread_id))
-                        .order_by("sequence", SortDirection::Descending)
-                        .limit(1)
-                        .build(),
-                    "assistant latest sequence select",
-                )?;
+                let latest_query = SqlBuilder::select("assistant_messages")
+                    .columns(["sequence"])
+                    .and_where(Condition::equal("thread_id", &input.thread_id))
+                    .order_by("sequence", SortDirection::Descending)
+                    .limit(1)
+                    .build();
                 let next_sequence = transaction
-                    .read_one(&latest_query)?
+                    .read_one(latest_query)?
                     .map(|row| transaction_integer(&row, "sequence"))
                     .transpose()?
                     .map(|sequence| {
@@ -389,33 +373,27 @@ impl AssistantChatRepository {
                         sequence,
                     ));
                 }
-                let history_query = transaction_query(
-                    history_builder
-                        .order_by("sequence", SortDirection::Descending)
-                        .limit(64)
-                        .build(),
-                    "assistant context select",
-                )?;
+                let history_query = history_builder
+                    .order_by("sequence", SortDirection::Descending)
+                    .limit(64)
+                    .build();
                 let mut prior_messages = transaction
-                    .read(&history_query)?
+                    .read(history_query)?
                     .into_iter()
                     .map(transaction_message)
                     .collect::<Result<Vec<_>, _>>()?;
                 prior_messages.reverse();
                 if existing_user_sequence.is_none() {
-                    let user_insert = transaction_query(
-                        SqlBuilder::insert_into("assistant_messages")
-                            .value("message_id", &input.user_message_id)
-                            .value("thread_id", &input.thread_id)
-                            .value("parent_message_id", input.parent_message_id.as_deref())
-                            .value("sequence", next_sequence)
-                            .value("role", "user")
-                            .value("content", &input.prompt)
-                            .value("status", "completed")
-                            .build(),
-                        "assistant user message insert",
-                    )?;
-                    transaction.write(&user_insert)?;
+                    let user_insert = SqlBuilder::insert_into("assistant_messages")
+                        .value("message_id", &input.user_message_id)
+                        .value("thread_id", &input.thread_id)
+                        .value("parent_message_id", input.parent_message_id.as_deref())
+                        .value("sequence", next_sequence)
+                        .value("role", "user")
+                        .value("content", &input.prompt)
+                        .value("status", "completed")
+                        .build();
+                    transaction.write(user_insert)?;
                 }
                 let assistant_sequence = if existing_user_sequence.is_some() {
                     next_sequence
@@ -426,21 +404,18 @@ impl AssistantChatRepository {
                         )
                     })?
                 };
-                let assistant_insert = transaction_query(
-                    SqlBuilder::insert_into("assistant_messages")
-                        .value("message_id", &input.assistant_message_id)
-                        .value("thread_id", &input.thread_id)
-                        .value("parent_message_id", &input.user_message_id)
-                        .value("sequence", assistant_sequence)
-                        .value("role", "assistant")
-                        .value("content", "")
-                        .value("status", "streaming")
-                        .value("model", &input.model)
-                        .value("request_id", &input.request_id)
-                        .build(),
-                    "assistant pending message insert",
-                )?;
-                transaction.write(&assistant_insert)?;
+                let assistant_insert = SqlBuilder::insert_into("assistant_messages")
+                    .value("message_id", &input.assistant_message_id)
+                    .value("thread_id", &input.thread_id)
+                    .value("parent_message_id", &input.user_message_id)
+                    .value("sequence", assistant_sequence)
+                    .value("role", "assistant")
+                    .value("content", "")
+                    .value("status", "streaming")
+                    .value("model", &input.model)
+                    .value("request_id", &input.request_id)
+                    .build();
+                transaction.write(assistant_insert)?;
                 let title = transaction_text(&thread_row, "title")?;
                 let updated_at = now_timestamp();
                 let mut thread_update = SqlBuilder::update("assistant_threads")
@@ -451,9 +426,8 @@ impl AssistantChatRepository {
                 if title == "New chat" {
                     thread_update = thread_update.set("title", derive_title(&input.prompt));
                 }
-                let thread_update =
-                    transaction_query(thread_update.build(), "assistant thread activity update")?;
-                transaction.write(&thread_update)?;
+                let thread_update = thread_update.build();
+                transaction.write(thread_update)?;
                 Ok(StartRunResult::Started { prior_messages })
             })
             .await
@@ -477,17 +451,14 @@ impl AssistantChatRepository {
         error_code: Option<&'static str>,
     ) -> Result<(), RepositoryError> {
         let completed_at = now_timestamp();
-        let update = query(
-            SqlBuilder::update("assistant_messages")
-                .set("content", content)
-                .set("status", status)
-                .set("error_code", error_code)
-                .set("completed_at", completed_at)
-                .and_where(Condition::equal("message_id", message_id))
-                .and_where(Condition::equal("status", "streaming"))
-                .build(),
-            "assistant run finalization",
-        )?;
+        let update = SqlBuilder::update("assistant_messages")
+            .set("content", content)
+            .set("status", status)
+            .set("error_code", error_code)
+            .set("completed_at", completed_at)
+            .and_where(Condition::equal("message_id", message_id))
+            .and_where(Condition::equal("status", "streaming"))
+            .build();
         let result = self
             .sqlite
             .write_async(update)
@@ -499,19 +470,16 @@ impl AssistantChatRepository {
         Ok(())
     }
 
-    async fn thread_by_id(
+    pub(super) async fn thread_by_id(
         &self,
         user_id: i64,
         thread_id: String,
     ) -> Result<Option<AssistantThread>, RepositoryError> {
-        let query = query(
-            SqlBuilder::select("assistant_threads")
-                .columns(THREAD_COLUMNS)
-                .and_where(Condition::equal("thread_id", thread_id))
-                .and_where(Condition::equal("user_id", user_id))
-                .build(),
-            "assistant thread select",
-        )?;
+        let query = SqlBuilder::select("assistant_threads")
+            .columns(THREAD_COLUMNS)
+            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("user_id", user_id))
+            .build();
         self.sqlite
             .read_one_async(query)
             .await
@@ -521,29 +489,13 @@ impl AssistantChatRepository {
     }
 }
 
-fn query(
-    result: Result<SqlQuery, SqlBuilderError>,
-    operation: &str,
-) -> Result<SqlQuery, RepositoryError> {
-    result
-        .map_err(|error| RepositoryError::storage(format!("failed to build {operation}: {error}")))
-}
-
-fn transaction_query(
-    result: Result<SqlQuery, SqlBuilderError>,
-    operation: &str,
-) -> Result<SqlQuery, SqliteClientError> {
-    result.map_err(|error| {
-        SqliteClientError::transaction_aborted(format!("failed to build {operation}: {error}"))
-    })
-}
-
 fn storage(context: &'static str) -> impl FnOnce(SqliteClientError) -> RepositoryError {
     move |error| RepositoryError::storage(format!("failed to {context}: {error}"))
 }
 
 fn thread_from_row(row: SqlRow) -> Result<AssistantThread, RepositoryError> {
     Ok(AssistantThread {
+        deal_id: optional_text(&row, "deal_id")?,
         thread_id: text(&row, "thread_id")?,
         title: text(&row, "title")?,
         status: text(&row, "status")?,
@@ -640,3 +592,14 @@ fn now_timestamp() -> String {
 #[cfg(test)]
 #[path = "../../../../tests/integration/domains/assistant/chat/repository_tests.rs"]
 mod tests;
+
+fn apply_scope(
+    builder: crate::adapters::sqlite::query::SelectBuilder,
+    scope: &ThreadScope,
+) -> crate::adapters::sqlite::query::SelectBuilder {
+    match scope {
+        ThreadScope::All => builder,
+        ThreadScope::Freeform => builder.and_where(Condition::is_null("deal_id")),
+        ThreadScope::Deal(id) => builder.and_where(Condition::equal("deal_id", id)),
+    }
+}

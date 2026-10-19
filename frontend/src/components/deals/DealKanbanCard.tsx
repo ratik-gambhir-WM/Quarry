@@ -6,6 +6,8 @@ import { ViewTransition } from "../ui/ViewTransition";
 
 export type DealKanbanCardData = {
   closeDate?: string;
+  closeDateLabel: string;
+  engagement: string;
   colorClassName: string;
   id: string;
   lifecycle: DealLifecycle;
@@ -46,7 +48,8 @@ export function DealKanbanCard({ deal }: { deal: DealKanbanCardData }) {
         <MetadataGrid className="mt-4">
           <MetadataItem label="Type" truncate value={deal.type} />
           <MetadataItem label="Sponsor" truncate value={deal.sponsor ?? "—"} />
-          <MetadataItem label="Target close" value={formatShortUtcDate(deal.closeDate)} />
+          <MetadataItem label="Engagement" value={deal.engagement} />
+          <MetadataItem label={deal.closeDateLabel} value={formatShortUtcDate(deal.closeDate)} />
           <MetadataItem
             label="Open questions"
             value={deal.openQuestionCount}

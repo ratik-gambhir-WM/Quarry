@@ -8,7 +8,7 @@ export type DealRoomOverviewSection =
   | "findings"
   | "data-points"
   | "open-items"
-  | "history";
+  | "settings";
 
 type DealRoomHeaderProps = {
   activeSection: DealRoomOverviewSection;
@@ -26,7 +26,7 @@ const sections: ReadonlyArray<{
   { enabled: false, label: "Findings", value: "findings" },
   { enabled: false, label: "Data Points", value: "data-points" },
   { enabled: false, label: "Open Items", value: "open-items" },
-  { enabled: false, label: "History", value: "history" },
+  { enabled: true, label: "Settings", value: "settings" },
 ];
 
 export function DealRoomHeader({ activeSection, onActiveSectionChange }: DealRoomHeaderProps) {
