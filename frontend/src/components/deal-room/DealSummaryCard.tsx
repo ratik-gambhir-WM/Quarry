@@ -23,9 +23,10 @@ import { Separator } from "../ui/separator";
 
 type DealSummaryCardProps = {
   deal: DealRoomData;
+  onAddResources?: () => void;
 };
 
-export function DealSummaryCard({ deal }: DealSummaryCardProps) {
+export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) {
   return (
     <div className="grid grid-cols-12 gap-4 lg:gap-6">
       <WorkspaceCard
@@ -69,14 +70,17 @@ export function DealSummaryCard({ deal }: DealSummaryCardProps) {
         interactive={false}
         surface="chrome"
       >
-        <div className="mb-4 flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary/8 text-primary">
-            <Icon className="size-4.5" name="folderOpen" />
-          </span>
-          <div>
-            <h2 className="type-h3 text-text-main" id="deal-resources-heading">Deal Resources</h2>
-            <p className="mt-0.5 text-[11px] text-muted">Source documents and connected rooms</p>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
+              <Icon className="size-4.5" name="folderOpen" />
+            </span>
+            <div>
+              <h2 className="type-h3 text-text-main" id="deal-resources-heading">Deal Resources</h2>
+              <p className="mt-0.5 text-[11px] text-muted">Source documents and connected rooms</p>
+            </div>
           </div>
+          {onAddResources ? <Button className="shrink-0" size="sm" variant="outline" onClick={onAddResources}>Add deal resources</Button> : null}
         </div>
         <div className="space-y-2" role="list">
           {deal.resources.map((resource) => <ResourceRow key={resource.id} resource={resource} />)}

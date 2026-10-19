@@ -143,8 +143,8 @@ pub(super) async fn update_deal_handler(
 }
 
 pub(super) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
-    if let Some(link) = link {
-        validate_text("link", link, 2048)?;
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text("sharepointLink", link, 2048)?;
         let parsed = reqwest::Url::parse(link)
             .map_err(|_| AppError::bad_request("sharepointLink must be an HTTPS SharePoint URL"))?;
         let is_sharepoint = parsed
@@ -174,8 +174,8 @@ fn parse_date(field: &str, value: &str) -> AppResult<NaiveDate> {
 }
 
 pub(super) fn validate_https_link(field: &str, link: Option<&str>) -> AppResult<()> {
-    if let Some(link) = link {
-        validate_text("link", link, 2048)?;
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text(field, link, 2048)?;
         let parsed = reqwest::Url::parse(link)
             .map_err(|_| AppError::bad_request(format!("{field} must be an HTTPS URL")))?;
         if parsed.scheme() != "https"

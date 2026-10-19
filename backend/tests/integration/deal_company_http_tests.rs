@@ -41,6 +41,91 @@ async fn app() -> Router {
     }
     app
 }
+
+async fn save_metadata_links(app: &Router, fields: &[(&str, &str)]) -> (StatusCode, Value) {
+    const BOUNDARY: &str = "quarry-optional-links";
+    let mut body = String::new();
+    for (name, value) in fields {
+        body.push_str(&format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        ));
+    }
+    body.push_str(&format!("--{BOUNDARY}--\r\n"));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/deals/DEAL-MODEL/metadata")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn optional_metadata_links_accept_blanks_preserve_omitted_and_validate_populated_fields() {
+    let app = app().await;
+    assert_eq!(
+        request(&app, "POST", "/api/v1/deals", deal()).await.0,
+        StatusCode::CREATED
+    );
+    // Browser and desktop adapters send blanks for unfilled optional fields.
+    let links = [
+        (
+            "sharepointLink",
+            "https://example.sharepoint.com/sites/deal",
+        ),
+        (
+            "sowLink",
+            "https://example.sharepoint.com/sites/deal/sow.pdf",
+        ),
+        ("factSheetLink", ""),
+        ("rlLink", "   "),
+    ];
+    let (status, saved) = save_metadata_links(&app, &links).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["metadata"]["sharepointLink"], links[0].1);
+    assert_eq!(saved["metadata"]["sowLink"], links[1].1);
+    assert!(saved["metadata"]["factSheetLink"].is_null());
+    assert!(saved["metadata"]["rlLink"].is_null());
+
+    for (field, value) in [
+        ("sharepointLink", "https://example.com/not-sharepoint"),
+        ("sowLink", "http://example.com/sow"),
+        ("factSheetLink", "javascript:alert(1)"),
+        ("rlLink", "https://user:password@example.com/list"),
+        ("sowLink", "https://example.com/embedded\ncontrol"),
+    ] {
+        let (status, error) = save_metadata_links(&app, &[(field, value)]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        assert!(error["error"].as_str().unwrap().contains(field), "{error}");
+    }
+    // Omission preserves a saved link; an explicitly blank field clears it.
+    let (status, saved) = save_metadata_links(&app, &[("sowLink", "")]).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["metadata"]["sharepointLink"], links[0].1);
+    assert!(saved["metadata"]["sowLink"].is_null());
+    let blanks = [
+        ("sharepointLink", ""),
+        ("sowLink", " "),
+        ("factSheetLink", ""),
+        ("rlLink", ""),
+    ];
+    let (status, saved) = save_metadata_links(&app, &blanks).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, persisted) = request(&app, "GET", "/api/v1/deals/DEAL-MODEL", Value::Null).await;
+    for (field, _) in blanks {
+        assert!(saved["metadata"][field].is_null());
+        assert!(persisted["metadata"][field].is_null());
+    }
+}
 #[tokio::test]
 async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata() {
     let app = app().await;

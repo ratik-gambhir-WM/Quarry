@@ -119,12 +119,13 @@ describe("DealRoomPage", () => {
       "Findings",
       "Data Points",
       "Open Items",
-      "History",
+      "Settings",
     ]);
     expect(screen.getByRole("heading", { level: 1, name: "Project Alpha" })).not.toBeNull();
     expect(screen.queryByText("Analyzed Files")).toBeNull();
     expect(screen.getByRole("tab", { name: "Evidence, coming soon" })).toHaveProperty("disabled", true);
 
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveProperty("disabled", false);
     const overviewTab = screen.getByRole("tab", { name: "Overview" });
     const fileSummaryTab = screen.getByRole("tab", { name: "File Summary" });
     overviewTab.focus();

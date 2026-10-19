@@ -533,7 +533,13 @@ disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
 Deal Resources maps persisted HTTPS SOW, fact-sheet, SharePoint, and request-list URLs to external
 links and keeps each resource icon, title, and availability badge on one horizontal row; only an
 actual source filename adds secondary text beneath the title. Missing or unsafe URLs remain
-non-clickable and unavailable. The API accepts only credential-free HTTPS resource links and also
+non-clickable and unavailable. Saved deals expose **Add deal resources** at the top right of this
+card. Its dialog reuses the creation source fields, prefills saved links, and submits optional
+links and SOW/timeline files to the existing metadata endpoint without recreating or editing core
+deal fields. Failed saves retain the draft for retry; successful saves refresh cached resources and
+questions in place. Link-only saves preserve persisted questions and session-only SOW filenames.
+The enabled **Settings** overview tab replaces the disabled History tab and contains **Edit deal**;
+the Overview no longer has a standalone edit button. The API accepts only credential-free HTTPS resource links and also
 requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions header
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
 Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
@@ -1150,7 +1156,10 @@ Editing an existing deal retains the combined details-and-companies form and als
 or cancelling an open company form before submitting the deal. The desktop flow can
 authorize an optional local folder during the first step; selecting one disables the mutually
 exclusive SharePoint field.
-Both transports send the link fields and files through the same multipart Axum endpoint. A stored
+Both transports send the link fields and files through the same multipart Axum endpoint. A submitted
+link field containing only whitespace (including an empty string) clears that optional link;
+an omitted field preserves its saved value. Populated fields retain HTTPS, credential, and
+SharePoint-host validation, and validation errors identify the affected field. A stored
 SharePoint URL does not currently trigger a live SharePoint import. Link metadata is committed
 before optional OpenAI extraction, so an extraction failure does not discard the submitted URLs.
 Choosing **Skip metadata** creates the core deal if needed and completes the UI flow without

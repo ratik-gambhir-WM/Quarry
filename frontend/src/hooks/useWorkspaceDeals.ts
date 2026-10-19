@@ -84,6 +84,17 @@ function createDealsStore(dataSourceValue: string | undefined) {
       // Core deal edits preserve metadata, including source details held only in this session.
       const previous = resource.status === "success" ? resource.deals.find((d) => d.room.id === deal.room.id) : undefined;
       if (!("extraction" in result) && previous) deal.room.resources = previous.room.resources;
+      if ("extraction" in result) {
+        if (result.files.length === 0) {
+          deal.room.keyQuestions = buildWorkspaceDealFromPersisted(result.deal, result.metadata).room.keyQuestions;
+        }
+        const previousSow = previous?.room.resources.find((resource) => resource.id === "sow");
+        if (!sowSourceName && previousSow?.sourceName) {
+          deal.room.resources = deal.room.resources.map((resource) => resource.id === "sow"
+            ? { ...resource, availability: "available", sourceName: previousSow.sourceName }
+            : resource);
+        }
+      }
       cache(deal);
     },
   };

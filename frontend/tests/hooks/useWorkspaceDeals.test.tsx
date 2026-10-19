@@ -61,6 +61,26 @@ describe("useWorkspaceDeals", () => {
     expect(edited.deals[0]?.room.resources.find((r) => r.id === "sow")).toMatchObject({ availability: "available", sourceName: "sow.pdf" });
   });
 
+  it("updates saved links without losing session SOW details or persisted questions", async () => {
+    listDeals.mockResolvedValue([]);
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    await waitFor(() => expect(result.current.resource.status).toBe("success"));
+    const deal = testDeal();
+    const metadata = { ...testMetadata(), keyQuestionsJson: '["Saved question?"]' };
+    act(() => result.current.saveDealResult({ deal, metadata, extraction: { keyQuestions: ["Saved question?"] },
+      files: [{ filename: "sow.pdf", path: "sow.pdf", relativePath: "sow.pdf", sizeBytes: 10 }],
+    }, "sow.pdf"));
+    act(() => result.current.saveDealResult({ deal, metadata: { ...metadata, sowLink: "https://example.com/new-sow" },
+      extraction: { keyQuestions: [] }, files: [],
+    }));
+    const saved = result.current.resource;
+    if (saved.status !== "success") throw new Error("expected loaded deals");
+    expect(saved.deals[0]?.room.keyQuestions).toEqual(["Saved question?"]);
+    expect(saved.deals[0]?.room.resources.find((r) => r.id === "sow")).toMatchObject({
+      availability: "available", sourceName: "sow.pdf", href: "https://example.com/new-sow",
+    });
+  });
+
   it.each([false, true])("preserves company edits across a pending list (saved aggregate: %s)", async (saveAggregate) => {
     const request = deferred<PersistedDeal[]>();
     listDeals.mockReturnValueOnce(request.promise);
