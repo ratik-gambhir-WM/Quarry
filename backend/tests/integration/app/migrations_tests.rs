@@ -274,7 +274,7 @@ fn file_and_version_deletes_cascade_to_their_children() {
 
 #[test]
 fn incompatible_layouts_are_rejected_without_erasing_records() {
-    for marker in [0, 6, 7, 8, 10] {
+    for marker in [0, 5, 6, 7, 8, 10, 11] {
         let mut connection = Connection::open_in_memory().unwrap();
         connection
             .execute_batch("CREATE TABLE users (name TEXT); INSERT INTO users VALUES ('retained');")
@@ -425,4 +425,142 @@ fn a_current_marker_with_missing_tables_is_rejected_without_recreation() {
     assert!(run_migrations(&mut c).is_err());
     assert!(!table_columns(&c, "users").is_empty());
     assert!(table_columns(&c, "deal_metadata").is_empty());
+}
+
+fn schema_nine() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../../fixtures/schema-v9.sql"))
+        .unwrap();
+    connection
+}
+
+fn seed_upgrade_records(connection: &Connection) {
+    seed_deal(connection, "upgrade-deal", "active");
+    insert_file_aggregate(
+        connection,
+        "upgrade-deal",
+        "upgrade-file",
+        "upgrade-version",
+    );
+    connection.execute_batch(r#"INSERT INTO companies (company_id, user_id, name, created_at, updated_at) VALUES ('company', 1, 'Upgrade Company', 'now', 'now');
+        INSERT INTO deal_parties VALUES ('party', 'upgrade-deal', 'company', 'target', NULL);
+        INSERT INTO deal_scopes VALUES ('upgrade-deal', 'product_architecture');
+        INSERT INTO deal_metadata (deal_id, key_questions_json) VALUES ('upgrade-deal', '["Keep this question"]');
+        INSERT INTO assistant_threads (thread_id, user_id, deal_id, title) VALUES ('thread', 1, 'upgrade-deal', 'Keep this thread');
+        INSERT INTO assistant_messages (message_id, thread_id, sequence, role, content, status) VALUES ('message', 'thread', 0, 'user', 'Keep this message', 'completed');
+        INSERT INTO reminders (reminder, notes, date, link) VALUES ('Keep reminder', 'notes', 'now', 'link');
+        INSERT INTO app_metadata VALUES ('retained-key', 'retained-value');"#).unwrap();
+}
+
+fn product_snapshot(connection: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+    // All columns, including timestamps and binary bytes, must remain identical.
+    [
+        "app_metadata",
+        "users",
+        "companies",
+        "deals",
+        "deal_parties",
+        "deal_scopes",
+        "deal_metadata",
+        "assistant_threads",
+        "assistant_messages",
+        "reminders",
+        "quarry_files",
+        "quarry_file_versions",
+        "quarry_file_blobs",
+    ]
+    .into_iter()
+    .map(|table| {
+        let mut statement = connection
+            .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+            .unwrap();
+        let columns = statement.column_count();
+        statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|index| row.get(index))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    })
+    .collect()
+}
+
+#[test]
+fn schema_nine_upgrade_is_additive_and_retains_every_product_record() {
+    let mut connection = schema_nine();
+    seed_upgrade_records(&connection);
+    let before = product_snapshot(&connection);
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        10
+    );
+    connection
+        .execute(
+            "INSERT INTO templates VALUES (?1, ?2)",
+            ["coexisting", "{}"],
+        )
+        .unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(table_count(&connection, "templates"), 1);
+    assert_eq!(product_snapshot(&connection), before);
+    validate_template_schema(&connection).unwrap();
+}
+
+#[test]
+fn failed_schema_nine_upgrade_rolls_back_partial_ddl_and_marker() {
+    let mut connection = schema_nine();
+    seed_upgrade_records(&connection);
+    // This collision occurs after several new tables have already been created.
+    connection.execute_batch("CREATE TABLE template_previews (value TEXT); INSERT INTO template_previews VALUES ('retained');").unwrap();
+    let before = product_snapshot(&connection);
+    for _ in 0..2 {
+        assert!(run_migrations(&mut connection).is_err());
+        assert_eq!(product_snapshot(&connection), before);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            9
+        );
+        assert!(table_columns(&connection, "templates").is_empty());
+        assert!(table_columns(&connection, "template_assets").is_empty());
+        assert_eq!(
+            connection
+                .query_row("SELECT value FROM template_previews", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "retained"
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+}
+
+#[test]
+fn current_schema_with_missing_template_table_is_rejected_without_recreation() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    seed_upgrade_records(&connection);
+    let before = product_snapshot(&connection);
+    connection
+        .execute("DROP TABLE template_assets", [])
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(product_snapshot(&connection), before);
+    assert!(table_columns(&connection, "template_assets").is_empty());
 }

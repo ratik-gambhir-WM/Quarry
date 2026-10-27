@@ -52,7 +52,7 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
-| `diligence-studio-server/` | Standalone Node/Express template catalog and PowerPoint service | npm + `package-lock.json` |
+| `$HOME/diligence-studio-server/` | External Node/Express template catalog and PowerPoint service | npm + `package-lock.json` |
 | `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
@@ -63,15 +63,20 @@ not exist.
 
 ### Diligence Studio remains a separate server boundary
 
-- `diligence-studio-server/` is an independent Node 22.5+ build root. Do not add it to the
+- `$HOME/diligence-studio-server/` is an independent Node 22.5+ build root outside this repository. Do not add it to the
   frontend package or create a root npm workspace.
 - The browser and Tauri webview call only Axum. Axum reaches Diligence Studio through its typed
   adapter and fixed `X-App-Id: Quarry_WestMonroe`; client code must never call port `43127`.
-- Diligence Studio owns its in-memory template catalog, PowerPoint conversion, and Playwright
-  preview generation. Quarry's hidden Vite route supplies the read-only SVG render surface.
-- The catalog is seeded on startup and all imports are process-local. Do not copy local SQLite
-  files into the package or describe imported templates as durable.
-- Keep server keys in the ignored `diligence-studio-server/.env`; never place them in `VITE_*`,
+- Default `embedded` mode runs `domains/templates/slide_templates` in Axum with native conversion,
+  Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
+  projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
+  in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
+- `app/migrations.rs` owns all SQLite schema (marker 10), including templates, assets, previews,
+  metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
+  `SqliteClient` to product and template repositories. Schema 9 upgrades additively in one transaction;
+  no standalone template database setting, initializer, or memory-store default exists. Previously
+  created standalone files must remain untouched. SQLite is canonical; Helix is recoverable.
+- Keep server keys in the ignored `$HOME/diligence-studio-server/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
 ## Non-negotiable architecture boundaries
@@ -140,13 +145,15 @@ request -> router -> handler -> service -> repository/client
 
 ### Persistence and indexing
 
-- SQLite is the canonical store for users, deals, logical files, immutable versions, and blobs.
+- SQLite is the canonical store for users, deals, logical files, immutable versions, blobs, and
+  embedded templates/assets/previews/classification/embeddings.
 - Helix is the document graph/search projection. It is required during normal backend bootstrap.
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current schema marker is 9. Startup creates an empty database or validates/reuses the
-  current layout; incompatible schemas fail without deleting records. The explicit offline
+- The current shared schema marker is 10. Startup creates an empty database, transactionally
+  upgrades validated schema 9 with additive template tables, or validates/reuses schema 10.
+  Incompatible schemas fail without deleting records. The explicit offline
   `reset_development --discard <absolute-database-path>` utility is destructive and must never
   run automatically at startup. Run it only for a deliberately selected, drained disposable
   database, paired with a fresh isolated Helix store. Do not discard valuable local data.
@@ -257,7 +264,7 @@ Also run frontend desktop typechecking and boundary checks for native contract c
 `npm run build:desktop` for packaging or release validation; it is substantially broader than a
 normal code check.
 
-### Diligence Studio server (`diligence-studio-server/`)
+### Diligence Studio server (`$HOME/diligence-studio-server/`)
 
 ```sh
 npm ci
@@ -267,8 +274,8 @@ npm test
 
 Install the matching local preview browser with `npx playwright install chromium` when imports
 will be exercised. The root `./quarry web` and `./quarry desktop` launchers supervise Axum, the
-selected UI, and this server after ensuring Docker Desktop and the configured local Helix container
-are ready; Docker and Helix remain running after the launcher exits. A direct `npm start` is a
+selected UI, and, only in explicit legacy mode, this server after ensuring Docker Desktop and the
+configured local Helix container are ready; Docker and Helix remain running after the launcher exits. A direct `npm start` is a
 standalone runtime operation.
 
 ## Change checklists
@@ -332,8 +339,6 @@ Do not hand-edit or commit generated/local outputs unless the task explicitly re
 - `frontend/node_modules/`, `frontend/dist/`
 - `frontend/src-tauri/target/`, `frontend/src-tauri/gen/schemas/`
 - `backend/target/`, `backend/data/`, `backend/.helix/`
-- `diligence-studio-server/node_modules/`, `coverage/`, `server-dist/`, `data/`, caches, and
-  `*.tsbuildinfo`
 - local `.env*` files and `*.log`
 
 `frontend/tsconfig.node.tsbuildinfo` is tracked even though it is generated. Never edit it by

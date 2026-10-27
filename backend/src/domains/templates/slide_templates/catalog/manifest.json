@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "templateId": "layered-architecture",
+      "kind": "diagram",
+      "title": "Layered Architecture",
+      "description": "A clean layered view for showing presentation, service, integration, and data responsibilities across one application stack.",
+      "templatePath": "templates/layered-arch.json",
+      "previewPath": "previews/layered-arch.png"
+    },
+    {
+      "templateId": "layered-platform",
+      "kind": "diagram",
+      "title": "Layered Platform",
+      "description": "A denser platform-oriented variant that helps explain shared services, internal enablement layers, and cross-cutting concerns.",
+      "templatePath": "templates/layered-arch-2.json",
+      "previewPath": "previews/layered-arch-2.png"
+    },
+    {
+      "templateId": "microservice-architecture",
+      "kind": "diagram",
+      "title": "Microservice Architecture",
+      "description": "A microservice architecture template for showing service boundaries, API interaction points, data ownership, and supporting infrastructure across distributed capabilities.",
+      "templatePath": "templates/microservice-arch.json",
+      "previewPath": "previews/microservice-arch.png"
+    },
+    {
+      "templateId": "multi-tenant-system",
+      "kind": "diagram",
+      "title": "Multi-Tenant System",
+      "description": "A multi-tenant diagram template for illustrating tenant isolation, shared infrastructure, and service boundaries in one product ecosystem.",
+      "templatePath": "templates/two-system-arch.json",
+      "previewPath": "previews/multi-tenant-arch.png"
+    },
+    {
+      "templateId": "multi-application-ecosystem",
+      "kind": "diagram",
+      "title": "Multi-Application Ecosystem",
+      "description": "A multi-application architecture template for showing how several products or business applications interact through shared services, integrations, and data flows.",
+      "templatePath": "templates/multi-app-arch.json",
+      "previewPath": "previews/multi-app-arch.png"
+    },
+    {
+      "templateId": "product-architecture",
+      "kind": "diagram",
+      "title": "Product Architecture",
+      "description": "A product-centric architecture view that emphasizes product modules, supporting integrations, and how business capabilities connect end to end.",
+      "templatePath": "templates/multi-product-arch.json",
+      "previewPath": "previews/product-arch-2.png"
+    },
+    {
+      "templateId": "architecture-ssa",
+      "kind": "commentary",
+      "title": "Architecture SSA",
+      "description": "A commentary slide for summarizing architecture findings, impact, remediation themes, and recommended project work.",
+      "templatePath": "templates/slide-01-phase-1.compact copy.json",
+      "previewPath": "previews/arch-ssa.png"
+    },
+    {
+      "templateId": "security-ssa",
+      "kind": "commentary",
+      "title": "Security SSA",
+      "description": "A commentary slide for secure development findings, remediation priorities, and phase-one project recommendations.",
+      "templatePath": "templates/slide-02-phase-1.compact copy.json",
+      "previewPath": "previews/security-ssa.png"
+    },
+    {
+      "templateId": "sdlc-ssa",
+      "kind": "commentary",
+      "title": "SDLC SSA",
+      "description": "A commentary slide for SDLC and QA findings, operational execution gaps, and delivery improvement recommendations.",
+      "templatePath": "templates/slide-03-phase-1.compact copy.json",
+      "previewPath": "previews/sdlc-ssa.png"
+    }
+  ]
+}

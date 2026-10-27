@@ -302,3 +302,39 @@ fn validates_join_conditions() {
         "SELECT * FROM \"users\" CROSS JOIN \"roles\""
     );
 }
+
+#[test]
+fn count_rows_and_fts_keep_bound_input() {
+    let query = SqlBuilder::select("templates")
+        .and_where(Condition::equal("template_id", "value' OR 1=1"))
+        .count_rows()
+        .build()
+        .unwrap();
+    assert!(query.sql().starts_with("SELECT COUNT(*)"));
+    assert_eq!(query.parameters(), &[SqlValue::from("value' OR 1=1")]);
+    let query = SqlBuilder::select("documents_fts")
+        .and_where(Condition::full_text_match(
+            "documents_fts",
+            "cloud OR attack",
+        ))
+        .order_by_bm25("documents_fts", vec![0.0, 2.0])
+        .order_by("id", SortDirection::Ascending)
+        .limit(10)
+        .build()
+        .unwrap();
+    assert!(!query.sql().contains("cloud OR attack"));
+    assert!(query.sql().contains("bm25("));
+    assert_eq!(query.parameters().len(), 3);
+}
+
+#[test]
+fn fts_ranking_rejects_nonfinite_weights() {
+    assert_eq!(
+        build_error(
+            SqlBuilder::select("documents_fts")
+                .order_by_bm25("documents_fts", vec![f64::NAN])
+                .build()
+        ),
+        SqlBuilderError::NonFiniteRankWeight
+    );
+}

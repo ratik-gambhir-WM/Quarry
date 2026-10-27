@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Quarry Axum product API"
 authors = ["Quarry contributors"]
 edition = "2021"
+rust-version = "1.94"
 default-run = "quarry-backend"
 autotests = false
 
@@ -17,9 +18,9 @@ crate-type = ["rlib"]
 [dependencies]
 axum = { version = "0.8.9", features = ["multipart"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["raw_value", "arbitrary_precision"] }
 base64 = "0.23.1"
-reqwest = { version = "0.13.4", features = ["json", "multipart", "stream"] }
+reqwest = { version = "0.13.4", features = ["json", "multipart", "stream", "blocking"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = [
@@ -51,3 +52,13 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 libc = "0.2"
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
+
+# ZIP 8 preserves the imported OOXML package safety checks; existing parsers retain ZIP 4.
+zip_slide = { package = "zip", version = "8.6.0", default-features = false, features = ["deflate"] }
+bytes = "1.12.1"
+tempfile = "3.27.0"
+url = "2.5.8"
+tungstenite = "0.30.0"
+regex = "1"
+icu_collator = "2.3.1"
+icu_locale = "2.3.1"

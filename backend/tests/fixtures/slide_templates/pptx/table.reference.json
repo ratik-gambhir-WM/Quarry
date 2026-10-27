@@ -1,0 +1,171 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Category",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Category",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "FFFFFF",
+          "elements": [
+            {
+              "id": "element-2001",
+              "type": "shape",
+              "shape": "rect",
+              "x": 96,
+              "y": 96,
+              "w": 192,
+              "h": 96,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "Category",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Category",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-2002",
+              "type": "shape",
+              "shape": "rect",
+              "x": 288,
+              "y": 96,
+              "w": 480,
+              "h": 96,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "Assessment",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Assessment",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-2101",
+              "type": "shape",
+              "shape": "rect",
+              "x": 96,
+              "y": 192,
+              "w": 192,
+              "h": 172.8,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "Architecture",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Architecture",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-2102",
+              "type": "shape",
+              "shape": "rect",
+              "x": 288,
+              "y": 192,
+              "w": 480,
+              "h": 172.8,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "A long assessment that wraps across several lines to exercise weighted automatic row sizing.",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "A long assessment that wraps across several lines to exercise weighted automatic row sizing.",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-2201",
+              "type": "shape",
+              "shape": "rect",
+              "x": 96,
+              "y": 364.8,
+              "w": 192,
+              "h": 115.2,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "Security",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Security",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-2202",
+              "type": "shape",
+              "shape": "rect",
+              "x": 288,
+              "y": 364.8,
+              "w": 480,
+              "h": 115.2,
+              "fill": "070154",
+              "stroke": "0047FF",
+              "strokeWidth": 1,
+              "text": "Brief",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Brief",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": []
+}

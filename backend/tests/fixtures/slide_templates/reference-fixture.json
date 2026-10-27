@@ -1,0 +1,167 @@
+{
+  "richTemplate": {
+    "presentation": {
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "title": "Product Architecture",
+      "slides": [
+        {
+          "backgroundColor": "FFFFFF",
+          "elements": [
+            {
+              "fill": "transparent",
+              "h": 40,
+              "id": "text-1",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "text": "Customer data flow",
+              "type": "text",
+              "w": 400,
+              "x": 20,
+              "y": 20
+            },
+            {
+              "endArrow": "triangle",
+              "id": "line-1",
+              "lineType": "straight",
+              "stroke": "000000",
+              "strokeWidth": 1,
+              "type": "line",
+              "x1": 100,
+              "x2": 300,
+              "y1": 200,
+              "y2": 200
+            },
+            {
+              "altText": "Sensitive diagram",
+              "fit": "contain",
+              "h": 100,
+              "id": "image-1",
+              "src": "data:image/png;base64,DO_NOT_INCLUDE",
+              "type": "image",
+              "w": 100,
+              "x": 500,
+              "y": 200
+            }
+          ],
+          "height": 720,
+          "id": "slide-1",
+          "name": "Architecture",
+          "width": 1280
+        }
+      ]
+    }
+  },
+  "richDigest": "title: Product Architecture\nkind: diagram\nslide: Architecture\ndimensions: 1280 x 720\nbackground: FFFFFF\nelement counts: image=1 | line=1 | text=1\nlayout hints: x-buckets=2 | y-buckets=2 | connected-lines=1\nelement 1: text; text=Customer data flow; box=0.0156,0.0278,0.3125,0.0556\nelement 2: line; route=straight; arrows=none->triangle; box=0.0781,0.2778,0.2344,0.2778\nelement 3: image; alt=Sensitive diagram; fit=contain; crop={}; box=0.3906,0.2778,0.0781,0.1389",
+  "unicodeSort": [
+    " x",
+    "_x",
+    "-x",
+    "a",
+    "A",
+    "é",
+    "é",
+    "É",
+    "Z"
+  ],
+  "rounded": [
+    [
+      0.00015,
+      0.0001
+    ],
+    [
+      0.00115,
+      0.0011
+    ],
+    [
+      0.12345,
+      0.1235
+    ],
+    [
+      1.06255,
+      1.0626
+    ],
+    [
+      1e-7,
+      0
+    ],
+    [
+      1e+21,
+      1e+21
+    ],
+    [
+      -0.00015,
+      -0.0001
+    ]
+  ],
+  "metadata": {
+    "slide_type": "architecture-overview",
+    "slide_purpose": "Explain the platform architecture",
+    "description": "A three-tier platform with integrations.",
+    "topics": [
+      "Architecture",
+      "Integrations"
+    ],
+    "business_domains": [
+      "Insurance"
+    ],
+    "technologies": [
+      "Salesforce",
+      "Snowflake"
+    ],
+    "entities": [
+      "PolicyCenter"
+    ],
+    "use_cases": [
+      "Answer architecture diligence questions"
+    ],
+    "audience": [
+      "Technology diligence"
+    ],
+    "layout_type": "diagram-led",
+    "visual_elements": [
+      "System boxes",
+      "Directional connectors"
+    ],
+    "content_density": "medium",
+    "information_types": [
+      "Current state",
+      "Dependencies"
+    ],
+    "structural_features": [
+      "Three tiers",
+      "Legend"
+    ],
+    "retrieval_keywords": [
+      "Application stack",
+      "System integration"
+    ],
+    "has_timeline": false,
+    "has_table": false,
+    "has_chart": false,
+    "has_process_flow": true,
+    "has_kpis": false,
+    "has_recommendations": false
+  },
+  "document": "title: Product Architecture\nkind: diagram\nslide type: architecture-overview\npurpose: Explain the platform architecture\ndescription: A three-tier platform with integrations.\ntopics: Architecture | Integrations\nbusiness domains: Insurance\ntechnologies: Salesforce | Snowflake\nentities: PolicyCenter\nuse cases: Answer architecture diligence questions\naudience: Technology diligence\nlayout: diagram-led\nvisual elements: System boxes | Directional connectors\ncontent density: medium\ninformation types: Current state | Dependencies\nstructural features: Three tiers | Legend\nretrieval keywords: Application stack | System integration\npositive facets: process flow",
+  "embeddingFingerprint": "b93f940d0c02d9f900fa70ac1a4e0d77f1b3b009bff518c3cc2c7a577020cac9",
+  "digest": "title: Product Architecture\nkind: diagram\nslide: Architecture\ndimensions: 1280 x 720\nbackground: FFFFFF\nelement counts: none\nlayout hints: x-buckets=0 | y-buckets=0 | connected-lines=0",
+  "classificationFingerprint": "fe5dd43e4fc739812ffc0a5adea3895a39bc0c31cf1758d9c8d9bd5aeeafbb39",
+  "template": {
+    "presentation": {
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "title": "Product Architecture",
+      "slides": [
+        {
+          "backgroundColor": "FFFFFF",
+          "elements": [],
+          "height": 720,
+          "id": "slide-1",
+          "name": "Architecture",
+          "width": 1280
+        }
+      ]
+    }
+  }
+}

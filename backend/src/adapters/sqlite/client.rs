@@ -110,6 +110,43 @@ impl SqliteTransaction<'_> {
         Ok(rows)
     }
 
+    pub fn read_result_with<T, E>(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+        mut mapper: impl FnMut(&Row<'_>) -> Result<T, E>,
+    ) -> Result<Vec<T>, E>
+    where
+        E: From<SqliteClientError>,
+    {
+        let query = query?;
+        ensure_read_query(&query)?;
+        let mut statement = self
+            .transaction
+            .prepare(query.sql())
+            .map_err(SqliteClientError::from)?;
+        let mut rows = statement
+            .query(params_from_iter(query.parameters()))
+            .map_err(SqliteClientError::from)?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next().map_err(SqliteClientError::from)? {
+            result.push(mapper(row)?);
+        }
+        Ok(result)
+    }
+
+    pub fn read_one_with<T>(
+        &self,
+        query: Result<SqlQuery, SqliteClientError>,
+        mapper: impl FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Option<T>, SqliteClientError> {
+        let query = query?;
+        ensure_read_query(&query)?;
+        Ok(self
+            .transaction
+            .query_row(query.sql(), params_from_iter(query.parameters()), mapper)
+            .optional()?)
+    }
+
     pub fn read(
         &self,
         query: Result<SqlQuery, SqliteClientError>,
@@ -294,6 +331,30 @@ impl SqliteClient {
     /// Runs one `BEGIN IMMEDIATE` transaction while holding the connection
     /// lock exactly once. The closure is synchronous so the transaction can
     /// never be held across an `.await`.
+    /// Like `transaction`, with a typed caller error; any failure rolls back.
+    pub fn transaction_result<T, E>(
+        &self,
+        operation: impl for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<SqliteClientError>,
+    {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| E::from(SqliteClientError::ConnectionLockPoisoned))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(SqliteClientError::from)?;
+        let transaction = SqliteTransaction { transaction };
+        let result = operation(&transaction)?;
+        transaction
+            .transaction
+            .commit()
+            .map_err(SqliteClientError::from)?;
+        Ok(result)
+    }
+
     pub fn transaction<T, F>(&self, operation: F) -> Result<T, SqliteClientError>
     where
         F: for<'connection> FnOnce(&SqliteTransaction<'connection>) -> Result<T, SqliteClientError>,

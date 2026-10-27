@@ -1,0 +1,45 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Slide 1",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Slide 1",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "FFFFFF",
+          "elements": [
+            {
+              "id": "element-70",
+              "type": "shape",
+              "shape": "rect",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 50,
+              "fill": "transparent",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "runs": [
+                {
+                  "color": "111827",
+                  "fontFace": "Calibri",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": [
+    "slide 1: ppt/slides/slide1.xml#p:sp[1]: Rendered a custom/freeform PowerPoint geometry as a rectangle fallback.",
+    "slide 1: ppt/slides/slide1.xml#p:sp[1]: This shape uses a gradient, pattern, or picture fill; the compact canvas schema uses a solid-color fallback.",
+    "slide 1: ppt/slides/slide1.xml#p:graphicFrame[2]: Skipped a graphic frame because it is not a plain PowerPoint drawable element."
+  ]
+}

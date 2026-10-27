@@ -3,5 +3,6 @@ pub mod helix;
 pub mod office;
 pub mod openai;
 pub mod sharepoint;
+pub mod slide_templates;
 pub mod sqlite;
 pub mod wm_ai;

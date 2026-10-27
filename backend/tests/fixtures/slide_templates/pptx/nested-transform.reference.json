@@ -1,0 +1,48 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Transformed",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Transformed",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "FFFFFF",
+          "elements": [
+            {
+              "id": "element-61",
+              "type": "shape",
+              "shape": "rect",
+              "x": 286.63,
+              "y": 188.78,
+              "w": 200,
+              "h": 150,
+              "rotate": 120,
+              "flipV": true,
+              "fill": "E8EEF8",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "text": "Transformed",
+              "fontSize": 12,
+              "fontFace": "Calibri",
+              "textColor": "111827",
+              "runs": [
+                {
+                  "text": "Transformed",
+                  "color": "111827",
+                  "fontFace": "Calibri",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": []
+}

@@ -12,11 +12,9 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::{
-    adapters::diligence_studio::templates::{MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES},
-    app::http::error::{AppError, AppResult},
-};
+use crate::app::http::error::{AppError, AppResult};
 
+use super::model::{MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES};
 use super::service::{
     PptxTemplateImportMode, PptxTemplateImportResult, PptxTemplateUpload, TemplatePreviewPage,
     TemplateService, MAX_PPTX_TEMPLATE_IMPORT_BYTES, POWERPOINT_CONTENT_TYPE,
