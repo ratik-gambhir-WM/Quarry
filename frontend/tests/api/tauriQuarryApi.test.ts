@@ -5,6 +5,30 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it("keeps summaries upload-only through the desktop multipart relay", async () => {
+    const postMultipart = vi.fn().mockResolvedValue({ summary: "Summary" });
+    const api = createTauriQuarryApi({
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postPowerPoint: vi.fn(),
+      postMultipart,
+      subscribeJob: vi.fn(),
+    });
+    const file = new File(["Report"], "report.txt", { type: "text/plain" });
+
+    await expect(api.summarizeUpload([file])).resolves.toBe("Summary");
+    expect(postMultipart).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/summarize/upload",
+      fields: [],
+      files: [{ dataBase64: "UmVwb3J0", fieldName: "files", filename: "report.txt", mimeType: "text/plain" }],
+    }));
+    for (const method of ["listSummaryFiles", "summarizePath", "summarizeSelected"]) {
+      expect(api).not.toHaveProperty(method);
+    }
+  });
+
   it("uses the versioned template preview path and preserves its response", async () => {
     const payload = {
       pagination: {

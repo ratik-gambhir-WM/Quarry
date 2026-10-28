@@ -7,6 +7,21 @@ describe("httpQuarryApi", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps summaries upload-only through the versioned multipart route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ summary: "Summary" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["Report"], "report.txt", { type: "text/plain" });
+
+    await expect(httpQuarryApi.summarizeUpload([file])).resolves.toBe("Summary");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/summarize/upload");
+    expect(init.method).toBe("POST");
+    expect(init.body.getAll("files")).toEqual([file]);
+    for (const method of ["listSummaryFiles", "summarizePath", "summarizeSelected"]) {
+      expect(httpQuarryApi).not.toHaveProperty(method);
+    }
+  });
+
   it("uses the versioned API contract", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("[]", {

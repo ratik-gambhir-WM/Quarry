@@ -23,7 +23,6 @@ import type {
   QuarryApi,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
-  SummarizableFile,
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
@@ -522,25 +521,6 @@ function searchDocumentChunksByKeyword(search: FileChunkKeywordSearch) {
 }
 
 
-function listSummaryFiles(path: string) {
-  return post<SummarizableFile[], { path: string }>("/api/v1/summarize/files", { path });
-}
-
-async function summarizeSelected(paths: string[]) {
-  const response = await post<{ summary: string }, { paths: string[] }>(
-    "/api/v1/summarize/selected",
-    { paths },
-  );
-  return response.summary;
-}
-
-async function summarizePath(path: string) {
-  const response = await post<{ summary: string }, { path: string }>("/api/v1/summarize", {
-    path,
-  });
-  return response.summary;
-}
-
 function summarizeUpload(files: File[]) {
   const form = new FormData();
   appendFiles(form, files);
@@ -806,7 +786,6 @@ export const httpQuarryApi: QuarryApi = {
   listDealDocuments,
   listDeals,
   listTemplatePreviews,
-  listSummaryFiles,
   previewDealDocument,
   processDocuments,
   queryModel,
@@ -817,8 +796,6 @@ export const httpQuarryApi: QuarryApi = {
   searchDocumentChunksByVector,
   startProcessFile,
   subscribeToProcessFileJob,
-  summarizePath,
-  summarizeSelected,
   summarizeUpload,
   unarchiveAssistantThread: (threadId) =>
     setAssistantThreadArchived(threadId, false),

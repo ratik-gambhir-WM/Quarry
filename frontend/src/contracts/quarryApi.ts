@@ -18,15 +18,6 @@ export type PersistedDeal = SavedDeal & {
   metadata: SavedDealMetadata | null;
 };
 
-export type SummarizableFile = {
-  filename: string;
-  mimeType: string;
-  path: string;
-  relativePath: string;
-  sizeBytes: number;
-  supported: boolean;
-};
-
 export type LoginInput = { username: string; password: string };
 export type RegisterInput = LoginInput & { email: string; firstName: string; lastName: string; jobTitle?: string };
 export type SessionResponse = { user: WorkspaceAccountUser; accessToken: string; tokenType: "Bearer"; expiresAt: string };
@@ -264,7 +255,6 @@ export interface QuarryApi {
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
   listDeals(): Promise<PersistedDeal[]>;
   listTemplatePreviews(page: number): Promise<TemplatePreviewPage>;
-  listSummaryFiles(path: string): Promise<SummarizableFile[]>;
   previewDealDocument(
     dealId: string,
     relativePath: string,
@@ -293,8 +283,6 @@ export interface QuarryApi {
     jobId: string,
     handlers: ProcessFileJobEventHandlers,
   ): () => void;
-  summarizePath(path: string): Promise<string>;
-  summarizeSelected(paths: string[]): Promise<string>;
   summarizeUpload(files: File[]): Promise<string>;
   unarchiveAssistantThread(threadId: string): Promise<void>;
 }

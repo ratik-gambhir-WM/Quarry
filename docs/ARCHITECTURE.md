@@ -497,9 +497,9 @@ global state or query-cache library.
   Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
   Axum loads bounded canonical completed pairs from SQLite. The legacy `/query_model` adapter path
   still sends bounded client context for compatibility.
-- Legacy summarize components, `useSummarizeWorkflow`, data modules, and summary API methods remain
-  available to the codebase, but the former `SummarizePage` route module and summary screen are no
-  longer registered in the product route tree.
+- Legacy summarize presentation components and data helpers remain available, but the unused
+  `useSummarizeWorkflow` and unsupported server-path API methods have been removed. Uploaded-file
+  summaries remain available through both adapters; no summary screen is registered in the product route tree.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
@@ -521,7 +521,7 @@ operational failures.
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, File Summary, and Settings tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Site Visits, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
-| Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
+| Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
@@ -613,7 +613,7 @@ The contract covers:
 - validated hydrated template retrieval through `getTemplate`
 - app-scoped template deletion through `deleteTemplate`
 - explicit single-slide or deck PPTX import through `importPptxTemplate`
-- path, selection, and upload summarization
+- uploaded-file summarization
 - platform-specific local data-room selection/read and file export
 
 ### 6.2 Web path
@@ -632,7 +632,9 @@ non-success responses into `BackendApiError`, and logs HTTP/SSE activity. Query 
 strict incremental UTF-8 POST-SSE parser and `AbortController`; its activity records contain only
 counts, event classes, timing, and other non-content metadata. Every protected request attaches
 Bearer authorization and a matching `X-User-Id`; document GET-SSE uses fetch with cancellation
-instead of EventSource. Auth bodies/responses and credential envelopes are excluded from logs.
+instead of EventSource. Protected 401 responses are buffered before session invalidation aborts
+other tracked work, preserving the HTTP error body for callers. Auth bodies/responses and
+credential envelopes are excluded from logs.
 
 The web platform adapter implements JSON, Markdown, and validated PowerPoint export with Blob
 downloads, has no native folder chooser, and rejects local source-file reads.

@@ -24,7 +24,16 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
       ...init, headers, signal: controller.signal, redirect: "error",
     });
     if (!publicRequest && response.status === 401) {
-      sessionStore.clearIfCurrent(snapshot.generation, "Your session expired. Sign in again.");
+      // Detach the error body before clearing the session aborts tracked fetches.
+      try {
+        const body = await response.arrayBuffer();
+        return new Response(body, {
+          status: response.status, statusText: response.statusText, headers: response.headers,
+        });
+      } finally {
+        cleanup();
+        sessionStore.clearIfCurrent(snapshot.generation, "Your session expired. Sign in again.");
+      }
     }
     // Keep cancellation active while streaming or reading the response body.
     if (!response.body) {

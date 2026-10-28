@@ -21,7 +21,6 @@ import type {
   QuarryApi,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
-  SummarizableFile,
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
@@ -195,8 +194,6 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.get<TemplatePreviewPage>(
         `/api/v1/templates/previews?page=${encodeURIComponent(String(page))}`,
       ),
-    listSummaryFiles: (path) =>
-      transport.post<SummarizableFile[]>("/api/v1/summarize/files", { path }),
     previewDealDocument: (dealId, relativePath) =>
       transport.post<DocumentPreviewResponse>(
         `/api/v1/deals/${encodeURIComponent(dealId)}/data-room/preview`,
@@ -415,17 +412,6 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         active = false;
         unsubscribe?.();
       };
-    },
-    async summarizePath(path) {
-      const response = await transport.post<{ summary: string }>("/api/v1/summarize", { path });
-      return response.summary;
-    },
-    async summarizeSelected(paths) {
-      const response = await transport.post<{ summary: string }>(
-        "/api/v1/summarize/selected",
-        { paths },
-      );
-      return response.summary;
     },
     async summarizeUpload(files) {
       const response = await transport.postMultipart<{ summary: string }>(
