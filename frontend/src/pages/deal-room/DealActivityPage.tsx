@@ -1,14 +1,10 @@
-import { DealTimelineView } from "../../components/deal-room/DealTimelineView";
-import { WorkspaceMain } from "../../components/hub/WorkspaceLayout";
+import { Navigate, useLocation } from "react-router-dom";
+import { getDealActivityPath } from "../../data/workspace";
 import { useDealRoom } from "../DealRoomPage";
 
+// Preserve old activity bookmarks while rendering activity as a Deal Room tab.
 export function DealActivityPage() {
-  const { deal, setTimelineItems, timelineItems } = useDealRoom();
-  return (
-    <WorkspaceMain>
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
-        <DealTimelineView deal={deal.room} events={timelineItems} onEventsChange={setTimelineItems} />
-      </div>
-    </WorkspaceMain>
-  );
+  const { deal } = useDealRoom();
+  const location = useLocation();
+  return <Navigate replace state={location.state} to={getDealActivityPath(deal.room.id)} />;
 }

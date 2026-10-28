@@ -102,6 +102,8 @@ export function Column({
       ref={setNodeRef}
       style={style}
       data-dragging={isDragging || undefined}
+      data-slot="kanban-column"
+      data-column-id={column.id}
       className={cn(
         "flex h-full min-h-0 max-h-full w-80 shrink-0 flex-col rounded-md border-l-4 border-y border-r border-border bg-card/40",
         isDragging && "opacity-60",

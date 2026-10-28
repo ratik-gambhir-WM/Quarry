@@ -1,3 +1,4 @@
+import { DealTimelineView } from "../../components/deal-room/DealTimelineView";
 import { DealResourcesDialog } from "../../components/deal-room/DealResourcesDialog";
 import { WorkspaceCard } from "../../components/hub/WorkspaceCard";
 import { useState } from "react";
@@ -13,7 +14,7 @@ import { useDealRoom } from "../DealRoomPage";
 export function DealRoomOverviewPage() {
   const [addingResources, setAddingResources] = useState(false);
   const [editing, setEditing] = useState(false);
-  const { activeOverviewSection, deal, email, setActiveOverviewSection } = useDealRoom();
+  const { activeOverviewSection, deal, email, setActiveOverviewSection, timelineItems, setTimelineItems } = useDealRoom();
   const dealInsights = workspaceInsights.filter((insight) => insight.deal === deal.room.name);
 
   return (
@@ -23,7 +24,9 @@ export function DealRoomOverviewPage() {
       {editing && deal.persisted ? <AddDealModal initialDeal={deal.persisted} email={email} onClose={() => setEditing(false)} /> : null}
       {addingResources && deal.persisted ? <DealResourcesDialog deal={deal} onClose={() => setAddingResources(false)} /> : null}
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
-        {activeOverviewSection === "settings" ? (
+        {activeOverviewSection === "activity" ? (
+          <DealTimelineView deal={deal.room} events={timelineItems} onEventsChange={setTimelineItems} />
+        ) : activeOverviewSection === "settings" ? (
           <WorkspaceCard interactive={false} className="p-6 sm:p-7">
             <h1 className="type-h3 text-text-main">Deal settings</h1>
             <p className="mt-2 text-sm text-muted">Manage deal details, companies, roles, and scope.</p>

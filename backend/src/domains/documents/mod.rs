@@ -1,5 +1,5 @@
 pub mod formats;
-pub mod index;
+pub mod graph;
 pub mod ingestion;
 pub mod model;
 pub mod search;

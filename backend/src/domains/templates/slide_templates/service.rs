@@ -611,7 +611,7 @@ impl ImportService {
     pub(crate) fn projection_record(
         &self,
         id: &str,
-    ) -> SlideResult<Option<super::index::TemplateProjectionRecord>> {
+    ) -> SlideResult<Option<super::graph::TemplateProjectionRecord>> {
         let Some(template) = self
             .repository
             .find_by_id(id)
@@ -634,7 +634,7 @@ impl ImportService {
             .repository
             .find_preview(id)
             .map_err(SlideTemplateError::internal)?
-            .map(|p| super::index::TemplatePreviewDescriptor {
+            .map(|p| super::graph::TemplatePreviewDescriptor {
                 content_type: p.content_type,
                 width: p.width,
                 height: p.height,
@@ -643,7 +643,7 @@ impl ImportService {
                     self.app_id
                 ),
             });
-        Ok(Some(super::index::TemplateProjectionRecord {
+        Ok(Some(super::graph::TemplateProjectionRecord {
             template,
             metadata,
             classification,

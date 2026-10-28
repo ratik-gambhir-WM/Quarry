@@ -290,7 +290,7 @@ compatibility/version decision.
            -> canonical deal/access lookup
            -> consumes validated canonical criteria
            -> OpenAiClient embeds positive intent once when required
-           -> DocumentSearchIndex issues bounded, predicate-aware Helix reads
+           -> DocumentGraphSearch issues bounded, predicate-aware Helix reads
            -> rechecks anchor, validates current version, collapses, RRFs, shapes excerpt
       -> typed response
       -> existing stored-document preview and optional page request

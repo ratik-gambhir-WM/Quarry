@@ -5,7 +5,7 @@ use crate::{
     adapters::sqlite::client::SqliteClient,
     app::migrations::migrate,
     domains::documents::{
-        index::repository::{map_document_version_response, HelixDocumentVersionResponse},
+        graph::repository::{map_document_version_response, HelixDocumentVersionResponse},
         ingestion::persistence::build_file_persistence_input,
         model::Document,
     },

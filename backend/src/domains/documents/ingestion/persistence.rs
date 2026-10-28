@@ -1,7 +1,7 @@
 use crate::domains::documents::{
-    index::{
+    graph::{
         model::{FileChunkNode, FileNode, FileVersionNode},
-        repository::{DocumentIndexWriter, PreparedDocumentGraph},
+        repository::{DocumentGraphWriter, PreparedDocumentGraph},
     },
     model::{Document, DocumentChunk},
     store::{
@@ -33,18 +33,19 @@ struct PreparedDocumentPersistence {
 
 pub(crate) async fn persist_document_and_chunks(
     files: &DocumentStore,
-    index: &DocumentIndexWriter,
+    graph_writer: &DocumentGraphWriter,
     deal_id: &str,
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
 ) -> Result<DocumentPersistenceResult, String> {
-    let prepared = prepare_document_persistence(index, deal_id, &document, &chunks, file_bytes)?;
-    persist_prepared_document_and_chunks(files, index, prepared).await
+    let prepared =
+        prepare_document_persistence(graph_writer, deal_id, &document, &chunks, file_bytes)?;
+    persist_prepared_document_and_chunks(files, graph_writer, prepared).await
 }
 
 fn prepare_document_persistence(
-    index: &DocumentIndexWriter,
+    graph_writer: &DocumentGraphWriter,
     deal_id: &str,
     document: &Document,
     chunks: &[DocumentChunk],
@@ -64,7 +65,7 @@ fn prepare_document_persistence(
         chunks,
         &file_persistence.timestamp,
     )?;
-    let graph = index
+    let graph = graph_writer
         .preflight_graph(file_node, version_node, chunk_nodes)
         .map_err(|error| error.to_string())?;
     Ok(PreparedDocumentPersistence {
@@ -76,7 +77,7 @@ fn prepare_document_persistence(
 
 async fn persist_prepared_document_and_chunks(
     files: &DocumentStore,
-    index: &DocumentIndexWriter,
+    graph_writer: &DocumentGraphWriter,
     prepared: PreparedDocumentPersistence,
 ) -> Result<DocumentPersistenceResult, String> {
     let insert_blob_result = files
@@ -99,7 +100,7 @@ async fn persist_prepared_document_and_chunks(
                 .to_string(),
         );
     }
-    let insert_document_chunk_result = index
+    let insert_document_chunk_result = graph_writer
         .insert_prepared_graph(prepared.graph)
         .await
         .map_err(|error| error.to_string())

@@ -14,7 +14,6 @@ import {
   type DealsView,
 } from "../components/deals/DealsHeaderControls";
 import { DealsEmptyState, DealsTable } from "../components/deals/DealsTable";
-import { WorkspaceCard } from "../components/hub/WorkspaceCard";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { useWorkspaceHomeDeals, WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
 import { Skeleton } from "../components/ui/skeleton";
@@ -136,11 +135,10 @@ function DealsContent({ navigationState, onQueryChange, query, view }: DealsCont
 
 function KanbanFallback() {
   return (
-    <WorkspaceCard
+    <div
       aria-label="Loading kanban view"
       aria-live="polite"
-      className="h-[min(650px,calc(100vh-17rem))] min-h-[420px] p-5"
-      radius="small"
+      className="h-[calc(100dvh-9rem)] min-h-[420px]"
       role="status"
     >
       <span className="sr-only">Loading kanban view</span>
@@ -153,6 +151,6 @@ function KanbanFallback() {
           </div>
         ))}
       </div>
-    </WorkspaceCard>
+    </div>
   );
 }

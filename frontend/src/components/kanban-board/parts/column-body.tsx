@@ -41,7 +41,7 @@ export function ColumnBody({
     swimlanes && swimlanes.length > 0 ? swimlanes : [undefined];
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1.5">
+    <div data-slot="kanban-column-body" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1.5">
       {/* In single-lane mode the lone cell grows to fill the column so the whole
           empty area below the cards is a (highlighted) drop target. In swimlane
           mode each lane cell stays content-sized so the lanes stack + scroll. */}

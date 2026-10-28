@@ -348,7 +348,7 @@ timeline entries, and search excerpts must not be documented or treated as persi
 | Class | Current examples | Owner | Lifetime/recovery |
 | --- | --- | --- | --- |
 | Canonical durable state | Users, deals, metadata, files, versions, blobs | SQLite through owning domain repositories | Survives restart; subject to current schema migration policy |
-| Search projection | File/version/chunk graph | Helix through `documents::index` | Rebuild intended from SQLite, but general tooling is missing |
+| Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from SQLite, but general tooling is missing |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
 | Legacy service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
 | Server ephemeral state | Document jobs, ingestion locks, Office preview cache | Owning service/process | Lost on restart; not multi-instance |
@@ -411,7 +411,7 @@ When adding or changing a domain model:
 - Local Data Room read model: [`backend/src/domains/data_rooms/`](../backend/src/domains/data_rooms/)
 - Document canonical store: [`backend/src/domains/documents/store/`](../backend/src/domains/documents/store/)
 - Document ingestion and identity mapping: [`backend/src/domains/documents/ingestion/`](../backend/src/domains/documents/ingestion/)
-- Helix projection/search model: [`backend/src/domains/documents/index/`](../backend/src/domains/documents/index/)
+- Helix projection/search model: [`backend/src/domains/documents/graph/`](../backend/src/domains/documents/graph/)
 - Shared identifier functions: [`backend/src/shared/ids.rs`](../backend/src/shared/ids.rs)
 - Frontend transport DTOs: [`frontend/src/contracts/quarryApi.ts`](../frontend/src/contracts/quarryApi.ts)
 - Frontend presentation models: [`frontend/src/data/`](../frontend/src/data/)

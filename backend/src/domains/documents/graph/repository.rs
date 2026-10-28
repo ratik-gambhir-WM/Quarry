@@ -12,7 +12,7 @@ use tokio::time::sleep;
 
 use crate::{
     adapters::helix::client::HelixClient,
-    domains::documents::index::{
+    domains::documents::graph::{
         model::{FileChunkNode, FileNode, FileVersionNode},
         query::{
             find_current_helix_document_by_content_hash as build_content_hash_lookup,
@@ -59,7 +59,7 @@ struct IndexOperationStatusResponse {
 }
 
 #[derive(Clone)]
-pub struct DocumentIndexWriter {
+pub struct DocumentGraphWriter {
     helix: Arc<HelixClient>,
 }
 
@@ -95,7 +95,7 @@ impl PreparedDocumentGraph {
     }
 }
 
-impl DocumentIndexWriter {
+impl DocumentGraphWriter {
     pub fn new(helix: Arc<HelixClient>) -> Self {
         Self { helix }
     }
@@ -172,11 +172,11 @@ impl DocumentIndexWriter {
 }
 
 #[derive(Clone)]
-pub struct DocumentIndexReader {
+pub struct DocumentGraphReader {
     helix: Arc<HelixClient>,
 }
 
-impl DocumentIndexReader {
+impl DocumentGraphReader {
     pub fn new(helix: Arc<HelixClient>) -> Self {
         Self { helix }
     }
@@ -225,11 +225,11 @@ impl DocumentIndexReader {
 }
 
 #[derive(Clone)]
-pub struct DocumentSearchIndex {
+pub struct DocumentGraphSearch {
     helix: Arc<HelixClient>,
 }
 
-impl DocumentSearchIndex {
+impl DocumentGraphSearch {
     pub fn new(helix: Arc<HelixClient>) -> Self {
         Self { helix }
     }

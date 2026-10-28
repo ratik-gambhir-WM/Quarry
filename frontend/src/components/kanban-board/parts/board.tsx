@@ -85,6 +85,7 @@ export function Board({
   return (
     <div
       ref={scrollRef}
+      data-slot="kanban-lanes"
       className={cn(
         "flex h-full min-h-0 w-full gap-3 overflow-x-auto overflow-y-hidden p-3",
         className,

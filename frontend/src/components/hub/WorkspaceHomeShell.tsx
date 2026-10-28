@@ -7,6 +7,7 @@ import type { ActiveHomeSection, SidebarMode } from "./sidebar/sidebarTypes";
 type WorkspaceHomeShellProps = {
   activeHomeSection?: ActiveHomeSection;
   children: ReactNode;
+  contentClassName?: string;
   contentMode?: "fill" | "scroll";
   header: ReactNode;
   sidebarMode?: Extract<SidebarMode, "assistant" | "home">;
@@ -19,6 +20,7 @@ export function useWorkspaceHomeDeals() {
 export function WorkspaceHomeShell({
   activeHomeSection = "hub",
   children,
+  contentClassName,
   contentMode = "scroll",
   header,
   sidebarMode = "home",
@@ -29,6 +31,7 @@ export function WorkspaceHomeShell({
 
   return (
     <WorkspaceLayout
+      contentClassName={contentClassName}
       contentMode={contentMode}
       header={header}
       sidebar={

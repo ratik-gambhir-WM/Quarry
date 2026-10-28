@@ -164,7 +164,7 @@ error category.
 Implement this as a focused Axum layer, not as additions to
 `documents::search`:
 
-- `backend/src/domains/templates/index/` owns node models, Helix writers,
+- `backend/src/domains/templates/graph/` owns node models, Helix writers,
   query builders, response validation, and index bootstrap;
 - `backend/src/domains/templates/vector_service.rs` owns lifecycle, upsert,
   deletion, and query/similarity orchestration;
@@ -174,7 +174,7 @@ Implement this as a focused Axum layer, not as additions to
   shared `HelixClient` and initializes the new indexes before accepting
   requests.
 
-Keep the existing `DocumentIndexWriter`, document graph, and `/documents/search/*`
+Keep the existing `DocumentGraphWriter`, document graph, and `/documents/search/*`
 routes untouched except for any small shared Helix bootstrap abstraction that
 prevents duplicate index-readiness polling. Read operations remain read-only;
 all Helix writes continue through the shared process-serialized client.

@@ -6,10 +6,10 @@ import {
 import { Icon } from "../../ui/Icon";
 import { useWorkspaceHomeDeals } from "../WorkspaceHomeShell";
 
-const tabs: SuggestedContentTab[] = ["Recent", "Analyzed", "Files to review"];
+const tabs: SuggestedContentTab[] = ["Bookmarks", "Drafts", "Global Variables"];
 
 export function SuggestedContentCard() {
-  const [activeTab, setActiveTab] = useState<SuggestedContentTab>("Recent");
+  const [activeTab, setActiveTab] = useState<SuggestedContentTab>("Bookmarks");
   const groups = suggestedContentByTab[activeTab];
 
   return (

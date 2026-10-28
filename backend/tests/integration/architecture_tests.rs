@@ -168,14 +168,14 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "HeadlessTemplatePreviewGenerator::new(",
         "OpenAISlideClassifier::new(",
         "OpenAISlideEmbedder::new(",
-        "TemplateIndex::new(",
+        "TemplateGraph::new(",
         "UserRepository::new(",
         "DealRepository::new(",
         "CompanyRepository::new(",
         "DocumentStore::new(",
-        "DocumentIndexReader::new(",
-        "DocumentIndexWriter::new(",
-        "DocumentSearchIndex::new(",
+        "DocumentGraphReader::new(",
+        "DocumentGraphWriter::new(",
+        "DocumentGraphSearch::new(",
     ];
 
     for (path, source) in rust_sources("src") {

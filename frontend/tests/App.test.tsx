@@ -54,7 +54,7 @@ describe("App routes", () => {
     expect(listDeals).not.toHaveBeenCalled();
   });
 
-  it("supports direct entry to URL-backed Deal Activity", async () => {
+  it("opens legacy activity links in the Deal Room tab and preserves browser history", async () => {
     render(
       <MemoryRouter
         initialEntries={["/hub/deals/project-alpha", "/hub/deals/project-alpha/activity"]}
@@ -65,14 +65,19 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" }, lazyRouteWait)).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Deal Activity", selected: true }, lazyRouteWait)).toBeTruthy();
     expect((await screen.findAllByRole("heading", { name: "Deal Activity" }, lazyRouteWait)).length).toBeGreaterThan(0);
     expect(listDeals).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("link", { name: "Deal Activity" })).toBeNull();
+    const main = screen.getByRole("main");
+    expect(main.contains(screen.getByRole("tab", { name: "Overview" }))).toBe(true);
+    expect(main.contains(screen.getByRole("heading", { level: 1, name: "Deal Activity" }))).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByRole("link", { name: "Deal Room", current: "page" }, lazyRouteWait)).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Overview", selected: true }, lazyRouteWait)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
-    expect(await screen.findByRole("link", { name: "Deal Activity", current: "page" }, lazyRouteWait)).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Deal Activity", selected: true }, lazyRouteWait)).toBeTruthy();
     expect(listDeals).toHaveBeenCalledTimes(1);
   }, 10_000);
 

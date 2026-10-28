@@ -3,7 +3,7 @@ use axum::{extract::State, Json};
 use crate::{
     app::http::error::{AppError, AppResult},
     domains::documents::{
-        index::query::{
+        graph::query::{
             FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
             MAX_FILE_CHUNK_SEARCH_LIMIT,
         },

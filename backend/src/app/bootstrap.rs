@@ -30,7 +30,7 @@ use crate::{
         },
         dev_support,
         documents::{
-            index::repository::{DocumentIndexReader, DocumentIndexWriter, DocumentSearchIndex},
+            graph::repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
             search::{self, service::DocumentSearchService},
             store::sqlite::DocumentStore,
@@ -96,7 +96,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    DocumentIndexWriter::new(helix.clone())
+    DocumentGraphWriter::new(helix.clone())
         .initialize(config.helix.vector_dimension)
         .await
         .map_err(|error| BootstrapError::HelixIndexes(error.to_string()))?;
@@ -128,7 +128,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 fn assemble_api_with_templates(
     config: &AppConfig,
     sqlite: SqliteClient,
-    document_index: Arc<HelixClient>,
+    document_graph: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
     templates: Arc<TemplateService>,
@@ -137,9 +137,9 @@ fn assemble_api_with_templates(
     let users_repository = UserRepository::new(sqlite.clone());
     let deals_repository = DealRepository::new(sqlite.clone());
     let document_files = DocumentStore::new(sqlite.clone());
-    let document_index_reader = DocumentIndexReader::new(document_index.clone());
-    let document_index_writer = DocumentIndexWriter::new(document_index.clone());
-    let document_search_index = DocumentSearchIndex::new(document_index);
+    let document_graph_reader = DocumentGraphReader::new(document_graph.clone());
+    let document_graph_writer = DocumentGraphWriter::new(document_graph.clone());
+    let document_graph_search = DocumentGraphSearch::new(document_graph);
     let openai = config.openai.as_ref().map(|openai_config| {
         Arc::new(OpenAiClient::from_config(
             http.clone(),
@@ -192,8 +192,8 @@ fn assemble_api_with_templates(
     let database = Arc::new(DatabaseService::new(sqlite.path().to_path_buf()));
     let document_ingestion = Arc::new(DocumentIngestionService::new(
         document_files.clone(),
-        document_index_reader,
-        document_index_writer,
+        document_graph_reader,
+        document_graph_writer,
         openai.clone(),
         config
             .openai
@@ -211,7 +211,7 @@ fn assemble_api_with_templates(
         document_ingestion.clone(),
         config.documents.completed_job_retention,
     ));
-    let document_search = Arc::new(DocumentSearchService::new(document_search_index));
+    let document_search = Arc::new(DocumentSearchService::new(document_graph_search));
     let document_summaries = Arc::new(SummaryService::new(
         openai.clone(),
         config
@@ -351,15 +351,15 @@ async fn build_templates(
         ))
     });
     let dimensions = settings.embedding_dimensions;
-    let index = Arc::new(index::TemplateIndex::new(helix, dimensions));
-    index.initialize().await.map_err(|_| {
+    let graph = Arc::new(graph::TemplateGraph::new(helix, dimensions));
+    graph.initialize().await.map_err(|_| {
         BootstrapError::SlideTemplates("Helix template indexes failed to initialize".into())
     })?;
     let embedded = Arc::new(SlideTemplates::new(
         repository,
         preview,
         classification,
-        Some(index),
+        Some(graph),
         settings.allow_embedding_inspection,
     ));
     embedded.reconcile().await.map_err(|_| {
@@ -387,7 +387,7 @@ fn seed_templates(
 pub(crate) fn assemble_api(
     config: &AppConfig,
     sqlite: SqliteClient,
-    document_index: Arc<HelixClient>,
+    document_graph: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
 ) -> Router {
@@ -398,7 +398,7 @@ pub(crate) fn assemble_api(
     assemble_api_with_templates(
         config,
         sqlite,
-        document_index,
+        document_graph,
         http,
         prompts,
         Arc::new(TemplateService::new(legacy)),

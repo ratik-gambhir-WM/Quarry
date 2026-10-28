@@ -15,9 +15,9 @@ const vaultSections = [
 
 export function VaultPage() {
   return (
-    <WorkspaceHomeShell activeHomeSection="vault" header={<WorkspaceHeader title="Vault" />}>
-      <div className="mx-auto w-full max-w-[1120px] pb-10">
-        <div className="border-b border-outline-variant/70 pb-5">
+    <WorkspaceHomeShell activeHomeSection="vault" contentClassName="py-8" header={<WorkspaceHeader title="Vault" />}>
+      <div className="w-full pb-10">
+        <div className="border-b border-outline-variant/70 px-8 pb-5">
           <p aria-hidden="true" className="type-h1 text-text-main">
             Vault
           </p>

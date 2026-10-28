@@ -19,19 +19,17 @@ describe("DealRoomWorkspaceSidebar", () => {
 
     const deliverableLink = markup.match(/<a[^>]*aria-label="Deliverable"[^>]*>.*?<\/a>/u)?.[0];
     const dealRoomIndex = markup.indexOf('aria-label="Deal Room"');
-    const dealActivityIndex = markup.indexOf('aria-label="Deal Activity"');
     const artifactsSectionIndex = markup.indexOf(">Deal Artifacts</h2>");
     const dataRoomIndex = markup.indexOf('aria-label="Data Room"');
     const deliverableIndex = markup.indexOf('aria-label="Deliverable"');
     const analysisIndex = markup.indexOf('aria-label="Analysis"');
 
     expect(markup).toContain('href="/hub/deals/project-alpha/deliverables"');
-    expect(markup).toContain('href="/hub/deals/project-alpha/activity"');
+    expect(markup).not.toContain('aria-label="Deal Activity"');
     expect(markup).toContain('href="/hub/deals/project-alpha/analysis"');
     expect(deliverableLink).toContain("bg-sidebar-selected");
     expect(markup.match(/aria-current="page"/gu)).toHaveLength(1);
-    expect(dealRoomIndex).toBeLessThan(dealActivityIndex);
-    expect(dealActivityIndex).toBeLessThan(artifactsSectionIndex);
+    expect(dealRoomIndex).toBeLessThan(artifactsSectionIndex);
     expect(artifactsSectionIndex).toBeLessThan(dataRoomIndex);
     expect(dataRoomIndex).toBeLessThan(analysisIndex);
     expect(analysisIndex).toBeLessThan(deliverableIndex);

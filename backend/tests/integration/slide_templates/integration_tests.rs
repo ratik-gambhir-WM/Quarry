@@ -295,7 +295,7 @@ async fn projection_failure_preserves_the_canonical_import_without_fallback() {
         crate::adapters::helix::client::HelixClient::with_config("http://127.0.0.1:9", None)
             .unwrap(),
     );
-    let index = Arc::new(index::TemplateIndex::new(
+    let graph = Arc::new(graph::TemplateGraph::new(
         helix,
         std::num::NonZeroUsize::new(2).unwrap(),
     ));
@@ -303,7 +303,7 @@ async fn projection_failure_preserves_the_canonical_import_without_fallback() {
         repository.clone(),
         Arc::new(DisabledTemplatePreviewGenerator),
         None,
-        Some(index),
+        Some(graph),
         false,
     );
     let error = studio

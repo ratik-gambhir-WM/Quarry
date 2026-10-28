@@ -2,10 +2,10 @@ use std::{env, num::NonZeroUsize, sync::Arc};
 
 use crate::{
     adapters::helix::client::HelixClient,
-    domains::documents::index::{
+    domains::documents::graph::{
         model::{FileChunkNode, FileNode, FileVersionNode},
         query::{FileChunkKeywordSearch, FileChunkVectorSearch},
-        repository::{DocumentIndexReader, DocumentIndexWriter, DocumentSearchIndex},
+        repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
     },
 };
 
@@ -18,9 +18,9 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
         .expect("the ignored compatibility test requires an explicit Helix URL");
     let helix = Arc::new(HelixClient::with_config(&url, None).expect("valid Helix URL"));
     let vector_dimension = NonZeroUsize::new(2).expect("test vector dimension is non-zero");
-    let writer = DocumentIndexWriter::new(helix.clone());
-    let reader = DocumentIndexReader::new(helix.clone());
-    let search = DocumentSearchIndex::new(helix.clone());
+    let writer = DocumentGraphWriter::new(helix.clone());
+    let reader = DocumentGraphReader::new(helix.clone());
+    let search = DocumentGraphSearch::new(helix.clone());
     writer
         .initialize(vector_dimension)
         .await

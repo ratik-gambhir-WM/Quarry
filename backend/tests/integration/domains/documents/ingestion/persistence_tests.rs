@@ -53,8 +53,8 @@ fn document_chunk(document: &Document) -> DocumentChunk {
     }
 }
 
-fn test_index_writer() -> DocumentIndexWriter {
-    DocumentIndexWriter::new(Arc::new(
+fn test_graph_writer() -> DocumentGraphWriter {
+    DocumentGraphWriter::new(Arc::new(
         HelixClient::with_config("http://127.0.0.1:6969", None).unwrap(),
     ))
 }
@@ -185,7 +185,7 @@ fn persistence_input_derives_canonical_modern_office_mime_types() {
 
 #[test]
 fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
-    let writer = test_index_writer();
+    let writer = test_graph_writer();
     let bytes = b"office bytes";
     let document = document("logical-office", OWNER, "model.xlsx", bytes);
     let chunk = document_chunk(&document);
@@ -214,7 +214,7 @@ fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
 #[test]
 fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
     let (sqlite, _files) = test_document_store();
-    let writer = test_index_writer();
+    let writer = test_graph_writer();
     let bytes = b"office bytes".to_vec();
     let document = document("logical-office", OWNER, "model.xlsx", &bytes);
 

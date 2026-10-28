@@ -1,0 +1,54 @@
+.deals-kanban [data-slot="kanban-lanes"] {
+  gap: 16px;
+  padding: 0;
+}
+
+.deals-kanban [data-slot="kanban-column"] {
+  width: 340px;
+  flex: 1 0 320px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(var(--theme-surface-muted), transparent);
+}
+
+.deals-kanban [data-slot="kanban-column-header"] {
+  min-height: 56px;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.deals-kanban [data-slot="kanban-column-title"]::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--theme-text-muted);
+  border-radius: 50%;
+}
+
+.deals-kanban [data-column-id="active"] [data-slot="kanban-column-title"]::before {
+  border-color: var(--theme-interactive);
+  background: linear-gradient(90deg, var(--theme-interactive) 50%, transparent 50%);
+}
+
+.deals-kanban [data-column-id="historic"] [data-slot="kanban-column-title"]::before {
+  background: var(--theme-text-muted);
+  box-shadow: inset 0 0 0 2px var(--theme-surface-muted);
+}
+
+.deals-kanban [data-slot="kanban-column-count"] {
+  padding: 0 2px;
+  background: transparent;
+  color: var(--theme-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.deals-kanban [data-slot="kanban-column-body"] {
+  padding: 0 10px 12px;
+}
+
+.deals-kanban [data-slot="kanban-column-body"] [role="link"] {
+  margin-bottom: 8px;
+  cursor: pointer;
+}

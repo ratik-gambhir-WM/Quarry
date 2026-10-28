@@ -3,7 +3,7 @@ use std::{collections::HashSet, num::NonZeroUsize};
 use helix_db::dsl::prelude::*;
 use helix_db::OnNodes;
 
-use crate::domains::documents::index::model::{FileChunkNode, FileNode, FileVersionNode};
+use crate::domains::documents::graph::model::{FileChunkNode, FileNode, FileVersionNode};
 
 pub const QUARRY_FILE_LABEL: &str = "QuarryFile";
 pub const FILE_VERSION_LABEL: &str = "FileVersion";
@@ -804,5 +804,5 @@ pub(super) fn file_chunk_projection() -> Vec<PropertyProjection> {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/integration/domains/documents/index/writer_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/graph/writer_tests.rs"]
 mod tests;

@@ -3,7 +3,6 @@ import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from
 export type ActiveHomeSection = "account" | "assistant" | "deals" | "hub" | "logs" | "tauri-playground" | "vault";
 
 export type ActiveDealSection =
-  | "activity"
   | "analysis"
   | "data-room"
   | "deal-room"

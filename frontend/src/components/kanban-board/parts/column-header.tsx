@@ -38,9 +38,10 @@ export function ColumnHeader({
   const overCap = column.maxItems !== undefined && itemCount > column.maxItems;
 
   return (
-    <div className="flex items-center gap-1 px-2.5 py-2">
+    <div data-slot="kanban-column-header" className="flex items-center gap-1 px-2.5 py-2">
       <div
         {...(readOnly ? {} : dragHandleProps)}
+        data-slot="kanban-column-title"
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2",
           !readOnly && "cursor-grab active:cursor-grabbing",
@@ -48,6 +49,7 @@ export function ColumnHeader({
       >
         <span className="truncate text-sm font-medium text-foreground">{column.title}</span>
         <span
+          data-slot="kanban-column-count"
           className={cn(
             "shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
             overCap ? "bg-destructive/15 text-destructive" : "text-muted-foreground",

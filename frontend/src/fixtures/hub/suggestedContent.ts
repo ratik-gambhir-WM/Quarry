@@ -1,4 +1,4 @@
-export type SuggestedContentTab = "Recent" | "Analyzed" | "Files to review";
+export type SuggestedContentTab = "Bookmarks" | "Drafts" | "Global Variables";
 
 type SuggestedContentItem = {
   icon: "doc" | "folderOpen" | "pdf" | "sheet";
@@ -12,7 +12,7 @@ type SuggestedContentGroup = {
 };
 
 export const suggestedContentByTab: Record<SuggestedContentTab, SuggestedContentGroup[]> = {
-  Recent: [
+  Bookmarks: [
     {
       label: "Today",
       items: [
@@ -30,7 +30,7 @@ export const suggestedContentByTab: Record<SuggestedContentTab, SuggestedContent
       ],
     },
   ],
-  Analyzed: [
+  Drafts: [
     {
       label: "Today",
       items: [
@@ -46,7 +46,7 @@ export const suggestedContentByTab: Record<SuggestedContentTab, SuggestedContent
       ],
     },
   ],
-  "Files to review": [
+  "Global Variables": [
     {
       label: "Today",
       items: [

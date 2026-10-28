@@ -114,10 +114,11 @@ describe("DealRoomPage", () => {
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Overview",
+      "Deal Activity",
+      "Site Visits",
       "File Summary",
       "Evidence",
       "Findings",
-      "Data Points",
       "Open Items",
       "Settings",
     ]);
@@ -131,6 +132,11 @@ describe("DealRoomPage", () => {
     overviewTab.focus();
     await user.keyboard("{ArrowRight}");
 
+    const activityTab = await screen.findByRole("tab", { name: "Deal Activity", selected: true });
+    expect(document.activeElement).toBe(activityTab);
+    expect(screen.getByRole("heading", { level: 1, name: "Deal Activity" }).closest("main")).toBe(overviewTab.closest("main"));
+    await user.keyboard("{ArrowRight}");
+    await screen.findByRole("tab", { name: "File Summary", selected: true });
     expect(document.activeElement).toBe(fileSummaryTab);
     expect(screen.getByText("Analyzed Files")).not.toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Project Alpha" })).not.toBeNull();

@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     adapters::helix::client::HelixClient,
-    domains::documents::index::repository::DocumentIndexWriter,
+    domains::documents::graph::repository::DocumentGraphWriter,
 };
 
 fn file() -> FileNode {
@@ -137,7 +137,7 @@ async fn failed_chunk_batch_is_not_published_and_a_retry_publishes() {
         requests_tx.send(requests).unwrap();
     });
 
-    let writer = DocumentIndexWriter::new(Arc::new(
+    let writer = DocumentGraphWriter::new(Arc::new(
         HelixClient::with_config(&format!("http://{address}"), None).unwrap(),
     ));
     let first_attempt = writer

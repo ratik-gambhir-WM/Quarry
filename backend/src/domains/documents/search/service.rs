@@ -1,34 +1,34 @@
 use crate::{
-    domains::documents::index::{
+    domains::documents::graph::{
         query::{
             FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
         },
-        repository::DocumentSearchIndex,
+        repository::DocumentGraphSearch,
     },
     shared::error::ServiceResult,
 };
 
 #[derive(Clone)]
 pub struct DocumentSearchService {
-    index: DocumentSearchIndex,
+    graph: DocumentGraphSearch,
 }
 
 impl DocumentSearchService {
-    pub fn new(index: DocumentSearchIndex) -> Self {
-        Self { index }
+    pub fn new(graph: DocumentGraphSearch) -> Self {
+        Self { graph }
     }
 
     pub async fn vector(
         &self,
         search: FileChunkVectorSearch,
     ) -> ServiceResult<Vec<VectorFileChunkHit>> {
-        self.index.search_vector(search).await.map_err(Into::into)
+        self.graph.search_vector(search).await.map_err(Into::into)
     }
 
     pub async fn keyword(
         &self,
         search: FileChunkKeywordSearch,
     ) -> ServiceResult<Vec<KeywordFileChunkHit>> {
-        self.index.search_keyword(search).await.map_err(Into::into)
+        self.graph.search_keyword(search).await.map_err(Into::into)
     }
 }

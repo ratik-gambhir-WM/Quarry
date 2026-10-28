@@ -309,7 +309,7 @@ shared `/hub/*` route tree:
 | `/hub/logs` | `LogsPage` | lazy |
 | `/hub/deals` | `Deals` | lazy; currently uncommitted |
 | `/hub/deals/:dealId` | `DealRoomPage` + `DealRoomOverviewPage` | lazy parent and nested leaf |
-| `/hub/deals/:dealId/activity` | `DealActivityPage` | lazy nested leaf |
+| `/hub/deals/:dealId/activity` | `DealActivityPage` compatibility redirect to `?section=activity` | lazy nested leaf |
 | `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy nested leaf |
 | `/hub/deals/:dealId/analysis` | `DealAnalysisPage` | lazy nested leaf |
 | `/hub/deals/:dealId/deliverables` | `DeliverablesPage` | lazy nested leaf |
@@ -450,14 +450,18 @@ global state or query-cache library.
   second title panel and fills the remaining inset surface. Entering text edit mode preserves the
   canvas's SVG-rendered glyph layout until the user changes the draft, at which point the Plate
   editor becomes the visible layout owner. The Deal Room sidebar keeps Deal
-  Room and Deal Activity as its primary navigation and uses an animated calendar-days icon for
-  Deal Activity. It then groups Data Room, Analysis, and Deliverable under a Deal Artifacts
+  Room as its primary navigation. It groups Data Room, Analysis, and Deliverable under a Deal Artifacts
   section. Their animated
   folder-tree, file-stack, and ship icons respectively honor the operating system's reduced-motion
   preference.
   Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
-  section enables Overview and File Summary today; Evidence, Findings, Data Points, Open Items,
+  section enables Overview, Deal Activity, File Summary, and Settings today. Deal Activity sits
+  immediately after Overview, followed by the disabled Site Visits tab, and renders its calendar, timeline, and tasks inside the same inset
+  beneath the persistent tab header. Enabled tabs use the `section` query parameter, with Overview
+  as the default; tab navigation preserves router state and supports refresh, Back, and Forward.
+  The former `/activity` route redirects to `?section=activity`. Timeline edits remain deal-scoped
+  in-memory state. Evidence, Findings, Site Visits, Open Items,
   and History remain explicitly disabled until typed backing data and view behavior exist. The
   page consumes already extracted/persisted key questions and does not trigger extraction. A
   freshly submitted SOW name
@@ -507,13 +511,13 @@ operational failures.
 | --- | --- | --- |
 | Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
-| Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview and File Summary tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Data Points, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, File Summary, and Settings tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Site Visits, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
 | Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
-| Initiative Vault | Static ReUI Vault table with a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
+| Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
 | Account/profile | Navigates immediately, displays a destination skeleton while fetching, then shows the fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Workspace email moves through router/UI state; profile data is request-local and this is not an auth session |
 
@@ -949,7 +953,7 @@ state.
 | `app/migrations` | SQLite schema creation and migration | Runtime service construction |
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
-| `domains/documents` | Document formats, canonical document store, ingestion/jobs, graph index capabilities, search, and viewing | Summary generation |
+| `domains/documents` | Document formats, canonical document store, ingestion/jobs, Helix graph capabilities, search, and viewing | Summary generation |
 | `domains/assistant::chat` | SQLite thread/message persistence, owner resolution, bounded canonical context, default system-prompt selection, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
 | `adapters/*` | Concrete SQLite, Helix, OpenAI, WM AI, Diligence Studio, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
@@ -1114,6 +1118,13 @@ no backfill or conversion. Restarting thereafter preserves new data.
 The operational procedure and model vocabulary are in [Deal/company model](deal-company-model.md).
 
 ### 9.2 Helix versioned file graph
+
+Helix domain queries and projection writes live in `domains/documents/graph/` (models, queries,
+repository, and writer) and `domains/templates/slide_templates/graph.rs` (template projection).
+The wrappers are named `DocumentGraphReader`, `DocumentGraphWriter`, `DocumentGraphSearch`, and
+`TemplateGraph`; ingestion/search fields and bootstrap bindings use matching graph terminology.
+Their unit/integration test paths mirror the `graph` naming. Database index operations retain
+index terminology; this module naming does not change their stored names or API contracts.
 
 ```text
 QuarryFile
@@ -1780,7 +1791,7 @@ current-state reference.
 | Backend handler | route, extractor, error mapping, service call | focused route test, backend fmt/Clippy/tests |
 | Domain service/repository | domain facade, constructor, bootstrap, architecture tests, failure mapping | focused unit tests and full backend gates |
 | SQLite schema | `app/migrations`, owning domain store/repository, state tests, recovery documentation | disposable database tests; never real local data |
-| Helix graph/query | document index models/query/writer/repository, documented reindex policy | graph/query tests and explicit integration plan |
+| Helix graph/query | document graph models/query/writer/repository, documented reindex policy | graph/query tests and explicit integration plan |
 | Config | parser/default/example/bootstrap | config tests, secret redaction, startup plan with disposable config |
 | Diligence Studio API or catalog | Express routes/services/repository, Axum adapter contract, preview renderer | server typecheck/tests, backend adapter tests, supervised local smoke when dependencies exist |
 | Styling/theme | semantic tokens, light/dark, reduced motion, affected primitives | typecheck/tests plus visual/keyboard inspection |

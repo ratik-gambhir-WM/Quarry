@@ -1,8 +1,8 @@
 import { runtime } from "@quarry/runtime";
 import { useEffect, useState } from "react";
-import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { useWorkspace } from "../app/WorkspaceProvider";
-import type { DealRoomOverviewSection } from "../components/deal-room/DealRoomHeader";
+import { getDealRoomSection, type DealRoomOverviewSection } from "../components/deal-room/DealRoomHeader";
 import { WorkspaceShell } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { ActiveDealSection } from "../components/hub/sidebar/sidebarTypes";
@@ -114,7 +114,16 @@ function DealRoomWorkspace({
   navigationState?: WorkspaceLocationState;
 }) {
   const location = useLocation();
-  const [activeOverviewSection, setActiveOverviewSection] = useState<DealRoomOverviewSection>("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeOverviewSection = getDealRoomSection(searchParams.get("section"));
+  function setActiveOverviewSection(section: DealRoomOverviewSection) {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (section === "overview") next.delete("section");
+      else next.set("section", section);
+      return next;
+    }, { state: location.state });
+  }
   const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(() => deal.room.timeline);
 
   const childPath = getDealRoomChildPath(location.pathname, deal.room.id);
@@ -152,7 +161,6 @@ function getDealRoomChildPath(pathname: string, dealId: string) {
 }
 
 function getActiveDealSection(childPath: string): ActiveDealSection {
-  if (childPath.startsWith("/activity")) return "activity";
   if (childPath.startsWith("/data-room")) return "data-room";
   if (childPath.startsWith("/analysis")) return "analysis";
   if (childPath.startsWith("/deliverables")) return "deliverables";

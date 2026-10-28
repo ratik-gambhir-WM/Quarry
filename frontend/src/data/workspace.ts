@@ -110,7 +110,7 @@ export function getDealRoomPath(dealId: string) {
 }
 
 export function getDealActivityPath(dealId: string) {
-  return `${getDealRoomPath(dealId)}/activity`;
+  return `${getDealRoomPath(dealId)}?section=activity`;
 }
 
 export function getDataRoomPath(dealId: string) {

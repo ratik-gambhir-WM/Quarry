@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { buildDealKanbanLanes, type DealPortfolioView } from "../../data/dealsView";
-import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { KanbanBoard } from "../kanban-board/kanban-board";
 import type { AnyKanbanCardRenderer, KanbanData, KanbanItem } from "../kanban-board/types";
 import { dealCardRenderer, type DealKanbanCardData } from "./DealKanbanCard";
+import "./deals-kanban.css";
 
 type DealsKanbanProps = {
   deals: DealPortfolioView[];
@@ -42,7 +42,7 @@ export function DealsKanban({ deals, onOpenDeal }: DealsKanbanProps) {
   }
 
   return (
-    <WorkspaceCard className="h-[min(650px,calc(100vh-17rem))] min-h-[420px] overflow-hidden" radius="small">
+    <div className="deals-kanban h-[calc(100dvh-9rem)] min-h-[420px] overflow-hidden">
       <KanbanBoard
         aria-label="Deals by status"
         className="h-full"
@@ -51,7 +51,7 @@ export function DealsKanban({ deals, onOpenDeal }: DealsKanbanProps) {
         readOnly
         renderers={renderers}
       />
-    </WorkspaceCard>
+    </div>
   );
 }
 

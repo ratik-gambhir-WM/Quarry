@@ -2,8 +2,8 @@
 pub(crate) mod catalog;
 pub(super) mod error;
 mod facade;
+pub mod graph;
 mod handler;
-pub mod index;
 mod json_contract;
 mod models;
 mod normalize;

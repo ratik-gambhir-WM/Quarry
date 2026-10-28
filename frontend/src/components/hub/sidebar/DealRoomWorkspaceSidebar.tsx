@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
   getDataRoomPath,
-  getDealActivityPath,
   getDealAnalysisPath,
   getDealRoomPath,
   getDeliverablesPath,
@@ -14,7 +13,6 @@ import type { DealRoomSidebarProps } from "./sidebarTypes";
 
 const primaryDealRoomLinks = [
   { icon: "dashboard" as const, key: "deal-room" as const, label: "Deal Room" },
-  { icon: "calendarDays" as const, key: "activity" as const, label: "Deal Activity" },
 ];
 
 const dealArtifactLinks = [
@@ -35,8 +33,6 @@ export function DealRoomWorkspaceSidebar({
     if (activeDeal) {
       const destination = link.key === "deal-room"
         ? getDealRoomPath(activeDeal.room.id)
-        : link.key === "activity"
-          ? getDealActivityPath(activeDeal.room.id)
         : link.key === "data-room"
           ? getDataRoomPath(activeDeal.room.id)
           : link.key === "analysis"

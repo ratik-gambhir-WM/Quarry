@@ -22,7 +22,7 @@ pub struct SlideTemplates {
     capacity: Arc<Semaphore>,
     admission: Arc<Semaphore>,
     mutations: Arc<Mutex<()>>,
-    projection: Option<Arc<super::index::TemplateIndex>>,
+    projection: Option<Arc<super::graph::TemplateGraph>>,
     pub(super) allow_embeddings: bool,
     stopping: Arc<AtomicBool>,
     active: Arc<StdMutex<Vec<Weak<AtomicBool>>>>,
@@ -32,7 +32,7 @@ impl SlideTemplates {
         repository: Arc<dyn TemplateRepository>,
         preview: Arc<dyn TemplatePreviewGenerator>,
         classification: Option<Arc<SlideClassificationService>>,
-        projection: Option<Arc<super::index::TemplateIndex>>,
+        projection: Option<Arc<super::graph::TemplateGraph>>,
         allow_embeddings: bool,
     ) -> Self {
         Self {

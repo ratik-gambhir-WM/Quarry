@@ -6,6 +6,7 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use tokio::sync::mpsc;
+use tower::util::error::optional::None;
 
 use crate::{
     adapters::openai::client::{ChatMessageInput, ChatRole, OpenAiClient, ResponsesFileInput},
@@ -77,7 +78,12 @@ impl AssistantChatService {
         self
     }
 
+    // pub fn ask_with_references(&self, input: QueryModelInput) -> Option<None> {
+    //     return None;
+    // }
+
     pub fn ask(&self, input: QueryModelInput) -> ServiceResult<mpsc::Receiver<SendQueryEvent>> {
+        // TODO: Add files refs to the input and pull from db
         let client = self
             .openai
             .as_ref()

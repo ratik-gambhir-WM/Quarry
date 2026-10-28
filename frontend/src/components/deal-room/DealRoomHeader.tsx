@@ -3,10 +3,11 @@ import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
 export type DealRoomOverviewSection =
   | "overview"
+  | "activity"
   | "file-summary"
   | "evidence"
   | "findings"
-  | "data-points"
+  | "site-visits"
   | "open-items"
   | "settings";
 
@@ -21,13 +22,18 @@ const sections: ReadonlyArray<{
   value: DealRoomOverviewSection;
 }> = [
   { enabled: true, label: "Overview", value: "overview" },
+  { enabled: true, label: "Deal Activity", value: "activity" },
+  { enabled: false, label: "Site Visits", value: "site-visits" },
   { enabled: true, label: "File Summary", value: "file-summary" },
   { enabled: false, label: "Evidence", value: "evidence" },
   { enabled: false, label: "Findings", value: "findings" },
-  { enabled: false, label: "Data Points", value: "data-points" },
   { enabled: false, label: "Open Items", value: "open-items" },
   { enabled: true, label: "Settings", value: "settings" },
 ];
+
+export function getDealRoomSection(value: string | null): DealRoomOverviewSection {
+  return sections.find((section) => section.enabled && section.value === value)?.value ?? "overview";
+}
 
 export function DealRoomHeader({ activeSection, onActiveSectionChange }: DealRoomHeaderProps) {
   const descriptionId = useId();

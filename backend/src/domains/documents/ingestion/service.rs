@@ -19,7 +19,7 @@ use crate::{
             image::{build_image_assembly, validate_image_by_bytes},
             ParsedQuarryFile, QuarryFile,
         },
-        index::repository::{DocumentIndexReader, DocumentIndexWriter},
+        graph::repository::{DocumentGraphReader, DocumentGraphWriter},
         ingestion::persistence::persist_document_and_chunks,
         store::{model::PersistedFileIdentity, sqlite::DocumentStore},
     },
@@ -86,8 +86,8 @@ pub struct ProcessDocumentsResponse {
 #[derive(Clone)]
 pub struct DocumentIngestionService {
     files: DocumentStore,
-    index_reader: DocumentIndexReader,
-    index_writer: DocumentIndexWriter,
+    graph_reader: DocumentGraphReader,
+    graph_writer: DocumentGraphWriter,
     openai: Option<Arc<OpenAiClient>>,
     embedding_model: String,
     image_description_model: String,
@@ -100,8 +100,8 @@ pub struct DocumentIngestionService {
 impl DocumentIngestionService {
     pub fn new(
         files: DocumentStore,
-        index_reader: DocumentIndexReader,
-        index_writer: DocumentIndexWriter,
+        graph_reader: DocumentGraphReader,
+        graph_writer: DocumentGraphWriter,
         openai: Option<Arc<OpenAiClient>>,
         embedding_model: String,
         image_description_model: String,
@@ -109,8 +109,8 @@ impl DocumentIngestionService {
     ) -> Self {
         Self {
             files,
-            index_reader,
-            index_writer,
+            graph_reader,
+            graph_writer,
             openai,
             embedding_model,
             image_description_model,
@@ -206,7 +206,7 @@ impl DocumentIngestionService {
         };
         if let Some(existing) = &existing_attachment {
             match self
-                .index_reader
+                .graph_reader
                 .current_document(&user_id, &existing.file_id)
                 .await
             {
@@ -286,7 +286,7 @@ impl DocumentIngestionService {
         .await?;
         persist_document_and_chunks(
             &self.files,
-            &self.index_writer,
+            &self.graph_writer,
             &deal_id,
             graph.document,
             graph.chunks,

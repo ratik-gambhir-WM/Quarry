@@ -33,12 +33,12 @@ pub struct TemplatePreviewDescriptor {
     pub height: u32,
     pub url: String,
 }
-pub struct TemplateIndex {
+pub struct TemplateGraph {
     helix: Arc<HelixClient>,
     dimensions: NonZeroUsize,
     preparation: Arc<tokio::sync::Semaphore>,
 }
-impl TemplateIndex {
+impl TemplateGraph {
     pub fn new(helix: Arc<HelixClient>, dimensions: NonZeroUsize) -> Self {
         Self {
             helix,
@@ -406,5 +406,5 @@ pub(crate) fn prepare_record(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/templates/slide_templates/index_tests.rs"]
+#[path = "../../../../tests/unit/domains/templates/slide_templates/graph_tests.rs"]
 mod tests;

@@ -18,7 +18,9 @@ import { Icon } from "../ui/Icon";
 
 const vaultTableClassNames = {
   ...quarryDataGridTableClassNames,
-  base: `${quarryDataGridTableClassNames.base} [&_tbody_td]:px-5 [&_tbody_td]:py-5`,
+  base: `${quarryDataGridTableClassNames.base} bg-transparent [&_tbody_td]:px-5 [&_tbody_td]:py-5`,
+  header: "bg-transparent",
+  headerRow: "border-outline-variant/70 bg-transparent",
 } as const;
 
 const vaultTableColumns: ColumnDef<DataGridFeatures, VaultTableRow>[] = [
@@ -93,7 +95,7 @@ export function VaultTable() {
   return (
     <section aria-labelledby="vault-table-heading">
       <h2
-        className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted"
+        className="px-8 text-[11px] font-bold uppercase tracking-[0.2em] text-muted"
         id="vault-table-heading"
       >
         Vault table

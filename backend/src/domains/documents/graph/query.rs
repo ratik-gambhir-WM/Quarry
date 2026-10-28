@@ -2,7 +2,7 @@ use helix_db::dsl::prelude::*;
 use helix_db::OnNodes;
 use serde::{Deserialize, Serialize};
 
-use crate::domains::documents::index::model::{FileNode, FileVersionNode};
+use crate::domains::documents::graph::model::{FileNode, FileVersionNode};
 
 use super::writer::{
     file_chunk_projection, file_projection, file_version_projection, CURRENT_VERSION_LABEL,
@@ -362,5 +362,5 @@ fn search_limit_to_i64(limit: usize) -> Result<i64, String> {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/domains/documents/index/query_tests.rs"]
+#[path = "../../../../tests/unit/domains/documents/graph/query_tests.rs"]
 mod tests;

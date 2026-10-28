@@ -67,12 +67,12 @@ async fn both_vector_roles_and_complete_metadata_publish_after_bounded_parts() {
 #[ignore = "requires explicitly disposable Helix at 127.0.0.1:16969"]
 async fn live_helix_templates_metadata_dual_vectors_and_deletion() {
     let helix = Arc::new(HelixClient::with_config("http://127.0.0.1:16969", None).unwrap());
-    let index = TemplateIndex::new(helix.clone(), NonZeroUsize::new(2).unwrap());
-    index.initialize().await.unwrap();
+    let graph = TemplateGraph::new(helix.clone(), NonZeroUsize::new(2).unwrap());
+    graph.initialize().await.unwrap();
     let record = record().await;
     let id = record.template.template_id.clone();
-    index.upsert(record.clone()).await.unwrap();
-    index.upsert(record.clone()).await.unwrap();
+    graph.upsert(record.clone()).await.unwrap();
+    graph.upsert(record.clone()).await.unwrap();
     let root: Value = helix
         .execute_read_query(
             "test.templates.root",
@@ -150,7 +150,7 @@ async fn live_helix_templates_metadata_dual_vectors_and_deletion() {
         record.metadata.title
     );
     assert_eq!(projected["classification"]["subjectVector"][0], 1.0);
-    index.delete(&id).await.unwrap();
+    graph.delete(&id).await.unwrap();
     for label in [ROOT, PART, SUBJECT, CAPABILITY] {
         let found: Value = helix
             .execute_read_query(
