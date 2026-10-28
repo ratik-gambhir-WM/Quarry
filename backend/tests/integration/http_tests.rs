@@ -1087,7 +1087,7 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
                     r#"
                     INSERT INTO deals (
                         deal_id, user_id, deal_name, status, created_at, updated_at, engagement_type, transaction_type
-                    ) VALUES (?1, ?2, 'Project Test', 'active', '2026-01-01', '2026-02-01',
+                    ) VALUES (?1, ?2, 'Project Test', 'prepare', '2026-01-01', '2026-02-01',
                               'buy_side', 'unknown')
                     "#,
                     rusqlite::params![deal_id, user_id],

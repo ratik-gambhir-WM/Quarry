@@ -192,7 +192,7 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
     }
     input["dealName"] = json!("Edited");
     input["engagementCompletedDate"] = json!("2026-02-01");
-    input["status"] = json!("completed");
+    input["status"] = json!("closed");
     let (status, updated) = request(
         &app,
         "POST",
@@ -243,7 +243,7 @@ async fn validates_enum_dates_cardinality_and_references_at_the_correct_boundary
     }
     let mut input = deal();
     input["transactionType"] = json!("platform_acquisition");
-    input["status"] = json!("active");
+    input["status"] = json!("prepare");
     assert_eq!(
         request(&app, "POST", "/api/v1/deals", input.clone())
             .await
@@ -333,4 +333,107 @@ async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
     )
     .await;
     assert_eq!(thread["dealId"], "DEAL-MODEL");
+}
+
+#[tokio::test]
+async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_stage() {
+    let app = app().await;
+    let mut input = deal();
+    assert_eq!(
+        request(&app, "POST", "/api/v1/deals", input.clone())
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    input.as_object_mut().unwrap().remove("dealId");
+    let frontend = include_str!("../../../frontend/src/data/dealModel.ts");
+    for code in [
+        "pipeline",
+        "prepare",
+        "review_plan_discovery",
+        "interviews_site_visit",
+        "debrief_flash_report",
+        "follow_ups_analysis",
+        "qa_readout_closeout",
+        "closed",
+        "pencils_down",
+    ] {
+        assert!(frontend.contains(&format!("\"{code}\"")));
+        input["status"] = json!(code);
+        let mut create = input.clone();
+        create["dealId"] = json!(format!("DEAL-{code}"));
+        let (created_status, created) = request(&app, "POST", "/api/v1/deals", create).await;
+        assert_eq!(created_status, StatusCode::CREATED, "{created}");
+        assert_eq!(created["deal"]["status"], code);
+        let (status, saved) = request(
+            &app,
+            "POST",
+            "/api/v1/deals/DEAL-MODEL/update",
+            input.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["deal"]["status"], code);
+        assert_eq!(saved["deal"]["actualCloseDate"], Value::Null);
+        assert_eq!(saved["deal"]["engagementCompletedDate"], Value::Null);
+        let (_, read) = request(&app, "GET", "/api/v1/deals/DEAL-MODEL", Value::Null).await;
+        assert_eq!(read["status"], code, "{read}");
+    }
+    for code in ["active", "on_hold", "completed", "cancelled", "unknown"] {
+        input["status"] = json!(code);
+        let (status, error) = request(
+            &app,
+            "POST",
+            "/api/v1/deals/DEAL-MODEL/update",
+            input.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!error.to_string().contains(code));
+        let mut create = input.clone();
+        create["dealId"] = json!("DEAL-INVALID");
+        assert_eq!(
+            request(&app, "POST", "/api/v1/deals", create).await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    for _ in 0..2 {
+        let (status, archived) =
+            request(&app, "POST", "/api/v1/deals/DEAL-MODEL/archive", json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(archived["status"], "pencils_down");
+        assert!(archived["archivedAt"].is_string());
+    }
+}
+
+#[tokio::test]
+async fn deal_json_validation_preserves_body_limits_and_content_type_errors() {
+    let app = app().await;
+    for (content_type, body, expected) in [
+        (
+            "text/plain",
+            "{}".to_string(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ),
+        (
+            "application/json",
+            " ".repeat(2 * 1024 * 1024 + 1),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        ("application/json", "{".to_string(), StatusCode::BAD_REQUEST),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/deals")
+                    .header("authorization", format!("Bearer {}", "a".repeat(43)))
+                    .header("x-user-id", "1")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
 }

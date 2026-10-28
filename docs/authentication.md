@@ -90,7 +90,11 @@ The `/_internal/template-preview` route stays outside the product session guard.
 injected snapshots for Chromium and makes no authenticated API requests. It is not a secret
 bypass and supplies no backend credentials.
 
-## Schema 11 and development reset
+## Schema 12 and development reset
+
+Schema 12 replaces the deal-status CHECK with nine diligence stages. Schema 11 and older
+layouts require the same explicit reset; no status remapping or credential backfill runs.
+Stop old clients/writers and rebuild/reload matching web and desktop clients after reset.
 
 `users` replaces `api_key`/authorization-looking `role` with username, password_hash and optional
 job_title. `auth_sessions` owns token digests, user FKs, creation/expiry/revocation times and owner/
@@ -99,7 +103,7 @@ Helix is a recoverable projection, not an identity database.
 
 Deploy the backend and updated web/desktop clients together: old profile-only clients cannot
 authenticate against the new contract. There is no conversion from old profiles to passwords. Normal startup only initializes an empty
-database or validates schema 11; older/newer/forged layouts fail without erasing records. Use the
+database or validates schema 12; older/newer/forged layouts fail without erasing records. Use the
 explicit offline `reset_development --discard <absolute-disposable-database-path>` binary after
 stopping producers. Reset discards all dependent product and embedded template records together,
 including sessions, chats, blobs, previews, classification/embeddings and memberships. It is never

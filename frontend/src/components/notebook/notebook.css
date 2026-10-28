@@ -1,0 +1,101 @@
+.notebook-editor .bn-root,
+.quarry-notebook-theme.bn-root {
+  --bn-font-family: var(--font-body);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--foreground);
+  --bn-colors-menu-background: var(--popover);
+  --bn-colors-menu-text: var(--popover-foreground);
+  --bn-colors-tooltip-background: var(--popover);
+  --bn-colors-tooltip-text: var(--popover-foreground);
+  --bn-colors-hovered-background: var(--theme-surface-hover);
+  --bn-colors-hovered-text: var(--foreground);
+  --bn-colors-selected-background: var(--theme-sidebar-selected);
+  --bn-colors-selected-text: var(--foreground);
+  --bn-colors-border: var(--border);
+  --bn-colors-shadow: var(--border);
+  --bn-colors-side-menu: var(--theme-text-muted);
+  --bn-colors-disabled-text: var(--theme-text-muted);
+  --bn-colors-disabled-background: var(--theme-surface-muted);
+  --bn-colors-highlights-gray-background: var(--theme-surface-subtle);
+  --bn-colors-highlights-gray-text: var(--theme-text-subtle);
+}
+.quarry-notebook-theme .bn-suggestion-menu {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(380px, 60dvh);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--foreground) 8%, transparent);
+  scrollbar-width: thin;
+}
+.quarry-notebook-theme .bn-suggestion-menu > .bn-suggestion-menu-label {
+  padding: 8px 12px 4px;
+  color: var(--theme-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] {
+  min-height: 34px;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] > [data-position="left"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] > [data-position="left"] svg {
+  width: 16px;
+  height: 16px;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] > div:not([data-position]) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] > div:not([data-position]) > div:first-child {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] > div:not([data-position]) > div:last-child {
+  overflow: hidden;
+  color: var(--theme-text-muted);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quarry-notebook-theme .bn-suggestion-menu > [role="option"] [data-slot="badge"] {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 400;
+}
+/* Shadcn's accent utility uses Quarry's blue interactive token by default. */
+.quarry-notebook-theme .bn-suggestion-menu [role="option"]:is([aria-selected="true"], :hover, :focus) {
+  background-color: var(--theme-workspace-chrome);
+  color: var(--foreground);
+}
+.notebook-editor .bn-editor {
+  padding-inline: 0;
+  padding-bottom: 35vh;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+  background: transparent;
+}
+.notebook-editor .bn-editor:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  .notebook-editor *, .quarry-notebook-theme * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

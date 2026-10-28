@@ -204,6 +204,7 @@ fn validate_input(input: &SaveFileInput) -> AppResult<()> {
     let allowed_extensions: &[&str] = match input.mime_type.as_str() {
         "application/json;charset=utf-8" => &["json"],
         "text/markdown;charset=utf-8" => &["md", "markdown"],
+        "text/html;charset=utf-8" => &["html"],
         _ => {
             return Err(AppError::validation(
                 "The requested file type is not supported.",

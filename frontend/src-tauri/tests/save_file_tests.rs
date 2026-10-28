@@ -56,3 +56,15 @@ fn validates_bounded_powerpoint_save_input() {
         crate::errors::ErrorCode::Validation
     );
 }
+
+#[test]
+fn accepts_html_exports_and_rejects_unrelated_extensions() {
+    let mut input = valid_input();
+    input.contents = "<!doctype html><html><body>Note</body></html>".into();
+    input.mime_type = "text/html;charset=utf-8".into();
+    input.suggested_name = "note.html".into();
+    input.extensions = vec!["html".into()];
+    assert!(validate_input(&input).is_ok());
+    input.extensions = vec!["exe".into()];
+    assert!(validate_input(&input).is_err());
+}

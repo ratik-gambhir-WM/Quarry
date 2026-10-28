@@ -12,15 +12,15 @@ use crate::{
     shared::ids::{document_id_from_content, file_version_id, sha256_hex},
 };
 
-const OWNER: &str = "analyst@example.com";
+const OWNER: &str = "1";
 const DEAL_ID: &str = "DEAL-FILES";
 
 fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]) {
     state
         .with_connection(|connection| {
             connection.execute(
-                "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES ('Avery', 'Analyst', ?1, ?1, 'unusable-test-hash')",
-                [owner],
+                "INSERT INTO users (id, first_name, last_name, email, username, password_hash) VALUES (?1, 'Avery', 'Analyst', ?2, ?2, 'unusable-test-hash')",
+                rusqlite::params![owner, format!("analyst{owner}@example.com")],
             )?;
             let user_id = connection.last_insert_rowid();
             for (deal_id, status) in deals {
@@ -31,7 +31,7 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
                     ) VALUES (?1, ?2, 'Project Test', ?3, '2026-01-01', '2026-02-01',
                               'buy_side', 'unknown')
                     "#,
-                    rusqlite::params![deal_id, user_id, "active"],
+                    rusqlite::params![deal_id, user_id, "prepare"],
                 )?;
                 if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id])?; }
             }
@@ -169,6 +169,20 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
 }
 
 #[tokio::test]
+async fn deal_ownership_rejects_email_in_place_of_authenticated_user_id() {
+    let state = test_state();
+    let bytes = b"email identity".to_vec();
+    let document = document("email-file", "analyst1@example.com", "report.pdf", &bytes);
+
+    let error = persist_file_blob(&state, DEAL_ID, &document, bytes)
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("is not owned by workspace"));
+    assert_eq!(table_counts(&state), (0, 0, 0));
+}
+
+#[tokio::test]
 async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
     let state = empty_sqlite();
     seed_user_and_deals(
@@ -257,7 +271,7 @@ async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() 
         OWNER,
         &[(DEAL_ID, "Active"), ("DEAL-ARCHIVED", "Archived")],
     );
-    seed_user_and_deals(&state, "other@example.com", &[("DEAL-OTHER", "Active")]);
+    seed_user_and_deals(&state, "2", &[("DEAL-OTHER", "Active")]);
     let bytes = b"deal validation".to_vec();
     let document = document("file-deal", OWNER, "report.pdf", &bytes);
 

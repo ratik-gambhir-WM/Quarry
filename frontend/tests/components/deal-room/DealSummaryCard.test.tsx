@@ -48,17 +48,17 @@ const deal: DealRoomData = {
 afterEach(cleanup);
 
 describe("DealSummaryCard", () => {
-  it("shows closing and engagement dates independently, including unavailable dates", () => {
+  it("omits the date section from the overview", () => {
     render(<DealSummaryCard deal={{ ...deal, metrics: [
       { label: "Start date", value: "Unavailable" },
       { label: "Expected close", value: "2026-12-31" },
       { label: "Actual close", value: "Unavailable" },
       { label: "Engagement completed", value: "2026-10-15" },
     ] }} />);
-    expect(screen.getAllByRole("definition")).toHaveLength(4);
-    expect(screen.getByText("Expected close").nextElementSibling?.textContent).toBe("2026-12-31");
-    expect(screen.getByText("Actual close").nextElementSibling?.textContent).toBe("Unavailable");
-    expect(screen.getByText("Engagement completed").nextElementSibling?.textContent).toBe("2026-10-15");
+    expect(screen.queryByLabelText("Deal details")).toBeNull();
+    for (const label of ["Start date", "Expected close", "Actual close", "Engagement completed"]) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
   });
   it("renders the overview, resources, and extracted questions in response order", () => {
     const { container } = render(<DealSummaryCard deal={deal} />);

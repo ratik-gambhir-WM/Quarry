@@ -1,3 +1,4 @@
+import { dealStatusOptions } from "@/data/dealModel";
 import { testDeal, testDealInput, testMetadata } from "@/test/fixtures/deals";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { httpQuarryApi } from "@/api/httpQuarryApi";
@@ -5,6 +6,20 @@ import { httpQuarryApi } from "@/api/httpQuarryApi";
 describe("httpQuarryApi", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each(dealStatusOptions)("preserves %s through create, update and read", async (status) => {
+    const input = { ...testDealInput(), status };
+    const response = { deal: testDeal({ status }), metadata: testMetadata() };
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json(response)));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = httpQuarryApi;
+    expect((await api.createDeal(input)).deal.status).toBe(status);
+    expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(status);
+    fetchMock.mockResolvedValue(Response.json({ ...response.deal, metadata: response.metadata }));
+    expect((await api.getDeal(input.dealId)).status).toBe(status);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).status).toBe(status);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).status).toBe(status);
   });
 
   it("keeps summaries upload-only through the versioned multipart route", async () => {

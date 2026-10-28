@@ -128,7 +128,8 @@ describe("DealRoomPage", () => {
     api.listCompanies.mockResolvedValue({ companies: [party.company], hasMore: false });
     api.updateCompany.mockResolvedValue({ ...party.company, name: "Renamed company" });
     renderDealRoutes(`/hub/deals/${deal.dealId}`);
-    await screen.findByText(/Target: Original company/);
+    const overview = await screen.findByLabelText("Engagement overview");
+    expect(within(overview).getByText("Target").nextElementSibling?.textContent).toBe("Original company");
     await user.click(screen.getByRole("tab", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: "Edit deal" }));
     await user.click(await screen.findByRole("button", { name: "Edit shared company Original company" }));
@@ -138,7 +139,7 @@ describe("DealRoomPage", () => {
     await screen.findByText(/was updated for every linked deal/);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("tab", { name: "Overview" }));
-    expect(await screen.findByText(/Target: Renamed company/)).toBeTruthy();
+    expect(within(screen.getByLabelText("Engagement overview")).getByText("Target").nextElementSibling?.textContent).toBe("Renamed company");
     expect(screen.getByLabelText("Portfolio deals").textContent).toBe("");
     expect(api.updateDeal).not.toHaveBeenCalled();
     expect(api.getDeal).toHaveBeenCalledOnce();

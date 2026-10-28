@@ -5,7 +5,7 @@ type FormFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "onChange"> & 
   action?: ReactNode;
   icon: ReactNode;
   label: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
 };
 
 export function FormField({
@@ -38,7 +38,7 @@ export function FormField({
           autoComplete={autoComplete}
           className={cn("w-full rounded-full border border-outline-variant bg-surface-container-lowest py-md pl-[52px] pr-md text-[16px] leading-[1.6] text-on-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] outline-none transition placeholder:text-outline-variant focus:border-primary-container focus:ring-4 focus:ring-primary-fixed/40", className)}
           id={id}
-          onChange={(event) => onChange(event.currentTarget.value)}
+          onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined}
           placeholder={placeholder}
           required={required}
           type={type}

@@ -1,4 +1,4 @@
-import type { DealParty } from "../../data/dealModel";
+import { dealStatusLabels, type DealParty } from "../../data/dealModel";
 import type {
   DealResource,
   WorkspaceDeal,
@@ -17,10 +17,10 @@ function unavailableDealResources(): DealResource[] {
 export const workspaceDeals: WorkspaceDeal[] = [
   {
     colorClassName: "bg-primary",
-    complete: true,
+    terminal: true,
     portfolio: {
       engagementType: "buy_side",
-      status: "completed",
+      status: "closed",
       parties: [fixtureParty("Alpha Corp")],
       transactionType: "strategic_acquisition",
     },
@@ -46,7 +46,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
       phaseLabel: "Phase 1",
       resources: unavailableDealResources(),
       sectorLabel: "Manufacturing Sector",
-      stageLabel: "In Progress",
+      stageLabel: dealStatusLabels.closed,
       summary:
         "Evaluating the potential acquisition of Alpha Corp. Current focus is on identifying operational synergies, verifying the reported 15% CapEx reduction, and assessing environmental liabilities at the primary manufacturing site.",
       timeline: [
@@ -93,7 +93,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
     colorClassName: "bg-[#6b87c8]",
     portfolio: {
       engagementType: "buy_side",
-      status: "active",
+      status: "review_plan_discovery",
       parties: [fixtureParty("Beta Holdings")],
       transactionType: "platform_acquisition",
     },
@@ -119,7 +119,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
       phaseLabel: "Phase 2",
       resources: unavailableDealResources(),
       sectorLabel: "Industrial Distribution",
-      stageLabel: "Under Review",
+      stageLabel: dealStatusLabels.review_plan_discovery,
       summary:
         "Assessing Beta Holdings as a platform acquisition with particular emphasis on channel concentration, pricing resilience, and execution risk tied to the in-flight ERP modernization program.",
       timeline: [
@@ -166,7 +166,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
     colorClassName: "bg-muted",
     portfolio: {
       engagementType: "buy_side",
-      status: "on_hold",
+      status: "follow_ups_analysis",
       transactionType: "merger",
       parties: [],
     },
@@ -192,7 +192,7 @@ export const workspaceDeals: WorkspaceDeal[] = [
       phaseLabel: "Integration Planning",
       resources: unavailableDealResources(),
       sectorLabel: "Transportation & Logistics",
-      stageLabel: "Risk Watch",
+      stageLabel: dealStatusLabels.follow_ups_analysis,
       summary:
         "Preparing the integration case for a regional logistics merger. The current workstream is focused on route overlap, depot labor complexity, and validating the modeled service-level improvements against historical throughput.",
       timeline: [

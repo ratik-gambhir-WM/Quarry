@@ -156,8 +156,20 @@ fn acquisition_target_rule_depends_on_engagement_status_and_transaction_structur
     ] {
         let mut fields = input().fields;
         fields.transaction_type = transaction;
-        assert!(validate_target_rule(&fields).is_ok());
-        for status in [DealStatus::Active, DealStatus::Completed] {
+        for status in [DealStatus::Pipeline, DealStatus::PencilsDown] {
+            fields.status = status;
+            fields.parties.clear();
+            assert!(validate_target_rule(&fields).is_ok());
+        }
+        for status in [
+            DealStatus::Prepare,
+            DealStatus::ReviewPlanDiscovery,
+            DealStatus::InterviewsSiteVisit,
+            DealStatus::DebriefFlashReport,
+            DealStatus::FollowUpsAnalysis,
+            DealStatus::QaReadoutCloseout,
+            DealStatus::Closed,
+        ] {
             fields.status = status;
             fields.parties.clear();
             assert!(validate_target_rule(&fields).is_err());

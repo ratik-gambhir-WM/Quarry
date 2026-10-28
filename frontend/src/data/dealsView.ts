@@ -1,4 +1,4 @@
-import { codeLabel, partyNames, type DealStatus } from "./dealModel";
+import { codeLabel, dealStatusOptions, dealStatusLabels, isTerminalDealStatus, partyNames, type DealStatus } from "./dealModel";
 import type { WorkspaceDeal } from "./workspace";
 
 export type DealLifecycle = "Current" | "Historic";
@@ -39,18 +39,12 @@ export type DealKanbanLane = {
   title: string;
 };
 
-const knownLaneOrder = ["pipeline", "active", "on_hold", "historic"] as const;
-const knownLaneTitles = { pipeline: "Pipeline", active: "Active / In Progress", on_hold: "On hold", historic: "Historic / Closed" };
-
 export function getDealLifecycle(deal: WorkspaceDeal): DealLifecycle {
-  const status = normalizeStatus(deal.portfolio.status || deal.room.stageLabel);
-  return status === "completed" || status === "cancelled"
-    ? "Historic"
-    : "Current";
+  return isTerminalDealStatus(deal.portfolio.status) ? "Historic" : "Current";
 }
 
 export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
-  const status = deal.portfolio.status.trim() || deal.room.stageLabel.trim() || "Unknown";
+  const status = deal.portfolio.status;
 
   return {
     buyer: partyNames(deal.portfolio.parties, "buyer"),
@@ -126,46 +120,17 @@ export function buildDealSearchText(deal: DealPortfolioView): string {
 }
 
 export function buildDealKanbanLanes(deals: readonly DealPortfolioView[]): DealKanbanLane[] {
-  const lanes = new Map<string, DealKanbanLane>();
-
-  for (const deal of deals) {
-    const lane = getDealKanbanLane(deal);
-    const existing = lanes.get(lane.id);
-    if (existing) {
-      existing.deals.push(deal);
-    } else {
-      lanes.set(lane.id, { ...lane, deals: [deal] });
-    }
-  }
-
-  return Array.from(lanes.values()).sort((left, right) => {
-    const leftIndex = knownLaneOrder.indexOf(left.id as (typeof knownLaneOrder)[number]);
-    const rightIndex = knownLaneOrder.indexOf(right.id as (typeof knownLaneOrder)[number]);
-    const leftOrder = leftIndex === -1 ? knownLaneOrder.length - 1 : leftIndex;
-    const rightOrder = rightIndex === -1 ? knownLaneOrder.length - 1 : rightIndex;
-
-    if (left.id === "historic") return right.id === "historic" ? 0 : 1;
-    if (right.id === "historic") return -1;
-    return leftOrder - rightOrder || left.title.localeCompare(right.title);
-  });
+  if (!deals.length) return [];
+  return dealStatusOptions.map((status) => ({
+    id: status,
+    title: dealStatusLabels[status],
+    deals: deals.filter((deal) => deal.statusCode === status),
+  }));
 }
 
 export function getDealTransitionName(id: string): string {
   const encoded = Array.from(id, (character) => character.codePointAt(0)?.toString(36) ?? "0").join("-");
   return `deal-surface-${encoded || "empty"}`;
-}
-
-function getDealKanbanLane(deal: DealPortfolioView): Omit<DealKanbanLane, "deals"> {
-  switch (deal.statusCode) {
-    case "completed": case "cancelled": return { id: "historic", title: knownLaneTitles.historic };
-    case "pipeline": return { id: "pipeline", title: knownLaneTitles.pipeline };
-    case "active": return { id: "active", title: knownLaneTitles.active };
-    case "on_hold": return { id: "on_hold", title: knownLaneTitles.on_hold };
-  }
-}
-
-function normalizeStatus(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function normalizeSearchText(value: string): string {

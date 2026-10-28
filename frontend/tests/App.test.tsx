@@ -85,6 +85,15 @@ describe("App routes", () => {
     expect(listDeals).toHaveBeenCalledTimes(1);
   }, 10_000);
 
+  it("opens Notebook from its shared workspace link", async () => {
+    render(<MemoryRouter initialEntries={["/hub"]}><App /></MemoryRouter>);
+    const link = await screen.findByRole("link", { name: "Notebook" });
+    fireEvent.click(link);
+    expect(await screen.findByRole("heading", { name: "A little room to think" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to Deal Hub" })).toBeTruthy();
+    expect(screen.getByText("Session drafts")).toBeTruthy();
+  });
+
   it("registers Assistant at its new route and removes the former summarize leaf", async () => {
     const { unmount } = render(
       <MemoryRouter initialEntries={["/hub/assistant"]}>

@@ -1,6 +1,6 @@
 import type { DealResource, WorkspaceDeal, WorkspaceLocationState } from "./workspace";
 
-import { codeLabel, type DealFields, type DealParty } from "./dealModel";
+import { codeLabel, isTerminalDealStatus, type DealFields, type DealParty } from "./dealModel";
 export type SaveDealInput = DealFields & {
   dealId: string; localPath: string | null; sharepointLink: string | null;
 };
@@ -108,7 +108,7 @@ function buildWorkspaceDeal(
   const roleSummary = deal.parties.map((p) => `${codeLabel(p.role)}: ${p.company.name}`).join("; ");
   return {
     colorClassName: "bg-primary",
-    complete: deal.status === "completed" || deal.status === "cancelled",
+    terminal: isTerminalDealStatus(deal.status),
     persisted: deal,
     persistedMetadata: metadata,
     portfolio: {
@@ -138,6 +138,13 @@ function buildWorkspaceDeal(
       sectorLabel: codeLabel(deal.transactionType),
       stageLabel: codeLabel(deal.status),
       summary: `${codeLabel(deal.engagementType)} engagement · ${codeLabel(deal.transactionType)}. ${roleSummary ? `${roleSummary}.` : "Companies are unspecified."}${deal.scopes.length ? ` Scope: ${deal.scopes.map(codeLabel).join(", ")}.` : " Scope is unspecified."}`,
+      summaryDetails: [
+        { label: "Engagement", value: codeLabel(deal.engagementType) },
+        { label: "Transaction", value: codeLabel(deal.transactionType) },
+        ...deal.parties.map((party) => ({ label: codeLabel(party.role), value: party.company.name })),
+        ...(!deal.parties.length ? [{ label: "Companies", value: "Unspecified" }] : []),
+        { label: "Scope", value: deal.scopes.length ? deal.scopes.map(codeLabel).join(", ") : "Unspecified" },
+      ],
       timeline: [],
     },
   };

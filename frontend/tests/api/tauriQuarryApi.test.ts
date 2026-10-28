@@ -1,3 +1,5 @@
+import { testDeal, testDealInput, testMetadata } from "@/test/fixtures/deals";
+import { dealStatusOptions } from "@/data/dealModel";
 import { describe, expect, it, vi } from "vitest";
 import {
   createTauriQuarryApi,
@@ -5,6 +7,20 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it.each(dealStatusOptions)("preserves %s through create, update and read", async (status) => {
+    const input = { ...testDealInput(), status };
+    const response = { deal: testDeal({ status }), metadata: testMetadata() };
+    const post = vi.fn().mockResolvedValue(response);
+    const get = vi.fn().mockResolvedValue(response);
+    const api = createTauriQuarryApi({ delete: vi.fn(), get, getPdf: vi.fn(), post, postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
+    expect((await api.createDeal(input)).deal.status).toBe(status);
+    expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(status);
+    get.mockResolvedValue({ ...response.deal, metadata: response.metadata });
+    expect((await api.getDeal(input.dealId)).status).toBe(status);
+    expect(post).toHaveBeenNthCalledWith(1, "/api/v1/deals", input);
+    expect(post).toHaveBeenNthCalledWith(2, `/api/v1/deals/${input.dealId}/update`, input);
+  });
+
   it("keeps summaries upload-only through the desktop multipart relay", async () => {
     const postMultipart = vi.fn().mockResolvedValue({ summary: "Summary" });
     const api = createTauriQuarryApi({

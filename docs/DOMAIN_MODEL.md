@@ -45,7 +45,7 @@ and tests first.
 | Domain | Current responsibility | Durable model | Important boundary or limitation |
 | --- | --- | --- | --- |
 | `users` | Development profile creation and lookup by email | `users` | Profile lookup is not authentication; the development-era `api_key` is not an AI provider key |
-| `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive is a status update; owner email is resolved through the public `UserDirectory` facade |
+| `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive sets `archivedAt` while retaining the stage; owner email is resolved through the public `UserDirectory` facade |
 | `data_rooms` | Browse and preview a deal's configured local filesystem source | None of its own | Reads a local root from deal metadata or server configuration; does not own stored document blobs or activate SharePoint |
 | `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | SQLite is canonical; Helix is a search projection; jobs and locks are process-local |
 | `summaries` | List summarizable server files, summarize paths/uploads, and write Markdown | None | OpenAI-backed when configured; filesystem-oriented operations have a development trust model |
@@ -71,7 +71,7 @@ capabilities each domain receives and merges already-state-bound feature routers
 | `workflow` | Durable tasks, approvals, and workflow execution | Reserved; there is no durable queue or workflow engine |
 | `deliverables` | Generated/user-managed deal artifacts and provenance | Reserved; current completed/in-progress UI has no backing API |
 | `vaults` | Durable knowledge collections and access rules | Reserved; current vault screens are presentation/staging experiences |
-| `notebooks` | Source-linked notes and notebook organization | Reserved; no persisted notebook model |
+| `notebooks` | Personal note UI; source links and organization remain proposed | Session-only frontend drafts; no persisted notebook model or API |
 | `unified_search` | Authorized cross-domain search composition | Reserved; implemented search is document-chunk search only |
 | `assistant` | Conversations, messages, citations, and interaction orchestration | Reserved; no assistant conversation API or durable thread model |
 | `activity` | Durable product activity history | Reserved; frontend activity logs are session-local and separate |
@@ -208,8 +208,9 @@ values supplied by clients are not trustworthy identity assertions.
 ### 4.2 Deal aggregate
 
 A `Deal` is the primary current product aggregate. Its stable key is `deal_id`; creation currently
-requires an ID beginning with `DEAL-`, non-empty descriptive fields, parseable start/close dates,
-and a close date that is not before the start date.
+requires an ID beginning with `DEAL-`, a non-empty name, typed engagement/transaction/status fields,
+and valid optional date-only values. Engagement completion cannot precede start; transaction
+closing can precede diligence.
 
 `DealMetadata` is an optional one-to-one extension keyed by `deal_id`. It owns:
 
@@ -218,8 +219,20 @@ and a close date that is not before the start date.
 - an optional HTTPS SharePoint link.
 
 The local path and SharePoint link are mutually exclusive, but both may be absent. A SharePoint
-link is metadata only today. Archiving sets deal status to `Archived`; it does not delete the deal,
+link is metadata only today. Archiving sets `archivedAt` and retains the diligence stage; it does not delete the deal,
 metadata, files, versions, or blobs.
+
+The ordered diligence stages are Pipeline (`pipeline`), Prepare (`prepare`), Review & plan
+discovery (`review_plan_discovery`), Interviews & site visit (SV) (`interviews_site_visit`),
+Debrief & flash report (`debrief_flash_report`), Follow-ups & analysis (`follow_ups_analysis`),
+QA, readout & closeout (`qa_readout_closeout`), Closed (`closed`), and Pencils Down (`pencils_down`).
+Closed and Pencils Down are Historic outcomes; Pencils Down indicates stopped work. All other
+stages are Current. Platform, add-on and strategic acquisitions require exactly one target in
+working stages and Closed; Pipeline and Pencils Down permit incomplete parties. Users can select
+stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
+independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
+
+Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-12-and-development-reset).
 
 ### 4.3 Logical file aggregate
 
@@ -342,6 +355,15 @@ Types such as `WorkspaceDeal`, `DealRoomData`, `DataRoomTreeNode`, file-review r
 and search results may combine server data with explicit frontend fixtures. They are presentation
 models, not automatically canonical backend entities. Fixture-backed findings, metrics, tasks,
 timeline entries, and search excerpts must not be documented or treated as persisted facts.
+
+### 7.6 Notebook UI drafts
+
+The Notebook UI currently holds user-created drafts in frontend module memory for the active
+authentication session. Each draft has a UUID, title, native restricted-schema BlockNote blocks,
+`contentSchemaVersion: 1`, and creation/edit timestamps. The URL selects a draft; changing routes
+retains it, while reload and authentication changes clear it. Search filters all session titles.
+There is no persisted owner/revision contract, note API, autosave, or collaboration model yet.
+The UI labels this lifetime explicitly; it is not canonical product storage.
 
 ## 8. State ownership by durability
 
