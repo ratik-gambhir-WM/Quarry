@@ -387,7 +387,9 @@ global state or query-cache library.
   BlockNote JSON with content schema version 1, and creation/edit timestamps. Title search covers
   the session's complete list. Recency sorting waits until focus leaves editing/list navigation.
   The independently lazy editor uses BlockNote's shadcn defaults with Quarry semantic tokens,
-  Inter, and reduced-motion handling. Its keyed mount isolates content/undo sessions between notes;
+  Inter, and reduced-motion handling. Both Vite targets emit ProseMirror as a separate lazy
+  dependency chunk to keep the Notebook schema below the application chunk-size limit.
+  Its keyed mount isolates content/undo sessions between notes;
   acknowledgements and autosave are absent. Paragraphs, headings, lists/checklists, quotes, code,
   tables, and HTTP(S)/mailto links are supported. Asset blocks, upload and file paste/drop paths
   are disabled. The viewport meta tag requests `interactive-widget=resizes-content` for mobile

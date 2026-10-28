@@ -34,6 +34,10 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            // Keep BlockNote's editing engine separate from its schema and React UI.
+            if (id.includes("/node_modules/prosemirror-")) {
+              return "prosemirror";
+            }
             const embedPdfMarker = "/node_modules/@embedpdf/";
             const embedPdfIndex = id.indexOf(embedPdfMarker);
             if (embedPdfIndex === -1) {
