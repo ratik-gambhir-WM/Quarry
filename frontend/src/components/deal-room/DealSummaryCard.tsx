@@ -48,19 +48,20 @@ export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) 
             <Badge variant="outline">{deal.sectorLabel}</Badge>
           </div>
           <Separator className="bg-outline-variant/70" />
-          <p className="max-w-[58rem] text-[14px] leading-7 text-text-main/86 sm:text-[15px]">
-            {deal.summary}
-          </p>
-          {deal.metrics.length ? (
-            <dl aria-label="Deal details" className="grid grid-cols-1 gap-4 border-t border-outline-variant/70 pt-5 sm:grid-cols-2">
-              {deal.metrics.map((metric) => (
-                <div key={metric.label}>
-                  <dt className="text-xs text-muted">{metric.label}</dt>
-                  <dd className="mt-1 text-sm font-medium text-text-main">{metric.value}</dd>
+          {deal.summaryDetails?.length ? (
+            <dl aria-label="Engagement overview" className="grid gap-3 text-sm leading-6">
+              {deal.summaryDetails.map((detail, index) => (
+                <div className="grid min-w-0 gap-0.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4" key={`${detail.label}-${index}`}>
+                  <dt className="font-medium text-muted">{detail.label}</dt>
+                  <dd className="min-w-0 break-words text-text-main">{detail.value}</dd>
                 </div>
               ))}
             </dl>
-          ) : null}
+          ) : (
+            <p className="max-w-[58rem] text-[14px] leading-7 text-text-main/86 sm:text-[15px]">
+              {deal.summary}
+            </p>
+          )}
         </div>
       </WorkspaceCard>
 

@@ -69,6 +69,7 @@ export type DealRoomData = {
   sectorLabel: string;
   stageLabel: string;
   summary: string;
+  summaryDetails?: DealMetric[];
   timeline: DealTimelineItem[];
 };
 

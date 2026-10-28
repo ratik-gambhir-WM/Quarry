@@ -138,6 +138,13 @@ function buildWorkspaceDeal(
       sectorLabel: codeLabel(deal.transactionType),
       stageLabel: codeLabel(deal.status),
       summary: `${codeLabel(deal.engagementType)} engagement · ${codeLabel(deal.transactionType)}. ${roleSummary ? `${roleSummary}.` : "Companies are unspecified."}${deal.scopes.length ? ` Scope: ${deal.scopes.map(codeLabel).join(", ")}.` : " Scope is unspecified."}`,
+      summaryDetails: [
+        { label: "Engagement", value: codeLabel(deal.engagementType) },
+        { label: "Transaction", value: codeLabel(deal.transactionType) },
+        ...deal.parties.map((party) => ({ label: codeLabel(party.role), value: party.company.name })),
+        ...(!deal.parties.length ? [{ label: "Companies", value: "Unspecified" }] : []),
+        { label: "Scope", value: deal.scopes.length ? deal.scopes.map(codeLabel).join(", ") : "Unspecified" },
+      ],
       timeline: [],
     },
   };

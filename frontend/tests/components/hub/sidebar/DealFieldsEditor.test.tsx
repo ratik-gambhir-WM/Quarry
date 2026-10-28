@@ -86,7 +86,33 @@ describe("DealFieldsEditor", () => {
     await user.click(screen.getByRole("button", { name: "Create company" }));
     await user.type(screen.getByLabelText("Company name"), "New Company");
     await user.click(screen.getByRole("button", { name: "Save company" }));
-    await waitFor(() => expect(api.createCompany).toHaveBeenCalledWith({ userEmail: "owner@example.com", name: "New Company", website: null, industry: null, description: null }));
+    await waitFor(() => expect(api.createCompany).toHaveBeenCalledWith({ name: "New Company", website: null, industry: null, description: null }));
     expect(await screen.findByText(/remains available if you cancel/)).toBeTruthy();
+  });
+
+  it.each(["create", "edit"] as const)("sends only company fields when saving a %s form", async (mode) => {
+    const user = userEvent.setup();
+    const company = testCompany("Reusable");
+    api.listCompanies.mockResolvedValue({ companies: [company], hasMore: false });
+    api.createCompany.mockResolvedValue({ ...company, name: "Updated company" });
+    api.updateCompany.mockResolvedValue({ ...company, name: "Updated company" });
+    render(<Editor />);
+    await user.click(await screen.findByRole("button", { name: mode === "create" ? "Create company" : "Edit shared company Reusable" }));
+    await user.clear(screen.getByLabelText("Company name"));
+    await user.type(screen.getByLabelText("Company name"), "Updated company");
+    await user.type(screen.getByLabelText("Company website (HTTPS)"), "https://example.com/");
+    await user.type(screen.getByLabelText("Industry"), "Fleet management");
+    await user.type(screen.getByLabelText("Description"), "Company description");
+    await user.click(screen.getByRole("button", { name: "Save company" }));
+
+    const payload = { name: "Updated company", website: "https://example.com/", industry: "Fleet management", description: "Company description" };
+    if (mode === "create") {
+      expect(api.createCompany).toHaveBeenCalledExactlyOnceWith(payload);
+      expect(api.updateCompany).not.toHaveBeenCalled();
+    } else {
+      expect(api.updateCompany).toHaveBeenCalledExactlyOnceWith(company.companyId, payload);
+      expect(api.createCompany).not.toHaveBeenCalled();
+    }
+    expect(await screen.findByText(mode === "create" ? /was saved to the directory and selected/ : /was updated for every linked deal/)).toBeTruthy();
   });
 });

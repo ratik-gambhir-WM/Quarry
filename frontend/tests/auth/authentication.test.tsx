@@ -17,6 +17,55 @@ function form(isRegister = false) {
   render(<MemoryRouter initialEntries={[isRegister ? "/register" : "/login"]}><UserProvider><Routes><Route path="/login" element={<LoginPage />} /><Route path="/register" element={<LoginPage register />} /><Route path="/hub" element={<p>Signed in workspace</p>} /></Routes></UserProvider></MemoryRouter>);
 }
 function fill(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
+function autofill(label: string, value: string) {
+  const input = screen.getByLabelText(label);
+  if (!(input instanceof HTMLInputElement)) throw new Error(`Expected input: ${label}`);
+  // Password managers can fill native values without dispatching React change events.
+  input.value = value;
+  return input;
+}
+it("submits autofilled credentials, preserves them through visibility and retry, and disables only while pending", async () => {
+  login.mockRejectedValueOnce(new Error("Try again")).mockResolvedValue(testSession);
+  form();
+  const username = autofill("Username", "analyst");
+  const password = autofill("Password", "  a sufficiently long password  ");
+  const button = screen.getByRole("button", { name: "Sign in" });
+  expect(button).toHaveProperty("disabled", false);
+  fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+  expect(password.value).toBe("  a sufficiently long password  ");
+  fireEvent.click(button);
+  expect(screen.getByRole("button", { name: "Please wait…" })).toHaveProperty("disabled", true);
+  fireEvent.click(screen.getByRole("button", { name: "Please wait…" }));
+  expect(login).toHaveBeenCalledExactlyOnceWith({ username: "analyst", password: "  a sufficiently long password  " });
+  expect((await screen.findByRole("alert")).textContent).toBe("Try again");
+  expect(username.value).toBe("analyst");
+  expect(password.value).toBe("  a sufficiently long password  ");
+  expect(screen.getByRole("button", { name: "Sign in" })).toHaveProperty("disabled", false);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText("Signed in workspace")).toBeTruthy();
+  expect(login).toHaveBeenCalledTimes(2);
+});
+it("keeps empty required fields from submitting without a misleading disabled button", () => {
+  form();
+  const button = screen.getByRole("button", { name: "Sign in" });
+  expect(button).toHaveProperty("disabled", false);
+  fireEvent.click(button);
+  expect(login).not.toHaveBeenCalled();
+});
+it("registers autofilled fields using the fixed email domain and excludes confirmation", async () => {
+  register.mockResolvedValue(testSession);
+  form(true);
+  autofill("Username", "analyst");
+  autofill("Password", "a sufficiently long password");
+  autofill("Confirm password", "a sufficiently long password");
+  autofill("West Monroe email", "analyst@westmonroe.com");
+  autofill("First name", "Alex");
+  autofill("Last name", "Morgan");
+  autofill("Job title (optional)", "Analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+  expect(await screen.findByText("Signed in workspace")).toBeTruthy();
+  expect(register).toHaveBeenCalledExactlyOnceWith({ username: "analyst", password: "a sufficiently long password", email: "analyst@westmonroe.com", firstName: "Alex", lastName: "Morgan", jobTitle: "Analyst" });
+});
 it("logs in with username/password and exposes a memory-only session", async () => {
   login.mockResolvedValue(testSession); form();
   fill("Username", "analyst"); fill("Password", "a sufficiently long password");

@@ -332,7 +332,11 @@ The product tree is wrapped in `UserProvider`, backed by one memory-only session
 registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
 workspace state by its generation. Registration uses a responsive two-column card (900px max),
 while login uses a 560px card; small screens stack the fields. Registration shows a fixed
-`@westmonroe.com` suffix and the backend enforces that exact email domain. Reload requires sign-in. Router state and the removed
+`@westmonroe.com` suffix and the backend enforces that exact email domain. Auth fields use native,
+named inputs and read their current values through `FormData` at submission so browser/password-manager
+autofill does not depend on React change events. Native required-field validation blocks empty
+submissions; submit buttons disable only while a request is pending. Password visibility and error
+rerenders preserve the entered values, and passwords are never trimmed. Reload requires sign-in. Router state and the removed
 `quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
 
 ### 5.3 Layer responsibilities
@@ -1152,6 +1156,9 @@ Key invariants include:
 - deal metadata has at most one of local path or SharePoint link; both may be absent
 - SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
 - logical files belong to one deal/workspace
+- document uploads use the authenticated numeric user ID, serialized as a string, as their
+  workspace identity in SQLite and Helix; the file transaction compares it with `deals.user_id`,
+  rejects archived or differently owned deals, and never uses the owner's email as identity
 - versions are unique by `(file_id, version_number)` and `(file_id, content_sha256)`
 - at most one current version exists per logical file
 - blobs cascade from versions; files/versions cascade through their children
@@ -1293,6 +1300,14 @@ Editing an existing deal retains the combined details-and-companies form and als
 or cancelling an open company form before submitting the deal. The desktop flow can
 authorize an optional local folder during the first step; selecting one disables the mutually
 exclusive SharePoint field.
+
+The deal overview renders engagement, transaction, each company role, and scope as labeled
+definition-list rows from the persisted deal view model. Labels stack above values on small
+screens; long company names and scope text wrap. Narrative-only demo summaries retain their
+paragraph presentation.
+The overview omits the date section; start, expected/actual close, and engagement completion dates
+remain persisted and editable in the deal form.
+
 Both transports send the link fields and files through the same multipart Axum endpoint. A submitted
 link field containing only whitespace (including an empty string) clears that optional link;
 an omitted field preserves its saved value. Populated fields retain HTTPS, credential, and

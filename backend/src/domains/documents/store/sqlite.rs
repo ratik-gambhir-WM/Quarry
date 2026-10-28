@@ -243,17 +243,12 @@ async fn persist_file_blob(
         .map_err(|error| format!("failed to persist file transaction: {error}"))
 }
 
-fn normalize_stored_owner(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
 fn validate_deal_ownership(
     transaction: &SqliteTransaction<'_>,
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
     let query = SqlBuilder::select("deals")
-        .columns(["deals.archived_at", "users.email"])
-        .inner_join("users", "deals.user_id", "users.id")
+        .columns(["deals.archived_at", "deals.user_id"])
         .and_where(Condition::equal("deals.deal_id", &input.deal_id))
         .build();
     let row = transaction
@@ -271,7 +266,7 @@ fn validate_deal_ownership(
             input.deal_id
         )));
     }
-    let owner = normalize_stored_owner(&required_text(&row, "email")?);
+    let owner = required_integer(&row, "user_id")?.to_string();
     if owner != input.workspace_id {
         return Err(SqliteClientError::transaction_aborted(format!(
             "deal `{}` is not owned by workspace `{}`",

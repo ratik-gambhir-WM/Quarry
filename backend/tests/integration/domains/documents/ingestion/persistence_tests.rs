@@ -5,7 +5,7 @@ use crate::{
 };
 use std::sync::Arc;
 
-const OWNER: &str = "analyst@example.com";
+const OWNER: &str = "1";
 
 fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Document {
     let content_hash = sha256_hex(bytes);
@@ -85,7 +85,7 @@ fn test_document_store() -> (SqliteClient, DocumentStore) {
         .with_connection(|connection| {
             connection.execute(
                 "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
-                [OWNER],
+                ["analyst@example.com"],
             )?;
             let user_id = connection.last_insert_rowid();
             connection.execute(

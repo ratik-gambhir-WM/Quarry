@@ -75,7 +75,7 @@ export function DealCompanyRolesEditor({ fields, onChange, userEmail, initialCom
       <label className="grid gap-2 text-sm">Search company directory<Input maxLength={200} value={query} onChange={(e) => setQuery(e.currentTarget.value)} /></label>
       <CompanyResults key={`${userEmail}:${query}:${attempt}`} userEmail={userEmail} query={query} onAdd={addCompany} onEdit={editCompany} onRetry={() => setAttempt((n) => n + 1)} disabled={fields.parties.length >= 100} />
       <Button type="button" variant="outline" onClick={() => editCompany("new")}>Create company</Button>
-      {companyForm ? <CompanyForm key={companyForm === "new" ? "new" : companyForm.companyId} company={companyForm === "new" ? undefined : companyForm} userEmail={userEmail} onCancel={() => editCompany(null)} onSaved={(company, created) => {
+      {companyForm ? <CompanyForm key={companyForm === "new" ? "new" : companyForm.companyId} company={companyForm === "new" ? undefined : companyForm} onCancel={() => editCompany(null)} onSaved={(company, created) => {
         setCompanies((current) => new Map(current).set(company.companyId, company));
         if (created) addCompany(company);
         onCompanySaved?.(company);
@@ -119,10 +119,10 @@ function CompanyResults({ userEmail, query, onAdd, onEdit, onRetry, disabled }: 
   </div>;
 }
 
-function CompanyForm({ company, userEmail, onSaved, onCancel }: {
-  company?: Company; userEmail: string; onSaved: (company: Company, created: boolean) => void; onCancel: () => void;
+function CompanyForm({ company, onSaved, onCancel }: {
+  company?: Company; onSaved: (company: Company, created: boolean) => void; onCancel: () => void;
 }) {
-  const [input, setInput] = useState<CompanyInput>(() => ({ userEmail, name: company?.name ?? "", website: company?.website ?? null, industry: company?.industry ?? null, description: company?.description ?? null }));
+  const [input, setInput] = useState((): CompanyInput => ({ name: company?.name ?? "", website: company?.website ?? null, industry: company?.industry ?? null, description: company?.description ?? null }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   async function save() {

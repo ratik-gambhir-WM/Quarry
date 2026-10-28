@@ -13,23 +13,27 @@ export function LoginPage({ register = false }: { register?: boolean }) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", confirm: "", email: "", firstName: "", lastName: "", jobTitle: "" });
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const from: unknown = location.state && typeof location.state === "object" && "from" in location.state ? location.state.from : undefined;
   const destination = typeof from === "string" && from.startsWith("/hub") && !from.includes("\\") ? from : "/hub";
   if (user.user) return <Navigate replace to={destination} />;
-  const field = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
-    if (register && form.password !== form.confirm) { setError("Passwords do not match."); return; }
+    const values = new FormData(event.currentTarget);
+    const value = (name: string) => {
+      const entry = values.get(name);
+      return typeof entry === "string" ? entry : "";
+    };
+    if (register && value("password") !== value("confirm")) { setError("Passwords do not match."); return; }
     setError(""); setPending(true);
     try {
-      const input = { username: form.username.trim(), password: form.password };
-      if (register) await user.register({ ...input, email: form.email.trim(), firstName: form.firstName.trim(), lastName: form.lastName.trim(), ...(form.jobTitle.trim() ? { jobTitle: form.jobTitle.trim() } : {}) }, () => active.current);
+      const input = { username: value("username").trim(), password: value("password") };
+      const jobTitle = value("jobTitle").trim();
+      if (register) await user.register({ ...input, email: `${value("email").trim().replace(/@.*$/, "")}@westmonroe.com`, firstName: value("firstName").trim(), lastName: value("lastName").trim(), ...(jobTitle ? { jobTitle } : {}) }, () => active.current);
       else await user.login(input, () => active.current);
-      if (active.current) { setForm((current) => ({ ...current, password: "", confirm: "" })); navigate(destination, { replace: true }); }
+      if (active.current) navigate(destination, { replace: true });
     } catch (failure) { if (active.current) setError(failure instanceof Error ? failure.message : "Unable to sign in. Try again."); }
     finally { if (active.current) setPending(false); }
   }
@@ -39,7 +43,7 @@ export function LoginPage({ register = false }: { register?: boolean }) {
         <BrandLockup compact={register} title="Quarry" subtitle={register ? "Create your account" : "Sign in to your account"} />
         <form className="mt-lg space-y-md" onSubmit={submit} aria-busy={pending}>
           <div className={`grid gap-md ${register ? "sm:grid-cols-2" : ""}`}>
-            <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="username" label="Username" autoComplete="username" minLength={3} maxLength={32} value={form.username} onChange={(value) => field("username", value)} />
+            <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="username" name="username" label="Username" autoComplete="username" minLength={3} maxLength={32} />
             {register && (
               <>
                 <div className="min-w-0 space-y-xs">
@@ -48,31 +52,31 @@ export function LoginPage({ register = false }: { register?: boolean }) {
                     <input
                       className="min-w-0 flex-1 bg-transparent px-md py-sm text-[16px] leading-[1.6] text-on-surface outline-none"
                       id="email"
+                      name="email"
                       aria-describedby="email-domain"
                       autoComplete="email"
                       maxLength={300}
                       placeholder="your.name"
                       required
                       type="text"
-                      value={form.email.split("@")[0] ?? ""}
                       onChange={(event) => {
                         const name = event.currentTarget.value.replace(/\s/g, "").replace(/@.*$/, "");
-                        field("email", name ? `${name}@westmonroe.com` : "");
+                        event.currentTarget.value = name;
                       }}
                     />
                     <span className="flex shrink-0 items-center border-l border-outline-variant bg-surface-container-low px-sm text-sm font-semibold text-on-surface-variant" id="email-domain">@westmonroe.com</span>
                   </div>
                 </div>
-                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="first-name" label="First name" autoComplete="given-name" maxLength={100} value={form.firstName} onChange={(value) => field("firstName", value)} />
-                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="last-name" label="Last name" autoComplete="family-name" maxLength={100} value={form.lastName} onChange={(value) => field("lastName", value)} />
+                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="first-name" name="firstName" label="First name" autoComplete="given-name" maxLength={100} />
+                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="last-name" name="lastName" label="Last name" autoComplete="family-name" maxLength={100} />
               </>
             )}
-            <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="password" label="Password" type={visible ? "text" : "password"} autoComplete={register ? "new-password" : "current-password"} value={form.password} onChange={(value) => field("password", value)} />
+            <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="password" name="password" label="Password" type={visible ? "text" : "password"} autoComplete={register ? "new-password" : "current-password"} />
             {register && (
               <>
-                <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="confirm-password" label="Confirm password" type={visible ? "text" : "password"} autoComplete="new-password" value={form.confirm} onChange={(value) => field("confirm", value)} />
+                <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="confirm-password" name="confirm" label="Confirm password" type={visible ? "text" : "password"} autoComplete="new-password" />
                 <div className="sm:col-span-2">
-                  <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} required={false} id="job-title" label="Job title (optional)" autoComplete="organization-title" maxLength={200} value={form.jobTitle} onChange={(value) => field("jobTitle", value)} />
+                  <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} required={false} id="job-title" name="jobTitle" label="Job title (optional)" autoComplete="organization-title" maxLength={200} />
                 </div>
               </>
             )}
@@ -83,7 +87,7 @@ export function LoginPage({ register = false }: { register?: boolean }) {
           </div>
           {error && <p className="text-error" role="alert">{error}</p>}
           {user.notice && <p className="text-secondary" role="status">{user.notice}</p>}
-          <QuarryButton type="submit" disabled={pending || !form.username || !form.password || (register && (!form.email || !form.firstName || !form.lastName || !form.confirm))}>{pending ? "Please wait…" : register ? "Create account" : "Sign in"}</QuarryButton>
+          <QuarryButton type="submit" disabled={pending}>{pending ? "Please wait…" : register ? "Create account" : "Sign in"}</QuarryButton>
           <span className="sr-only" role="status">{pending ? register ? "Creating account…" : "Signing in…" : ""}</span>
         </form>
         <p className="mt-md type-body-sm">{register ? "Already have an account? " : "New to Quarry? "}<Link className="text-primary underline" to={register ? "/login" : "/register"} state={{ from: destination }}>{register ? "Sign in" : "Create an account"}</Link></p>
