@@ -1,3 +1,5 @@
+import { sessionStore } from "@/auth/sessionStore";
+import { testSession } from "@/test/fixtures/auth";
 import { testDeal } from "@/test/fixtures/deals";
 // @vitest-environment happy-dom
 
@@ -19,10 +21,11 @@ vi.mock("@quarry/runtime", () => ({
   },
 }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); sessionStore.set(null); });
 
 describe("App routes", () => {
   beforeEach(() => {
+    sessionStore.set(testSession);
     listDeals.mockReset();
     listDeals.mockResolvedValue([persistedDeal]);
     queryModel.mockReset();
@@ -32,6 +35,7 @@ describe("App routes", () => {
   });
 
   it("keeps Login eager without starting workspace data loading", () => {
+    sessionStore.set(null);
     render(
       <MemoryRouter initialEntries={["/login"]}>
         <App />
@@ -99,7 +103,7 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Quarry" })).toBeTruthy();
+    expect(await screen.findByRole("main")).toBeTruthy();
   });
 });
 

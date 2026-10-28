@@ -3,6 +3,8 @@ use super::{
     service::CompanyService,
 };
 use crate::app::http::error::{AppError, AppResult};
+use crate::domains::identity::model::AuthenticatedUser;
+use axum::Extension;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -17,16 +19,15 @@ pub(super) struct CompanyState {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SearchInput {
-    user_email: String,
     query: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
 }
 pub(super) async fn list(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<CompanyState>,
     Query(input): Query<SearchInput>,
 ) -> AppResult<Json<CompanyPage>> {
-    validate_text("userEmail", &input.user_email, 320)?;
     let limit = input.limit.unwrap_or(30);
     if !(1..=100).contains(&limit) || input.offset.unwrap_or(0) > 1_000_000 {
         return Err(AppError::bad_request("invalid company pagination"));
@@ -40,7 +41,7 @@ pub(super) async fn list(
         state
             .companies
             .list(
-                input.user_email.trim(),
+                &actor.user.email,
                 input.query,
                 limit,
                 input.offset.unwrap_or(0),
@@ -49,9 +50,11 @@ pub(super) async fn list(
     ))
 }
 pub(super) async fn create(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<CompanyState>,
-    Json(input): Json<CompanyInput>,
+    Json(mut input): Json<CompanyInput>,
 ) -> AppResult<(StatusCode, Json<Company>)> {
+    input.user_email = actor.user.email;
     validate(&input)?;
     Ok((
         StatusCode::CREATED,
@@ -59,16 +62,17 @@ pub(super) async fn create(
     ))
 }
 pub(super) async fn update(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<CompanyState>,
     Path(id): Path<String>,
-    Json(input): Json<CompanyInput>,
+    Json(mut input): Json<CompanyInput>,
 ) -> AppResult<Json<Company>> {
     uuid::Uuid::parse_str(&id).map_err(|_| AppError::bad_request("invalid companyId"))?;
+    input.user_email = actor.user.email;
     validate(&input)?;
     Ok(Json(state.companies.save(Some(id), input).await?))
 }
 fn validate(input: &CompanyInput) -> AppResult<()> {
-    validate_text("userEmail", &input.user_email, 320)?;
     validate_text("name", &input.name, 300)?;
     for (field, value, max) in [
         ("website", &input.website, 2048),

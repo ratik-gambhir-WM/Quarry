@@ -64,8 +64,8 @@ introduced.
 - Use parameterized SQL through the current SQL builder/client.
 - Preserve file size, name, MIME, path-containment, PDF, identifier, timeout, and URL validation.
 - Treat CORS and client/Tauri validation as transport controls, not authorization.
-- The current API has no authentication or tenancy. Do not add routes that assume caller-supplied
-  email, `userId`, or `workspaceId` is trustworthy; flag the missing authorization boundary.
+- The API verifies bearer sessions and per-user resource ownership. Never trust caller-supplied
+  email, `userId`, or `workspaceId`; use the authenticated actor. Organization tenancy remains absent.
 - Never move OpenAI, Helix, WM AI, Azure, or other secrets into frontend-visible configuration.
 
 ## Async and blocking work
@@ -89,8 +89,9 @@ introduced.
 - Parsers create a new random `file_id`, and the normal ingestion path reuses one only for an exact
   content-hash match. Changed content currently becomes a new logical file even though repository
   tests can create later versions by supplying the same `file_id` explicitly.
-- Schema version 6 migration drops and recreates older application tables. Use only disposable
-  databases in tests and make any new migration/recovery policy explicit.
+- Schema marker 11 initializes fresh storage or validates/reuses the current schema. Older
+  profiles require the explicit offline reset, never startup deletion. Use disposable databases
+  in tests and keep authentication/recovery documentation aligned.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
 - Jobs and caches are currently process-local. Do not describe them as durable or distributed.

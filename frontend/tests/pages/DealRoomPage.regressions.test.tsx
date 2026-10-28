@@ -1,3 +1,6 @@
+import { UserProvider } from "@/auth/UserProvider";
+import { sessionStore } from "@/auth/sessionStore";
+import { testSession } from "@/test/fixtures/auth";
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -18,7 +21,7 @@ vi.mock("@quarry/runtime", () => ({ runtime: { target: "web", api, platform: {} 
 vi.mock("@/components/hub/WorkspaceSidebar", () => ({ WorkspaceSidebar: () => null }));
 
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
-beforeEach(() => {
+beforeEach(() => { sessionStore.set(testSession);
   window.localStorage.clear();
   window.sessionStorage.clear();
   api.listDeals.mockResolvedValue([]);
@@ -33,7 +36,7 @@ function PortfolioProbe() {
 function renderDealRoutes(pathname: string) {
   return render(
     <MemoryRouter initialEntries={[{ pathname, state: { email: "owner@example.com" } }]}>
-      <WorkspaceProvider dataSource="api">
+      <UserProvider><WorkspaceProvider dataSource="api">
         <PortfolioProbe />
         <Routes>
           <Route path="/hub/deals" element={<AddDealModal email="owner@example.com" onClose={vi.fn()} />} />
@@ -41,7 +44,7 @@ function renderDealRoutes(pathname: string) {
             <Route index element={<DealRoomOverviewPage />} />
           </Route>
         </Routes>
-      </WorkspaceProvider>
+      </WorkspaceProvider></UserProvider>
     </MemoryRouter>,
   );
 }

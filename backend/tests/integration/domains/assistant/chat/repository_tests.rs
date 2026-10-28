@@ -13,7 +13,6 @@ async fn repository_fixture() -> (AssistantChatRepository, i64, SqliteClient) {
     migrations::migrate(&sqlite).unwrap();
     let user = UserRepository::new(sqlite.clone())
         .create(AddUserInput {
-            api_key: "development-key".to_string(),
             email: "analyst@example.com".to_string(),
             first_name: "Avery".to_string(),
             last_name: "Analyst".to_string(),

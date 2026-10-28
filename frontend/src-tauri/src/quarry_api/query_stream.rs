@@ -82,7 +82,6 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
         if !request.context.is_empty() {
             return Err("persisted assistant requests cannot include context".to_string());
         }
-        validate_identifier_field("userEmail", request.user_email.as_deref())?;
         validate_identifier_field("userMessageId", request.user_message_id.as_deref())?;
         validate_identifier_field(
             "assistantMessageId",
@@ -113,7 +112,6 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     let mut form = Form::new().text("prompt", request.prompt);
     if persistent {
         form = form
-            .text("userEmail", request.user_email.unwrap_or_default())
             .text("userMessageId", request.user_message_id.unwrap_or_default())
             .text(
                 "assistantMessageId",
@@ -234,12 +232,7 @@ fn validate_query_path(path: &str) -> Result<(), String> {
 
 fn validate_identifier_field(name: &str, value: Option<&str>) -> Result<(), String> {
     let value = value.ok_or_else(|| format!("{name} is required"))?;
-    if name == "userEmail" {
-        if value.trim().is_empty() || value.chars().count() > 320 {
-            return Err("userEmail is invalid".to_string());
-        }
-        return Ok(());
-    }
+
     validate_identifier(name, value)
 }
 

@@ -24,7 +24,7 @@ async fn fixture() -> (SqliteClient, DealRepository, CompanyRepository, i64) {
             first_name: "Test".into(),
             last_name: "Owner".into(),
             email: "owner@example.com".into(),
-            api_key: "unused".into(),
+
             role: "Analyst".into(),
         })
         .await
@@ -286,7 +286,7 @@ async fn missing_cross_owner_and_duplicate_assignments_never_commit() {
             first_name: "Other".into(),
             last_name: "Owner".into(),
             email: "other@example.com".into(),
-            api_key: "unused".into(),
+
             role: "Analyst".into(),
         })
         .await

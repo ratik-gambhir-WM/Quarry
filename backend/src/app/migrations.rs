@@ -1,8 +1,8 @@
-//! Shared SQLite schema ownership, with an additive upgrade from Quarry schema 9.
+//! Shared SQLite schema ownership, for authenticated Quarry accounts.
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 10;
+const LATEST_SCHEMA_VERSION: i64 = 11;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -29,7 +29,7 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
         transaction.execute_batch(SCHEMA)?;
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
     } else {
-        if !matches!(version, 9 | LATEST_SCHEMA_VERSION) {
+        if version != LATEST_SCHEMA_VERSION {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
@@ -37,10 +37,6 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
         }
         validate_product_schema(&transaction)?;
         check_foreign_keys(&transaction)?;
-        if version == 9 {
-            // No DROP/ALTER or record updates: conflicts fail and roll back all DDL.
-            transaction.execute_batch(TEMPLATE_SCHEMA)?;
-        }
     }
     validate_product_schema(&transaction)?;
     validate_template_schema(&transaction)?;
@@ -53,8 +49,9 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
 fn validate_product_schema(connection: &Connection) -> rusqlite::Result<()> {
     // Detect a forged/stale marker as well as foreign-key damage before accepting a database.
     for sql in [
+        "SELECT token_hash, user_id, expires_at, revoked_at FROM auth_sessions LIMIT 0",
         "SELECT key, value FROM app_metadata LIMIT 0",
-        "SELECT id, first_name, last_name, email, api_key, role, created_at, updated_at FROM users LIMIT 0",
+        "SELECT id, first_name, last_name, email, username, password_hash, job_title, created_at, updated_at FROM users LIMIT 0",
         "SELECT id, reminder, notes, date, link, time, deal, tag, created_at, updated_at FROM reminders LIMIT 0",
         "SELECT deal_id, user_id, deal_name, deal_code, engagement_type, transaction_type, status, start_date, expected_close_date, actual_close_date, engagement_completed_date, archived_at, created_at, updated_at FROM deals LIMIT 0",
         "SELECT company_id, user_id, name, website, industry, description, created_at, updated_at FROM companies LIMIT 0",
@@ -128,6 +125,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
              DROP TABLE IF EXISTS deals;
              DROP TABLE IF EXISTS companies;
              DROP TABLE IF EXISTS reminders;
+             DROP TABLE IF EXISTS auth_sessions;
              DROP TABLE IF EXISTS users;
              DROP TABLE IF EXISTS app_metadata;",
         )?;
@@ -154,11 +152,22 @@ const SCHEMA: &str = r#"
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
-                api_key TEXT NOT NULL,
-                role TEXT NOT NULL,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                job_title TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE auth_sessions (
+                token_hash TEXT PRIMARY KEY NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL CHECK(expires_at > created_at),
+                revoked_at INTEGER
+            );
+            CREATE INDEX idx_auth_sessions_owner ON auth_sessions(user_id);
+            CREATE INDEX idx_auth_sessions_expiry ON auth_sessions(expires_at);
 
             CREATE TABLE assistant_threads (
                 thread_id TEXT PRIMARY KEY NOT NULL,

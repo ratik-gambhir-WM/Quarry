@@ -180,7 +180,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "a
     const threadId = selectedThreadId
       ? Promise.resolve(selectedThreadId)
       : createAssistantThread
-        ? createAssistantThread(userEmail, undefined, scope === "deal" ? dealId : null).then((thread) => {
+        ? createAssistantThread(undefined, scope === "deal" ? dealId : null).then((thread) => {
             if (!mountedRef.current) return null;
             update({
               selectedThreadId: thread.threadId,
@@ -212,7 +212,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "a
 
     update({ deletingThreadId: threadId, threadDeleteError: false });
     try {
-      await deleteAssistantThread(threadId, userEmail);
+      await deleteAssistantThread(threadId);
       const wasSelected = stateRef.current.selectedThreadId === threadId;
       if (wasSelected) loadTokenRef.current += 1;
       update({
@@ -269,7 +269,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "a
       threadLoadError: false,
     });
     try {
-      const thread = await getAssistantThread(threadId, userEmail);
+      const thread = await getAssistantThread(threadId);
       if (token === loadTokenRef.current) {
         update({ isThreadLoading: false, messages: activeMessageBranch(thread.messages) });
       }
@@ -324,7 +324,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "a
   useEffect(() => {
     if (!userEmail || !api.listAssistantThreads) return;
     let active = true;
-    void api.listAssistantThreads(userEmail, { scope, ...(scope === "deal" && dealId ? { dealId } : {}) })
+    void api.listAssistantThreads({ scope, ...(scope === "deal" && dealId ? { dealId } : {}) })
       .then((page) => {
         logChat("thread_list.loaded", { threadCount: page.threads.length });
         if (active) {
@@ -359,7 +359,7 @@ export function useAgentRuntime({ api, onContextTruncated, userEmail, scope = "a
     update({ isThreadListLoading: true });
     const options: AssistantThreadListOptions = { after: cursor, scope, ...(scope === "deal" && dealId ? { dealId } : {}) };
     try {
-      const page = await api.listAssistantThreads(userEmail, options);
+      const page = await api.listAssistantThreads(options);
       update({ isThreadListLoading: false, threadListError: false, nextCursor: page.nextCursor, threads: mergeThreadPage(page.threads, stateRef.current.threads) });
     } catch { update({ isThreadListLoading: false, threadListError: true }); }
   }, [api, userEmail, scope, dealId, update]);

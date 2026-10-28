@@ -27,13 +27,10 @@ export type SummarizableFile = {
   supported: boolean;
 };
 
-export type AddUserInput = {
-  apiKey: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-};
+export type LoginInput = { username: string; password: string };
+export type RegisterInput = LoginInput & { email: string; firstName: string; lastName: string; jobTitle?: string };
+export type SessionResponse = { user: WorkspaceAccountUser; accessToken: string; tokenType: "Bearer"; expiresAt: string };
+export type CurrentUserResponse = { user: WorkspaceAccountUser; expiresAt: string };
 
 export type ProcessedDocument = {
   chunkCount: number;
@@ -125,7 +122,6 @@ export type RunAssistantThreadInput = {
   requestId: string;
   systemInstructions?: string;
   threadId: string;
-  userEmail: string;
   userMessageId: string;
 };
 
@@ -165,13 +161,11 @@ export type DealDocumentText = {
 export type FileChunkVectorSearch = {
   limit: number;
   queryEmbedding: number[];
-  workspaceId: string;
 };
 
 export type FileChunkKeywordSearch = {
   limit: number;
   queryText: string;
-  workspaceId: string;
 };
 
 export type FileChunkResult = {
@@ -237,33 +231,34 @@ export type AssistantThreadListOptions = { after?: string; archived?: boolean; s
 export interface QuarryApi {
   createCompany(input: CompanyInput): Promise<Company>;
   updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
-  listCompanies(userEmail: string, options?: CompanySearch): Promise<CompanyPage>;
+  listCompanies(options?: CompanySearch): Promise<CompanyPage>;
   updateDeal(dealId: string, input: DealFields): Promise<SaveDealResponse>;
-  archiveAssistantThread(threadId: string, userEmail: string): Promise<void>;
+  archiveAssistantThread(threadId: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
-  createAssistantThread(userEmail: string, threadId?: string, dealId?: string | null): Promise<AssistantThread>;
+  createAssistantThread(threadId?: string, dealId?: string | null): Promise<AssistantThread>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
-  createUser(input: AddUserInput): Promise<WorkspaceAccountUser>;
+  login(input: LoginInput): Promise<SessionResponse>;
+  register(input: RegisterInput): Promise<SessionResponse>;
+  currentUser(): Promise<CurrentUserResponse>;
+  logout(): Promise<void>;
   deleteTemplate(templateId: string): Promise<void>;
-  deleteAssistantThread(threadId: string, userEmail: string): Promise<void>;
+  deleteAssistantThread(threadId: string): Promise<void>;
   exportPowerPoint(document: DiligenceCanvasDocument): Promise<PowerPointExport>;
   saveDealMetadata(
     dealId: string,
     input: SaveDealMetadataInput,
   ): Promise<SaveDealMetadataResponse>;
   getDeal(dealId: string): Promise<PersistedDeal>;
-  getAssistantThread(threadId: string, userEmail: string): Promise<AssistantThreadDetail>;
+  getAssistantThread(threadId: string): Promise<AssistantThreadDetail>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
   getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
   getTemplate(templateId: string): Promise<DiligenceCanvasDocument>;
-  getUserByEmail(email: string): Promise<WorkspaceAccountUser | null>;
   importPptxTemplate(
     file: File,
     importMode: PptxTemplateImportMode,
   ): Promise<PptxTemplateImportResult>;
   listDealDataRoom(dealId: string): Promise<DealDataRoom>;
   listAssistantThreads(
-    userEmail: string,
     options?: AssistantThreadListOptions,
   ): Promise<AssistantThreadPage>;
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
@@ -276,11 +271,10 @@ export interface QuarryApi {
   ): Promise<DocumentPreviewResponse>;
   processDocuments(
     dealId: string,
-    userId: string,
     files: File[],
   ): Promise<ProcessDocumentsResponse>;
   queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers): () => void;
-  renameAssistantThread(threadId: string, userEmail: string, title: string): Promise<void>;
+  renameAssistantThread(threadId: string, title: string): Promise<void>;
   runAssistantThread(
     input: RunAssistantThreadInput,
     handlers: SendQueryEventHandlers,
@@ -293,7 +287,6 @@ export interface QuarryApi {
   ): Promise<VectorFileChunkHit[]>;
   startProcessFile(
     dealId: string,
-    userId: string,
     file: File,
   ): Promise<ProcessFileJobResponse>;
   subscribeToProcessFileJob(
@@ -303,8 +296,7 @@ export interface QuarryApi {
   summarizePath(path: string): Promise<string>;
   summarizeSelected(paths: string[]): Promise<string>;
   summarizeUpload(files: File[]): Promise<string>;
-  unarchiveAssistantThread(threadId: string, userEmail: string): Promise<void>;
-  userExistsByEmail(email: string): Promise<boolean>;
+  unarchiveAssistantThread(threadId: string): Promise<void>;
 }
 
 export type SaveFileInput = {

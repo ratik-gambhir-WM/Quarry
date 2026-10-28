@@ -8,13 +8,38 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 async fn request(app: &Router, method: &str, path: &str, value: Value) -> (StatusCode, Value) {
+    let email = value
+        .get("userEmail")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            if path.contains("other") {
+                "other@example.com"
+            } else {
+                "owner@example.com"
+            }
+        });
+    let other = email == "other@example.com";
+    let mut value = value;
+    if let Some(object) = value.as_object_mut() {
+        object.remove("userEmail");
+    }
+    let path = path
+        .replace("userEmail=owner%40example.com&", "")
+        .replace("userEmail=other%40example.com&", "")
+        .replace("?userEmail=owner%40example.com", "")
+        .replace("?userEmail=other%40example.com", "");
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method(method)
-                .uri(path)
+                .uri(path.as_str())
                 .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", if other { "b" } else { "a" }.repeat(43)),
+                )
+                .header("x-user-id", if other { "2" } else { "1" })
                 .body(if method == "GET" {
                     Body::empty()
                 } else {
@@ -35,11 +60,10 @@ fn deal() -> Value {
     json!({"dealId":"DEAL-MODEL","userEmail":"owner@example.com","dealName":"Pipeline","dealCode":null,"engagementType":"sell_side","transactionType":"unknown","status":"pipeline","startDate":null,"expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":null,"parties":[],"scopes":[]})
 }
 async fn app() -> Router {
-    let app = test_application().unwrap().router;
-    for email in ["owner@example.com", "other@example.com"] {
-        assert_eq!(request(&app,"POST","/api/v1/users",json!({"firstName":"Test","lastName":"Owner","email":email,"apiKey":"unused","role":"Analyst"})).await.0, StatusCode::CREATED);
-    }
-    app
+    let app = test_application().unwrap();
+    crate::integration_support::seed_identity(&app.sqlite, "owner@example.com", 'a');
+    crate::integration_support::seed_identity(&app.sqlite, "other@example.com", 'b');
+    crate::integration_support::with_test_credentials(app.router)
 }
 
 async fn save_metadata_links(app: &Router, fields: &[(&str, &str)]) -> (StatusCode, Value) {

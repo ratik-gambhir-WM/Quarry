@@ -84,7 +84,7 @@ fn test_document_store() -> (SqliteClient, DocumentStore) {
     sqlite
         .with_connection(|connection| {
             connection.execute(
-                "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
+                "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
                 [OWNER],
             )?;
             let user_id = connection.last_insert_rowid();

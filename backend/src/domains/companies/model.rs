@@ -14,6 +14,7 @@ pub struct Company {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompanyInput {
+    #[serde(skip_deserializing)]
     pub user_email: String,
     pub name: String,
     pub website: Option<String>,

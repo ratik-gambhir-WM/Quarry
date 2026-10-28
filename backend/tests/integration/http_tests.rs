@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::{io::Cursor, sync::Arc};
 use tower::ServiceExt;
 
-use crate::integration_support::test_application;
+use crate::integration_support::authenticated_test_application as test_application;
 
 fn test_router() -> axum::Router {
     test_application().unwrap().router
@@ -18,25 +18,13 @@ fn test_router() -> axum::Router {
 #[tokio::test]
 async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
     let application = test_application().unwrap();
-    crate::domains::users::repository::UserRepository::new(application.sqlite.clone())
-        .create(crate::domains::users::repository::AddUserInput {
-            api_key: "development-key".to_string(),
-            email: "analyst@example.com".to_string(),
-            first_name: "Avery".to_string(),
-            last_name: "Analyst".to_string(),
-            role: "Analyst".to_string(),
-        })
-        .await
-        .unwrap();
     let app = application.router;
     let create = app
         .clone()
         .oneshot(
             Request::post("/api/v1/assistant/threads")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"userEmail":"analyst@example.com","threadId":"thread-1"}"#,
-                ))
+                .body(Body::from(r#"{"threadId":"thread-1"}"#))
                 .unwrap(),
         )
         .await
@@ -60,7 +48,9 @@ async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
     let other_owner = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/assistant/threads/thread-1?userEmail=someone%40example.com")
+            Request::get("/api/v1/assistant/threads/thread-1")
+                .header("authorization", format!("Bearer {}", "b".repeat(43)))
+                .header("x-user-id", "2")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -117,7 +107,7 @@ async fn handlers_reject_transport_validation_failures_before_service_calls() {
         )
         .await
         .unwrap();
-    assert_eq!(invalid_assistant_owner.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(invalid_assistant_owner.status(), StatusCode::OK);
 
     let invalid_document_id = app
         .oneshot(
@@ -246,7 +236,10 @@ async fn query_model_streams_the_typed_lifecycle_without_buffering() {
         crate::integration_support::prompt_catalog(),
     );
     let api = crate::domains::assistant::chat::route::routes(Arc::new(service));
-    let app = crate::app::http::create_router(api, &crate::AppConfig::default().http);
+    let app = crate::app::http::create_router(
+        api.layer(axum::Extension(crate::integration_support::test_actor())),
+        &crate::AppConfig::default().http,
+    );
     let context = r#"[{"role":"user","content":"first"},{"role":"assistant","content":"answer"}]"#;
     let (content_type, body) = query_multipart("next", context);
     let response = app
@@ -390,7 +383,10 @@ async fn template_document_route_relays_valid_json_with_private_no_store() {
     let api = crate::domains::templates::route::routes(Arc::new(
         crate::domains::templates::service::TemplateService::new(Some(Arc::new(client))),
     ));
-    let app = crate::app::http::create_router(api, &crate::AppConfig::default().http);
+    let app = crate::app::http::create_router(
+        api.layer(axum::Extension(crate::integration_support::test_actor())),
+        &crate::AppConfig::default().http,
+    );
 
     let response = app
         .oneshot(
@@ -472,7 +468,10 @@ async fn template_export_route_relays_bounded_powerpoint_downloads() {
     let api = crate::domains::templates::route::routes(Arc::new(
         crate::domains::templates::service::TemplateService::new(Some(Arc::new(client))),
     ));
-    let app = crate::app::http::create_router(api, &crate::AppConfig::default().http);
+    let app = crate::app::http::create_router(
+        api.layer(axum::Extension(crate::integration_support::test_actor())),
+        &crate::AppConfig::default().http,
+    );
 
     let response = app
         .oneshot(
@@ -630,127 +629,10 @@ async fn legacy_command_routes_are_not_exposed() {
 }
 
 #[tokio::test]
-async fn sqlite_user_can_be_saved_and_fetched_by_email() {
-    let app = test_router();
-    let create_response = app
-        .clone()
-        .oneshot(
-            Request::post("/api/users")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{
-                            "firstName":"Ada",
-                            "lastName":"Lovelace",
-                            "email":"ada@example.com",
-                            "apiKey":"test-key",
-                            "role":"Analyst"
-                        }"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(create_response.status(), StatusCode::CREATED);
-    let created: Value = serde_json::from_slice(
-        &to_bytes(create_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(created["email"], "ada@example.com");
-    assert_eq!(created["firstName"], "Ada");
-
-    let get_response = app
-        .oneshot(
-            Request::get("/api/users/by-email?email=ada%40example.com")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(get_response.status(), StatusCode::OK);
-    let fetched: Value = serde_json::from_slice(
-        &to_bytes(get_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(fetched["id"], created["id"]);
-    assert_eq!(fetched["email"], created["email"]);
-}
-
-#[tokio::test]
-async fn sqlite_user_lookup_returns_not_found_for_unknown_email() {
-    let app = test_router();
-    let response = app
-        .oneshot(
-            Request::get("/api/users/by-email?email=missing%40example.com")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn sqlite_user_handlers_reject_blank_required_fields() {
-    let app = test_router();
-    let create_response = app
-        .clone()
-        .oneshot(
-            Request::post("/api/users")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{
-                        "firstName":" ","lastName":"Analyst",
-                        "email":"analyst@example.com","apiKey":"test-key","role":"Analyst"
-                    }"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(create_response.status(), StatusCode::BAD_REQUEST);
-
-    let lookup_response = app
-        .oneshot(
-            Request::get("/api/users/by-email?email=%20")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(lookup_response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
 async fn deal_flow_saves_core_fields_then_optional_metadata() {
     const BOUNDARY: &str = "quarry-empty-deal-metadata";
     let app = test_router();
-    let create_user = app
-        .clone()
-        .oneshot(
-            Request::post("/api/v1/users")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{
-                        "firstName":"Avery","lastName":"Analyst",
-                        "email":"analyst@example.com","apiKey":"test-key","role":"Analyst"
-                    }"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(create_user.status(), StatusCode::CREATED);
-    let created_user: Value =
-        serde_json::from_slice(&to_bytes(create_user.into_body(), usize::MAX).await.unwrap())
-            .unwrap();
-    let user_id = created_user["id"].as_i64().unwrap();
+    let user_id = 1;
 
     let create_deal = app
         .clone()
@@ -1162,7 +1044,7 @@ async fn process_file_rejects_legacy_office_extensions_at_the_handler_boundary()
 }
 
 #[tokio::test]
-async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
+async fn process_file_uses_authenticated_identity_instead_of_blank_legacy_user_id() {
     const BOUNDARY: &str = "quarry-blank-document-user";
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\n   \r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"report.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\r\n--{BOUNDARY}--\r\n"
@@ -1182,7 +1064,7 @@ async fn process_file_rejects_blank_user_id_at_the_handler_boundary() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
 
 #[tokio::test]
@@ -1196,10 +1078,10 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
         .sqlite
         .with_connection(|connection| {
             connection.execute(
-                "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', 'analyst@example.com', 'key', 'Analyst')",
+                "UPDATE users SET first_name='Avery' WHERE id=1",
                 [],
             )?;
-            let user_id = connection.last_insert_rowid();
+            let user_id = 1;
             for deal_id in ["DEAL-DOCUMENTS", "DEAL-OTHER"] {
                 connection.execute(
                     r#"

@@ -71,9 +71,9 @@ not exist.
   Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
   projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
   in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
-- `app/migrations.rs` owns all SQLite schema (marker 10), including templates, assets, previews,
+- `app/migrations.rs` owns all SQLite schema (marker 11), including templates, assets, previews,
   metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
-  `SqliteClient` to product and template repositories. Schema 9 upgrades additively in one transaction;
+  `SqliteClient` to product and template repositories. Old schemas require an explicit offline development reset;
   no standalone template database setting, initializer, or memory-store default exists. Previously
   created standalone files must remain untouched. SQLite is canonical; Helix is recoverable.
 - Keep server keys in the ignored `$HOME/diligence-studio-server/.env`; never place them in `VITE_*`,
@@ -140,8 +140,8 @@ request -> router -> handler -> service -> repository/client
   and adapter/route tests.
 - Preserve camelCase JSON, URL encoding, status handling, multipart field names and limits,
   PDF response checks, and document-job SSE event names.
-- Do not mistake transport validation for authorization. The current server does not yet
-  enforce production identity or tenant boundaries.
+- Do not mistake transport validation for authorization. The server verifies bearer sessions and per-user ownership; organization tenancy and
+  production identity lifecycle remain incomplete.
 
 ### Persistence and indexing
 
@@ -151,8 +151,8 @@ request -> router -> handler -> service -> repository/client
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current shared schema marker is 10. Startup creates an empty database, transactionally
-  upgrades validated schema 9 with additive template tables, or validates/reuses schema 10.
+- The current shared schema marker is 11. Startup creates an empty database or validates/reuses
+  schema 11. Old profile schemas require the explicit offline development reset.
   Incompatible schemas fail without deleting records. The explicit offline
   `reset_development --discard <absolute-database-path>` utility is destructive and must never
   run automatically at startup. Run it only for a deliberately selected, drained disposable
@@ -323,10 +323,11 @@ standalone runtime operation.
   the configuration sections of `docs/ARCHITECTURE.md` as the documented environment schema.
 - Do not put secrets in `VITE_*`, browser storage, client bundles, or Tauri command arguments when
   a server-held secret is appropriate.
-- The current users table contains a development-era `api_key` field and the login flow is profile
-  lookup/creation, not authentication. Do not describe either as production-safe.
-- The per-user `api_key` is not used by AI services. Those use the server-side `OPENAI_API_KEY`;
-  do not imply that creating a profile configures AI.
+- Users have salted Argon2id password hashes; only public profile fields are serialized. Sessions
+  store token digests in SQLite. The app holds bearer tokens in memory and sends a matching
+  `X-User-Id` consistency header; the token is the identity authority.
+- User-provided API-key collection was removed. AI services use server-side `OPENAI_API_KEY`.
+  Job titles grant no privileges. See `docs/authentication.md` for current limits and reset policy.
 - Preserve request limits, filename/path validation, safe URL policy, CORS allowlists, sanitized
   error responses, and activity-log redaction.
 - New server endpoints need real authorization before public production use; client-side route

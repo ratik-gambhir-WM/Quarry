@@ -1,6 +1,7 @@
+import { sessionStore } from "../auth/sessionStore";
 import type { Company, CompanyPage } from "../data/dealModel";
 import type {
-  AddUserInput,
+  LoginInput, RegisterInput, SessionResponse, CurrentUserResponse,
   AssistantThread,
   AssistantThreadDetail,
   AssistantThreadPage,
@@ -35,10 +36,10 @@ import type {
   SavedDeal,
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
-import type { WorkspaceAccountUser } from "../data/workspace";
 import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 
 export type TauriMultipartRequest = {
+  sessionGeneration?: number;
   fields: { name: string; value: string }[];
   files: {
     dataBase64: string;
@@ -50,6 +51,7 @@ export type TauriMultipartRequest = {
 };
 
 export type TauriQueryRequest = {
+  sessionGeneration?: number;
   assistantMessageId?: string;
   context?: QueryModelInput["context"];
   files: TauriMultipartRequest["files"];
@@ -59,13 +61,12 @@ export type TauriQueryRequest = {
   prompt: string;
   requestId?: string;
   systemInstructions?: string;
-  userEmail?: string;
   userMessageId?: string;
 };
 
 export type TauriQueryPayload =
   | { event: unknown; kind: "serverEvent"; subscriptionId: string }
-  | { kind: "connectionError"; message: string; subscriptionId: string };
+  | { kind: "connectionError"; message: string; status?: number; subscriptionId: string };
 
 type TauriTransport = {
   delete(path: string): Promise<void>;
@@ -92,7 +93,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     fields: TauriMultipartRequest["fields"] = [],
     fallbackMimeType = "application/octet-stream",
   ) {
+    const sessionGeneration = sessionStore.getSnapshot().generation;
     return {
+      sessionGeneration,
       fields,
       files: await Promise.all(files.map((file) => fileToMultipart(file, fallbackMimeType))),
       path,
@@ -100,23 +103,22 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
   }
 
   return {
-    archiveAssistantThread: (threadId, userEmail) =>
+    archiveAssistantThread: (threadId) =>
       transport.post<void>(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/archive`,
-        { userEmail },
+        {},
       ),
     archiveDeal: (dealId) =>
       transport.post<SavedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}/archive`, {}),
-    createAssistantThread: (userEmail, threadId, dealId) =>
+    createAssistantThread: (threadId, dealId) =>
       transport.post<AssistantThread>("/api/v1/assistant/threads", {
-        userEmail,
         ...(threadId ? { threadId } : {}),
         ...(dealId !== undefined ? { dealId } : {}),
       }),
     createCompany: (input) => transport.post<Company>("/api/v1/companies", input),
     updateCompany: (id, input) => transport.post<Company>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input),
-    listCompanies: (userEmail, options = {}) => {
-      const params = new URLSearchParams({ userEmail });
+    listCompanies: (options = {}) => {
+      const params = new URLSearchParams();
       if (options.query !== undefined) params.set("query", options.query);
       if (options.limit !== undefined) params.set("limit", String(options.limit));
       if (options.offset !== undefined) params.set("offset", String(options.offset));
@@ -125,11 +127,13 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     updateDeal: (id, input) => transport.post<SaveDealResponse>(`/api/v1/deals/${encodeURIComponent(id)}/update`, input),
     createDeal: (input: SaveDealInput) =>
       transport.post<SaveDealResponse>("/api/v1/deals", input),
-    createUser: (input: AddUserInput) =>
-      transport.post<WorkspaceAccountUser>("/api/v1/users", input),
-    deleteAssistantThread: (threadId, userEmail) =>
+    login: (input: LoginInput) => transport.post<SessionResponse>("/api/v1/auth/login", input),
+    register: (input: RegisterInput) => transport.post<SessionResponse>("/api/v1/auth/register", input),
+    currentUser: () => transport.get<CurrentUserResponse>("/api/v1/auth/me"),
+    logout: () => transport.post<void>("/api/v1/auth/logout", {}),
+    deleteAssistantThread: (threadId) =>
       transport.delete(
-        `/api/v1/assistant/threads/${encodeURIComponent(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+        `/api/v1/assistant/threads/${encodeURIComponent(threadId)}`,
       ),
     deleteTemplate: (templateId) =>
       transport.delete(`/api/v1/templates/${encodeURIComponent(templateId)}`),
@@ -137,9 +141,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.postPowerPoint("/api/v1/templates/export", document),
     getDeal: (dealId) =>
       transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
-    getAssistantThread: (threadId, userEmail) =>
+    getAssistantThread: (threadId) =>
       transport.get<AssistantThreadDetail>(
-        `/api/v1/assistant/threads/${encodeURIComponent(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+        `/api/v1/assistant/threads/${encodeURIComponent(threadId)}`,
       ),
     async getDealDocumentPdf(dealId, fileId): Promise<DealDocumentPdf> {
       const bytes = await transport.getPdf(
@@ -154,16 +158,6 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     getTemplate: async (templateId) => parseDiligenceCanvasDocument(
       await transport.get<unknown>(`/api/v1/templates/${encodeURIComponent(templateId)}`),
     ),
-    async getUserByEmail(email) {
-      try {
-        return await transport.get<WorkspaceAccountUser>(
-          `/api/v1/users/by-email?email=${encodeURIComponent(email.trim())}`,
-        );
-      } catch (error) {
-        if (errorMessage(error).toLowerCase().includes("user not found")) return null;
-        throw error;
-      }
-    },
     async importPptxTemplate(
       file,
       importMode: PptxTemplateImportMode,
@@ -182,8 +176,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     },
     listDealDataRoom: (dealId) =>
       transport.get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`),
-    listAssistantThreads: (userEmail, options = {}) => {
-      const parameters = new URLSearchParams({ userEmail });
+    listAssistantThreads: (options = {}) => {
+      const parameters = new URLSearchParams();
       if (options.after) parameters.set("before", options.after);
       if (options.archived) parameters.set("archived", "true");
       if (options.scope) parameters.set("scope", options.scope);
@@ -208,14 +202,14 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/deals/${encodeURIComponent(dealId)}/data-room/preview`,
         { relativePath },
       ),
-    async processDocuments(dealId, userId, files) {
+    async processDocuments(dealId, files) {
       return transport.postMultipart<ProcessDocumentsResponse>(
         await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`, files, [
-          { name: "userId", value: userId.trim() },
         ]),
       );
     },
     queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
+      const sessionGeneration = sessionStore.getSnapshot().generation;
       let active = true;
       let settled = false;
       let stop: (() => void) | undefined;
@@ -231,6 +225,7 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
             throw new Error("The desktop query transport is unavailable.");
           }
           return transport.startQuery({
+            sessionGeneration,
             context: input.context.map((message) => ({ ...message })),
             files,
             model: input.model,
@@ -285,6 +280,7 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       };
     },
     runAssistantThread(input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) {
+      const sessionGeneration = sessionStore.getSnapshot().generation;
       let active = true;
       let settled = false;
       let stop: (() => void) | undefined;
@@ -302,6 +298,7 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
             throw new Error("The desktop query transport is unavailable.");
           }
           return transport.startQuery({
+            sessionGeneration,
             assistantMessageId: input.assistantMessageId,
             files,
             model: input.model,
@@ -310,7 +307,6 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
             prompt: input.prompt,
             requestId: input.requestId,
             systemInstructions: input.systemInstructions,
-            userEmail: input.userEmail,
             userMessageId: input.userMessageId,
           }, (payload) => {
             if (!active || settled) return;
@@ -361,10 +357,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         stopTransport();
       };
     },
-    renameAssistantThread: (threadId, userEmail, title) =>
+    renameAssistantThread: (threadId, title) =>
       transport.post<void>(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/rename`,
-        { title, userEmail },
+        { title },
       ),
     saveDealMetadata: async (dealId, input: SaveDealMetadataInput) =>
       transport.postMultipart<SaveDealMetadataResponse>(
@@ -383,10 +379,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.post<KeywordFileChunkHit[]>("/api/v1/documents/search/keyword", search),
     searchDocumentChunksByVector: (search: FileChunkVectorSearch) =>
       transport.post<VectorFileChunkHit[]>("/api/v1/documents/search/vector", search),
-    async startProcessFile(dealId, userId, file) {
+    async startProcessFile(dealId, file) {
       return transport.postMultipart<ProcessFileJobResponse>(
         await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`, [file], [
-          { name: "userId", value: userId.trim() },
         ]),
       );
     },
@@ -438,14 +433,12 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       );
       return response.summary;
     },
-    unarchiveAssistantThread: (threadId, userEmail) =>
+    unarchiveAssistantThread: (threadId) =>
       transport.post<void>(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/unarchive`,
-        { userEmail },
+        {},
       ),
-    async userExistsByEmail(email) {
-      return (await this.getUserByEmail(email)) !== null;
-    },
+
   };
 }
 
@@ -466,11 +459,4 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
   return btoa(binary);
-}
-
-function errorMessage(error: unknown) {
-  if (typeof error === "object" && error && "message" in error) {
-    return String(error.message);
-  }
-  return error instanceof Error ? error.message : String(error);
 }

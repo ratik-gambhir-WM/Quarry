@@ -132,7 +132,7 @@ export function AddDealModal({ email, onClose, initialDeal }: AddDealModalProps)
     let savedCore = createdDeal;
     try {
       if (!savedCore) {
-        const input = buildSaveDealInput(form, email);
+        const input = buildSaveDealInput(form);
         savedCore = initialDeal ? await runtime.api.updateDeal(initialDeal.dealId, editableFields(input)) : await runtime.api.createDeal(input);
         saveDealResult(savedCore);
         if (!initialDeal) setCreatedDeal(savedCore);
@@ -359,8 +359,8 @@ function editableFields(form: DealFields): DealFields {
     scopes: form.scopes,
   };
 }
-function buildSaveDealInput(form: AddDealFormState, userEmail: string): SaveDealInput {
-  return { ...editableFields(form), dealId: form.dealId.trim(), userEmail,
+function buildSaveDealInput(form: AddDealFormState): SaveDealInput {
+  return { ...editableFields(form), dealId: form.dealId.trim(),
     localPath: runtime.target === "desktop" ? form.localPath.trim() || null : null, sharepointLink: null };
 }
 

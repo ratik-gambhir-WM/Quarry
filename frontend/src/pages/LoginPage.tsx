@@ -1,238 +1,93 @@
-import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { runtime } from "@quarry/runtime";
-import { LoginCard } from "../components/login/LoginCard";
+import { useRef, useState, useEffect, type FormEvent } from "react";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useUser } from "../auth/UserProvider";
 import { AppShell } from "../components/layout/AppShell";
-import { QuarryButton } from "../components/ui/QuarryButton";
-import { FormField } from "../components/ui/FormField";
+import { BrandLockup } from "../components/brand/BrandLockup";
 import { Icon } from "../components/ui/Icon";
-import { persistWorkspaceEmail } from "../hooks/useWorkspaceSession";
-
-type LoginStep = "email" | "new-user";
-
-type NewUserFormState = {
-  apiKey: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-};
-
-const emptyNewUserForm: NewUserFormState = {
-  apiKey: "",
-  firstName: "",
-  lastName: "",
-  role: "",
-};
-
-export function LoginPage() {
+import { FormField } from "../components/ui/FormField";
+import { QuarryButton } from "../components/ui/QuarryButton";
+export function LoginPage({ register = false }: { register?: boolean }) {
+  const user = useUser();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const location = useLocation();
   const [error, setError] = useState("");
-  const [isCheckingUser, setIsCheckingUser] = useState(false);
-  const [isCreatingUser, setIsCreatingUser] = useState(false);
-  const [newUserForm, setNewUserForm] = useState<NewUserFormState>(emptyNewUserForm);
-  const [step, setStep] = useState<LoginStep>("email");
-
-  async function handleEmailSubmit(event: FormEvent<HTMLFormElement>) {
+  const [pending, setPending] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [form, setForm] = useState({ username: "", password: "", confirm: "", email: "", firstName: "", lastName: "", jobTitle: "" });
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const from: unknown = location.state && typeof location.state === "object" && "from" in location.state ? location.state.from : undefined;
+  const destination = typeof from === "string" && from.startsWith("/hub") && !from.includes("\\") ? from : "/hub";
+  if (user.user) return <Navigate replace to={destination} />;
+  const field = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const normalizedEmail = email.trim();
-
-    if (!normalizedEmail) {
-      setError("Enter your West Monroe email.");
-      return;
-    }
-
-    setError("");
-    setIsCheckingUser(true);
-
+    if (pending) return;
+    if (register && form.password !== form.confirm) { setError("Passwords do not match."); return; }
+    setError(""); setPending(true);
     try {
-      const exists = await runtime.api.userExistsByEmail(normalizedEmail);
-
-      if (exists) {
-        enterWorkspace(normalizedEmail);
-        return;
-      }
-
-      setStep("new-user");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsCheckingUser(false);
-    }
+      const input = { username: form.username.trim(), password: form.password };
+      if (register) await user.register({ ...input, email: form.email.trim(), firstName: form.firstName.trim(), lastName: form.lastName.trim(), ...(form.jobTitle.trim() ? { jobTitle: form.jobTitle.trim() } : {}) }, () => active.current);
+      else await user.login(input, () => active.current);
+      if (active.current) { setForm((current) => ({ ...current, password: "", confirm: "" })); navigate(destination, { replace: true }); }
+    } catch (failure) { if (active.current) setError(failure instanceof Error ? failure.message : "Unable to sign in. Try again."); }
+    finally { if (active.current) setPending(false); }
   }
-
-  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedEmail = email.trim();
-
-    setError("");
-    setIsCreatingUser(true);
-
-    try {
-      await runtime.api.createUser({
-        apiKey: newUserForm.apiKey.trim(),
-        email: normalizedEmail,
-        firstName: newUserForm.firstName.trim(),
-        lastName: newUserForm.lastName.trim(),
-        role: newUserForm.role.trim(),
-      });
-
-      enterWorkspace(normalizedEmail);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsCreatingUser(false);
-    }
-  }
-
-  function enterWorkspace(workspaceEmail: string) {
-    persistWorkspaceEmail(workspaceEmail);
-
-    navigate("/hub", {
-      state: {
-        email: workspaceEmail,
-      },
-    });
-  }
-
-  function updateNewUserField(field: keyof NewUserFormState, value: string) {
-    setNewUserForm((current) => ({ ...current, [field]: value }));
-  }
-
-  const statusText =
-    email && !error
-      ? isCheckingUser
-        ? "Checking workspace profile..."
-        : ""
-      : "";
-
   return (
     <AppShell centered showFooter={false}>
-      <div className="mx-auto flex w-full max-w-[440px] flex-col gap-lg">
-        {step === "email" ? (
-          <LoginCard
-            email={email}
-            error={error}
-            isChecking={isCheckingUser}
-            onEmailChange={setEmail}
-            onSubmit={handleEmailSubmit}
-            statusText={statusText}
-          />
-        ) : (
-          <NewUserSetupCard
-            email={email}
-            error={error}
-            form={newUserForm}
-            isCreating={isCreatingUser}
-            onBack={() => {
-              setError("");
-              setStep("email");
-            }}
-            onChange={updateNewUserField}
-            onSubmit={handleCreateUser}
-          />
-        )}
-      </div>
+      <section className={`glass-panel mx-auto w-full rounded-[8px] p-lg sm:p-xl ${register ? "max-w-[900px]" : "max-w-[560px]"}`}>
+        <BrandLockup compact={register} title="Quarry" subtitle={register ? "Create your account" : "Sign in to your account"} />
+        <form className="mt-lg space-y-md" onSubmit={submit} aria-busy={pending}>
+          <div className={`grid gap-md ${register ? "sm:grid-cols-2" : ""}`}>
+            <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="username" label="Username" autoComplete="username" minLength={3} maxLength={32} value={form.username} onChange={(value) => field("username", value)} />
+            {register && (
+              <>
+                <div className="min-w-0 space-y-xs">
+                  <label className="type-label px-xs text-on-surface-variant" htmlFor="email">West Monroe email</label>
+                  <div className="flex overflow-hidden rounded-full border border-outline-variant bg-surface-container-lowest focus-within:border-primary-container focus-within:ring-4 focus-within:ring-primary-fixed/40">
+                    <input
+                      className="min-w-0 flex-1 bg-transparent px-md py-sm text-[16px] leading-[1.6] text-on-surface outline-none"
+                      id="email"
+                      aria-describedby="email-domain"
+                      autoComplete="email"
+                      maxLength={300}
+                      placeholder="your.name"
+                      required
+                      type="text"
+                      value={form.email.split("@")[0] ?? ""}
+                      onChange={(event) => {
+                        const name = event.currentTarget.value.replace(/\s/g, "").replace(/@.*$/, "");
+                        field("email", name ? `${name}@westmonroe.com` : "");
+                      }}
+                    />
+                    <span className="flex shrink-0 items-center border-l border-outline-variant bg-surface-container-low px-sm text-sm font-semibold text-on-surface-variant" id="email-domain">@westmonroe.com</span>
+                  </div>
+                </div>
+                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="first-name" label="First name" autoComplete="given-name" maxLength={100} value={form.firstName} onChange={(value) => field("firstName", value)} />
+                <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} id="last-name" label="Last name" autoComplete="family-name" maxLength={100} value={form.lastName} onChange={(value) => field("lastName", value)} />
+              </>
+            )}
+            <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="password" label="Password" type={visible ? "text" : "password"} autoComplete={register ? "new-password" : "current-password"} value={form.password} onChange={(value) => field("password", value)} />
+            {register && (
+              <>
+                <FormField className="py-sm" icon={<Icon name="key" className="h-5 w-5" />} id="confirm-password" label="Confirm password" type={visible ? "text" : "password"} autoComplete="new-password" value={form.confirm} onChange={(value) => field("confirm", value)} />
+                <div className="sm:col-span-2">
+                  <FormField className="py-sm" icon={<Icon name="personSearch" className="h-5 w-5" />} required={false} id="job-title" label="Job title (optional)" autoComplete="organization-title" maxLength={200} value={form.jobTitle} onChange={(value) => field("jobTitle", value)} />
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-sm">
+            <button type="button" className="shrink-0 text-sm text-primary underline focus-visible:outline-2" aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? "Hide password" : "Show password"}</button>
+            {register && <p className="type-body-sm max-w-[32rem] text-muted">Use 15–128 characters. Usernames use 3–32 letters, numbers, dots, underscores or hyphens.</p>}
+          </div>
+          {error && <p className="text-error" role="alert">{error}</p>}
+          {user.notice && <p className="text-secondary" role="status">{user.notice}</p>}
+          <QuarryButton type="submit" disabled={pending || !form.username || !form.password || (register && (!form.email || !form.firstName || !form.lastName || !form.confirm))}>{pending ? "Please wait…" : register ? "Create account" : "Sign in"}</QuarryButton>
+          <span className="sr-only" role="status">{pending ? register ? "Creating account…" : "Signing in…" : ""}</span>
+        </form>
+        <p className="mt-md type-body-sm">{register ? "Already have an account? " : "New to Quarry? "}<Link className="text-primary underline" to={register ? "/login" : "/register"} state={{ from: destination }}>{register ? "Sign in" : "Create an account"}</Link></p>
+      </section>
     </AppShell>
-  );
-}
-
-type NewUserSetupCardProps = {
-  email: string;
-  error: string;
-  form: NewUserFormState;
-  isCreating: boolean;
-  onBack: () => void;
-  onChange: (field: keyof NewUserFormState, value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-};
-
-function NewUserSetupCard({
-  email,
-  error,
-  form,
-  isCreating,
-  onBack,
-  onChange,
-  onSubmit,
-}: NewUserSetupCardProps) {
-  return (
-    <section className="glass-panel mx-auto w-full max-w-[440px] rounded-[8px] p-xl">
-      <div className="space-y-xs">
-        <p className="type-label text-on-surface-variant">New Workspace Profile</p>
-        <h1 className="type-h1 text-text-main">Finish setup</h1>
-        <p className="type-body-sm text-secondary">{email}</p>
-      </div>
-
-      <form className="mt-xl space-y-lg" onSubmit={onSubmit}>
-        <div className="grid gap-md sm:grid-cols-2">
-          <FormField
-            autoComplete="given-name"
-            icon={<Icon className="h-5 w-5" name="personSearch" />}
-            id="first-name"
-            label="First name"
-            onChange={(value) => onChange("firstName", value)}
-            placeholder="Rohan"
-            value={form.firstName}
-          />
-          <FormField
-            autoComplete="family-name"
-            icon={<Icon className="h-5 w-5" name="personSearch" />}
-            id="last-name"
-            label="Last name"
-            onChange={(value) => onChange("lastName", value)}
-            placeholder="Gambhir"
-            value={form.lastName}
-          />
-        </div>
-
-        <FormField
-          action={
-            <a
-              className="inline-flex items-center gap-xs text-[12px] font-semibold tracking-[0.05em] text-primary-container transition-colors hover:text-primary"
-              href="https://platform.openai.com/api-keys"
-              rel="noreferrer"
-              target="_blank"
-            >
-              <Icon className="h-3.5 w-3.5" name="help" />
-              API keys
-            </a>
-          }
-          autoComplete="off"
-          icon={<Icon className="h-5 w-5" name="key" />}
-          id="api-key"
-          label="OpenAI API key"
-          onChange={(value) => onChange("apiKey", value)}
-          placeholder="sk-..."
-          type="password"
-          value={form.apiKey}
-        />
-
-        <FormField
-          autoComplete="organization-title"
-          icon={<Icon className="h-5 w-5" name="shield" />}
-          id="role"
-          label="Role"
-          onChange={(value) => onChange("role", value)}
-          placeholder="Analyst"
-          value={form.role}
-        />
-
-        {error ? <p className="px-xs text-[14px] font-medium text-error">{error}</p> : null}
-
-        <div className="grid gap-sm sm:grid-cols-[auto_1fr]">
-          <button
-            className="rounded-full px-lg py-md text-[14px] font-semibold text-secondary transition hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-            onClick={onBack}
-            type="button"
-          >
-            Back
-          </button>
-          <QuarryButton disabled={isCreating} icon={<Icon className="h-[18px] w-[18px]" name="arrowRight" />} type="submit">
-            {isCreating ? "Creating..." : "Create Profile"}
-          </QuarryButton>
-        </div>
-      </form>
-    </section>
   );
 }

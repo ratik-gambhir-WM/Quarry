@@ -185,7 +185,7 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
   async function startEntryUpload(entry: UploadEntry) {
     try {
-      const job = await runtime.api.startProcessFile(dealId, userId, entry.file);
+      const job = await runtime.api.startProcessFile(dealId, entry.file);
       setEntries((current) =>
         current.map((currentEntry) =>
           currentEntry.id === entry.id

@@ -19,7 +19,7 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
     state
         .with_connection(|connection| {
             connection.execute(
-                "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
+                "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES ('Avery', 'Analyst', ?1, ?1, 'unusable-test-hash')",
                 [owner],
             )?;
             let user_id = connection.last_insert_rowid();

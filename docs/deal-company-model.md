@@ -1,5 +1,11 @@
 # Deal, company, and chat model
 
+Current authentication rollout (2026-10-28): schema **11** replaces legacy profile credentials.
+There is no automatic 9→10→11 upgrade or password backfill. Use the deliberately selected,
+drained development reset described in [authentication](authentication.md#schema-11-and-development-reset),
+paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
+previous rollout and do not authorize running an old migration against the current schema.
+
 SQLite owns the engagement aggregate. Helix owns only a document search projection; creating or
 editing a deal has no graph write. Diligence Studio's process-local template catalog is unrelated
 to deal persistence.

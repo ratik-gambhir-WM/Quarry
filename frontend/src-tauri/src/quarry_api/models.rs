@@ -1,3 +1,10 @@
+/// Per-request credentials; intentionally neither Debug nor Serialize.
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthCredentials {
+    pub token: String,
+    pub user_id: i64,
+}
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -68,7 +75,6 @@ pub struct QueryStreamRequest {
     pub prompt: String,
     pub request_id: Option<String>,
     pub system_instructions: Option<String>,
-    pub user_email: Option<String>,
     pub user_message_id: Option<String>,
 }
 
@@ -123,6 +129,7 @@ pub enum QueryEventPayload {
     },
     ConnectionError {
         message: String,
+        status: Option<u16>,
         subscription_id: String,
     },
 }

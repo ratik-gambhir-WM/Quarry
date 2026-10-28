@@ -14,6 +14,7 @@ pub const MAX_FILE_CHUNK_SEARCH_LIMIT: usize = 100;
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChunkVectorSearch {
+    #[serde(default)]
     pub workspace_id: String,
     pub query_embedding: Vec<f32>,
     pub limit: usize,
@@ -22,6 +23,7 @@ pub struct FileChunkVectorSearch {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChunkKeywordSearch {
+    #[serde(default)]
     pub workspace_id: String,
     pub query_text: String,
     pub limit: usize,

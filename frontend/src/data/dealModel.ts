@@ -13,7 +13,7 @@ export type Company = {
   companyId: string; userId: number; name: string; website: string | null;
   industry: string | null; description: string | null; createdAt: string; updatedAt: string;
 };
-export type CompanyInput = Pick<Company, "name" | "website" | "industry" | "description"> & { userEmail: string };
+export type CompanyInput = Pick<Company, "name" | "website" | "industry" | "description">;
 export type CompanyPage = { companies: Company[]; hasMore: boolean };
 export type CompanySearch = { query?: string; limit?: number; offset?: number };
 export type PartyInput = { companyId: string; role: PartyRole; notes: string | null };

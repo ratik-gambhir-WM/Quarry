@@ -1,9 +1,8 @@
-pub(crate) mod handler;
 pub(crate) mod repository;
-pub(crate) mod route;
+#[cfg(test)]
 pub(crate) mod service;
 
-use repository::UserRepository;
+pub(crate) use repository::UserRepository;
 use shared::UserDirectoryResult;
 
 pub use repository::User;

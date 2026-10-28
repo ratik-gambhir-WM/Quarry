@@ -61,7 +61,7 @@ describe("QueryChatRuntimeProvider", () => {
     const assistantMessage = screen.getByText("Earlier assistant answer");
     expect(userMessage.closest('[data-role="user"]')).toBeTruthy();
     expect(assistantMessage.closest('[data-role="assistant"]')).toBeTruthy();
-    expect(api.getAssistantThread).toHaveBeenCalledWith(threadMetadata.threadId, "analyst@example.com");
+    expect(api.getAssistantThread).toHaveBeenCalledWith(threadMetadata.threadId);
   });
 
   it("creates a persistent thread before sending its first run", async () => {
@@ -83,7 +83,7 @@ describe("QueryChatRuntimeProvider", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Persisted answer")).toBeTruthy();
-    expect(api.createAssistantThread).toHaveBeenCalledWith("analyst@example.com", undefined, null);
+    expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, null);
     await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledTimes(1));
     const run = api.runAssistantThread.mock.calls[0]?.[0];
     expect(run).toMatchObject({
@@ -91,7 +91,6 @@ describe("QueryChatRuntimeProvider", () => {
       parentMessageId: undefined,
       prompt: "Persist this question",
       threadId: threadMetadata.threadId,
-      userEmail: "analyst@example.com",
     });
     expect(run.assistantMessageId).toBe(run.requestId);
     expect(run.userMessageId).toEqual(expect.any(String));
@@ -203,7 +202,6 @@ describe("QueryChatRuntimeProvider", () => {
 
     await waitFor(() => expect(api.deleteAssistantThread).toHaveBeenCalledWith(
       threadMetadata.threadId,
-      "analyst@example.com",
     ));
     await waitFor(() => expect(screen.queryByRole("button", { name: threadMetadata.title })).toBeNull());
     expect(screen.queryByText("Earlier assistant answer")).toBeNull();
@@ -297,8 +295,8 @@ it("keys drafts, pending lists, and new threads by the active deal", async () =>
   rerender(view("DEAL-B"));
   expect((screen.getByRole("textbox", { name: "Message input" }) as HTMLTextAreaElement).value).toBe("");
   pending.resolve({ nextCursor: null, threads: [] });
-  await waitFor(() => expect(api.listAssistantThreads).toHaveBeenLastCalledWith("owner@example.com", { scope: "deal", dealId: "DEAL-B" }));
+  await waitFor(() => expect(api.listAssistantThreads).toHaveBeenLastCalledWith({ scope: "deal", dealId: "DEAL-B" }));
   await user.type(screen.getByRole("textbox", { name: "Message input" }), "Question for B");
   await user.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(api.createAssistantThread).toHaveBeenCalledWith("owner@example.com", undefined, "DEAL-B"));
+  await waitFor(() => expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, "DEAL-B"));
 });

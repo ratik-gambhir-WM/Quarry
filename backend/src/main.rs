@@ -15,10 +15,15 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to bind {}", application.bind_address))?;
 
     tracing::info!(address = %application.bind_address, "Quarry API listening");
-    axum::serve(listener, application.router)
-        .with_graceful_shutdown(shutdown_signal(application.templates))
-        .await
-        .context("API server failed")?;
+    axum::serve(
+        listener,
+        application
+            .router
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal(application.templates))
+    .await
+    .context("API server failed")?;
 
     Ok(())
 }

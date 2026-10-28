@@ -60,10 +60,10 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    await expect(api.deleteAssistantThread("thread/one", "analyst@example.com"))
+    await expect(api.deleteAssistantThread("thread/one"))
       .resolves.toBeUndefined();
     expect(deleteRequest).toHaveBeenCalledWith(
-      "/api/v1/assistant/threads/thread%2Fone?userEmail=analyst%40example.com",
+      "/api/v1/assistant/threads/thread%2Fone",
     );
   });
 
@@ -142,6 +142,7 @@ describe("createTauriQuarryApi", () => {
       await expect(api.importPptxTemplate(file, importMode)).resolves.toEqual(result);
 
       expect(postMultipart).toHaveBeenCalledWith({
+      sessionGeneration: expect.any(Number),
         fields: [],
         files: [{
           dataBase64: "AQID",
@@ -172,10 +173,11 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    await api.processDocuments("DEAL / 1", " analyst@example.com ", []);
+    await api.processDocuments("DEAL / 1", []);
 
     expect(postMultipart).toHaveBeenCalledWith({
-      fields: [{ name: "userId", value: "analyst@example.com" }],
+      sessionGeneration: expect.any(Number),
+      fields: [],
       files: [],
       path: "/api/v1/deals/DEAL%20%2F%201/documents/process",
     });
@@ -195,17 +197,16 @@ describe("createTauriQuarryApi", () => {
 
     await api.startProcessFile(
       "DEAL / 1",
-      " analyst@example.com ",
       new File([new Uint8Array([1, 2, 3])], "model.XLSX", { type: "" }),
     );
     await api.startProcessFile(
       "DEAL / 1",
-      " analyst@example.com ",
       new File([new Uint8Array([4, 5, 6])], "board.pptx", { type: "" }),
     );
 
     expect(postMultipart).toHaveBeenNthCalledWith(1, {
-      fields: [{ name: "userId", value: "analyst@example.com" }],
+      sessionGeneration: expect.any(Number),
+      fields: [],
       files: [{
         dataBase64: "AQID",
         fieldName: "files",
@@ -215,7 +216,8 @@ describe("createTauriQuarryApi", () => {
       path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
     });
     expect(postMultipart).toHaveBeenNthCalledWith(2, {
-      fields: [{ name: "userId", value: "analyst@example.com" }],
+      sessionGeneration: expect.any(Number),
+      fields: [],
       files: [{
         dataBase64: "BAUG",
         fieldName: "files",
@@ -247,6 +249,7 @@ describe("createTauriQuarryApi", () => {
     });
 
     expect(postMultipart).toHaveBeenCalledWith({
+      sessionGeneration: expect.any(Number),
       fields: [
         { name: "sharepointLink", value: "" },
         { name: "sowLink", value: "https://example.com/sow" },
@@ -348,7 +351,6 @@ describe("createTauriQuarryApi", () => {
       prompt: "hello",
       requestId: "assistant-1",
       threadId: "thread-1",
-      userEmail: "analyst@example.com",
       userMessageId: "user-1",
     }, { onEvent: vi.fn() });
 
@@ -358,7 +360,6 @@ describe("createTauriQuarryApi", () => {
       files: [],
       path: "/api/v1/assistant/threads/thread-1/runs",
       requestId: "assistant-1",
-      userEmail: "analyst@example.com",
       userMessageId: "user-1",
     });
     expect(startQuery.mock.calls[0][0]).not.toHaveProperty("context");
@@ -453,12 +454,12 @@ it("relays company, aggregate updates and nullable/scoped chats with encoded pat
   const fields = { dealName: "Draft", dealCode: null, engagementType: "sell_side" as const, transactionType: "unknown" as const, status: "pipeline" as const, startDate: null, expectedCloseDate: null, actualCloseDate: null, engagementCompletedDate: null, parties: [], scopes: [] };
   await api.updateDeal("DEAL/A", fields);
   expect(post).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", fields);
-  await api.listCompanies("owner@example.com", { query: "A & B", limit: 30, offset: 30 });
-  expect(get).toHaveBeenLastCalledWith("/api/v1/companies?userEmail=owner%40example.com&query=A+%26+B&limit=30&offset=30");
-  await api.createAssistantThread("owner@example.com", undefined, null);
-  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { userEmail: "owner@example.com", dealId: null });
-  await api.createAssistantThread("owner@example.com", "linked", "DEAL/A");
-  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { userEmail: "owner@example.com", threadId: "linked", dealId: "DEAL/A" });
-  await api.listAssistantThreads("owner@example.com", { scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
-  expect(get).toHaveBeenLastCalledWith("/api/v1/assistant/threads?userEmail=owner%40example.com&before=cursor%7C1&scope=deal&dealId=DEAL%2FA");
+  await api.listCompanies({ query: "A & B", limit: 30, offset: 30 });
+  expect(get).toHaveBeenLastCalledWith("/api/v1/companies?query=A+%26+B&limit=30&offset=30");
+  await api.createAssistantThread(undefined, null);
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { dealId: null });
+  await api.createAssistantThread("linked", "DEAL/A");
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { threadId: "linked", dealId: "DEAL/A" });
+  await api.listAssistantThreads({ scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
+  expect(get).toHaveBeenLastCalledWith("/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA");
 });

@@ -6,7 +6,6 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use tokio::sync::mpsc;
-use tower::util::error::optional::None;
 
 use crate::{
     adapters::openai::client::{ChatMessageInput, ChatRole, OpenAiClient, ResponsesFileInput},
