@@ -233,7 +233,7 @@ describe("AddDealModal", () => {
 
   it("returns to company assignments if the core deal is rejected and allows retry", async () => {
     const user = userEvent.setup();
-    createDeal.mockRejectedValueOnce(new Error("An active acquisition requires exactly one target"));
+    createDeal.mockRejectedValueOnce(new Error("A working-stage acquisition requires exactly one target"));
     render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
     await completeDealDetails(user);
     await user.click(screen.getByRole("button", { name: "Finish deal" }));

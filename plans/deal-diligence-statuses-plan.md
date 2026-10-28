@@ -1,6 +1,11 @@
 # Granular deal diligence statuses
 
-Date: 2026-10-27. Status: proposed; planning only.
+Date: 2026-10-27. Reviewed against the working tree: 2026-10-28. Status: proposed; planning only.
+
+The user has explicitly accepted discarding the current development data and recreating it
+manually. Use an explicit offline drop-and-recreate reset for the schema change; no existing-data
+migration, export/import pipeline, status backfill, or provenance column is required. This document
+does not execute that reset or change application code.
 
 ## 1. Requested outcome
 
@@ -52,13 +57,15 @@ archive restrictions still apply; this work does not invent an unarchive endpoin
 | --- | --- |
 | [dealModel.ts](../frontend/src/data/dealModel.ts) defines `pipeline`, `active`, `completed`, `on_hold`, `cancelled`. | Replace with the new nine-value union/options; define exact labels, ordering, and terminal-status helpers. Generic `codeLabel` alone cannot preserve punctuation or SV/QA capitalization. |
 | [Backend deal model](../backend/src/domains/deals/model.rs) mirrors those five statuses in Rust/serde. | Update enum, serialization, code conversion, and validation to the same nine codes. |
-| [migrations.rs](../backend/src/app/migrations.rs) restricts `deals.status` with a SQLite CHECK. | A UI rename alone is insufficient. Replace the constraint through a data-preserving migration. |
+| [migrations.rs](../backend/src/app/migrations.rs) restricts `deals.status` with a SQLite CHECK; the current shared marker is 11. | Update the fresh-schema CHECK and compatibility marker, then recreate the selected development schema through the existing explicit reset. Do not build a data-preserving table migration. |
 | [dealsView.ts](../frontend/src/data/dealsView.ts) derives Current/Historic, lane order, and groups Completed/Cancelled. | Make `closed` and `pencils_down` terminal; replace lane definitions with the ordered status catalog. |
 | [dealExtraction.ts](../frontend/src/data/dealExtraction.ts) derives `complete` from Completed/Cancelled. | Audit what `complete` means for each consumer. Preserve historic/stopped display behavior without claiming Pencils Down is a successfully completed engagement. Rename or split the derived flag if consumers need that distinction. |
-| [DealFieldsEditor.tsx](../frontend/src/components/hub/sidebar/DealFieldsEditor.tsx) consumes the shared options. | Apply labels and grouping consistently to create/edit surfaces; Pipeline remains the new-deal default. |
+| [DealFieldsEditor.tsx](../frontend/src/components/hub/sidebar/DealFieldsEditor.tsx) consumes the shared options and displays “Active and completed acquisitions require exactly one target.” | Apply labels/grouping consistently and rewrite the target-rule helper for working stages/Closed; Pipeline remains the new-deal default. |
 | [Deal service](../backend/src/domains/deals/service.rs) requires one target for Active/Completed acquisitions. | Replace this enum match with explicit stage policy, described below; do not accidentally drop the invariant. |
 | [WorkspaceProvider.tsx](../frontend/src/app/WorkspaceProvider.tsx) excludes archived deals. | Keep archive filtering independent of stage and keep existing cache updates after edits. |
 | [DealsKanban.tsx](../frontend/src/components/deals/DealsKanban.tsx) and its scoped CSS use existing lane IDs. | Render the new IDs/order and update stage-ring styling without restoring broad Active/Historic grouping. |
+| [Authentication boundary](../backend/src/app/http/auth.rs) and [resource access](../backend/src/domains/identity/access.rs) authenticate sessions and check deal ownership. | Preserve bearer-session authority, matching `X-User-Id`, owner-scoped lists, and foreign-resource 404 behavior. Do not restore caller-email identity. |
+| [reset_development.rs](../backend/src/bin/reset_development.rs) explicitly drops and recreates shared SQLite tables. | Reuse this offline mechanism for deliberately selected disposable data; keep ordinary startup non-destructive and pair the reset with a fresh isolated Helix store. |
 
 The shared [QuarryApi contract](../frontend/src/contracts/quarryApi.ts) imports deal fields and
 supports the existing create/update/list/get/archive operations. Keep those endpoints and camelCase
@@ -71,47 +78,67 @@ Build roots: `frontend/`, `backend/`, and Tauri verification under `frontend/src
 native contracts/validation change. Use the project React/Vite, Axum, verification, and review
 guidance, with current manifests/code taking precedence over older skill descriptions.
 
-## 4. Existing-data migration
+The backend currently uses `app/bootstrap.rs` plus `domains/deals/{route,handler,service,repository,model}.rs`.
+Domain routers bind private service state before composition; there is no global `AppState` or
+horizontal `src/services`/`src/repository` tree to extend. Keep transport validation in handlers,
+target-party policy in the deal service, and bound SQLite writes in the repository.
 
-Use the following deterministic baseline, with a reviewed per-deal stage mapping for active
-engagements when trustworthy stage information is available:
+Recent Notebook UI work is session-only, and the notebook API plan is still a proposal; neither
+has added notebook tables or changed the deal status codes. Check actual implemented schema work
+when selecting the next marker instead of reserving a version based on another plan. Preserve
+the uncommitted Notebook, frontend, native export, and documentation work.
 
-| Existing status | New status | Migration consideration |
-| --- | --- | --- |
-| `pipeline` | `pipeline` | Preserve exactly. |
-| `active` | `prepare` | Conservative entry-stage default, not a claim that preparation has just started. Review existing active deals and assign their actual stage. |
-| `on_hold` | `prepare` | Retired status has no exact new equivalent. Preserve its original value for review; do not silently equate paused work with Pencils Down. |
-| `completed` | `closed` | Preserve all completion/transaction dates. |
-| `cancelled` | `pencils_down` | Direct replacement requested by the user. Do not mark the engagement successfully complete. |
+## 4. Disposable-data schema reset
 
-Preserve the original pre-migration status in an internal nullable `legacy_status` column for
-retired codes, populated once by migration and never writable through normal deal requests.
-Use it for a bounded migration review report; keep it out of normal status choices. This retains
-the On hold distinction and original cancellation/completion values without introducing extra
-active statuses. Report unmapped/unrecognized stored values and abort transactionally; never
-guess on an unknown code. Preserve archive timestamps, IDs, ownership, dates, metadata, parties,
-scopes, resources, documents/versions/blobs, and linked chats.
+Existing data does **not** need to survive this change. The user will recreate it manually.
+Remove migration mapping/reporting from scope: no old-to-new row conversion, `legacy_status`
+column, provenance report, copy to another database, reverse migration, or multi-version upgrade
+chain. New records are created directly with the nine canonical status codes.
 
-The current schema marker is 10 with a supported schema-9 additive template upgrade. Select the
-next available marker at implementation time and compose with any intervening migration work
-(including the proposed Notebook work); do not assume a particular next marker is unused.
-Support fresh databases and upgrades from every currently supported starting schema. Keep schema
-inspection and validation synchronized with the new CHECK and optional provenance column.
+The current shared schema marker is **11**. Current startup initializes a genuinely empty database
+or validates marker 11; it does not support a 9 -> 10 -> 11 upgrade. Select the next unused marker
+at implementation time (12 if no intervening schema change has landed). Update the central
+fresh-schema DDL, schema validation, reset behavior, and marker assertions together. Preserve all
+unrelated table definitions, indexes, foreign keys, and authentication constraints in the recreated
+schema. Old or malformed layouts must still fail normal startup without deleting or repairing data.
 
-SQLite cannot directly alter this CHECK. Use a carefully tested table-rebuild migration through
-the central migration owner, reconstructing indexes and all constraints. Inbound foreign keys
-make naive rename/drop dangerous: test that metadata, parties, scopes, file rows, and assistant
-thread references still point to the rebuilt `deals` table and that no cascade or FK rewrite
-deletes/rebinds them. If foreign-key enforcement must be temporarily changed, do so only on the
-isolated migration connection outside an active transaction, restore it reliably, and require
-`foreign_key_check` before accepting the upgrade. Follow the actual SQLite client/migration API;
-do not introduce request-time ad hoc SQL or globally disable foreign keys.
+Use the existing [offline reset entrypoint](../backend/src/bin/reset_development.rs) and central
+`reset_development` implementation rather than an ad hoc `DROP deals` script. Dropping only `deals`
+would conflict with dependent tables and leave inconsistent product state. The existing reset
+recreates the shared schema in the **same selected database**; a second database and a data-transfer
+process are unnecessary.
 
-Test with disposable databases only. For real rollout, drain writes, back up the selected database,
-upgrade once, verify counts/relationships/status mapping, and retain the backup. No reset utility,
-global Helix clear, or deletion of valuable data is authorized by this plan. Rollback after new
-stages have been written requires a reviewed reverse migration or restoring the full backup with
-an explicit reconciliation of subsequent writes; old binaries cannot safely read new statuses.
+The accepted discard includes profiles/password hashes and sessions, deals and company directory
+records, metadata/parties/scopes, chats/messages, documents/versions/blobs, reminders, imported
+templates/assets/previews/classification/embeddings, and app memberships. Built-in templates are
+reseeded by normal bootstrap; user-created content is not restored. If additional tables have
+actually landed by implementation time, include them in the dependency-ordered reset too. Local
+data-room source files and unrelated standalone databases are outside this reset and remain untouched.
+
+Implementation cutover:
+
+1. Stop/drain backend writers, document jobs, launchers, and clients using the selected development
+   database. Resolve its exact absolute path when carrying out the implementation; never infer a
+   deletion target from this plan or run the reset during ordinary startup.
+2. Run the updated reset utility once with its required `--discard <absolute-database-path>`
+   argument against that explicitly selected disposable file. It must drop dependent tables,
+   recreate the final schema, validate foreign keys, advance the marker, and commit atomically;
+   restore FK enforcement even on failure. Do not add a new automatic reset path.
+3. Pair the empty SQLite store with a **fresh isolated Helix store**, as required by the current
+   [authentication reset procedure](../docs/authentication.md#schema-11-and-development-reset).
+   This prevents stale document projections referencing discarded users/files. Do not reuse the
+   old projection or run a global `clear_helix` against an unrelated/shared graph.
+4. Start matching backend/web/desktop builds, allow built-in template reseeding/reconciliation,
+   clear/reload stale client state, and register/sign in again. Recreate company/deal data manually;
+   no status remapping or re-upload automation is required.
+5. Verify all nine new values can be saved/read and old codes fail. A later restart must retain
+   newly created data; resetting is a deliberate one-time cutover, not recurring initialization.
+
+A pre-reset backup is optional for this deliberately disposable dataset, not a prerequisite for
+the requested implementation. There is no automatic downgrade or retained-data guarantee. If a
+rollback is needed, use a matching old binary/schema with another explicit disposable reset, or
+an intentionally retained compatible snapshot. Tests use temporary databases and isolated/fake
+dependencies; this planning task performs no reset and starts no services.
 
 ## 5. Business rules and UI behavior
 
@@ -125,9 +152,9 @@ an explicit reconciliation of subsequent writes; old binaries cannot safely read
   all six working stages and Closed. Keep Pipeline permissive. For Pencils Down, allow incomplete
   acquisition parties so an early cancelled opportunity can be recorded without inventing a target.
   Preserve existing rules for other transaction types and all date validation.
-- A migrated On hold deal might lack a target. Load/display it safely, flag the missing requirement
-  when editing or advancing, and retain failed drafts; do not reject the migration or inject a
-  fake company to satisfy a new write rule.
+- Recreated Pipeline and Pencils Down deals may lack a target. Require a valid target when saving
+  them into a working stage or Closed, and retain failed edit drafts. No legacy On hold exception,
+  migration repair, or fake company is needed after the reset.
 - Show the same exact status labels in the portfolio status column, deal header/overview,
   sidebar editor, create form, and search. Use short helper descriptions for the six phases if
   needed, without treating screenshot timelines as mandatory SLAs.
@@ -139,40 +166,46 @@ an explicit reconciliation of subsequent writes; old binaries cannot safely read
   Current/Historic counts. Keep cards keyboard actionable and read-only: moving cards to change
   status is a separate feature. The existing controlled-board collapse issue is also separate.
 - Update shipped demo fixtures under `frontend/src/fixtures/` and test fixtures separately. Do not
-  hardcode new fake deal records in pages or use fixtures to mask an API/migration failure.
+  hardcode new fake deal records in pages or use fixtures to mask an API/schema failure.
 
 ## 6. API compatibility and rollout
 
 Ship this as a coordinated frontend/backend/desktop release. Backend responses emit only the new
-codes after migration, and the UI exposes only the nine new options. Reject unknown values at
+codes after the explicit reset, and the UI exposes only the nine new options. Reject unknown values at
 the HTTP boundary with sanitized errors; keep services/repositories free of transport validation.
+Test enum-deserialization rejections explicitly: existing Axum extractor failures do not universally
+use the `AppError` JSON envelope. Normalize deal input rejections if a consistent sanitized 400
+response is part of this change rather than assuming Serde errors already follow that contract.
 
-Prefer a drained cutover for this development-stage product. Stop old clients/servers before the
-migration, deploy matching web and desktop clients, then reopen writes. Do not silently accept
-retired codes indefinitely. If overlapping clients are actually required, first define a bounded
-compatibility window: explicitly map old request values using the table above, continue returning
-canonical new codes, document the old clients' read incompatibility, and remove aliases on a
-dated release. Request aliases alone cannot make an old client understand new responses.
+Use a drained cutover for this development-stage product. Stop old clients/servers before the
+reset, deploy matching web and desktop clients, then reopen writes. No overlapping-client window
+or retired-code aliases are required: `active`, `on_hold`, `completed`, and `cancelled` are rejected
+as deal-status inputs after cutover. Old clients cannot safely read/write the new vocabulary and
+must be refreshed/rebuilt. Preserve document/job/chat statuses that independently use those strings.
 
 Keep archive idempotent and status-preserving. No changes to `/api/v1/deals/{dealId}/archive`,
 new archive listing/restore features, permanent deletion, or current identity/security posture
-are implied. Existing caller-supplied profile identity is not production authentication.
+are implied. Password authentication and bearer sessions are already implemented: the token is
+the identity authority, `X-User-Id` must match it, and deal routes enforce canonical ownership.
+Preserve those controls; organization tenancy and production identity lifecycle remain incomplete.
 
 ## 7. Implementation sequence and validation
 
-1. Define canonical codes/labels/policies and migration fixtures before UI edits. Inventory every
+1. Define canonical codes/labels/policies and fresh-schema/reset fixtures before UI edits. Inventory every
    deal-status consumer, including completion badges, legacy adapters, extraction mappings,
    fixtures, and tests; leave document/job/chat statuses untouched.
-2. Implement and test the central SQLite migration plus Rust model/repository/service changes.
-   Verify fresh/9/10 upgrades, rollback on injected failure, preservation of archived and linked
-   records, provenance, and target/date rules using temporary databases.
+2. Update central fresh-schema DDL/marker and explicit reset plus Rust model/repository/service
+   changes. Test fresh creation, deliberate reset of populated disposable storage, idempotent
+   reopen, rejection of old/malformed layouts without startup deletion, reset rollback on injected
+   failure, restored FK enforcement, and target/date rules. Verify valid linked records and archive
+   behavior using newly created test records; no upgrade/provenance/preservation suite is required.
 3. Update TypeScript contracts/catalog/selectors and both transport tests. Test all nine values
    through create/update/read mapping; extend native tests only where native handling changes.
 4. Update create/edit/header/list/search/Kanban consumers and demo data. Preserve saving/error
    states, view switching, per-deal navigation, and accessible form/menu behavior.
 5. Run focused tests, then broad gates. Inspect long lane titles, empty stages, horizontal scroll,
    Current/Historic counts, closed versus Pencils Down, status changes/cache refresh, and archived
-   exclusion in web and desktop. Do not infer migration correctness from a visual preview.
+   exclusion in web and desktop. Do not infer schema/reset correctness from a visual preview.
 6. Update canonical documentation and carry out the coordinated rollout only when separately
    implementing this plan against deliberately selected data.
 
@@ -210,18 +243,22 @@ If Tauri Rust changes, run its fmt/clippy/tests from `frontend/src-tauri/` too. 
 startup as a routine check against local data. Record and stop only verification servers started
 for this task; preserve existing listeners and uncommitted work.
 
-Acceptance: all nine stages roundtrip consistently; existing Cancelled deals become Pencils Down;
-Closed and Pencils Down remain distinct; legacy data/links survive; archiving preserves the chosen
-stage; and search, counts, forms, table, and Kanban all agree.
+Acceptance: the explicit reset discards the selected development dataset and creates the final
+schema without copying/backfilling it; normal startup never deletes data; all nine stages roundtrip
+consistently for recreated records; old codes fail; Closed and Pencils Down remain distinct;
+archiving preserves the chosen stage; newly created links/ownership remain valid; subsequent
+restarts retain new records; and search, counts, forms, table, and Kanban all agree.
 
 ## 8. Architecture-impact check
 
 Implementation must update `docs/ARCHITECTURE.md` and `docs/DOMAIN_MODEL.md` for the status catalog,
-terminal/archived distinction, target policy, schema/migration/provenance, API compatibility,
-Kanban lane behavior, and rollout/recovery procedure. `DOMAIN_MODEL.md` currently says archiving
+terminal/archived distinction, target policy, fresh schema/marker and explicit reset, API compatibility,
+Kanban lane behavior, and rollout/recovery procedure. Update schema-marker references in
+`docs/authentication.md` and relevant recovery documents when the implemented marker changes.
+`DOMAIN_MODEL.md` currently says archiving
 sets status to Archived; that is stale relative to code and `ARCHITECTURE.md`, which correctly
 describe `archivedAt`. Correct this drift as part of the implementation, without introducing an
 Archived status value.
 
-Architecture impact for this planning task: none — only this proposal is added; current code,
+Architecture impact for this planning task: none — only this proposal is revised; current code,
 schemas, status values, and canonical architecture are unchanged.

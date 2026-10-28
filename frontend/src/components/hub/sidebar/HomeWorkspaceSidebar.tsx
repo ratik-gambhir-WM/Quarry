@@ -66,7 +66,7 @@ export function HomeWorkspaceSidebarNavigation({
           label="Deals"
           navigationState={navigationState}
         />
-        <SidebarLink icon="bookOpen" label="Notebook" />
+        <SidebarLink homeSection={activeHomeSection} href="/hub/notebook" icon="bookOpen" label="Notebook" navigationState={navigationState} />
       </SidebarSection>
 
       <div className="mt-3 border-t border-outline-variant/70 pt-3">

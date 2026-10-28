@@ -1,3 +1,4 @@
+import { NotebookWorkspaceSidebar } from "./sidebar/NotebookWorkspaceSidebar";
 import type { WorkspaceSidebarTool } from "../../data/workspace";
 import { AssistantWorkspaceSidebar } from "./sidebar/AssistantWorkspaceSidebar";
 import { DealRoomWorkspaceSidebar } from "./sidebar/DealRoomWorkspaceSidebar";
@@ -24,6 +25,8 @@ export function WorkspaceSidebar({
   navigationState,
   tools = [],
 }: WorkspaceSidebarProps) {
+  if (mode === "notebook") return <NotebookWorkspaceSidebar />;
+
   if (mode === "deal-room") {
     return (
       <DealRoomWorkspaceSidebar

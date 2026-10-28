@@ -1,8 +1,8 @@
 # Slide Templates Studio migration evidence
 
-Current authentication rollout (2026-10-28): schema **11** replaces legacy profile credentials.
-There is no automatic 9→10→11 upgrade or password backfill. Use the deliberately selected,
-drained development reset described in [authentication](authentication.md#schema-11-and-development-reset),
+Current rollout (2026-10-28): schema **12** adds nine diligence stages to the password/session schema.
+There is no automatic schema upgrade, status conversion, or password backfill. Use the deliberately selected,
+drained development reset described in [authentication](authentication.md#schema-12-and-development-reset),
 paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
 previous rollout and do not authorize running an old migration against the current schema.
 

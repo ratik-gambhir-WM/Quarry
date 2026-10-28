@@ -9,7 +9,7 @@ import {
   type SavedDealMetadata,
 } from "@/data/dealExtraction";
 
-const savedDeal: SavedDeal = testDeal({ dealId: "DEAL-123", dealName: "Acme", startDate: "2026-08-03", expectedCloseDate: "2026-09-12", status: "active", transactionType: "strategic_acquisition", parties: [testParty("Target", "target"), testParty("Cvs", "buyer"), testParty("Thoma Bravo", "pe_sponsor")] });
+const savedDeal: SavedDeal = testDeal({ dealId: "DEAL-123", dealName: "Acme", startDate: "2026-08-03", expectedCloseDate: "2026-09-12", status: "prepare", transactionType: "strategic_acquisition", parties: [testParty("Target", "target"), testParty("Cvs", "buyer"), testParty("Thoma Bravo", "pe_sponsor")] });
 
 const savedMetadata: SavedDealMetadata = {
   dealId: savedDeal.dealId,
@@ -32,11 +32,11 @@ describe("buildWorkspaceDealFromPersisted", () => {
     expect(workspaceDeal.room.metrics).toContainEqual({ label: "Actual close", value: "Unavailable" });
   });
 
-  it.each(["completed", "cancelled"] as const)("marks %s as historic", (status) => {
-    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null).complete).toBe(true);
+  it.each(["closed", "pencils_down"] as const)("marks %s as historic", (status) => {
+    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null).terminal).toBe(true);
   });
   it("does not infer engagement completion from a transaction close", () => {
-    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, actualCloseDate: "2026-09-01", status: "active" }, null).complete).toBe(false);
+    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, actualCloseDate: "2026-09-01", status: "prepare" }, null).terminal).toBe(false);
   });
   it("describes an unknown pipeline without placeholder companies", () => {
     const workspace = buildWorkspaceDealFromPersisted(testDeal(), null);

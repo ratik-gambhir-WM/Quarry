@@ -87,7 +87,7 @@ export type WorkspaceDeal = {
   persisted?: SavedDeal;
   persistedMetadata?: SavedDealMetadata | null;
   colorClassName: string;
-  complete?: boolean;
+  terminal?: boolean;
   portfolio: DealPortfolioMetadata;
   room: DealRoomData;
 };

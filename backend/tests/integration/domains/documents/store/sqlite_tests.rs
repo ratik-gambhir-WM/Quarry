@@ -31,7 +31,7 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
                     ) VALUES (?1, ?2, 'Project Test', ?3, '2026-01-01', '2026-02-01',
                               'buy_side', 'unknown')
                     "#,
-                    rusqlite::params![deal_id, user_id, "active"],
+                    rusqlite::params![deal_id, user_id, "prepare"],
                 )?;
                 if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id])?; }
             }

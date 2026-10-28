@@ -47,6 +47,7 @@ describe("activityLog", () => {
       context: [{ content: "prior secret", role: "user" }],
       delta: "generated secret",
       filename: "secret.pdf",
+      suggestedName: "private-note.html",
       prompt: "current secret",
       systemInstructions: "hidden policy",
     });
@@ -55,6 +56,7 @@ describe("activityLog", () => {
     expect(entry.details).not.toContain("prior secret");
     expect(entry.details).not.toContain("generated secret");
     expect(entry.details).not.toContain("secret.pdf");
+    expect(entry.details).not.toContain("private-note.html");
     expect(entry.details).not.toContain("current secret");
     expect(entry.details).not.toContain("hidden policy");
   });

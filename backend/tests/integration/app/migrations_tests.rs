@@ -75,7 +75,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
     let mut connection = Connection::open_in_memory().unwrap();
 
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-000001", "active");
+    seed_deal(&connection, "DEAL-000001", "prepare");
     insert_file_aggregate(&connection, "DEAL-000001", "file-1", "version-1");
     run_migrations(&mut connection).unwrap();
 
@@ -148,7 +148,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
 fn file_schema_enforces_foreign_keys_json_and_one_current_version() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-CONSTRAINTS", "active");
+    seed_deal(&connection, "DEAL-CONSTRAINTS", "prepare");
 
     assert!(connection
         .execute(
@@ -199,7 +199,7 @@ fn file_schema_enforces_foreign_keys_json_and_one_current_version() {
 fn deal_archive_retains_files_and_physical_delete_cascades() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-CASCADE", "active");
+    seed_deal(&connection, "DEAL-CASCADE", "prepare");
     insert_file_aggregate(&connection, "DEAL-CASCADE", "file-1", "version-1");
 
     connection
@@ -224,7 +224,7 @@ fn deal_archive_retains_files_and_physical_delete_cascades() {
 fn file_and_version_deletes_cascade_to_their_children() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-FILE-CASCADE", "active");
+    seed_deal(&connection, "DEAL-FILE-CASCADE", "prepare");
     insert_file_aggregate(
         &connection,
         "DEAL-FILE-CASCADE",
@@ -293,6 +293,8 @@ fn explicit_reset_discards_records_and_reopen_preserves_new_records() {
     sqlite
         .with_connection(|c| {
             seed_deal(c, "DEAL-OLD", "pipeline");
+            insert_file_aggregate(c, "DEAL-OLD", "old-file", "old-version");
+            c.pragma_update(None, "user_version", 11)?;
             Ok(())
         })
         .unwrap();
@@ -301,6 +303,9 @@ fn explicit_reset_discards_records_and_reopen_preserves_new_records() {
         .with_connection(|c| {
             assert_eq!(table_count(c, "users"), 0);
             assert_eq!(table_count(c, "deals"), 0);
+            assert_eq!(table_count(c, "quarry_files"), 0);
+            assert_eq!(table_count(c, "quarry_file_versions"), 0);
+            assert_eq!(table_count(c, "quarry_file_blobs"), 0);
             assert_eq!(
                 c.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))?,
                 1
@@ -387,7 +392,7 @@ fn disk_database_preserves_file_ownership_across_reopen() {
         database.with_connection_result(run_migrations).unwrap();
         database
             .with_connection(|connection| {
-                seed_deal(connection, "DEAL-PERSISTED", "active");
+                seed_deal(connection, "DEAL-PERSISTED", "prepare");
                 insert_file_aggregate(
                     connection,
                     "DEAL-PERSISTED",
@@ -483,7 +488,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 11
+            supported: 12
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -533,7 +538,7 @@ fn failed_schema_nine_upgrade_rolls_back_partial_ddl_and_marker() {
 fn current_schema_with_missing_template_table_is_rejected_without_recreation() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_deal(&connection, "DEAL-UPGRADE", "active");
+    seed_deal(&connection, "DEAL-UPGRADE", "prepare");
     let before = product_snapshot(&connection);
     connection
         .execute("DROP TABLE template_assets", [])
@@ -541,4 +546,62 @@ fn current_schema_with_missing_template_table_is_rejected_without_recreation() {
     assert!(run_migrations(&mut connection).is_err());
     assert_eq!(product_snapshot(&connection), before);
     assert!(table_columns(&connection, "template_assets").is_empty());
+}
+
+#[test]
+fn all_diligence_stages_roundtrip_and_retired_codes_fail_sqlite() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    seed_deal(&connection, "DEAL-STAGES", "pipeline");
+    for code in [
+        "pipeline",
+        "prepare",
+        "review_plan_discovery",
+        "interviews_site_visit",
+        "debrief_flash_report",
+        "follow_ups_analysis",
+        "qa_readout_closeout",
+        "closed",
+        "pencils_down",
+    ] {
+        connection
+            .execute(
+                "UPDATE deals SET status = ?1 WHERE deal_id = 'DEAL-STAGES'",
+                [code],
+            )
+            .unwrap();
+        run_migrations(&mut connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM deals WHERE deal_id = 'DEAL-STAGES'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            code
+        );
+    }
+    for code in ["active", "on_hold", "completed", "cancelled", "unknown"] {
+        assert!(connection
+            .execute(
+                "UPDATE deals SET status = ?1 WHERE deal_id = 'DEAL-STAGES'",
+                [code]
+            )
+            .is_err());
+    }
+}
+
+#[test]
+fn forged_current_marker_with_retired_status_constraint_is_rejected() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    let old = SCHEMA.replace("'pipeline', 'prepare', 'review_plan_discovery', 'interviews_site_visit', 'debrief_flash_report', 'follow_ups_analysis', 'qa_readout_closeout', 'closed', 'pencils_down'", "'pipeline', 'active', 'completed', 'on_hold', 'cancelled'");
+    connection.execute_batch(&old).unwrap();
+    connection.execute_batch(TEMPLATE_SCHEMA).unwrap();
+    seed_deal(&connection, "DEAL-OLD", "active");
+    connection
+        .pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(table_count(&connection, "deals"), 1);
 }

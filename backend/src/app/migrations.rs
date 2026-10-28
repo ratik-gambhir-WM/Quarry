@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 11;
+const LATEST_SCHEMA_VERSION: i64 = 12;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -47,6 +47,18 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
 }
 
 fn validate_product_schema(connection: &Connection) -> rusqlite::Result<()> {
+    let deals_ddl: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'deals'",
+        [],
+        |row| row.get(0),
+    )?;
+    let status_constraint = SCHEMA
+        .lines()
+        .find(|line| line.contains("status TEXT NOT NULL CHECK"))
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    if !deals_ddl.contains(status_constraint.trim().trim_end_matches(',')) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     // Detect a forged/stale marker as well as foreign-key damage before accepting a database.
     for sql in [
         "SELECT token_hash, user_id, expires_at, revoked_at FROM auth_sessions LIMIT 0",
@@ -233,7 +245,7 @@ const SCHEMA: &str = r#"
                 deal_code TEXT CHECK (deal_code IS NULL OR length(trim(deal_code)) > 0),
                 engagement_type TEXT NOT NULL CHECK (engagement_type IN ('buy_side', 'sell_side', 'other')),
                 transaction_type TEXT NOT NULL CHECK (transaction_type IN ('platform_acquisition', 'add_on_acquisition', 'strategic_acquisition', 'carve_out', 'merger', 'divestiture', 'recapitalization', 'growth_equity', 'other', 'unknown')),
-                status TEXT NOT NULL CHECK (status IN ('pipeline', 'active', 'completed', 'on_hold', 'cancelled')),
+                status TEXT NOT NULL CHECK (status IN ('pipeline', 'prepare', 'review_plan_discovery', 'interviews_site_visit', 'debrief_flash_report', 'follow_ups_analysis', 'qa_readout_closeout', 'closed', 'pencils_down')),
                 start_date TEXT CHECK (start_date IS NULL OR length(trim(start_date)) > 0),
                 expected_close_date TEXT CHECK (expected_close_date IS NULL OR length(trim(expected_close_date)) > 0),
                 actual_close_date TEXT CHECK (actual_close_date IS NULL OR length(trim(actual_close_date)) > 0),

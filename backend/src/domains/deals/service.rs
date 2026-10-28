@@ -349,8 +349,8 @@ fn updated_optional_value(submitted: Option<String>, existing: Option<String>) -
 mod tests;
 
 fn validate_target_rule(fields: &DealFields) -> ServiceResult<()> {
-    use super::model::{DealStatus, PartyRole, TransactionType};
-    if matches!(fields.status, DealStatus::Active | DealStatus::Completed)
+    use super::model::{PartyRole, TransactionType};
+    if fields.status.requires_acquisition_target()
         && matches!(
             fields.transaction_type,
             TransactionType::PlatformAcquisition
@@ -365,7 +365,7 @@ fn validate_target_rule(fields: &DealFields) -> ServiceResult<()> {
             != 1
     {
         return Err(ServiceError::validation(
-            "active or completed acquisitions require exactly one target",
+            "working-stage or closed acquisitions require exactly one target",
         ));
     }
     Ok(())

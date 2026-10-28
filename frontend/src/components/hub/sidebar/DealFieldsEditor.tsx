@@ -65,7 +65,7 @@ export function DealCompanyRolesEditor({ fields, onChange, userEmail, initialCom
   }
   return (
     <fieldset className="grid gap-3"><legend className="mb-2 text-sm font-semibold">Companies and roles (optional for pipeline deals)</legend>
-      <p className="text-xs text-muted-foreground">Select directory records explicitly. One company can have several roles. Active and completed acquisitions require exactly one target.</p>
+      <p className="text-xs text-muted-foreground">Select directory records explicitly. One company can have several roles. Acquisitions in working stages or Closed require exactly one target. Pipeline and Pencils Down may have incomplete parties.</p>
       {fields.parties.map((party, index) => <div className="grid gap-3 rounded-lg border border-border p-3" key={index}>
         <span className="text-sm font-semibold">{companies.get(party.companyId)?.name ?? "Company unavailable"}</span>
         <CodeSelect label={`Role for company ${index + 1}`} options={partyRoleOptions} value={party.role} onChange={(role) => update("parties", fields.parties.map((p, i) => i === index ? { ...p, role } : p))} />

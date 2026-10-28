@@ -1,6 +1,6 @@
 import type { DealResource, WorkspaceDeal, WorkspaceLocationState } from "./workspace";
 
-import { codeLabel, type DealFields, type DealParty } from "./dealModel";
+import { codeLabel, isTerminalDealStatus, type DealFields, type DealParty } from "./dealModel";
 export type SaveDealInput = DealFields & {
   dealId: string; localPath: string | null; sharepointLink: string | null;
 };
@@ -108,7 +108,7 @@ function buildWorkspaceDeal(
   const roleSummary = deal.parties.map((p) => `${codeLabel(p.role)}: ${p.company.name}`).join("; ");
   return {
     colorClassName: "bg-primary",
-    complete: deal.status === "completed" || deal.status === "cancelled",
+    terminal: isTerminalDealStatus(deal.status),
     persisted: deal,
     persistedMetadata: metadata,
     portfolio: {

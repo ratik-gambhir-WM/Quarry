@@ -1,3 +1,4 @@
+import { Variable } from "lucide-react";
 import { VaultTable } from "../components/hub/VaultTable";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
@@ -11,6 +12,7 @@ const vaultSections = [
   { icon: "listAlt", label: "Notes" },
   { icon: "checkCircle", label: "Tasks" },
   { icon: "layers", label: "Templates" },
+  { icon: "variable", label: "Global variables" },
 ] as const;
 
 export function VaultPage() {
@@ -35,6 +37,8 @@ export function VaultPage() {
                 >
                   {icon === "layers" ? (
                     <LayersIcon className="h-4 w-4 shrink-0" size={16} />
+                  ) : icon === "variable" ? (
+                    <Variable aria-hidden="true" className="h-4 w-4 shrink-0" />
                   ) : (
                     <Icon className="h-4 w-4 shrink-0" name={icon} />
                   )}

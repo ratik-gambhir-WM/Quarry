@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DealFieldsEditor } from "@/components/hub/sidebar/DealFieldsEditor";
 import { testCompany, testDealInput } from "@/test/fixtures/deals";
-import type { DealFields } from "@/data/dealModel";
+import { dealStatusLabels, dealStatusOptions, type DealFields } from "@/data/dealModel";
 const { api } = vi.hoisted(() => ({ api: { listCompanies: vi.fn(), createCompany: vi.fn(), updateCompany: vi.fn() } }));
 vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -14,6 +14,22 @@ function Editor() {
   return <><DealFieldsEditor userEmail="owner@example.com" fields={fields} onChange={setFields} /><output data-testid="fields">{JSON.stringify(fields)}</output></>;
 }
 describe("DealFieldsEditor", () => {
+  it("offers every diligence stage and preserves dates on close and reopening", async () => {
+    const user = userEvent.setup();
+    api.listCompanies.mockResolvedValue({ companies: [], hasMore: false });
+    render(<Editor />);
+    const status = screen.getByRole("combobox", { name: "Status" });
+    expect(Array.from(status.querySelectorAll("option"), (option) => option.textContent)).toEqual(dealStatusOptions.map((code) => dealStatusLabels[code]));
+    fireEvent.change(screen.getByLabelText("Actual close (optional)"), { target: { value: "2026-10-01" } });
+    for (const code of ["closed", "pencils_down", "prepare", "pipeline"]) {
+      await user.selectOptions(status, code);
+      const fields: DealFields = JSON.parse(screen.getByTestId("fields").textContent ?? "{}");
+      expect(fields.status).toBe(code);
+      expect(fields.actualCloseDate).toBe("2026-10-01");
+      expect(fields.engagementCompletedDate).toBeNull();
+    }
+  });
+
   it.each(["create", "edit"] as const)("cancels a %s company draft with Enter without saving", async (mode) => {
     const user = userEvent.setup();
     api.listCompanies.mockResolvedValue({ companies: [testCompany("Reusable")], hasMore: false });

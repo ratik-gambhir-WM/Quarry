@@ -282,6 +282,8 @@ The live frontend is an npm package using:
   and thread primitives
 - Extend UI's EmbedPDF/PDFium editor for Data Room PDF preview and in-memory annotations;
   the earlier reusable react-pdf/pdf.js viewer remains in the frontend tree
+- BlockNote 0.56 with its shadcn integration for the session-only Notebook editor; Plate remains
+  the Diligence Canvas text editor
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
 The repository does not pin Node, set `packageManager`/`engines`, or define ESLint/Prettier.
@@ -307,6 +309,7 @@ shared `/hub/*` route tree:
 | `/hub/vault` | `GlobalVaultPage` | lazy |
 | `/hub/initiatives/vault` | `VaultPage` | lazy |
 | `/hub/assistant` | `Assistant` | lazy |
+| `/hub/notebook` and `/hub/notebook/:noteId` | `NotebookPage` | lazy page; BlockNote loads only for a selected draft |
 | `/hub/logs` | `LogsPage` | lazy |
 | `/hub/deals` | `Deals` | lazy; currently uncommitted |
 | `/hub/deals/:dealId` | `DealRoomPage` + `DealRoomOverviewPage` | lazy parent and nested leaf |
@@ -363,7 +366,7 @@ global state or query-cache library.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
   sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
   Workspace section containing Deals and Notebook. Vault's section rail includes Documents,
-  Links, Prompts, Notes, Tasks, and Templates. The Deal Room and non-Assistant Deal Hub
+  Links, Prompts, Notes, Tasks, Templates, and Global variables. The Deal Room and non-Assistant Deal Hub
   headers identify the active sidebar without fixture-backed alternate
   spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
   initially selects Chat. Deal Hub restores the normal home navigation in the same sidebar without
@@ -374,6 +377,34 @@ global state or query-cache library.
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
   explorer's left-arrow back control returns to Deal Home.
+- Notebook is a UI-only workspace. Its `NotebookProvider` owns list search, selection, and the
+  mobile notes drawer around `WorkspaceHomeShell`; the URL selects the draft in both router
+  targets. The Notebook sidebar reuses `SidebarFrame`, including profile/collapse behavior and
+  Back to Deal Hub. The mobile drawer exposes the same list and a Hub link.
+  `data/notebook/notebookSession.ts` holds user-created drafts in module memory, survives workspace
+  navigation, and clears on authentication changes or reload. The surface explicitly labels these
+  as session drafts; it does not claim server saves. Drafts contain a stable UUID, title, native
+  BlockNote JSON with content schema version 1, and creation/edit timestamps. Title search covers
+  the session's complete list. Recency sorting waits until focus leaves editing/list navigation.
+  The independently lazy editor uses BlockNote's shadcn defaults with Quarry semantic tokens,
+  Inter, and reduced-motion handling. Its keyed mount isolates content/undo sessions between notes;
+  acknowledgements and autosave are absent. Paragraphs, headings, lists/checklists, quotes, code,
+  tables, and HTTP(S)/mailto links are supported. Asset blocks, upload and file paste/drop paths
+  are disabled. The viewport meta tag requests `interactive-widget=resizes-content` for mobile
+  keyboards. Editor loading/failure/retry, missing draft URLs, empty/search-empty states, and
+  confirmed deletion have explicit UI. A browser unload warning is best-effort while Notebook
+  is mounted; native close coordination and durable/offline recovery are not implemented.
+  Note APIs, persistence, server search/pagination, autosave/conflicts, collaboration, sharing,
+  and global search integration remain future work. No SQLite, Axum, API-adapter, or
+  new native commands accompany this UI slice. The header's compact Export menu creates Markdown
+  or standalone HTML from an immutable snapshot of the selected draft (including its title), using
+  BlockNote's lossy interoperability converters loaded on demand. Both formats can omit some editor
+  structure/formatting; neither is the canonical storage format. Exports use `platform.saveFile`:
+  browser downloads for web, a native save dialog on desktop. HTML escapes the document title and
+  includes a restrictive document CSP. The shared 5 MB bound, native origin/name/extension checks,
+  and atomic write remain in force. HTML is the only addition to the native text-export MIME allowlist.
+  Pending exports block duplicate submissions; cancellation, errors/retry, and completion are announced.
+  Export filenames are redacted in the activity log. PDF/DOCX exporters are not installed.
 - `AccountPage` owns its profile request. Profile-menu navigation commits `/hub/account`
   immediately with the workspace email, and the destination page renders a skeleton until the
   request resolves to success, empty, or error content.
@@ -391,8 +422,8 @@ global state or query-cache library.
   controls; company search is bounded, stale results are ignored, and directory creation is explicit.
   Enter in a company text input saves that company; Save and Cancel buttons retain their native
   keyboard activation and do not submit the surrounding deal form.
-  Directory entries remain saved when a deal form is cancelled or its write fails. Completed and
-  cancelled engagements are Historic; pipeline, active, and on-hold engagements are Current.
+  Directory entries remain saved when a deal form is cancelled or its write fails. Closed and
+  Pencils Down engagements are Historic; Pipeline and the six working stages are Current.
   Transaction closing never changes engagement status. Views show all companies for each role and
   distinguish expected close, actual close, and engagement completion.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
@@ -523,7 +554,7 @@ operational failures.
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
-| Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
+| Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, Tasks, Templates, and Global variables category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
 | Account/profile | Shows the verified provider-owned profile and signs out the current session | No profile editing or recovery; theme picker remains unavailable |
 
@@ -675,7 +706,7 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `cancel_query_stream` | Cancel one query relay | main window/origin; validated subscription ID; request-scoped sender |
 | `select_deal_data_room` | User-mediated folder selection and source scan | canonical root stored as process-local grant |
 | `read_deal_source_files` | Read one or two selected source files | authorized-root containment; type and 50 MB total cap |
-| `save_text_file` | Native JSON/Markdown export | MIME/extension/title/name checks; 5 MB cap; atomic sibling-temp write |
+| `save_text_file` | Native JSON/Markdown/HTML export | MIME/extension/title/name checks; 5 MB cap; atomic sibling-temp write |
 | `save_powerpoint_file` | Native PowerPoint export | base64/ZIP signature/title/name/`.pptx` checks; 64 MB cap; atomic sibling-temp write |
 
 Every command validates that the caller is the `main` window and originates from the bundled Tauri
@@ -885,7 +916,7 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 11. Startup creates a fresh schema or validates/reuses marker 11; older
+schema DDL and marker 12. Startup creates a fresh schema or validates/reuses marker 12; older
 profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
@@ -940,7 +971,7 @@ flowchart TD
 configuration, bootstrap, bind, serve, and graceful shutdown.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
 and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
-owns all product/auth/template SQLite initialization/validation, schema-11 compatibility, and
+owns all product/auth/template SQLite initialization/validation, schema-12 compatibility, and
 the explicitly invoked offline development reset. Bootstrap opens and migrates SQLite on the
 blocking pool, passes clones of the same client to product and template repositories, seeds
 templates, and reconciles their Helix projection before binding routes. Bootstrap passes each
@@ -1053,7 +1084,31 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 Shared SQLite schema marker 11
+### Deal diligence stages
+
+The ordered diligence stages are Pipeline (`pipeline`), Prepare (`prepare`), Review & plan
+discovery (`review_plan_discovery`), Interviews & site visit (SV) (`interviews_site_visit`),
+Debrief & flash report (`debrief_flash_report`), Follow-ups & analysis (`follow_ups_analysis`),
+QA, readout & closeout (`qa_readout_closeout`), Closed (`closed`), and Pencils Down (`pencils_down`).
+Closed and Pencils Down are Historic outcomes; Pencils Down indicates stopped work. All other
+stages are Current. Platform, add-on and strategic acquisitions require exactly one target in
+working stages and Closed; Pipeline and Pencils Down permit incomplete parties. Users can select
+stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
+independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
+
+The shared frontend catalog supplies exact labels to forms, headers, portfolio and search. The
+read-only Kanban displays nine ordered lanes including empty lanes when deals match, with
+wrapping titles, counts and horizontal scrolling. No matches retains the empty experience.
+
+This is a coordinated API compatibility change across Axum, web and desktop, retaining existing
+`/api/v1` endpoints and camelCase fields. Retired `active`, `on_hold`, `completed`, and `cancelled`
+deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses are unchanged.
+Stop old clients and writers before the explicit schema-12 development reset, pair SQLite with a
+fresh isolated Helix store, rebuild/reload matching clients, sign up again, and recreate data
+manually. No status conversion or automatic downgrade is provided. See
+[development reset and recovery](authentication.md#schema-12-and-development-reset).
+
+### 9.1 Shared SQLite schema marker 12
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1085,8 +1140,8 @@ Key invariants include:
 - deals and companies reference an existing authenticated user with delete restriction
 - atomic deal create/update checks company ownership inside the transaction; cross-owner assignments fail
 - company records have no fixed target/buyer/sponsor flags; one company can have several roles
-- active/completed platform, add-on, or strategic acquisitions require exactly one target at the service boundary;
-  pipeline drafts can have none, and other transaction structures may have multiple targets
+- working-stage/Closed platform, add-on, or strategic acquisitions require exactly one target at the service boundary;
+  Pipeline and Pencils Down drafts can have none, and other transaction structures may have multiple targets
 - date-only values are validated at HTTP input; engagement completion cannot precede a known start;
   transaction closing may precede start, and no date implicitly changes status
 - assistant threads reference a user and optionally a deal; deal deletion is restricted for linked chats;
@@ -1100,8 +1155,8 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 11` is the shared compatibility marker. Empty marker-0 databases receive
-all product/auth/template tables in one immediate transaction. Marker-11 layouts are validated
+`PRAGMA user_version = 12` is the shared compatibility marker. Empty marker-0 databases receive
+all product/auth/template tables in one immediate transaction. Marker-12 layouts are validated
 and reused; missing tables are not silently recreated. All older/newer layouts fail without
 deletion and require deliberate environment selection and the offline development reset. There
 is no profile/password backfill. Foreign-key checks and marker advancement commit together.
@@ -1201,6 +1256,7 @@ across Helix graph writes so a large XLSX/PPTX file can still be indexed.
 | Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
 | Duplicate-ingestion locks | Weak per-identity async mutexes | Process lifetime |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
+| Notebook drafts | Module memory scoped to the authentication session | Survives route changes; lost on reload or session change; no persistence |
 | Frontend activity log | Module store mirrored to `sessionStorage` | Tab/webview session and reloads within it; max 400 entries |
 
 None of these mechanisms supports multi-instance coordination or durable recovery.
@@ -1627,6 +1683,8 @@ Coverage currently includes:
   lazy canvas/Plate boundaries, selection/delete separation, stable pristine text-edit rendering,
   current-document PowerPoint export, bounded web/desktop binary mappings, native save validation,
   and export feedback
+- Notebook entry/direct URL and hash routing, title focus, create/edit/search, session isolation,
+  draft retention across route unmounts, history selection, mobile drawer, and confirmed deletion
 - workspace route lazy loading, Deal Room direct child-route entry and active navigation, explicit
   API/demo deal resources, Data Room content/session staleness and cleanup, Assistant route
   migration/provider lifetime, legacy Summarize workflow coverage, and manifest-driven
@@ -1741,7 +1799,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer tokens are memory-only; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 11 SQLite with explicit offline development reset | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 12 SQLite with explicit offline development reset | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

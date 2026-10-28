@@ -1,6 +1,6 @@
 import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../../../data/workspace";
 
-export type ActiveHomeSection = "account" | "assistant" | "deals" | "hub" | "logs" | "tauri-playground" | "vault";
+export type ActiveHomeSection = "account" | "assistant" | "deals" | "hub" | "logs" | "notebook" | "tauri-playground" | "vault";
 
 export type ActiveDealSection =
   | "analysis"
@@ -8,7 +8,7 @@ export type ActiveDealSection =
   | "deal-room"
   | "deliverables";
 
-export type SidebarMode = "assistant" | "deal-room" | "home";
+export type SidebarMode = "assistant" | "deal-room" | "home" | "notebook";
 
 export type SidebarBaseProps = {
   deals: WorkspaceDeal[];

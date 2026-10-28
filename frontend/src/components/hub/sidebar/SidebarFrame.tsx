@@ -19,7 +19,7 @@ type SidebarFrameProps = {
   navigationState?: WorkspaceLocationState;
   profileDeal?: WorkspaceDeal;
   profileSubtitle?: string;
-  sidebarIcon?: "dashboard" | "folderOpen" | "home";
+  sidebarIcon?: "bookOpen" | "dashboard" | "folderOpen" | "home";
   sidebarLabel?: string;
 };
 

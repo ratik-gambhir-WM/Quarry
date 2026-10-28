@@ -1,5 +1,8 @@
 .DS_Store
 
+# Local Zed editor and debugger configuration.
+/.zed/
+
 # One live local environment file per runtime. Ignore Vite/dotenv variants too so
 # an accidental alternate file cannot expose secrets through version control.
 backend/.env

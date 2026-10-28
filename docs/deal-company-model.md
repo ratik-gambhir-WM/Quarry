@@ -1,8 +1,8 @@
 # Deal, company, and chat model
 
-Current authentication rollout (2026-10-28): schema **11** replaces legacy profile credentials.
-There is no automatic 9→10→11 upgrade or password backfill. Use the deliberately selected,
-drained development reset described in [authentication](authentication.md#schema-11-and-development-reset),
+Current rollout (2026-10-28): schema **12** adds nine diligence stages to the password/session schema.
+There is no automatic schema upgrade, status conversion, or password backfill. Use the deliberately selected,
+drained development reset described in [authentication](authentication.md#schema-12-and-development-reset),
 paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
 previous rollout and do not authorize running an old migration against the current schema.
 
@@ -22,15 +22,15 @@ There are no company hierarchy, merge, delete, shared-workspace, or production i
 | --- | --- |
 | Engagement | `buy_side`, `sell_side`, `other` |
 | Transaction | `platform_acquisition`, `add_on_acquisition`, `strategic_acquisition`, `carve_out`, `merger`, `divestiture`, `recapitalization`, `growth_equity`, `other`, `unknown` |
-| Status | `pipeline`, `active`, `completed`, `on_hold`, `cancelled` |
+| Status | `pipeline`, `prepare`, `review_plan_discovery`, `interviews_site_visit`, `debrief_flash_report`, `follow_ups_analysis`, `qa_readout_closeout`, `closed`, `pencils_down` |
 | Role | `target`, `buyer`, `seller`, `pe_sponsor`, `portfolio_company`, `parent_company`, `client`, `other` |
 | Scope | `product_architecture`, `corporate_it`, `cybersecurity`, `application_security`, `sdlc`, `it_organization`, `it_financials` |
 
-Buyers and sponsors are optional. Pipeline drafts may omit all companies and dates. Active or
-completed acquisitions of the three named acquisition structures require exactly one target;
+Buyers and sponsors are optional. Pipeline and Pencils Down drafts may omit all companies and dates. Working-stage or
+Closed acquisitions of the three named acquisition structures require exactly one target;
 other structures allow multiple targets. `startDate`, `expectedCloseDate`, `actualCloseDate`, and
 `engagementCompletedDate` are nullable date-only values. Engagement completion cannot precede a
-known start; transaction closing can precede diligence. Completed/cancelled status determines
+known start; transaction closing can precede diligence. Closed/Pencils Down status determines
 Historic lifecycle independently of transaction dates. Lists sort by actual close, falling back
 to expected close, with nulls last and deal ID as the tie-breaker. `archivedAt` hides a deal from
 the default list without changing status or removing children. Direct lookup still works.

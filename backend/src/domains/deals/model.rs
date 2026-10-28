@@ -72,20 +72,34 @@ impl TransactionType {
 #[serde(rename_all = "snake_case")]
 pub enum DealStatus {
     Pipeline,
-    Active,
-    Completed,
-    OnHold,
-    Cancelled,
+    Prepare,
+    ReviewPlanDiscovery,
+    InterviewsSiteVisit,
+    DebriefFlashReport,
+    FollowUpsAnalysis,
+    QaReadoutCloseout,
+    Closed,
+    PencilsDown,
 }
 impl DealStatus {
     pub fn code(self) -> &'static str {
         match self {
             Self::Pipeline => "pipeline",
-            Self::Active => "active",
-            Self::Completed => "completed",
-            Self::OnHold => "on_hold",
-            Self::Cancelled => "cancelled",
+            Self::Prepare => "prepare",
+            Self::ReviewPlanDiscovery => "review_plan_discovery",
+            Self::InterviewsSiteVisit => "interviews_site_visit",
+            Self::DebriefFlashReport => "debrief_flash_report",
+            Self::FollowUpsAnalysis => "follow_ups_analysis",
+            Self::QaReadoutCloseout => "qa_readout_closeout",
+            Self::Closed => "closed",
+            Self::PencilsDown => "pencils_down",
         }
+    }
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Closed | Self::PencilsDown)
+    }
+    pub fn requires_acquisition_target(self) -> bool {
+        self == Self::Closed || (self != Self::Pipeline && !self.is_terminal())
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]

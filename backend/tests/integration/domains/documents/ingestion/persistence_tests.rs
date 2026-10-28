@@ -92,7 +92,7 @@ fn test_document_store() -> (SqliteClient, DocumentStore) {
                 r#"
                 INSERT INTO deals (
                     deal_id, user_id, deal_name, status, created_at, updated_at, engagement_type, transaction_type
-                ) VALUES ('DEAL-1', ?1, 'Project Test', 'active', '2026-01-01', '2026-02-01',
+                ) VALUES ('DEAL-1', ?1, 'Project Test', 'prepare', '2026-01-01', '2026-02-01',
                           'buy_side', 'unknown')
                 "#,
                 [user_id],

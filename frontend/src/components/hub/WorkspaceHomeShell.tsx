@@ -10,7 +10,7 @@ type WorkspaceHomeShellProps = {
   contentClassName?: string;
   contentMode?: "fill" | "scroll";
   header: ReactNode;
-  sidebarMode?: Extract<SidebarMode, "assistant" | "home">;
+  sidebarMode?: Extract<SidebarMode, "assistant" | "home" | "notebook">;
 };
 
 export function useWorkspaceHomeDeals() {

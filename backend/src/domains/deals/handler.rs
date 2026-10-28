@@ -3,6 +3,7 @@ use axum::Extension;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::NaiveDate;
@@ -10,9 +11,7 @@ use std::sync::Arc;
 
 use crate::{
     app::http::error::{AppError, AppResult},
-    domains::deals::service::{
-        Deal, DealFields, DealService, DealWithMetadata, SaveDealInput, SaveDealResponse,
-    },
+    domains::deals::service::{Deal, DealFields, DealService, DealWithMetadata, SaveDealInput},
 };
 
 #[derive(Clone)]
@@ -49,16 +48,30 @@ pub(super) async fn get_deal_handler(
 pub(super) async fn create_deal_handler(
     Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
-    Json(mut input): Json<SaveDealInput>,
-) -> crate::app::http::error::AppResult<(StatusCode, Json<SaveDealResponse>)> {
+    input: Result<Json<SaveDealInput>, axum::extract::rejection::JsonRejection>,
+) -> AppResult<Response> {
+    let mut input = match input {
+        Ok(Json(input)) => input,
+        Err(rejection) => return Ok(deal_json_rejection(rejection)),
+    };
     input.user_email = actor.user.email;
     validate_deal_input(&input)?;
     state
         .deals
         .create(input)
         .await
-        .map(|response| (StatusCode::CREATED, Json(response)))
+        .map(|response| (StatusCode::CREATED, Json(response)).into_response())
         .map_err(AppError::from)
+}
+
+fn deal_json_rejection(rejection: axum::extract::rejection::JsonRejection) -> Response {
+    use axum::extract::rejection::JsonRejection;
+    match rejection {
+        JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) => {
+            AppError::bad_request("invalid deal input").into_response()
+        }
+        other => other.into_response(),
+    }
 }
 
 pub(super) fn validate_deal_id(id: &str) -> AppResult<()> {
@@ -147,11 +160,15 @@ pub(super) async fn update_deal_handler(
     Extension(_actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(id): Path<String>,
-    Json(fields): Json<DealFields>,
-) -> AppResult<Json<SaveDealResponse>> {
+    fields: Result<Json<DealFields>, axum::extract::rejection::JsonRejection>,
+) -> AppResult<Response> {
     validate_deal_id(&id)?;
+    let fields = match fields {
+        Ok(Json(fields)) => fields,
+        Err(rejection) => return Ok(deal_json_rejection(rejection)),
+    };
     validate_fields(&fields)?;
-    Ok(Json(state.deals.update(&id, fields).await?))
+    Ok(Json(state.deals.update(&id, fields).await?).into_response())
 }
 
 pub(super) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
