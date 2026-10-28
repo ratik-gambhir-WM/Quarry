@@ -6,7 +6,7 @@
 | --- | --- |
 | Status | Current-state companion to `ARCHITECTURE.md` |
 | Last verified | 2026-09-25 |
-| Repository snapshot | Live working tree with the co-located Diligence Studio server |
+| Repository snapshot | Live working tree; optional legacy Diligence Studio is in a separate checkout |
 | Audience | Quarry product engineers, reviewers, and coding agents |
 | Scope | Product-domain ownership, durable entities, projections, ephemeral models, and known gaps |
 
@@ -50,7 +50,7 @@ and tests first.
 | `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | SQLite is canonical; Helix is a search projection; jobs and locks are process-local |
 | `summaries` | List summarizable server files, summarize paths/uploads, and write Markdown | None | OpenAI-backed when configured; filesystem-oriented operations have a development trust model |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | Expose and mutate the validated app-scoped slide-template catalog | None in Quarry's canonical store | The co-located Diligence Studio service owns ephemeral PPTX conversion, slide splitting, previews, and catalog rows; no deal ownership or selection |
+| `templates` | Expose and mutate the validated app-scoped slide-template catalog | None in Quarry's canonical store | The optional legacy Diligence Studio service, maintained in a separate checkout, owns its ephemeral PPTX conversion, slide splitting, previews, and catalog rows; no deal ownership or selection |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -327,7 +327,7 @@ Research aggregate today.
 ### 7.4 Slide templates and previews
 
 `TemplatePreviewPage`, pagination, and preview records are validated service-owned read models
-supplied by the co-located Diligence Studio process. Single-slide and deck PPTX imports are
+supplied by the optional external Diligence Studio process. Single-slide and deck PPTX imports are
 service writes whose compact Quarry results contain only the selected mode and imported/warning
 counts. Diligence Studio converts and stores one template per selected source slide in its own
 in-memory SQLite catalog; Quarry's canonical SQLite and Helix stores receive no template copy. A
@@ -350,7 +350,7 @@ timeline entries, and search excerpts must not be documented or treated as persi
 | Canonical durable state | Users, deals, metadata, files, versions, blobs | SQLite through owning domain repositories | Survives restart; subject to current schema migration policy |
 | Search projection | File/version/chunk graph | Helix through `documents::index` | Rebuild intended from SQLite, but general tooling is missing |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
-| Co-located service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
+| Legacy service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
 | Server ephemeral state | Document jobs, ingestion locks, Office preview cache | Owning service/process | Lost on restart; not multi-instance |
 | Desktop ephemeral authority | Authorized local roots | Tauri process | Lost on desktop restart |
 | Client session state | Activity log, route state, modal/view state | React/module/session storage | Tab/webview or route lifetime |

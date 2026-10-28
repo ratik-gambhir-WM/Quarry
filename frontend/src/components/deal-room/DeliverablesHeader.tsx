@@ -161,7 +161,7 @@ function TemplatesHeader({ onBack }: { onBack: () => void }) {
         </Button>
         <div className="min-w-0">
           <h1 className="text-sm font-semibold leading-none text-text-main">Templates</h1>
-          <p className="mt-1 truncate text-xs leading-none text-muted">Browse available slides to start a deliverable.</p>
+          <p className="mt-1 hidden truncate text-xs leading-none text-muted sm:block">Browse available slides to start a deliverable.</p>
         </div>
       </div>
       {hasTemplates ? (

@@ -121,6 +121,7 @@ pub struct AppConfig {
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
     pub diligence_studio: Option<DiligenceStudioConfig>,
+    pub slide_templates: SlideTemplatesConfig,
     pub prompts: PromptConfig,
 }
 
@@ -155,6 +156,7 @@ impl AppConfig {
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
             diligence_studio: parse_diligence_studio_config(&values)?,
+            slide_templates: parse_slide_templates_config(&values)?,
             prompts: parse_prompt_config(&values)?,
         })
     }
@@ -192,6 +194,8 @@ impl Default for AppConfig {
                 ),
             },
             diligence_studio: None,
+            slide_templates: parse_slide_templates_config(&HashMap::new())
+                .expect("default slide configuration is valid"),
             prompts: PromptConfig {
                 directory: PathBuf::from("prompts"),
             },
@@ -512,3 +516,184 @@ fn normalize_deal_config_key(deal_id: &str) -> String {
 #[cfg(test)]
 #[path = "../../tests/unit/app/config_tests.rs"]
 mod tests;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TemplateBackend {
+    DiligenceStudio,
+    #[default]
+    Embedded,
+}
+#[derive(Clone, Debug)]
+pub struct SlideTemplatesConfig {
+    pub backend: TemplateBackend,
+    pub embedding_dimensions: NonZeroUsize,
+    pub chromium_path: Option<PathBuf>,
+    pub render_url: String,
+    pub preview_max_bytes: usize,
+    pub preview_render_size: u32,
+    pub preview_timeout: Duration,
+    pub classification: Option<SlideClassificationConfig>,
+    pub allow_embedding_inspection: bool,
+}
+#[derive(Clone, Debug)]
+pub struct SlideClassificationConfig {
+    pub key: SecretString,
+    pub model: String,
+    pub embedding_model: String,
+    pub dimensions: NonZeroUsize,
+    pub timeout: Duration,
+    pub max_output_tokens: usize,
+    pub max_embedding_text_bytes: usize,
+}
+fn parse_slide_templates_config(
+    values: &HashMap<String, String>,
+) -> Result<SlideTemplatesConfig, String> {
+    let backend = match value(values, "QUARRY_TEMPLATE_BACKEND").unwrap_or("embedded") {
+        "diligence-studio" => TemplateBackend::DiligenceStudio,
+        "embedded" => TemplateBackend::Embedded,
+        _ => return Err("QUARRY_TEMPLATE_BACKEND must be diligence-studio or embedded".into()),
+    };
+    let render_url = value(values, "QUARRY_TEMPLATE_PREVIEW_RENDER_URL")
+        .unwrap_or("http://localhost:1420/_internal/template-preview")
+        .to_owned();
+    let url =
+        reqwest::Url::parse(&render_url).map_err(|_| "invalid template preview render URL")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("invalid template preview render URL".into());
+    }
+    let preview_max_bytes =
+        parse_value(values, "MAX_TEMPLATE_PREVIEW_BYTES", 10 * 1024 * 1024usize)?;
+    let preview_render_size = parse_value(values, "TEMPLATE_PREVIEW_RENDER_SIZE", 1600u32)?;
+    let preview_timeout_ms = parse_value(values, "TEMPLATE_PREVIEW_TIMEOUT_MS", 15_000u64)?;
+    if !(1..=16 * 1024 * 1024).contains(&preview_max_bytes)
+        || !(320..=4096).contains(&preview_render_size)
+        || !(1..=120_000).contains(&preview_timeout_ms)
+    {
+        return Err("template preview limits are outside supported ranges".into());
+    }
+    let chromium_path = match value(values, "QUARRY_SLIDE_TEMPLATES_PREVIEW").unwrap_or("chromium")
+    {
+        "disabled" => None,
+        "chromium" => resolve_chromium(values)?,
+        _ => return Err("QUARRY_SLIDE_TEMPLATES_PREVIEW must be disabled or chromium".into()),
+    };
+    let dimensions = parse_value(values, "OPENAI_SLIDE_EMBEDDING_DIMENSIONS", 1536usize)?;
+    if !(1..=16_384).contains(&dimensions) {
+        return Err("OPENAI_SLIDE_EMBEDDING_DIMENSIONS must be in 1..=16384".into());
+    }
+    let embedding_dimensions =
+        NonZeroUsize::new(dimensions).ok_or("invalid slide embedding dimensions")?;
+    let classification = match value(values, "QUARRY_SLIDE_CLASSIFICATION_PROVIDER")
+        .unwrap_or("disabled")
+    {
+        "disabled" => None,
+        "openai" => {
+            let group = "slide classification";
+            let timeout = parse_value(values, "OPENAI_SLIDE_TIMEOUT_MS", 30_000u64)?;
+            let max_output_tokens =
+                parse_value(values, "OPENAI_SLIDE_MAX_OUTPUT_TOKENS", 4096usize)?;
+            let max_embedding_text_bytes =
+                parse_value(values, "OPENAI_SLIDE_EMBEDDING_MAX_TEXT_BYTES", 32_000usize)?;
+            if dimensions == 0
+                || dimensions > 16_384
+                || timeout == 0
+                || timeout > 120_000
+                || max_output_tokens == 0
+                || max_output_tokens > 32_768
+                || max_embedding_text_bytes == 0
+                || max_embedding_text_bytes > 128_000
+            {
+                return Err("slide classification limits are outside supported ranges".into());
+            }
+            Some(SlideClassificationConfig {
+                key: SecretString::new(required(values, "OPENAI_API_KEY", group)?),
+                model: required(values, "OPENAI_SLIDE_CLASSIFICATION_MODEL", group)?,
+                embedding_model: required(values, "OPENAI_SLIDE_EMBEDDING_MODEL", group)?,
+                dimensions: embedding_dimensions,
+                timeout: Duration::from_millis(timeout),
+                max_output_tokens,
+                max_embedding_text_bytes,
+            })
+        }
+        _ => return Err("QUARRY_SLIDE_CLASSIFICATION_PROVIDER must be disabled or openai".into()),
+    };
+    let allow_embedding_inspection =
+        match value(values, "QUARRY_SLIDE_TEMPLATES_ALLOW_EMBEDDING_INSPECTION").unwrap_or("false")
+        {
+            "true" => true,
+            "false" => false,
+            _ => {
+                return Err(
+                    "QUARRY_SLIDE_TEMPLATES_ALLOW_EMBEDDING_INSPECTION must be true or false"
+                        .into(),
+                )
+            }
+        };
+    Ok(SlideTemplatesConfig {
+        backend,
+        embedding_dimensions,
+        chromium_path,
+        render_url,
+        preview_max_bytes,
+        preview_render_size,
+        preview_timeout: Duration::from_millis(preview_timeout_ms),
+        classification,
+        allow_embedding_inspection,
+    })
+}
+fn resolve_chromium(values: &HashMap<String, String>) -> Result<Option<PathBuf>, String> {
+    if let Some(path) = value(values, "QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() || !path.is_file() {
+            return Err(
+                "QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH must name an existing absolute executable"
+                    .into(),
+            );
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if std::fs::metadata(&path)
+                .map_err(|_| "could not inspect Chromium executable")?
+                .permissions()
+                .mode()
+                & 0o111
+                == 0
+            {
+                return Err("QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH must be executable".into());
+            }
+        }
+        return Ok(Some(path));
+    }
+    let mut candidates = Vec::new();
+    if let Some(home) = value(values, "HOME") {
+        for cache in [
+            PathBuf::from(home).join("Library/Caches/ms-playwright"),
+            PathBuf::from(home).join(".cache/ms-playwright"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(cache) {
+                let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+                entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+                for entry in entries {
+                    for relative in ["chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing","chrome-mac/Chromium.app/Contents/MacOS/Chromium","chrome-linux64/chrome","chrome-linux/chrome","chrome-headless-shell-mac-arm64/chrome-headless-shell","chrome-headless-shell-linux64/chrome-headless-shell"] {candidates.push(entry.path().join(relative));}
+                }
+            }
+        }
+    }
+    candidates.extend(
+        [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+        ]
+        .into_iter()
+        .map(PathBuf::from),
+    );
+    Ok(candidates.into_iter().find(|p| p.is_file()))
+}

@@ -1,0 +1,74 @@
+{
+  "overflow_root": {
+    "case": "overflow_root",
+    "status": 400,
+    "error": {
+      "code": "invalid_json_value",
+      "message": "The request body contains an unsupported JSON value."
+    }
+  },
+  "overflow_title": {
+    "case": "overflow_title",
+    "status": 400,
+    "error": {
+      "code": "invalid_json_value",
+      "message": "The request body contains an unsupported JSON value."
+    }
+  },
+  "overflow_font": {
+    "case": "overflow_font",
+    "status": 400,
+    "error": {
+      "code": "invalid_json_value",
+      "message": "The request body contains an unsupported JSON value."
+    }
+  },
+  "lone_high": {
+    "case": "lone_high",
+    "status": 200,
+    "replacement_character": true,
+    "emoji": false,
+    "literal_escape": false
+  },
+  "lone_low": {
+    "case": "lone_low",
+    "status": 200,
+    "replacement_character": true,
+    "emoji": false,
+    "literal_escape": false
+  },
+  "paired": {
+    "case": "paired",
+    "status": 200,
+    "replacement_character": false,
+    "emoji": true,
+    "literal_escape": false
+  },
+  "escaped_literal": {
+    "case": "escaped_literal",
+    "status": 200,
+    "replacement_character": false,
+    "emoji": false,
+    "literal_escape": true
+  },
+  "empty_image": {
+    "case": "empty_image",
+    "status": 200,
+    "images": 0,
+    "warnings": 0
+  },
+  "space_image": {
+    "case": "space_image",
+    "status": 422,
+    "error": {
+      "code": "unsupported_image_source",
+      "message": "Exported images must use an embedded base64 data URI."
+    }
+  },
+  "null_image": {
+    "case": "null_image",
+    "status": 200,
+    "images": 0,
+    "warnings": 1
+  }
+}

@@ -1,0 +1,270 @@
+{
+  "sourceRevision": null,
+  "reason": "Source directory has no Git metadata; SHA-256 identifies the inspected snapshot.",
+  "packageLicense": "MIT (server/Cargo.toml); no root LICENSE or NOTICE supplied. Catalog assets also occur in the retained Quarry Node server; no third-party notices invented.",
+  "files": [
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/manifest.json",
+      "sha256": "b8fc04e0975273ea9466b7a838eeafb5eedc4dc24e34a9506a6e9640e81f2299",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/manifest.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/arch-ssa.png",
+      "sha256": "7173782ad7b852e9246944f1563213cbf7304d693486d048b7bfe80a42f676a3",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/arch-ssa.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/layered-arch-2.png",
+      "sha256": "ef6932258ba01f754b67c34bc5ac1ec80eed981d8697a23b26896e9d316d786a",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/layered-arch-2.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/layered-arch.png",
+      "sha256": "62b0c1696a02391b2758751fe5aebc963344a56b33b60d3d94d44773222bbbad",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/layered-arch.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/microservice-arch.png",
+      "sha256": "963ba8c1ed83b13b9d73c0087baee6b0212ce923876391204b9db61c918f0012",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/microservice-arch.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/multi-app-arch.png",
+      "sha256": "73d1e7bc0cedc7e8b8e138dacf17ee0443eb362103c7c0be878ec8c0178c4046",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/multi-app-arch.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/multi-tenant-arch.png",
+      "sha256": "defbe50763fc3e84b778de821e6bc9e1f9bec5e5039f4ab2e4739504454ba69f",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/multi-tenant-arch.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/product-arch-2.png",
+      "sha256": "5c0b8c0ac8bf467098155d888678635acd46f5c42f2ac39f39735e8e6aea3462",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/product-arch-2.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/sdlc-ssa.png",
+      "sha256": "ad12f83a0ee85a4167a793d528e735c0ba04a6bfa9bdd9469ab673b2ddba046d",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/sdlc-ssa.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/previews/security-ssa.png",
+      "sha256": "0ff58fa41d3c86255887b55b5b571c7548b255f6ffb7b7b3e39402e1650d8cd9",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/previews/security-ssa.png"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/layered-arch-2.json",
+      "sha256": "39302388861e4e1b0b0044d5c80705253e264ddba1379bf6d50fdfd509bd7bdc",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/layered-arch-2.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/layered-arch.json",
+      "sha256": "b8ed57bec939d8bc24710f65358e6da37357f84eb3b4a0c9bb4165a963b2a519",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/layered-arch.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/microservice-arch.json",
+      "sha256": "f225baa4012f45e18455daaf7c45bed49ed565b63f2bfc84ccfae4147e0e873a",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/microservice-arch.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/multi-app-arch.json",
+      "sha256": "74acfc55deffd88d5358dadcb7d8bd0992ac67e9ab0d96ff3d93bba4df4b5749",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/multi-app-arch.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/multi-product-arch.json",
+      "sha256": "85f35e522e0f2f889c9f3628eff80f7b5d9610b191e33ff25972f672ec5054a1",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/multi-product-arch.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/slide-01-phase-1.compact copy.json",
+      "sha256": "20a348540825db404f740b4dd0ce0a5103f1a747b3abff7b5399265a5bf7cb59",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/slide-01-phase-1.compact copy.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/slide-02-phase-1.compact copy.json",
+      "sha256": "38a3b78088b144e10ef92a557339aa688dcf9cdb3d4aaba66c8f05b8c4b5bcdc",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/slide-02-phase-1.compact copy.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/slide-03-phase-1.compact copy.json",
+      "sha256": "002c582f3d57f90fa8120f4b0f3061230c28ad00b158bc5b7e19e96d789da85b",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/slide-03-phase-1.compact copy.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog/templates/two-system-arch.json",
+      "sha256": "0f7b0800fdf5cfb38f726095e26b70d05483e81dad6c210fd89bb4d4ee2b4aa6",
+      "destination": "backend/src/domains/templates/slide_templates/catalog/templates/two-system-arch.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/catalog.rs",
+      "sha256": "79ee05814d375e5b6c44d9a62cec19aece570244b6e89e8294a0bbebd158ffe4",
+      "destination": "backend/src/domains/templates/slide_templates/catalog.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/error.rs",
+      "sha256": "80367e1b27688834cfbfb2e2b941518d8fc8c5adf81f863204f33fa686608479",
+      "destination": "backend/src/domains/templates/slide_templates/error.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/handlers.rs",
+      "sha256": "5bec5f130febf4f35aef106e8fb549b96eeb8ba069b63a0eaf198ac108750082",
+      "destination": "backend/src/domains/templates/slide_templates/handler.rs",
+      "adaptation": "Native mappings use Quarry host policy and the shared bounded service facade."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/json_contract.rs",
+      "sha256": "b77d086c8e0ccdb200b04703564cab92e6d28267d8a3ca5f16e59ec865868390",
+      "destination": "backend/src/domains/templates/slide_templates/json_contract.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/mod.rs",
+      "sha256": "417fec7a1a5b8f5f3fad11c650f701e3745a5653982285380270fd7151f1a11c",
+      "destination": "backend/src/domains/templates/slide_templates/mod.rs",
+      "adaptation": "Global router/middleware replaced by Quarry composition, relative route.rs and facade.rs."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/models.rs",
+      "sha256": "bf3fa684ef957f5053bba7169a1cec4166c746b545d64c4a8b352964c3e42d26",
+      "destination": "backend/src/domains/templates/slide_templates/models.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/normalization-reference.json",
+      "sha256": "f33b39dbd35c6f6b529bf4eb81442b555925b2ad6f6e07ceed0a3a51922dae7d",
+      "destination": "backend/tests/fixtures/slide_templates/normalization-reference.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/normalize.rs",
+      "sha256": "2125b6ca61feb705020c5eb6dd2ff564b3cea85b8d466cc03ef8b270fbe12d79",
+      "destination": "backend/src/domains/templates/slide_templates/normalize.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/assets/theme1.xml",
+      "sha256": "8bb38102fa5d446d04800af2cf51ab6f91eb527ee6bbaf86fcf25cf50fc7df08",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/assets/theme1.xml"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/assets/viewProps.xml",
+      "sha256": "4cc12863620049069daeb39b14b4aba98a5e3048318be16a5af5879f6e4b2ac8",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/assets/viewProps.xml"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/assets/west_monroe_logo.b64",
+      "sha256": "41a9708a0b4457574662b5c29f5a896ca40d96cd2529f762edfe3c7c3e44496f",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/assets/west_monroe_logo.b64"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/insertion.rs",
+      "sha256": "9242184679a06c1977e9b013ebf009d768a0ab59377056c28d1961be52148ba6",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/insertion.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/mod.rs",
+      "sha256": "9c17b623b241e12184879537707d41166c267eb4ec0af537573c6aa3ca4ffd9d",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/mod.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/reader.rs",
+      "sha256": "aca55a0928443b1e847b529c136c127fbbd2ae596080c05351ae4b1472c35d0c",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/reader.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/pptx/writer.rs",
+      "sha256": "dbc78aa2472ef6d9eaa6e94a0fbf1e66a4cd72f7fc611d0e8ccede779d12f88c",
+      "destination": "backend/src/domains/templates/slide_templates/pptx/writer.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/preview/headless.rs",
+      "sha256": "ed5d8dc9ff15a31bfd653cf4302eb54d178d1cf861f1c7fca68cc6ae83059982",
+      "destination": "backend/src/adapters/slide_templates/preview/headless.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/preview.rs",
+      "sha256": "8cbd8398b778b601887f9b42c1cbb7aff9f940e3d5f4140a3017538126a0b0f0",
+      "destination": "backend/src/adapters/slide_templates/preview.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/providers/worker.rs",
+      "sha256": "caddd509886410debea18ed6a17dce3efe8fae5e5057fbd0ffec5c2fb7ba963a",
+      "destination": "backend/src/domains/templates/slide_templates/providers/worker.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/providers.rs",
+      "sha256": "2a66f87cc1842b5ad342445ad7371abe512203e787856542f007b5d13cc37316",
+      "destination": "backend/src/domains/templates/slide_templates/providers.rs",
+      "adaptation": "Classification rules remain in domain; bounded provider HTTP moved to adapters/slide_templates/providers.rs."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/repository/apps.rs",
+      "sha256": "2ad30a88a468cd6cac61d7390d3046061944fbfa8d5053cb76d88243053ffeb0",
+      "destination": "backend/src/domains/templates/slide_templates/repository/apps.rs",
+      "adaptation": "Persistence rewritten through Quarry SQL builder/client; schema owned by shared app/migrations.rs."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/repository/classification.rs",
+      "sha256": "7e4ea1574990800e83e70200d9e93e03ae648b29cc2843170ce0849654ce1f83",
+      "destination": "backend/src/domains/templates/slide_templates/repository/classification.rs",
+      "adaptation": "Persistence rewritten through Quarry SQL builder/client; schema owned by shared app/migrations.rs."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/repository.rs",
+      "sha256": "52271870308496cba574abce57382d9360eb525598070bc4577a6bd2bf2e23ed",
+      "destination": "backend/src/domains/templates/slide_templates/repository.rs",
+      "adaptation": "Persistence rewritten through Quarry SQL builder/client; schema owned by shared app/migrations.rs."
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/input.rs",
+      "sha256": "9cf5d16c38ece315089d5abc6c4a522c25da96ec0c9a774e0f340f964a7f41fb",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval/input.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/metadata.rs",
+      "sha256": "c0c6962910bfbea934a5af41deb4c113a4420a7cee444889e994ff553fddd149",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval/metadata.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/query/finding.rs",
+      "sha256": "dcedd4f6f48592c5077180c84e417adb2864f5d8da7d8d9dd3b28beff04b7c4f",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval/query/finding.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/query.rs",
+      "sha256": "87b52508e09596fa0df075255143fd5d899a577f5d43b76e9539803d4118e557",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval/query.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/reference-fixture.json",
+      "sha256": "604d7963532390d2d258143419d4a55d43884478d63527c3c334f61e65459c9b",
+      "destination": "backend/tests/fixtures/slide_templates/reference-fixture.json"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/tests.rs",
+      "sha256": "9ebfa77de46472892f61847a3ab667c6de29492bdeed158e7b8967018d39bdb8",
+      "destination": "backend/tests/unit/domains/templates/slide_templates/retrieval_tests.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval/vector.rs",
+      "sha256": "07055cc982125f601b748cba6e943156b4550085d44b9112f8c5a3d746058492",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval/vector.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/retrieval.rs",
+      "sha256": "37d9845339810262d85bb935dc2a95740a74c8f73a2f0489fd5fef378fd61f5a",
+      "destination": "backend/src/domains/templates/slide_templates/retrieval.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/service.rs",
+      "sha256": "7bf638d8f9aae2f7d18e22a45a56a5edbf845156e0cb469bf491ef1467ac98e7",
+      "destination": "backend/src/domains/templates/slide_templates/service.rs"
+    },
+    {
+      "source": "server/src/endpoints/slide_templates/transport_logging.rs",
+      "sha256": "a521517a9460d48468eb6c7d5168ae1b532bb1afcf95e5d01e23026a32ae6642",
+      "destination": null,
+      "adaptation": "Source Express transport logging intentionally replaced by Quarry tracing/request IDs."
+    }
+  ],
+  "verificationDate": "2026-10-20"
+}

@@ -13,6 +13,8 @@ readonly DILIGENCE_STUDIO_API_URL="http://${DILIGENCE_STUDIO_HOST}:${DILIGENCE_S
 readonly DILIGENCE_STUDIO_API_BASE_URL="${DILIGENCE_STUDIO_API_URL}/api/v1"
 readonly QUARRY_UI_URL="http://localhost:1420"
 readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template-preview"
+readonly TEMPLATE_BACKEND="${QUARRY_TEMPLATE_BACKEND:-embedded}"
+readonly DILIGENCE_STUDIO_ROOT="${QUARRY_DILIGENCE_STUDIO_ROOT:-${HOME}/diligence-studio-server}"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
 readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
@@ -26,8 +28,11 @@ usage() {
   cat <<'EOF'
 Usage: quarry <web|desktop>
 
-  web      Start Docker, Helix, Axum, the React web UI, and Diligence Studio.
-  desktop  Start Docker, Helix, Axum, the Tauri desktop UI, and Diligence Studio.
+  web      Start Docker, Helix, Axum, and the React web UI.
+  desktop  Start Docker, Helix, Axum, and the Tauri desktop UI.
+
+Templates run in Axum and persist in Quarry's shared SQLite database by default.
+QUARRY_TEMPLATE_BACKEND=diligence-studio selects the retained Node rollback service.
 
 Run this command from the Quarry repository root.
 EOF
@@ -139,6 +144,12 @@ case "$1" in
     ;;
 esac
 
+[[ "$TEMPLATE_BACKEND" == "diligence-studio" || "$TEMPLATE_BACKEND" == "embedded" ]] \
+  || fail "QUARRY_TEMPLATE_BACKEND must be diligence-studio or embedded"
+if [[ "$TEMPLATE_BACKEND" == "diligence-studio" && ! -d "$DILIGENCE_STUDIO_ROOT" ]]; then
+  fail "legacy Diligence Studio directory not found: ${DILIGENCE_STUDIO_ROOT}; set QUARRY_DILIGENCE_STUDIO_ROOT to its location"
+fi
+
 for required_command in cargo npm curl node docker; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     fail "required command not found: ${required_command}"
@@ -160,8 +171,10 @@ port_is_available "$QUARRY_API_HOST" "$QUARRY_API_PORT" \
   || fail "port ${QUARRY_API_PORT} is already in use; refusing to start the Quarry API"
 port_is_available "127.0.0.1" "1420" \
   || fail "port 1420 is already in use; refusing to start the Quarry UI"
-port_is_available "$DILIGENCE_STUDIO_HOST" "$DILIGENCE_STUDIO_PORT" \
-  || fail "port ${DILIGENCE_STUDIO_PORT} is already in use; refusing to start Diligence Studio"
+if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]]; then
+  port_is_available "$DILIGENCE_STUDIO_HOST" "$DILIGENCE_STUDIO_PORT" \
+    || fail "port ${DILIGENCE_STUDIO_PORT} is already in use; refusing to start Diligence Studio"
+fi
 
 docker_daemon_is_ready() {
   docker info >/dev/null 2>&1
@@ -259,6 +272,8 @@ set -m
   exec env \
     QUARRY_API_HOST="$QUARRY_API_HOST" \
     QUARRY_API_PORT="$QUARRY_API_PORT" \
+    QUARRY_TEMPLATE_BACKEND="$TEMPLATE_BACKEND" \
+    QUARRY_TEMPLATE_PREVIEW_RENDER_URL="$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" \
     DILIGENCE_STUDIO_API_BASE_URL="$DILIGENCE_STUDIO_API_BASE_URL" \
     cargo run --locked
 ) &
@@ -327,11 +342,12 @@ while ! curl --fail --silent --max-time 1 "$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" 
   sleep 0.25
 done
 
+if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]]; then
 printf '%s is ready at %s. Starting Diligence Studio at %s...\n' \
   "$ui_label" "$QUARRY_UI_URL" "$DILIGENCE_STUDIO_API_URL"
 set -m
 (
-  cd "$QUARRY_ROOT/diligence-studio-server" || exit 1
+  cd "$DILIGENCE_STUDIO_ROOT" || exit 1
   exec env \
     HOST="$DILIGENCE_STUDIO_HOST" \
     PORT="$DILIGENCE_STUDIO_PORT" \
@@ -344,7 +360,7 @@ set +m
 while ! curl --fail --silent --max-time 1 \
   --header 'X-App-Id: Quarry_WestMonroe' \
   "${DILIGENCE_STUDIO_API_BASE_URL}/templates/previews?page=1" >/dev/null 2>&1; do
-  if ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
+  if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]] && ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
     wait "$diligence_studio_pid"
     diligence_studio_status=$?
     diligence_studio_pid=""
@@ -366,8 +382,10 @@ while ! curl --fail --silent --max-time 1 \
   sleep 0.25
 done
 
-printf 'Quarry is ready: Helix %s, Axum %s, UI %s, Diligence Studio %s.\n' \
-  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "$DILIGENCE_STUDIO_API_URL"
+fi
+
+printf 'Quarry is ready: Helix %s, Axum %s, UI %s, templates %s.\n' \
+  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "$TEMPLATE_BACKEND"
 
 while true; do
   if ! kill -0 "$backend_pid" 2>/dev/null; then
@@ -388,7 +406,7 @@ while true; do
     exit "$ui_status"
   fi
 
-  if ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
+  if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]] && ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
     wait "$diligence_studio_pid"
     diligence_studio_status=$?
     diligence_studio_pid=""

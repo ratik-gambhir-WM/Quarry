@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
 
     tracing::info!(address = %application.bind_address, "Quarry API listening");
     axum::serve(listener, application.router)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(application.templates))
         .await
         .context("API server failed")?;
 
@@ -33,10 +33,17 @@ fn init_tracing() {
         .try_init();
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(
+    templates: Option<
+        std::sync::Arc<quarry_backend::domains::templates::slide_templates::SlideTemplates>,
+    >,
+) {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to install shutdown signal handler");
         return;
+    }
+    if let Some(templates) = templates {
+        templates.shutdown();
     }
     tracing::info!("shutdown signal received");
 }

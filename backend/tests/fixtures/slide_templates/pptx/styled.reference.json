@@ -1,0 +1,117 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Top line Next line",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Top line Next line",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "FEDCBA",
+          "elements": [
+            {
+              "id": "element-2",
+              "type": "shape",
+              "shape": "rect",
+              "x": 96,
+              "y": 384,
+              "w": 288,
+              "h": 28.8,
+              "fill": "070154",
+              "fillOpacity": 0.8,
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "padding": 0,
+              "text": "Lower text",
+              "fontSize": 12,
+              "fontFace": "Arial",
+              "textColor": "FFFFFF",
+              "runs": [
+                {
+                  "text": "Lower text",
+                  "color": "FFFFFF",
+                  "fontFace": "Arial",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-3",
+              "type": "shape",
+              "shape": "roundRect",
+              "x": 96,
+              "y": 96,
+              "w": 384,
+              "h": 48,
+              "fill": "E8EEF8",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "borderRadius": 9.6,
+              "padding": 0,
+              "text": "Top line\nNext line",
+              "fontSize": 19.5,
+              "fontFace": "Arial",
+              "textColor": "000000",
+              "runs": [
+                {
+                  "text": "Top",
+                  "bold": true,
+                  "color": "000000",
+                  "fontFace": "Arial",
+                  "fontSize": 19.5
+                },
+                {
+                  "text": " line",
+                  "italic": true,
+                  "color": "000000",
+                  "fontFace": "Aptos",
+                  "fontSize": 11,
+                  "breakLine": true
+                },
+                {
+                  "text": "Next line",
+                  "italic": true,
+                  "color": "000000",
+                  "fontFace": "Aptos",
+                  "fontSize": 11,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-4",
+              "type": "line",
+              "lineType": "elbow",
+              "elbowDirection": "horizontal-first",
+              "x1": 192,
+              "y1": 192,
+              "x2": 480,
+              "y2": 288,
+              "beginArrow": "diamond",
+              "stroke": "0047FF",
+              "strokeWidth": 2,
+              "endArrow": "triangle"
+            },
+            {
+              "id": "element-5",
+              "type": "shape",
+              "shape": "rect",
+              "x": 1344,
+              "y": 96,
+              "w": 96,
+              "h": 96,
+              "fill": "00AA00",
+              "stroke": "transparent",
+              "strokeWidth": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": []
+}

@@ -1,94 +1,84 @@
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
     adapters::diligence_studio::{
         client::DiligenceStudioClient,
         templates::{
             PptxTemplateImportMode as AdapterImportMode,
             PptxTemplateImportResult as AdapterImportResult, SlideTemplateClientError,
-            TemplatePreviewPage as AdapterPage, MAX_POWERPOINT_EXPORT_BYTES,
+            TemplatePreviewPage as AdapterPage,
         },
     },
     shared::error::{ServiceError, ServiceResult},
 };
 
-pub const PPTX_MULTI_SLIDE_IMPORT_MESSAGE: &str =
-    "This PowerPoint contains multiple slides. Use Import Deck Template instead.";
-pub const MAX_PPTX_TEMPLATE_IMPORT_BYTES: usize = 25 * 1024 * 1024;
-pub const MAX_TEMPLATE_DOCUMENT_BYTES: usize = 50 * 1024 * 1024;
-pub const POWERPOINT_CONTENT_TYPE: &str =
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PptxTemplateImportMode {
-    Single,
-    Batch,
+pub use super::model::*;
+#[derive(Clone)]
+enum TemplateBackend {
+    Unavailable,
+    DiligenceStudio(Arc<DiligenceStudioClient>),
+    Embedded(Arc<super::slide_templates::SlideTemplates>),
 }
-
-#[derive(Debug)]
-pub struct PptxTemplateUpload {
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PptxTemplateImportResult {
-    pub import_mode: PptxTemplateImportMode,
-    pub imported_count: usize,
-    pub warning_count: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PowerPointExport {
-    pub bytes: Vec<u8>,
-    pub file_name: String,
-    pub warning_count: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TemplatePreviewPage {
-    pub pagination: TemplatePreviewPagination,
-    pub previews: Vec<TemplatePreview>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TemplatePreviewPagination {
-    pub page: usize,
-    pub page_size: usize,
-    pub total_items: usize,
-    pub total_pages: usize,
-    pub has_next_page: bool,
-    pub has_previous_page: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TemplatePreview {
-    pub template_id: String,
-    pub content_type: String,
-    pub data_url: String,
-    pub preview_url: String,
-    pub width: u32,
-    pub height: u32,
-}
-
 #[derive(Clone)]
 pub struct TemplateService {
-    client: Option<Arc<DiligenceStudioClient>>,
+    backend: TemplateBackend,
 }
-
 impl TemplateService {
     pub fn new(client: Option<Arc<DiligenceStudioClient>>) -> Self {
-        Self { client }
+        Self {
+            backend: client
+                .map(TemplateBackend::DiligenceStudio)
+                .unwrap_or(TemplateBackend::Unavailable),
+        }
     }
-
+    pub fn embedded(studio: Arc<super::slide_templates::SlideTemplates>) -> Self {
+        Self {
+            backend: TemplateBackend::Embedded(studio),
+        }
+    }
+    pub(crate) fn try_admit(&self) -> ServiceResult<Option<tokio::sync::OwnedSemaphorePermit>> {
+        match &self.backend {
+            TemplateBackend::Embedded(studio) => {
+                studio.try_admit().map(Some).map_err(map_embedded_error)
+            }
+            TemplateBackend::Unavailable | TemplateBackend::DiligenceStudio(_) => Ok(None),
+        }
+    }
+    fn client(&self) -> Option<&Arc<DiligenceStudioClient>> {
+        match &self.backend {
+            TemplateBackend::DiligenceStudio(client) => Some(client),
+            TemplateBackend::Unavailable | TemplateBackend::Embedded(_) => None,
+        }
+    }
     pub async fn list_previews(&self, page: usize) -> ServiceResult<TemplatePreviewPage> {
-        let client = self.client.as_ref().ok_or_else(|| {
+        if let TemplateBackend::Embedded(studio) = &self.backend {
+            let result = studio.previews(page).await.map_err(map_embedded_error)?;
+            let page = TemplatePreviewPage {
+                pagination: TemplatePreviewPagination {
+                    page: result.pagination.page,
+                    page_size: result.pagination.page_size,
+                    total_items: result.pagination.total_items,
+                    total_pages: result.pagination.total_pages,
+                    has_next_page: result.pagination.has_next_page,
+                    has_previous_page: result.pagination.has_previous_page,
+                },
+                previews: result
+                    .previews
+                    .into_iter()
+                    .map(|p| TemplatePreview {
+                        template_id: p.template_id,
+                        content_type: p.content_type,
+                        data_url: p.data_url,
+                        preview_url: p.preview_url,
+                        width: p.width,
+                        height: p.height,
+                    })
+                    .collect(),
+            };
+            validate_embedded_preview_page(&page)?;
+            return Ok(page);
+        }
+        let client = self.client().ok_or_else(|| {
             ServiceError::unavailable("template preview capability is not configured")
         })?;
         client
@@ -99,9 +89,19 @@ impl TemplateService {
     }
 
     pub async fn delete(&self, template_id: &str) -> ServiceResult<()> {
+        if let TemplateBackend::Embedded(studio) = &self.backend {
+            return if studio
+                .delete(template_id.into())
+                .await
+                .map_err(map_embedded_error)?
+            {
+                Ok(())
+            } else {
+                Err(ServiceError::not_found("template was not found"))
+            };
+        }
         let client = self
-            .client
-            .as_ref()
+            .client()
             .ok_or_else(|| ServiceError::unavailable("template capability is not configured"))?;
         client
             .delete_template(template_id)
@@ -110,9 +110,15 @@ impl TemplateService {
     }
 
     pub async fn get(&self, template_id: &str) -> ServiceResult<serde_json::Value> {
+        if let TemplateBackend::Embedded(studio) = &self.backend {
+            return studio
+                .get(template_id.into())
+                .await
+                .map_err(map_embedded_error)?
+                .ok_or_else(|| ServiceError::not_found("template was not found"));
+        }
         let client = self
-            .client
-            .as_ref()
+            .client()
             .ok_or_else(|| ServiceError::unavailable("template capability is not configured"))?;
         client
             .get_template(template_id)
@@ -125,9 +131,37 @@ impl TemplateService {
         upload: PptxTemplateUpload,
         import_mode: PptxTemplateImportMode,
     ) -> ServiceResult<PptxTemplateImportResult> {
+        if let TemplateBackend::Embedded(studio) = &self.backend {
+            use super::slide_templates::TemplateKind;
+            let (imported_count, warning_count) = match import_mode {
+                PptxTemplateImportMode::Single => {
+                    let result = studio
+                        .import(upload.bytes, TemplateKind::Diagram)
+                        .await
+                        .map_err(map_embedded_error)?;
+                    (1, result.warnings.len())
+                }
+                PptxTemplateImportMode::Batch => {
+                    let result = studio
+                        .batch(upload.bytes, TemplateKind::Diagram)
+                        .await
+                        .map_err(map_embedded_error)?;
+                    (result.templates.len(), result.warnings.len())
+                }
+            };
+            if imported_count == 0 || imported_count > 1_000 || warning_count > 10_000 {
+                return Err(ServiceError::unavailable(
+                    "template import could not be confirmed; refresh templates before retrying",
+                ));
+            }
+            return Ok(PptxTemplateImportResult {
+                import_mode,
+                imported_count,
+                warning_count,
+            });
+        }
         let client = self
-            .client
-            .as_ref()
+            .client()
             .ok_or_else(|| ServiceError::unavailable("template import is not configured"))?;
         let adapter_mode = match import_mode {
             PptxTemplateImportMode::Single => AdapterImportMode::Single,
@@ -144,7 +178,21 @@ impl TemplateService {
         &self,
         document: serde_json::Value,
     ) -> ServiceResult<PowerPointExport> {
-        let client = self.client.as_ref().ok_or_else(|| {
+        if let TemplateBackend::Embedded(studio) = &self.backend {
+            let result = studio.export(document).await.map_err(map_embedded_error)?;
+            validate_powerpoint_export_size(result.bytes.len())?;
+            if result.warnings.len() > 10_000 {
+                return Err(ServiceError::unavailable(
+                    "PowerPoint export is temporarily unavailable",
+                ));
+            }
+            return Ok(PowerPointExport {
+                bytes: result.bytes,
+                file_name: result.file_name,
+                warning_count: result.warnings.len(),
+            });
+        }
+        let client = self.client().ok_or_else(|| {
             ServiceError::unavailable("PowerPoint export capability is not configured")
         })?;
         let result = client
@@ -277,3 +325,41 @@ impl From<AdapterPage> for TemplatePreviewPage {
 #[cfg(test)]
 #[path = "../../../tests/unit/domains/templates/service_tests.rs"]
 mod tests;
+
+fn map_embedded_error(error: super::slide_templates::SlideTemplateError) -> ServiceError {
+    use super::slide_templates::error::FailureKind;
+    if error.code == "template_must_have_one_slide" {
+        return ServiceError::validation(PPTX_MULTI_SLIDE_IMPORT_MESSAGE);
+    }
+    match error.kind {
+        FailureKind::Invalid | FailureKind::TooLarge | FailureKind::Unsupported => {
+            ServiceError::validation(error.message)
+        }
+        FailureKind::NotFound => ServiceError::not_found(error.message),
+        _ => {
+            tracing::warn!(code=%error.code,"embedded template operation failed");
+            ServiceError::unavailable(error.message)
+        }
+    }
+}
+
+fn validate_embedded_preview_page(page: &TemplatePreviewPage) -> ServiceResult<()> {
+    let mut pixels = 0u64;
+    let mut bytes = 0usize;
+    let valid = page.pagination.total_items <= 1_000
+        && page.pagination.total_pages <= MAX_TEMPLATE_PREVIEW_PAGES
+        && page.previews.len() <= 10
+        && page.previews.iter().all(|preview| {
+            pixels = pixels.saturating_add(u64::from(preview.width) * u64::from(preview.height));
+            bytes = bytes.saturating_add(preview.data_url.len());
+            preview.width <= 8_192
+                && preview.height <= 8_192
+                && preview.data_url.len() <= (8 * 1024 * 1024 * 4 / 3) + 64
+        });
+    if !valid || pixels > 100_000_000 || bytes > 32 * 1024 * 1024 - 64 * 1024 {
+        return Err(ServiceError::unavailable(
+            "template previews are temporarily unavailable",
+        ));
+    }
+    Ok(())
+}

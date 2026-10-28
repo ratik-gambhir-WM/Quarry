@@ -1,0 +1,22 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Slide 1",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Slide 1",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "FFFFFF",
+          "elements": []
+        }
+      ]
+    }
+  },
+  "warnings": [
+    "slide 1: shapeTree.elements: No exportable slide elements were found. The PowerPoint will be empty."
+  ]
+}

@@ -1,7 +1,7 @@
 # Quarry
 
 Quarry is a multiplatform diligence application with one shared React/Vite UI, a thin Tauri 2
-desktop shell, an Axum product API, and a standalone Node/Express Diligence Studio service. The
+desktop shell, an Axum product API, and an optional external Node/Express Diligence Studio service. The
 browser and desktop distributions share their pages, components, routes, contracts, and product
 behavior; only their platform adapters and transport paths differ.
 
@@ -19,16 +19,15 @@ Quarry/
 ├── backend/                  Axum product API and application core
 │   ├── src/                  configuration, domains, adapters, and HTTP composition
 │   └── tests/                unit and integration suites
-├── diligence-studio-server/ standalone template catalog and PowerPoint service
-│   ├── src/                  Express API, in-memory repository, catalog, and conversion logic
-│   └── test/                 Vitest API and behavior suites
 ├── docs/                     architecture and domain-model documentation
 ├── .agents/skills/           repository-local development guidance
 └── quarry                    root-only local process launcher
 ```
 
 There is no root workspace manifest. `frontend/`, `frontend/src-tauri/`, `backend/`, and
-`diligence-studio-server/` are independent build roots.
+The optional Diligence Studio service is a separate checkout at `$HOME/diligence-studio-server/`
+by default. Set `QUARRY_DILIGENCE_STUDIO_ROOT` to use another location. Its Node build root is
+independent of this repository.
 
 ## Set up local development
 
@@ -97,15 +96,14 @@ QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
 
 ### 3. Install project dependencies
 
-Install both npm packages and the browser used for Diligence Studio previews:
+Install the frontend package. The optional legacy Diligence Studio service is installed separately:
 
 ```sh
 cd frontend
 npm ci
-cd ../diligence-studio-server
+cd "$HOME/diligence-studio-server"
 npm ci
 npx playwright install chromium
-cd ..
 ```
 
 `npm ci` uses each package's checked-in lockfile. Do not run `npm install` from the repository root because Quarry has no root npm workspace. Cargo downloads Rust dependencies during the first Rust build or launcher run.
@@ -118,7 +116,7 @@ The default local stack does not require an environment file. Add ignored local 
 
 - `frontend/.env` contains public Vite settings
 - `backend/.env` contains Axum settings and server-side secrets
-- `diligence-studio-server/.env` contains Diligence Studio settings and optional provider secrets
+- `$HOME/diligence-studio-server/.env` contains Diligence Studio settings and optional provider secrets
 
 Never put secrets in a `VITE_*` variable. See [Configuration](#configuration) for the supported variables.
 
@@ -172,7 +170,7 @@ The browser and Tauri webview call Axum. They do not call Diligence Studio on po
 - Docker or Helix startup timeout: open Docker Desktop or start Docker Engine, then check
   `docker info`, `docker ps -a`, and `docker logs helix-quarry-v3-dev` before retrying.
 - Diligence Studio preview failures: rerun `npx playwright install chromium` from
-  `diligence-studio-server/`.
+  `$QUARRY_DILIGENCE_STUDIO_ROOT` (default `$HOME/diligence-studio-server/`).
 - Desktop-only build failures: revisit the Tauri prerequisites and confirm `xcode-select -p` and
   `cargo --version` succeed.
 
@@ -217,7 +215,8 @@ runtime operation rather than a routine compile check.
 
 ## Diligence Studio server commands
 
-Run these from `diligence-studio-server/`:
+Run these from `$HOME/diligence-studio-server/` (or the directory selected by
+`QUARRY_DILIGENCE_STUDIO_ROOT`):
 
 ```sh
 npm run typecheck
@@ -250,7 +249,7 @@ For local overrides, use the three ignored environment files defined by the repo
 
 - `frontend/.env` contains public Vite settings shared by the web and desktop UI builds.
 - `backend/.env` contains Axum settings and server-side secrets.
-- `diligence-studio-server/.env` contains its host, port, preview limits, and optional
+- `$HOME/diligence-studio-server/.env` contains its host, port, preview limits, and optional
   classification provider settings.
 
 The most common frontend settings are:

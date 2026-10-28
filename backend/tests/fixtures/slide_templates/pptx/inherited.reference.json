@@ -1,0 +1,101 @@
+{
+  "templateJson": {
+    "presentation": {
+      "title": "Inherited title",
+      "preserveElementOrder": true,
+      "showBranding": false,
+      "slides": [
+        {
+          "id": "slide-1",
+          "name": "Inherited title",
+          "width": 1280,
+          "height": 720,
+          "backgroundColor": "F1E2D3",
+          "elements": [
+            {
+              "id": "element-43",
+              "type": "shape",
+              "shape": "rect",
+              "x": 0,
+              "y": 524.93,
+              "w": 100,
+              "h": 50,
+              "fill": "E8EEF8",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "text": "Master decoration",
+              "fontSize": 12,
+              "fontFace": "Calibri",
+              "textColor": "111827",
+              "runs": [
+                {
+                  "text": "Master decoration",
+                  "color": "111827",
+                  "fontFace": "Calibri",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-42",
+              "type": "shape",
+              "shape": "rect",
+              "x": 0,
+              "y": 419.95,
+              "w": 100,
+              "h": 50,
+              "fill": "E8EEF8",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "text": "Layout decoration",
+              "fontSize": 12,
+              "fontFace": "Calibri",
+              "textColor": "111827",
+              "runs": [
+                {
+                  "text": "Layout decoration",
+                  "color": "111827",
+                  "fontFace": "Calibri",
+                  "fontSize": 12,
+                  "breakLine": true
+                }
+              ]
+            },
+            {
+              "id": "element-40",
+              "type": "shape",
+              "shape": "rect",
+              "x": 100,
+              "y": 50,
+              "w": 100,
+              "h": 50,
+              "fill": "E8EEF8",
+              "stroke": "transparent",
+              "strokeWidth": 0,
+              "padding": 10,
+              "text": "Inherited title",
+              "align": "center",
+              "valign": "top",
+              "fontSize": 25,
+              "fontFace": "Arial",
+              "bold": true,
+              "textColor": "0047FF",
+              "runs": [
+                {
+                  "text": "Inherited title",
+                  "bold": true,
+                  "color": "0047FF",
+                  "fontFace": "Arial",
+                  "fontSize": 25,
+                  "breakLine": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": []
+}

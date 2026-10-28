@@ -33,5 +33,38 @@ pub(crate) fn routes(templates: Arc<TemplateService>) -> Router {
             "/templates/{template_id}",
             get(get_template_handler).delete(delete_template_handler),
         )
-        .with_state(TemplatesHttpState { templates })
+        .with_state(TemplatesHttpState {
+            templates: templates.clone(),
+        })
+        .layer(axum::middleware::from_fn_with_state(templates, admit))
+}
+
+async fn admit(
+    axum::extract::State(templates): axum::extract::State<Arc<TemplateService>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match templates.try_admit() {
+        Ok(Some(permit)) => hold_admission(next.run(request).await, permit),
+        Ok(None) => next.run(request).await,
+        Err(error) => crate::app::http::error::AppError::from(error).into_response(),
+    }
+}
+/// Retain admission until the response body is consumed or dropped, including slow clients.
+pub(super) fn hold_admission(
+    response: axum::response::Response,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> axum::response::Response {
+    use futures_util::StreamExt;
+    let (parts, body) = response.into_parts();
+    let stream =
+        futures_util::stream::unfold(
+            (body.into_data_stream(), permit),
+            |(mut stream, permit)| async move {
+                stream.next().await.map(|chunk| (chunk, (stream, permit)))
+            },
+        )
+        .fuse();
+    axum::response::Response::from_parts(parts, axum::body::Body::from_stream(stream))
 }

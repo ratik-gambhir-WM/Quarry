@@ -1,0 +1,463 @@
+[
+  {
+    "input": {
+      "presentation": {
+        "title": "Precision",
+        "width": 1280.001,
+        "height": 720.009,
+        "slides": [
+          {
+            "elements": [
+              {
+                "type": "text",
+                "text": "Precision",
+                "x": 1.23456,
+                "y": -1.235,
+                "w": 100.004,
+                "h": 40.005,
+                "opacity": 0.123456789,
+                "rotate": 1.23456789,
+                "fillOpacity": 0.456789,
+                "strokeOpacity": 0.888888,
+                "borderRadius": 0.004,
+                "padding": 8.001,
+                "fontSize": 12.3456,
+                "bold": true
+              },
+              {
+                "type": "shape",
+                "shape": "rect",
+                "text": "",
+                "x": 2,
+                "y": 3,
+                "w": 40,
+                "h": 50,
+                "fontSize": 24,
+                "align": "center",
+                "runs": [
+                  {
+                    "text": "",
+                    "fontSize": 0.234
+                  }
+                ],
+                "rotate": 1e-20,
+                "opacity": 0.9999999999999999,
+                "borderRadius": 1e-20
+              },
+              {
+                "type": "image",
+                "src": "data:image/png;base64,cG5n",
+                "borderRadius": 0.004,
+                "opacity": 0.123456,
+                "crop": {
+                  "top": 0.004,
+                  "bottom": 0.999995
+                }
+              },
+              {
+                "type": "line",
+                "x1": 1.2345,
+                "y1": 2.3456,
+                "x2": 3.4567,
+                "y2": 4.5678,
+                "rotate": 0.12345,
+                "opacity": 0.33333,
+                "strokeOpacity": 0.66666
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalized": {
+      "templateJson": {
+        "presentation": {
+          "title": "Precision",
+          "preserveElementOrder": false,
+          "showBranding": true,
+          "slides": [
+            {
+              "id": "slide-1",
+              "name": "Slide 1",
+              "width": 1280.001,
+              "height": 720.009,
+              "backgroundColor": "FFFFFF",
+              "elements": [
+                {
+                  "id": "slides[0].elements[0]",
+                  "x": 1.23456,
+                  "y": -1.235,
+                  "w": 100.004,
+                  "h": 40.005,
+                  "text": "Precision",
+                  "strokeWidth": 0,
+                  "textColor": "111827",
+                  "fontSize": 12.3456,
+                  "fontFace": "Aptos",
+                  "padding": 8.001,
+                  "align": "left",
+                  "valign": "middle",
+                  "runs": [
+                    {
+                      "text": "Precision",
+                      "color": "111827",
+                      "fontFace": "Aptos",
+                      "fontSize": 12.3456,
+                      "bold": true,
+                      "italic": false,
+                      "underline": false,
+                      "breakLine": false
+                    }
+                  ],
+                  "opacity": 0.123456789,
+                  "rotate": 1.23456789,
+                  "bold": true,
+                  "flipH": false,
+                  "flipV": false,
+                  "borderRadius": 0.004,
+                  "fillOpacity": 0.456789,
+                  "strokeOpacity": 0.888888,
+                  "type": "text",
+                  "fill": "FFFFFF",
+                  "stroke": "FFFFFF",
+                  "italic": false
+                },
+                {
+                  "id": "slides[0].elements[1]",
+                  "x": 2,
+                  "y": 3,
+                  "w": 40,
+                  "h": 50,
+                  "text": "",
+                  "strokeWidth": 1,
+                  "textColor": "111827",
+                  "fontSize": 24,
+                  "fontFace": "Aptos",
+                  "padding": 8,
+                  "align": "center",
+                  "valign": "middle",
+                  "runs": [
+                    {
+                      "text": "",
+                      "color": "111827",
+                      "fontFace": "Aptos",
+                      "fontSize": 0.234,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "breakLine": false
+                    }
+                  ],
+                  "opacity": 0.9999999999999999,
+                  "rotate": 1e-20,
+                  "bold": false,
+                  "flipH": false,
+                  "flipV": false,
+                  "borderRadius": 1e-20,
+                  "fillOpacity": 1,
+                  "strokeOpacity": 1,
+                  "type": "shape",
+                  "shape": "rect",
+                  "fill": "E5EEF8",
+                  "stroke": "334155"
+                },
+                {
+                  "id": "slides[0].elements[2]",
+                  "type": "image",
+                  "x": 0,
+                  "y": 0,
+                  "w": 0,
+                  "h": 0,
+                  "src": "data:image/png;base64,cG5n",
+                  "fit": "contain",
+                  "crop": {
+                    "top": 0.004,
+                    "right": 0,
+                    "bottom": 0.999995,
+                    "left": 0
+                  },
+                  "altText": "",
+                  "opacity": 0.123456,
+                  "rotate": 0,
+                  "flipH": false,
+                  "flipV": false,
+                  "borderRadius": 0.004
+                },
+                {
+                  "id": "slides[0].elements[3]",
+                  "type": "line",
+                  "lineType": "elbow",
+                  "elbowDirection": "vertical-first",
+                  "x1": 1.2345,
+                  "y1": 2.3456,
+                  "x2": 3.4567,
+                  "y2": 4.5678,
+                  "stroke": "334155",
+                  "strokeWidth": 1.5,
+                  "dash": "solid",
+                  "opacity": 0.33333,
+                  "strokeOpacity": 0.66666,
+                  "rotate": 0.12345
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "warnings": []
+    },
+    "compact": {
+      "presentation": {
+        "title": "Precision",
+        "preserveElementOrder": false,
+        "showBranding": true,
+        "slides": [
+          {
+            "id": "slide-1",
+            "name": "Slide 1",
+            "width": 1280,
+            "height": 720.01,
+            "backgroundColor": "FFFFFF",
+            "elements": [
+              {
+                "id": "slides[0].elements[0]",
+                "type": "text",
+                "x": 1.23,
+                "y": -1.24,
+                "w": 100,
+                "h": 40.01,
+                "rotate": 1.23456789,
+                "opacity": 0.123456789,
+                "fill": "FFFFFF",
+                "fillOpacity": 0.456789,
+                "stroke": "FFFFFF",
+                "strokeOpacity": 0.888888,
+                "strokeWidth": 0,
+                "text": "Precision",
+                "fontSize": 12.35,
+                "fontFace": "Aptos",
+                "bold": true,
+                "textColor": "111827",
+                "runs": [
+                  {
+                    "text": "Precision",
+                    "bold": true,
+                    "color": "111827",
+                    "fontFace": "Aptos",
+                    "fontSize": 12.35
+                  }
+                ]
+              },
+              {
+                "id": "slides[0].elements[1]",
+                "type": "shape",
+                "shape": "rect",
+                "x": 2,
+                "y": 3,
+                "w": 40,
+                "h": 50,
+                "rotate": 1e-20,
+                "opacity": 0.9999999999999999,
+                "fill": "E5EEF8",
+                "stroke": "334155",
+                "strokeWidth": 1,
+                "runs": [
+                  {
+                    "color": "111827",
+                    "fontFace": "Aptos",
+                    "fontSize": 0.23
+                  }
+                ]
+              },
+              {
+                "id": "slides[0].elements[2]",
+                "type": "image",
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0,
+                "opacity": 0.123456,
+                "src": "data:image/png;base64,cG5n",
+                "fit": "contain",
+                "crop": {
+                  "bottom": 1
+                }
+              },
+              {
+                "id": "slides[0].elements[3]",
+                "type": "line",
+                "lineType": "elbow",
+                "elbowDirection": "vertical-first",
+                "x1": 1.23,
+                "y1": 2.35,
+                "x2": 3.46,
+                "y2": 4.57,
+                "rotate": 0.12345,
+                "opacity": 0.33333,
+                "stroke": "334155",
+                "strokeOpacity": 0.66666,
+                "strokeWidth": 1.5
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "input": {
+      "presentation": {
+        "slides": [
+          {
+            "elements": [
+              {
+                "type": "text",
+                "text": "Unicode",
+                "x": "﻿1in﻿",
+                "fill": "﻿#abcdef﻿"
+              },
+              {
+                "type": "line",
+                "lineType": "elbow",
+                "elbowDirection": "horizontal﻿first",
+                "x1": 0,
+                "y1": 0,
+                "x2": 3,
+                "y2": 4
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalized": {
+      "templateJson": {
+        "presentation": {
+          "title": "Generated Presentation",
+          "preserveElementOrder": false,
+          "showBranding": true,
+          "slides": [
+            {
+              "id": "slide-1",
+              "name": "Slide 1",
+              "width": 1280,
+              "height": 720,
+              "backgroundColor": "FFFFFF",
+              "elements": [
+                {
+                  "id": "slides[0].elements[0]",
+                  "x": 96,
+                  "y": 0,
+                  "w": 0,
+                  "h": 0,
+                  "text": "Unicode",
+                  "strokeWidth": 0,
+                  "textColor": "111827",
+                  "fontSize": 18,
+                  "fontFace": "Aptos",
+                  "padding": 8,
+                  "align": "left",
+                  "valign": "middle",
+                  "runs": [
+                    {
+                      "text": "Unicode",
+                      "color": "111827",
+                      "fontFace": "Aptos",
+                      "fontSize": 18,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "breakLine": false
+                    }
+                  ],
+                  "opacity": 1,
+                  "rotate": 0,
+                  "bold": false,
+                  "flipH": false,
+                  "flipV": false,
+                  "borderRadius": 0,
+                  "fillOpacity": 1,
+                  "strokeOpacity": 1,
+                  "type": "text",
+                  "fill": "ABCDEF",
+                  "stroke": "FFFFFF",
+                  "italic": false
+                },
+                {
+                  "id": "slides[0].elements[1]",
+                  "type": "line",
+                  "lineType": "elbow",
+                  "elbowDirection": "horizontal-first",
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 3,
+                  "y2": 4,
+                  "stroke": "334155",
+                  "strokeWidth": 1.5,
+                  "dash": "solid",
+                  "opacity": 1,
+                  "strokeOpacity": 1,
+                  "rotate": 0
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "warnings": []
+    },
+    "compact": {
+      "presentation": {
+        "title": "Generated Presentation",
+        "preserveElementOrder": false,
+        "showBranding": true,
+        "slides": [
+          {
+            "id": "slide-1",
+            "name": "Slide 1",
+            "width": 1280,
+            "height": 720,
+            "backgroundColor": "FFFFFF",
+            "elements": [
+              {
+                "id": "slides[0].elements[0]",
+                "type": "text",
+                "x": 96,
+                "y": 0,
+                "w": 0,
+                "h": 0,
+                "fill": "ABCDEF",
+                "stroke": "FFFFFF",
+                "strokeWidth": 0,
+                "text": "Unicode",
+                "fontSize": 18,
+                "fontFace": "Aptos",
+                "textColor": "111827",
+                "runs": [
+                  {
+                    "text": "Unicode",
+                    "color": "111827",
+                    "fontFace": "Aptos",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "id": "slides[0].elements[1]",
+                "type": "line",
+                "lineType": "elbow",
+                "elbowDirection": "horizontal-first",
+                "x1": 0,
+                "y1": 0,
+                "x2": 3,
+                "y2": 4,
+                "stroke": "334155",
+                "strokeWidth": 1.5
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+]

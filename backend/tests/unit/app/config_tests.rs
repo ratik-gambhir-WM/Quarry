@@ -157,3 +157,77 @@ fn secrets_are_redacted_from_debug_output() {
     assert!(debug.contains("[REDACTED]"));
     assert!(!debug.contains("super-secret"));
 }
+
+#[test]
+fn slide_templates_default_to_embedded_and_provider_configuration_is_atomic() {
+    let defaults = AppConfig::from_values(Vec::<(String, String)>::new()).unwrap();
+    assert_eq!(defaults.slide_templates.backend, TemplateBackend::Embedded);
+    assert!(defaults.slide_templates.classification.is_none());
+    let embedded = AppConfig::from_values([
+        ("QUARRY_TEMPLATE_BACKEND", "embedded"),
+        ("QUARRY_SLIDE_TEMPLATES_PREVIEW", "disabled"),
+    ])
+    .unwrap();
+    assert_eq!(embedded.slide_templates.backend, TemplateBackend::Embedded);
+    assert!(embedded.slide_templates.chromium_path.is_none());
+    let legacy = AppConfig::from_values([("QUARRY_TEMPLATE_BACKEND", "diligence-studio")]).unwrap();
+    assert_eq!(
+        legacy.slide_templates.backend,
+        TemplateBackend::DiligenceStudio
+    );
+    assert_eq!(TemplateBackend::default(), TemplateBackend::Embedded);
+    for values in [
+        vec![("QUARRY_TEMPLATE_BACKEND", "other")],
+        vec![("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "openai")],
+        vec![("QUARRY_SLIDE_TEMPLATES_PREVIEW", "other")],
+        vec![("TEMPLATE_PREVIEW_RENDER_SIZE", "1")],
+        vec![("QUARRY_SLIDE_TEMPLATES_ALLOW_EMBEDDING_INSPECTION", "yes")],
+    ] {
+        assert!(AppConfig::from_values(values).is_err());
+    }
+    let configured = AppConfig::from_values([
+        ("QUARRY_TEMPLATE_BACKEND", "embedded"),
+        ("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "openai"),
+        ("OPENAI_API_KEY", "synthetic-test-key"),
+        ("OPENAI_SLIDE_CLASSIFICATION_MODEL", "fixture-classifier"),
+        ("OPENAI_SLIDE_EMBEDDING_MODEL", "fixture-embedder"),
+        ("OPENAI_SLIDE_EMBEDDING_DIMENSIONS", "2"),
+    ])
+    .unwrap();
+    assert_eq!(
+        configured
+            .slide_templates
+            .classification
+            .unwrap()
+            .dimensions
+            .get(),
+        2
+    );
+}
+
+#[test]
+fn slide_vector_dimensions_remain_independent_when_classification_is_disabled() {
+    let configured = AppConfig::from_values([
+        ("HELIX_VECTOR_DIMENSION", "3"),
+        ("OPENAI_SLIDE_EMBEDDING_DIMENSIONS", "2"),
+        ("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "disabled"),
+    ])
+    .unwrap();
+    assert_eq!(configured.helix.vector_dimension.get(), 3);
+    assert_eq!(configured.slide_templates.embedding_dimensions.get(), 2);
+    assert!(configured.slide_templates.classification.is_none());
+    assert!(AppConfig::from_values([("OPENAI_SLIDE_EMBEDDING_DIMENSIONS", "0")]).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_chromium_path_must_be_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("chromium-fixture");
+    std::fs::write(&executable, b"fixture").unwrap();
+    assert!(AppConfig::from_values([(
+        "QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH",
+        executable.to_str().unwrap()
+    )])
+    .is_err());
+}

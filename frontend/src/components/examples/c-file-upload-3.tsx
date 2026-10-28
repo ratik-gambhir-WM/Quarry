@@ -69,6 +69,7 @@ export function PptxTemplateImportButtons({
         })}
       />
       <Button
+        aria-label="Import Slide Template"
         disabled={disabled}
         onClick={slideActions.openFileDialog}
         ref={slideTrigger}
@@ -76,9 +77,11 @@ export function PptxTemplateImportButtons({
         type="button"
       >
         <Icon className="size-3.5" name="upload" />
-        Import Slide Template
+        <span className="hidden sm:inline">Import Slide Template</span>
+        <span aria-hidden="true" className="sm:hidden">Slide</span>
       </Button>
       <Button
+        aria-label="Import Deck Template"
         disabled={disabled}
         onClick={deckActions.openFileDialog}
         ref={deckTrigger}
@@ -86,7 +89,8 @@ export function PptxTemplateImportButtons({
         type="button"
       >
         <Icon className="size-3.5" name="upload" />
-        Import Deck Template
+        <span className="hidden sm:inline">Import Deck Template</span>
+        <span aria-hidden="true" className="sm:hidden">Deck</span>
       </Button>
       {activeMode ? (
         <span className="sr-only">Importing {activeMode === "single" ? "slide" : "deck"}</span>

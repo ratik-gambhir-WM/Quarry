@@ -10,6 +10,8 @@ pub enum RepositoryError {
     InvalidData(String),
     #[error("{0}")]
     Storage(String),
+    #[error("repository storage operation failed")]
+    StorageCause(#[source] anyhow::Error),
     #[error("repository blocking worker failed: {0}")]
     BlockingWorker(String),
 }
@@ -68,3 +70,9 @@ impl From<RepositoryError> for ServiceError {
 }
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
+
+impl From<anyhow::Error> for RepositoryError {
+    fn from(source: anyhow::Error) -> Self {
+        Self::StorageCause(source)
+    }
+}

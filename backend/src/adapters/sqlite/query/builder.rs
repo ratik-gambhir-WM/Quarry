@@ -9,6 +9,8 @@ use crate::adapters::sqlite::client::SqliteClientError;
 pub enum SqlBuilderError {
     #[error("SQL identifier cannot be empty")]
     EmptyIdentifier,
+    #[error("BM25 weights must be finite")]
+    NonFiniteRankWeight,
     #[error("SQL identifier contains a null byte: `{0}`")]
     InvalidIdentifier(String),
     #[error("column `{0}` was specified more than once")]
@@ -131,6 +133,10 @@ impl JoinCondition {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Predicate {
+    FullTextMatch {
+        table: String,
+        query: String,
+    },
     Comparison {
         column: String,
         operator: ComparisonOperator,
@@ -151,6 +157,14 @@ enum Predicate {
 pub struct Condition(Predicate);
 
 impl Condition {
+    /// Match an FTS table using a bound search expression.
+    pub fn full_text_match(table: impl Into<String>, query: impl Into<String>) -> Self {
+        Self(Predicate::FullTextMatch {
+            table: table.into(),
+            query: query.into(),
+        })
+    }
+
     pub fn compare(
         column: impl Into<String>,
         operator: ComparisonOperator,
@@ -378,6 +392,7 @@ enum InsertConflict {
 
 #[derive(Debug, Clone)]
 pub struct SelectBuilder {
+    count_rows: bool,
     table: String,
     table_alias: Option<String>,
     columns: Vec<String>,
@@ -385,6 +400,7 @@ pub struct SelectBuilder {
     joins: Vec<JoinClause>,
     conditions: Vec<ConnectedCondition>,
     order_by: Vec<(String, SortDirection)>,
+    bm25: Option<(String, Vec<f64>)>,
     limit: Option<usize>,
     offset: Option<usize>,
 }
@@ -394,14 +410,22 @@ impl SelectBuilder {
         Self {
             table: table.into(),
             table_alias: None,
+            count_rows: false,
             columns: Vec::new(),
             distinct: false,
             joins: Vec::new(),
             conditions: Vec::new(),
             order_by: Vec::new(),
+            bm25: None,
             limit: None,
             offset: None,
         }
+    }
+
+    /// Select a row count while retaining joins and bound predicates.
+    pub fn count_rows(mut self) -> Self {
+        self.count_rows = true;
+        self
     }
 
     pub fn columns<I, S>(mut self, columns: I) -> Self
@@ -483,6 +507,12 @@ impl SelectBuilder {
         self
     }
 
+    /// Rank an FTS5 result before ordinary tie-break columns.
+    pub fn order_by_bm25(mut self, table: impl Into<String>, weights: Vec<f64>) -> Self {
+        self.bm25 = Some((table.into(), weights));
+        self
+    }
+
     pub fn order_by(mut self, column: impl Into<String>, direction: SortDirection) -> Self {
         self.order_by.push((column.into(), direction));
         self
@@ -501,7 +531,9 @@ impl SelectBuilder {
     pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
         ensure_unique_columns(&self.columns)?;
-        let columns = if self.columns.is_empty() {
+        let columns = if self.count_rows {
+            "COUNT(*)".to_owned()
+        } else if self.columns.is_empty() {
             "*".to_string()
         } else {
             self.columns
@@ -517,21 +549,29 @@ impl SelectBuilder {
         append_joins(&mut sql, &self.joins, &mut parameters)?;
         append_conditions(&mut sql, &self.conditions, &mut parameters)?;
 
-        if !self.order_by.is_empty() {
-            let order_by = self
-                .order_by
-                .iter()
-                .map(|(column, direction)| {
-                    Ok(format!(
-                        "{} {}",
-                        quote_identifier(column)?,
-                        direction.as_sql()
-                    ))
-                })
-                .collect::<Result<Vec<_>, SqlBuilderError>>()?
-                .join(", ");
+        let mut order_by = Vec::new();
+        if let Some((table, weights)) = self.bm25 {
+            if weights.iter().any(|weight| !weight.is_finite()) {
+                return Err(SqlBuilderError::NonFiniteRankWeight.into());
+            }
+            let mut rank = format!("bm25({}", quote_identifier(&table)?);
+            for weight in weights {
+                rank.push_str(", ?");
+                parameters.push(SqlValue::Real(weight));
+            }
+            rank.push(')');
+            order_by.push(rank);
+        }
+        for (column, direction) in self.order_by {
+            order_by.push(format!(
+                "{} {}",
+                quote_identifier(&column)?,
+                direction.as_sql()
+            ));
+        }
+        if !order_by.is_empty() {
             sql.push_str(" ORDER BY ");
-            sql.push_str(&order_by);
+            sql.push_str(&order_by.join(", "));
         }
 
         match (self.limit, self.offset) {
@@ -921,6 +961,11 @@ fn append_conditions(
 
         sql.push('(');
         match &connected.condition.0 {
+            Predicate::FullTextMatch { table, query } => {
+                sql.push_str(&quote_identifier(table)?);
+                sql.push_str(" MATCH ?");
+                parameters.push(query.clone().into());
+            }
             Predicate::Comparison {
                 column,
                 operator,

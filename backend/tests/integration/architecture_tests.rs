@@ -164,6 +164,11 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "IndexServiceClient::new(",
         "GraphRagClient::new(",
         "DiligenceStudioClient::new(",
+        "SqliteTemplateRepository::new(",
+        "HeadlessTemplatePreviewGenerator::new(",
+        "OpenAISlideClassifier::new(",
+        "OpenAISlideEmbedder::new(",
+        "TemplateIndex::new(",
         "UserRepository::new(",
         "DealRepository::new(",
         "CompanyRepository::new(",
@@ -274,4 +279,22 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
             .contains("deal_validation_rejects_missing_archived_and_differently_owned_deals"),
         "cross-context attachment check lacks its focused behavior test"
     );
+}
+
+#[test]
+fn template_domain_keeps_sql_and_http_ownership_explicit() {
+    for (path, source) in rust_sources("src/domains/templates/slide_templates") {
+        if !path.ends_with("/handler.rs") && !path.ends_with("/route.rs") {
+            assert!(
+                !source.contains("axum::") && !source.contains("StatusCode"),
+                "reusable template mechanism depends on HTTP: {path}"
+            );
+        }
+        assert!(
+            !source.contains("Connection::open(")
+                && !source.contains(".execute_batch(")
+                && !source.contains(".prepare("),
+            "template domain bypasses the SQLite builder/client: {path}"
+        );
+    }
 }
