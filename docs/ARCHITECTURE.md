@@ -398,6 +398,7 @@ global state or query-cache library.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
   type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
   Missing values and unavailable links display `N/A`; external links open in a separate tab.
+  A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
