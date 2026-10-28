@@ -28,6 +28,10 @@ impl RepositoryError {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ServiceError {
+    #[error("invalid credentials or expired session")]
+    Unauthorized,
+    #[error("too many authentication attempts; retry later")]
+    RateLimited,
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]

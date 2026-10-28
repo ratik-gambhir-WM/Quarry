@@ -121,7 +121,6 @@ export function createModelAdapter(
                 prompt,
                 requestId: runOptions.assistantMessageId!,
                 threadId: runOptions.threadId!,
-                userEmail: options.userEmail!,
                 userMessageId: currentUser.id,
               }, handlers)
             : api.queryModel({ context, files: [], prompt }, handlers);

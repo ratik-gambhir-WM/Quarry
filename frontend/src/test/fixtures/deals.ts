@@ -15,5 +15,5 @@ export function testMetadata(dealId = "DEAL-000184"): SavedDealMetadata {
 }
 export function testDealInput(): SaveDealInput {
   const deal = testDeal();
-  return { dealId: deal.dealId, userEmail: "analyst@example.com", dealName: deal.dealName, dealCode: deal.dealCode, engagementType: deal.engagementType, transactionType: deal.transactionType, status: deal.status, startDate: deal.startDate, expectedCloseDate: deal.expectedCloseDate, actualCloseDate: deal.actualCloseDate, engagementCompletedDate: deal.engagementCompletedDate, parties: [], scopes: [], localPath: null, sharepointLink: null };
+  return { dealId: deal.dealId, dealName: deal.dealName, dealCode: deal.dealCode, engagementType: deal.engagementType, transactionType: deal.transactionType, status: deal.status, startDate: deal.startDate, expectedCloseDate: deal.expectedCloseDate, actualCloseDate: deal.actualCloseDate, engagementCompletedDate: deal.engagementCompletedDate, parties: [], scopes: [], localPath: null, sharepointLink: null };
 }

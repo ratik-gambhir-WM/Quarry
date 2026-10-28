@@ -1,5 +1,7 @@
 use rusqlite::Row;
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::{
     adapters::sqlite::{
@@ -9,24 +11,24 @@ use crate::{
     shared::error::RepositoryError,
 };
 
-const USER_COLUMNS: [&str; 8] = [
+pub(crate) const USER_COLUMNS: [&str; 8] = [
     "id",
     "first_name",
     "last_name",
     "email",
-    "api_key",
-    "role",
+    "username",
+    "job_title",
     "created_at",
     "updated_at",
 ];
 
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddUserInput {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-    pub api_key: String,
     pub role: String,
 }
 
@@ -37,8 +39,8 @@ pub struct User {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-    pub api_key: String,
-    pub role: String,
+    pub username: String,
+    pub job_title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -53,13 +55,15 @@ impl UserRepository {
         Self { sqlite }
     }
 
+    #[cfg(test)]
     pub async fn create(&self, input: AddUserInput) -> Result<User, RepositoryError> {
         let insert = SqlBuilder::insert_into("users")
             .value("first_name", input.first_name.trim())
             .value("last_name", input.last_name.trim())
             .value("email", input.email.trim())
-            .value("api_key", input.api_key.trim())
-            .value("role", input.role.trim())
+            .value("username", input.email.trim().to_ascii_lowercase())
+            .value("password_hash", "test-only-unusable-password")
+            .value("job_title", input.role.trim())
             .build();
         let inserted =
             self.sqlite.write_async(insert).await.map_err(|error| {
@@ -87,7 +91,7 @@ impl UserRepository {
             .map_err(|error| RepositoryError::storage(format!("failed to read user: {error}")))
     }
 
-    async fn by_id(&self, id: i64) -> Result<Option<User>, RepositoryError> {
+    pub(crate) async fn by_id(&self, id: i64) -> Result<Option<User>, RepositoryError> {
         let query = SqlBuilder::select("users")
             .columns(USER_COLUMNS)
             .and_where(Condition::equal("id", id))
@@ -99,14 +103,14 @@ impl UserRepository {
     }
 }
 
-fn user_from_row(row: &Row<'_>) -> rusqlite::Result<User> {
+pub(crate) fn user_from_row(row: &Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
         id: row.get("id")?,
         first_name: row.get("first_name")?,
         last_name: row.get("last_name")?,
         email: row.get("email")?,
-        api_key: row.get("api_key")?,
-        role: row.get("role")?,
+        username: row.get("username")?,
+        job_title: row.get("job_title")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })

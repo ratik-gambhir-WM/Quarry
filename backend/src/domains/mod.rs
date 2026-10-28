@@ -1,7 +1,6 @@
 pub mod assistant;
 pub mod data_rooms;
 pub mod deals;
-pub mod dev_support;
 pub mod documents;
 pub mod research;
 pub mod summaries;
@@ -10,3 +9,5 @@ pub mod templates;
 pub mod users;
 
 pub mod companies;
+
+pub mod identity;

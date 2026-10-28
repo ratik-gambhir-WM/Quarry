@@ -28,7 +28,6 @@ use crate::{
             self, repository::DealRepository, service::DealService, DataRoomSourceReader,
             DealContextReader,
         },
-        dev_support,
         documents::{
             graph::repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
@@ -36,21 +35,23 @@ use crate::{
             store::sqlite::DocumentStore,
             viewing::{self, service::StoredDocumentService},
         },
+        identity::{
+            self, access::ResourceAccess, repository::IdentityRepository, service::IdentityService,
+        },
         research::{
             self,
             service::{ResearchService, WmAiClients},
         },
         summaries::{self, service::SummaryService},
-        system::{self, service::DatabaseService},
+        system,
         templates::{self, service::TemplateService},
-        users::{self, repository::UserRepository, service::UserService, UserDirectory},
+        users::{repository::UserRepository, UserDirectory},
     },
     shared::prompts::{PromptCatalog, PromptCatalogError},
 };
 
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
-const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 
 pub struct Application {
@@ -134,6 +135,11 @@ fn assemble_api_with_templates(
     templates: Arc<TemplateService>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
 ) -> Router {
+    let identity = Arc::new(IdentityService::new(IdentityRepository::new(
+        sqlite.clone(),
+        UserRepository::new(sqlite.clone()),
+    )));
+    let access = ResourceAccess::new(sqlite.clone());
     let users_repository = UserRepository::new(sqlite.clone());
     let deals_repository = DealRepository::new(sqlite.clone());
     let document_files = DocumentStore::new(sqlite.clone());
@@ -171,7 +177,6 @@ fn assemble_api_with_templates(
         CompanyRepository::new(sqlite.clone()),
         user_directory.clone(),
     ));
-    let users = Arc::new(UserService::new(users_repository.clone()));
     let deals = Arc::new(DealService::new(
         user_directory.clone(),
         deals_repository.clone(),
@@ -189,7 +194,15 @@ fn assemble_api_with_templates(
         config.data_room.clone(),
         office.clone(),
     ));
-    let database = Arc::new(DatabaseService::new(sqlite.path().to_path_buf()));
+    let summaries = Arc::new(SummaryService::new(
+        openai.clone(),
+        config
+            .openai
+            .as_ref()
+            .map(|c| c.document_summary_model.clone())
+            .unwrap_or_else(|| "gpt-5.5".into()),
+        prompts.clone(),
+    ));
     let document_ingestion = Arc::new(DocumentIngestionService::new(
         document_files.clone(),
         document_graph_reader,
@@ -211,16 +224,8 @@ fn assemble_api_with_templates(
         document_ingestion.clone(),
         config.documents.completed_job_retention,
     ));
-    let document_search = Arc::new(DocumentSearchService::new(document_graph_search));
-    let document_summaries = Arc::new(SummaryService::new(
-        openai.clone(),
-        config
-            .openai
-            .as_ref()
-            .map(|config| config.document_summary_model.clone())
-            .unwrap_or_else(|| DEFAULT_DOCUMENT_SUMMARY_MODEL.to_string()),
-        prompts.clone(),
-    ));
+    let document_search =
+        Arc::new(DocumentSearchService::new(document_graph_search).with_access(access.clone()));
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
     let assistant_chat = Arc::new(
@@ -231,7 +236,7 @@ fn assemble_api_with_templates(
                 .as_ref()
                 .map(|config| config.chat_model.clone())
                 .unwrap_or_else(|| "gpt-5.5".to_string()),
-            AssistantChatRepository::new(sqlite),
+            AssistantChatRepository::new(sqlite.clone()),
             user_directory,
             prompts,
         )
@@ -241,21 +246,30 @@ fn assemble_api_with_templates(
     let native_routes = embedded
         .map(templates::slide_templates::route::routes)
         .unwrap_or_default();
-    Router::new()
+    let protected = Router::new()
+        .merge(identity::route::protected(identity.clone()))
         .merge(native_routes)
-        .merge(system::route::routes(database))
-        .merge(dev_support::route::routes())
-        .merge(users::route::routes(users))
         .merge(deals::route::routes(deals))
         .merge(companies::route::routes(companies))
         .merge(data_rooms::route::routes(data_rooms))
         .merge(ingestion::route::routes(document_ingestion, document_jobs))
         .merge(viewing::route::routes(stored_documents))
         .merge(search::route::routes(document_search))
-        .merge(summaries::route::routes(document_summaries))
+        .merge(summaries::route::routes(summaries))
         .merge(research::route::routes(research))
         .merge(templates::route::routes(templates))
         .merge(assistant::chat::route::routes(assistant_chat))
+        .route_layer(axum::middleware::from_fn_with_state(
+            crate::app::http::auth::AuthBoundary {
+                identity: identity.clone(),
+                access,
+            },
+            crate::app::http::auth::authenticate,
+        ));
+    Router::new()
+        .merge(protected)
+        .merge(system::route::routes())
+        .merge(identity::route::public(identity))
 }
 
 fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {

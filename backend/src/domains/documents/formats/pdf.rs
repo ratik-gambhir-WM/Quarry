@@ -448,7 +448,9 @@ fn cmyk_to_rgb(cmyk: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     Ok(cmyk
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| {
             let cyan = pixel[0] as u16;
             let magenta = pixel[1] as u16;

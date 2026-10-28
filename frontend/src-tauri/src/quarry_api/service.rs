@@ -64,6 +64,19 @@ impl QuerySubscriptions {
 }
 
 impl QuarryApiService {
+    pub fn for_request(
+        &self,
+        auth: Option<super::models::AuthCredentials>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            client: self.client.for_request(auth)?,
+        })
+    }
+    pub fn api_error(&self, message: String) -> crate::errors::AppError {
+        let mut error = crate::errors::AppError::validation(message);
+        error.status = self.client.status();
+        error
+    }
     pub fn from_environment() -> Result<Self, String> {
         Ok(Self {
             client: QuarryHttpClient::from_environment()?,

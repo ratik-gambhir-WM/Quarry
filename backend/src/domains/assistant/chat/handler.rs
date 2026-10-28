@@ -1,3 +1,5 @@
+use crate::domains::identity::model::AuthenticatedUser;
+use axum::Extension;
 use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use axum::{
@@ -23,6 +25,7 @@ pub(super) struct AssistantChatHttpState {
 }
 
 pub(super) async fn query_model_handler(
+    Extension(_actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     headers: HeaderMap,
     multipart: Multipart,
@@ -55,6 +58,7 @@ pub(super) async fn query_model_handler(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ThreadListQuery {
+    #[serde(skip_deserializing)]
     user_email: String,
     archived: Option<bool>,
     limit: Option<usize>,
@@ -66,12 +70,14 @@ pub(super) struct ThreadListQuery {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct OwnerQuery {
+    #[serde(skip_deserializing)]
     user_email: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CreateThreadInput {
+    #[serde(skip_deserializing)]
     user_email: String,
     thread_id: Option<String>,
     deal_id: Option<String>,
@@ -80,6 +86,7 @@ pub(super) struct CreateThreadInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ThreadMutationInput {
+    #[serde(skip_deserializing)]
     user_email: String,
     title: Option<String>,
 }
@@ -92,9 +99,11 @@ pub(super) struct ThreadListResponse {
 }
 
 pub(super) async fn list_threads_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
-    Query(query): Query<ThreadListQuery>,
+    Query(mut query): Query<ThreadListQuery>,
 ) -> AppResult<Json<ThreadListResponse>> {
+    query.user_email = actor.user.email;
     validate_user_email(&query.user_email)?;
     let limit = query.limit.unwrap_or(30);
     if !(1..=100).contains(&limit) {
@@ -135,9 +144,11 @@ pub(super) async fn list_threads_handler(
 }
 
 pub(super) async fn create_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
-    Json(input): Json<CreateThreadInput>,
+    Json(mut input): Json<CreateThreadInput>,
 ) -> AppResult<(StatusCode, Json<AssistantThread>)> {
+    input.user_email = actor.user.email;
     validate_user_email(&input.user_email)?;
     let thread_id = input
         .thread_id
@@ -155,10 +166,12 @@ pub(super) async fn create_thread_handler(
 }
 
 pub(super) async fn get_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     Path(thread_id): Path<String>,
-    Query(query): Query<OwnerQuery>,
+    Query(mut query): Query<OwnerQuery>,
 ) -> AppResult<Json<AssistantThreadDetail>> {
+    query.user_email = actor.user.email;
     validate_user_email(&query.user_email)?;
     validate_identifier("threadId", &thread_id)?;
     state
@@ -170,13 +183,15 @@ pub(super) async fn get_thread_handler(
 }
 
 pub(super) async fn rename_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     Path(thread_id): Path<String>,
-    Json(input): Json<ThreadMutationInput>,
+    Json(mut input): Json<ThreadMutationInput>,
 ) -> AppResult<StatusCode> {
     let title = input
         .title
         .ok_or_else(|| AppError::bad_request("title is required"))?;
+    input.user_email = actor.user.email;
     validate_user_email(&input.user_email)?;
     validate_identifier("threadId", &thread_id)?;
     validate_title(&title)?;
@@ -189,10 +204,12 @@ pub(super) async fn rename_thread_handler(
 }
 
 pub(super) async fn archive_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     Path(thread_id): Path<String>,
-    Json(input): Json<ThreadMutationInput>,
+    Json(mut input): Json<ThreadMutationInput>,
 ) -> AppResult<StatusCode> {
+    input.user_email = actor.user.email;
     validate_user_email(&input.user_email)?;
     validate_identifier("threadId", &thread_id)?;
     state
@@ -204,10 +221,12 @@ pub(super) async fn archive_thread_handler(
 }
 
 pub(super) async fn unarchive_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     Path(thread_id): Path<String>,
-    Json(input): Json<ThreadMutationInput>,
+    Json(mut input): Json<ThreadMutationInput>,
 ) -> AppResult<StatusCode> {
+    input.user_email = actor.user.email;
     validate_user_email(&input.user_email)?;
     validate_identifier("threadId", &thread_id)?;
     state
@@ -219,10 +238,12 @@ pub(super) async fn unarchive_thread_handler(
 }
 
 pub(super) async fn delete_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     Path(thread_id): Path<String>,
-    Query(query): Query<OwnerQuery>,
+    Query(mut query): Query<OwnerQuery>,
 ) -> AppResult<StatusCode> {
+    query.user_email = actor.user.email;
     validate_user_email(&query.user_email)?;
     validate_identifier("threadId", &thread_id)?;
     state
@@ -234,6 +255,7 @@ pub(super) async fn delete_thread_handler(
 }
 
 pub(super) async fn run_thread_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<AssistantChatHttpState>,
     headers: HeaderMap,
     Path(thread_id): Path<String>,
@@ -245,7 +267,8 @@ pub(super) async fn run_thread_handler(
     let started_at = std::time::Instant::now();
     let http_request_id = request_id(&headers);
     tracing::info!(request_id = %http_request_id, thread_id = %thread_id, route = "/assistant/threads/{thread_id}/runs", "assistant persisted request received");
-    let input = match collect_persistent_query_upload(multipart, thread_id).await {
+    let input = match collect_persistent_query_upload(multipart, thread_id, actor.user.email).await
+    {
         Ok(input) => input,
         Err(error) => {
             tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted request rejected while parsing multipart");

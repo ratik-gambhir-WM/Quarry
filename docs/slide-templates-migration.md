@@ -1,5 +1,11 @@
 # Slide Templates Studio migration evidence
 
+Current authentication rollout (2026-10-28): schema **11** replaces legacy profile credentials.
+There is no automatic 9→10→11 upgrade or password backfill. Use the deliberately selected,
+drained development reset described in [authentication](authentication.md#schema-11-and-development-reset),
+paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
+previous rollout and do not authorize running an old migration against the current schema.
+
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
 The supplied directory has no Git metadata. The checked-in
 `backend/tests/fixtures/slide_templates/source-inventory.json` records source hashes

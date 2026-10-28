@@ -53,7 +53,7 @@ Quarry is a multiplatform diligence application with three core runtimes and a s
 The web and desktop distributions share pages, components, hooks, contracts, and product routes.
 Build-time aliases select the router and runtime adapter:
 
-- Web: `BrowserRouter` plus direct browser HTTP, multipart, binary, and `EventSource` transport.
+- Web: `BrowserRouter` plus authenticated browser HTTP, multipart, binary, and fetch SSE transport.
 - Desktop: `HashRouter` plus Tauri `invoke`/events; Rust `reqwest` then forwards product traffic
   to the same Axum `/api/v1` routes.
 
@@ -69,10 +69,10 @@ persists SQLite first and then indexes Helix, so cross-store writes are intentio
 through an exact-content re-upload today rather than transactionally atomic. A general reindex
 utility is not implemented.
 
-Quarry is a tested development foundation, not a production-secure deployment. There is no
-inbound authentication, tenant authorization, rate limiting, durable job queue, production
-database/object store, CI pipeline, or deployment manifest. The current login screen performs
-profile lookup/creation and must not be described as an authentication boundary.
+Quarry is a tested development foundation, not a production-secure deployment. Username/password
+authentication, revocable sessions, per-user access checks and bounded local auth throttling are
+implemented. Organization tenancy, distributed abuse protection, durable job queues, production
+storage, CI and deployment manifests remain absent. See [authentication](authentication.md).
 
 ## 2. System context
 
@@ -83,7 +83,7 @@ flowchart LR
     subgraph Browser[Web distribution]
         WebUI[Shared React UI]
         WebRuntime[runtime.web]
-        HttpApi[httpQuarryApi\nfetch + FormData + EventSource]
+        HttpApi[httpQuarryApi\nauthenticated fetch + FormData + SSE]
         WebUI --> WebRuntime --> HttpApi
     end
 
@@ -300,7 +300,8 @@ shared `/hub/*` route tree:
 | --- | --- | --- |
 | `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
-| `/login` | `LoginPage` | eager |
+| `/login` | Username/password `LoginPage` | eager |
+| `/register` | Account registration `LoginPage` | eager |
 | `/hub` | `HubPage` | lazy workspace route and page |
 | `/hub/account` | `AccountPage` | lazy workspace route and page |
 | `/hub/vault` | `GlobalVaultPage` | lazy |
@@ -324,9 +325,12 @@ routes, so a URL, refresh, Back, or Forward action selects the same view without
 view router. Lazy boundaries commit an accessible workspace or in-content skeleton while their
 module loads. Reduced-motion CSS disables transition animation.
 
-There is no authenticated route guard. Workspace email is carried in router state and mirrored to
-`sessionStorage` under `quarry.workspace.email`. These navigation conveniences are not identity or
-authorization controls.
+The product tree is wrapped in `UserProvider`, backed by one memory-only session store. Login and
+registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
+workspace state by its generation. Registration uses a responsive two-column card (900px max),
+while login uses a 560px card; small screens stack the fields. Registration shows a fixed
+`@westmonroe.com` suffix and the backend enforces that exact email domain. Reload requires sign-in. Router state and the removed
+`quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
 
 ### 5.3 Layer responsibilities
 
@@ -353,7 +357,8 @@ global state or query-cache library.
   and updates the browser theme color. The dark palette remains defined for restoration, but the
   current feature flag normalizes stored or requested dark mode to `slate-frost` and hides the
   profile theme picker.
-- `WorkspaceProvider` owns workspace session and deal-resource state for `/hub/*`.
+- `UserProvider` owns verified identity/session state for the product tree; `WorkspaceProvider`
+  owns deal-resource state for `/hub/*` and reads the verified profile through its session hook.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
   sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
@@ -393,6 +398,7 @@ global state or query-cache library.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
   type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
   Missing values and unavailable links display `N/A`; external links open in a separate tab.
+  A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
@@ -491,9 +497,9 @@ global state or query-cache library.
   Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
   Axum loads bounded canonical completed pairs from SQLite. The legacy `/query_model` adapter path
   still sends bounded client context for compatibility.
-- Legacy summarize components, `useSummarizeWorkflow`, data modules, and summary API methods remain
-  available to the codebase, but the former `SummarizePage` route module and summary screen are no
-  longer registered in the product route tree.
+- Legacy summarize presentation components and data helpers remain available, but the unused
+  `useSummarizeWorkflow` and unsupported server-path API methods have been removed. Uploaded-file
+  summaries remain available through both adapters; no summary screen is registered in the product route tree.
 - The activity log uses `useSyncExternalStore`, keeps at most 400 entries for the session, and
   recursively redacts secret-like fields, paths, and email addresses.
 
@@ -509,17 +515,17 @@ operational failures.
 
 | Feature | Implemented behavior | Current limitations |
 | --- | --- | --- |
-| Login/profile | Web email lookup/user creation; existing-user lookup and workspace navigation on both targets | Not authentication; desktop cannot currently enter the new-user flow; collected API key is development-era data, not AI configuration |
+| Login/profile | Username/password registration and login on both targets; revocable eight-hour sessions | Memory-only tokens; reload requires login; no account recovery or email verification |
 | Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, File Summary, and Settings tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Site Visits, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Workspace email is a development identity rather than authentication; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, authorization, rate limits, moderation, or quotas |
-| Summarization APIs | Path, selected-file, and upload summary contracts plus retained frontend workflow/components | No active product route; server-filesystem policy remains unresolved |
+| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
+| Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, and Tasks category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
-| Account/profile | Navigates immediately, displays a destination skeleton while fetching, then shows the fetched user details; the theme picker is temporarily unavailable while the light system is consolidated | Workspace email moves through router/UI state; profile data is request-local and this is not an auth session |
+| Account/profile | Shows the verified provider-owned profile and signs out the current session | No profile editing or recovery; theme picker remains unavailable |
 
 ### 5.6 UI and styling system
 
@@ -607,7 +613,7 @@ The contract covers:
 - validated hydrated template retrieval through `getTemplate`
 - app-scoped template deletion through `deleteTemplate`
 - explicit single-slide or deck PPTX import through `importPptxTemplate`
-- path, selection, and upload summarization
+- uploaded-file summarization
 - platform-specific local data-room selection/read and file export
 
 ### 6.2 Web path
@@ -616,7 +622,7 @@ The contract covers:
 React feature
   -> runtime.web
   -> httpQuarryApi
-  -> fetch / FormData / EventSource
+  -> authenticated fetch / FormData / GET-SSE
   -> Axum /api/v1
 ```
 
@@ -624,8 +630,11 @@ The HTTP adapter validates `VITE_API_BASE_URL`, permits HTTPS outside developmen
 in development, serializes JSON/multipart, validates PDF content type, reads bytes, normalizes
 non-success responses into `BackendApiError`, and logs HTTP/SSE activity. Query chat uses a
 strict incremental UTF-8 POST-SSE parser and `AbortController`; its activity records contain only
-counts, event classes, timing, and other non-content metadata. No authentication header or token
-is currently attached.
+counts, event classes, timing, and other non-content metadata. Every protected request attaches
+Bearer authorization and a matching `X-User-Id`; document GET-SSE uses fetch with cancellation
+instead of EventSource. Protected 401 responses are buffered before session invalidation aborts
+other tracked work, preserving the HTTP error body for callers. Auth bodies/responses and
+credential envelopes are excluded from logs.
 
 The web platform adapter implements JSON, Markdown, and validated PowerPoint export with Blob
 downloads, has no native folder chooser, and rejects local source-file reads.
@@ -692,8 +701,9 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 
 ## 7. API surface
 
-Axum builds one feature router and mounts it under both `/api` and `/api/v1`. Clients use
-`/api/v1`; `/api` is transitional compatibility. GET, POST, and DELETE are enabled by the CORS
+Axum composes explicit public and authenticated feature routers and mounts the result under both
+`/api` and `/api/v1`. Clients use `/api/v1`; `/api` is transitional compatibility. Only health,
+capabilities, register and login are public; all product routes require a verified session. GET, POST, and DELETE are enabled by the CORS
 method allowlist.
 
 ### 7.1 System and users
@@ -702,17 +712,15 @@ method allowlist.
 | --- | --- | --- | --- |
 | GET | `/health` | Shallow process health | Returns `{ "ok": true }`; does not check dependencies |
 | GET | `/capabilities` | Static contract feature flags | Does not report actual optional-service availability |
-| GET | `/greet` | Demo greeting | Development/demo route |
-| POST | `/users` | Create user/profile | Returns 201; currently includes stored `apiKey` |
-| GET | `/users/by-email` | Fetch user/profile by email | No authentication |
-| POST | `/login-demo` | Demo REST event | Development/demo route |
-| POST | `/login-demo/event` | Demo internal event adapter | Development/demo route |
+| POST | `/auth/register` | Register username/password and public profile | 201 user/token/expiry; unique normalized identity |
+| POST | `/auth/login` | Verify credentials and issue a session | 200; generic 401 failure |
+| GET | `/auth/me` | Current verified profile and expiry | Protected; no credentials in DTO |
+| POST | `/auth/logout` | Revoke current session | Protected; 204 |
 
 ### 7.2 Deals and data rooms
 
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
-| GET | `/database/status` | Report SQLite status/path | Exposes server path; development-only posture |
 | GET | `/deals` | List nonarchived aggregates | Metadata, parties/current companies, scopes; actual then expected close sort key; unknown dates last |
 | POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Typed codes; optional dates/parties; same-owner company references |
 | POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Owner/ID immutable; metadata preserved; unchanged assignments retain row IDs |
@@ -732,11 +740,11 @@ method allowlist.
 | GET | `/deals/{deal_id}/documents` | List current logical documents | SQLite source |
 | GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
-| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `userId` and `files` |
-| POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Same supported formats; returns 202 `{jobId, filename}` |
+| POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
+| POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Authenticated owner; same supported formats; returns 202 `{jobId, filename}` |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
-| POST | `/documents/search/vector` | Vector search Helix chunks | Client supplies `workspaceId`, vector, limit |
-| POST | `/documents/search/keyword` | Keyword search Helix chunks | Client supplies `workspaceId`, text, limit |
+| POST | `/documents/search/vector` | Vector search Helix chunks | Session determines workspace; vector and limit supplied by client |
+| POST | `/documents/search/keyword` | Keyword search Helix chunks | Session determines workspace; text and limit supplied by client |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
@@ -765,8 +773,8 @@ buffers, and bounded channels for backpressure. Cancellation drops the upstream 
 best effort and is not provider-side erasure.
 
 The persisted contract is rooted at `/assistant/threads`. List/create/load/rename/archive/
-unarchive/delete operations resolve the caller-supplied workspace email to `users.id` and enforce
-that owner in SQLite. This is useful development isolation, not authentication. A thread-scoped
+unarchive/delete operations resolve the server-verified profile email to `users.id` and enforce
+that owner in SQLite. HTTP handlers supply the verified actor identity instead of trusting the caller email. A thread-scoped
 `POST /assistant/threads/{thread_id}/runs` accepts stable user/assistant message IDs, uses the
 assistant message ID as its idempotency key, atomically inserts the prompt and pending assistant
 row with the preceding assistant as the user's parent, reuses the existing user row when retrying
@@ -800,11 +808,7 @@ reference data. Freeform runs receive no implicit deal context; context is not d
 | POST | `/indexes` | Create WM index | WM AI group |
 | GET | `/indexes/{index_id}/status` | Read WM index status | WM AI group |
 | POST | `/graphrag/query` | Query WM GraphRAG | WM AI group |
-| POST | `/summarize` | Summarize a server path | OpenAI and server filesystem |
-| POST | `/summarize/files` | List summarizable files under a server path | Server filesystem |
-| POST | `/summarize/selected` | Summarize selected server paths | OpenAI and server filesystem |
 | POST | `/summarize/upload` | Summarize uploaded files | OpenAI |
-| POST | `/summaries/markdown` | Write Markdown to a server path | Returns 204; development-only trust model |
 
 ### 7.5 Template catalog
 
@@ -881,8 +885,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 10. Startup transactionally adds template tables to a validated schema-9
-product database, preserving existing records. Fresh databases receive the complete schema;
+schema DDL and marker 11. Startup creates a fresh schema or validates/reuses marker 11; older
+profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -936,7 +940,7 @@ flowchart TD
 configuration, bootstrap, bind, serve, and graceful shutdown.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
 and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
-owns all product and template SQLite initialization/validation, the additive 9 → 10 upgrade, and
+owns all product/auth/template SQLite initialization/validation, schema-11 compatibility, and
 the explicitly invoked offline development reset. Bootstrap opens and migrates SQLite on the
 blocking pool, passes clones of the same client to product and template repositories, seeds
 templates, and reconciles their Helix projection before binding routes. Bootstrap passes each
@@ -974,19 +978,20 @@ service, model, table, or product capability.
 
 | Domain ownership | Current maturity |
 | --- | --- |
-| `users` | Implemented development profile creation and lookup; not authentication |
+| `users` | Public user directory and private password hash persistence |
 | `deals` | Implemented typed engagement aggregates, transactional writes, metadata, source selection, extraction, and public context/source readers |
-| `companies` | Implemented per-development-user reusable company directory; roles are owned by deal assignments |
+| `companies` | Implemented authenticated-owner company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
 | `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and Helix search capabilities |
 | `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
 | `research` | Implemented WM AI transport workflows when configured; broader product research remains conceptual |
-| `system`, `dev_support` | Implemented operations and explicitly development-oriented routes |
+| `system` | Public shallow health and static capabilities; development diagnostics/demo routes removed |
 | `user_settings` | Partial client-only preferences; backend scaffold only |
 | `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
 | `assistant::chat` | Implemented SQLite-backed OpenAI text threads when configured, plus the legacy client-context stream contract |
 | `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
-| `identity`, `workspaces`, `memberships` | Conceptual authentication and tenant-policy owners; backend scaffolds only |
+| `identity` | Implemented password verification, sessions and resource-access boundary |
+| `workspaces`, `memberships` | Organization membership policy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
 | `templates::{slide_templates}` | Five stable facade operations dispatch to legacy or embedded execution; embedded mode adds native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared SQLite canonical store, and Helix template/metadata/dual-vector projection |
 | `vaults`, `notebooks`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
@@ -995,8 +1000,8 @@ service, model, table, or product capability.
 ### 8.3 Router and middleware
 
 Each active domain exposes a route builder that binds only its required service state.
-[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, development
-support, user, company, deal, data-room, document-ingestion, document-viewing, document-search, summary,
+[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, identity, company, deal, data-room, document-ingestion, document-viewing,
+document-search, uploaded-summary,
 research, template, and assistant-chat routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
 same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
 layers provide:
@@ -1021,8 +1026,8 @@ The typical error boundary is layered:
 domain repository error -> domain service error -> AppError -> HTTP status + { "error": "..." }
 ```
 
-`AppError` maps validation, not-found, conflict, unavailable, and internal failures to
-400/404/409/503/500. Internal context is logged and replaced with `internal server error` in the
+`AppError` maps validation, unauthenticated, forbidden, not-found, conflict, throttled, unavailable,
+and internal failures to 400/401/403/404/409/429/503/500. Internal context is logged and replaced with `internal server error` in the
 response. Built-in Axum extractor rejections do not all use this envelope, so clients must not yet
 assume one universal error schema.
 
@@ -1048,7 +1053,7 @@ existing blocking/offload patterns.
 
 ## 9. Data architecture
 
-### 9.1 Shared SQLite schema marker 10
+### 9.1 Shared SQLite schema marker 11
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1056,7 +1061,8 @@ schema currently contains:
 | Table | Purpose | Active consumer status |
 | --- | --- | --- |
 | `app_metadata` | Application metadata key/value | No current service/route consumer |
-| `users` | Development user/profile records and API key | Used by user/deal services |
+| `users` | Public profile, unique username/email, private Argon2id hash | Identity and owner-scoped services |
+| `auth_sessions` | Token digests, owner, expiry/revocation | Durable eight-hour bearer sessions |
 | `assistant_threads` | User-owned thread metadata, nullable immutable deal association, archive state, and recency | Used by Assistant thread list |
 | `assistant_messages` | Ordered normalized user/assistant messages and terminal run state | Used by Assistant history and canonical context |
 | `reminders` | Reminder records | No current service/route consumer |
@@ -1076,7 +1082,7 @@ schema currently contains:
 
 Key invariants include:
 
-- deals and companies reference an existing development user with delete restriction
+- deals and companies reference an existing authenticated user with delete restriction
 - atomic deal create/update checks company ownership inside the transaction; cross-owner assignments fail
 - company records have no fixed target/buyer/sponsor flags; one company can have several roles
 - active/completed platform, add-on, or strategic acquisitions require exactly one target at the service boundary;
@@ -1094,15 +1100,12 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 10` is the shared compatibility marker. Startup inspects and changes
-schema within one immediate transaction. Empty marker-0 databases receive product and template
-tables directly. Validated schema-9 databases receive only additive template DDL; all existing
-users, companies, deals, chats, files, versions, blobs, reminders, and application metadata remain
-intact. Validation, DDL, foreign-key checks, and marker advancement commit together; any failure
-rolls back. Marker-10 layouts are validated and reused; missing tables are not silently recreated.
-Other layouts/versions (including standalone template marker 5) fail without deletion. No older
-upgrade/backfill ladder is provided. See [migration recovery](slide-templates-migration.md) for
-backup and rollback requirements.
+`PRAGMA user_version = 11` is the shared compatibility marker. Empty marker-0 databases receive
+all product/auth/template tables in one immediate transaction. Marker-11 layouts are validated
+and reused; missing tables are not silently recreated. All older/newer layouts fail without
+deletion and require deliberate environment selection and the offline development reset. There
+is no profile/password backfill. Foreign-key checks and marker advancement commit together.
+See [authentication](authentication.md) and [migration recovery](slide-templates-migration.md).
 
 All aggregate reads use one transaction snapshot: deals `LEFT JOIN` their optional metadata, then
 bounded batches fetch parties joined to companies and scopes separately. These reads run sequentially on the same transaction connection
@@ -1479,10 +1482,9 @@ from the startup-loaded server-side Markdown prompt catalog when the request omi
 Document ingestion injects `OPENAI_IMAGE_DESCRIPTION_MODEL` into the image parser; image uploads
 therefore require the optional OpenAI capability just as the existing embedding stage does.
 
-The “OpenAI API key” collected during profile creation is a separate, development-era user field.
-It is stored and returned by the user API but never read when services are assembled. All current
-AI use cases share the server-side `OpenAiClient` built only from `OPENAI_API_KEY`; creating a user
-profile does not configure or select an AI credential.
+Per-user provider API-key collection/storage was removed with password authentication. All
+current AI use cases share the server-side `OpenAiClient` built from `OPENAI_API_KEY`;
+registering an account does not configure or select an AI credential.
 
 ### 11.5 Optional WM AI capability group
 
@@ -1538,15 +1540,15 @@ All fields are required if any one is present:
 
 The following are current facts, not merely future enhancements:
 
-- No inbound authentication, authorization, or tenant enforcement exists.
-- Routes trust caller-supplied email, `userId`, `workspaceId`, deal ID, and paths.
-- User API keys are stored in plaintext SQLite and returned by user APIs, but are not used by AI
-  services; those use the server's `OPENAI_API_KEY`.
-- `/database/status` exposes the SQLite path.
+- Username/password authentication and per-user resource checks exist; organization tenancy,
+  verification, recovery and MFA do not. Open registration and shared template mutation are
+  development choices. Tokens remain in client memory; a reload requires login.
+- User API-key collection/storage and public profile lookup were removed; AI still uses only
+  server provider keys. Database diagnostics and arbitrary server-path summary routes are removed.
 - Data-room responses can expose absolute server roots.
-- Summary endpoints can enumerate/read/write caller-selected server filesystem paths.
+- Uploaded-file summary remains available behind authentication; server-path summary access is disabled.
 - Server HTTP is plaintext unless an external deployment layer terminates TLS.
-- No rate limiting or abuse protection exists.
+- Auth endpoints have bounded process-local admission limits; distributed abuse protection and provider quotas remain absent.
 - Health and capability responses do not verify live dependencies.
 - Tauri's proxy path restriction is not product authorization.
 - Diligence Studio has no authentication or tenant authorization. `X-App-Id` selects an isolated
@@ -1735,17 +1737,17 @@ configuration. Never use `clear_helix` as verification.
 
 | Area | Current condition | Consequence |
 | --- | --- | --- |
-| Identity | Profile lookup/creation only; no auth middleware | All reachable routes are effectively public |
+| Identity | Password authentication, durable revocable sessions, per-user checks | No organization tenancy, recovery, MFA or persistent client login |
 | Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
-| User secrets | Plaintext per-user `api_key`, returned but unused by AI services | Sensitive development-only field; server AI uses `OPENAI_API_KEY` |
+| User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer tokens are memory-only; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared SQLite; additive 9 → 10 migration and explicit offline development reset | No upgrade ladder before schema 9 or automatic cross-catalog transfer |
+| Persistence | Shared schema 11 SQLite with explicit offline development reset | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
 | Template catalog | Embedded mode uses the shared durable product SQLite database; the legacy Node catalog remains in memory | Embedded imports survive restart and startup reconciles Helix from canonical SQLite; legacy imports are lost on restart; changing backend does not transfer imports |
-| Assistant chat | SQLite transcript with caller-supplied email ownership; no authentication, stale-stream recovery, rate limits, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
+| Assistant chat | SQLite transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
 | npm dependencies | The 2026-10-19 [dependency check](npm-dependency-health.md) installed compatible fixes; frontend test/CLI tooling and Studio's PowerPoint image dependency retain audit findings | Passing builds/tests do not imply a clean security audit; broader dependency changes remain necessary |

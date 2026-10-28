@@ -177,7 +177,6 @@ describe("createModelAdapter", () => {
       prompt: "Current",
       requestId: "a2",
       threadId: "thread-1",
-      userEmail: "analyst@example.com",
       userMessageId: "u2",
     }, expect.any(Object));
   });

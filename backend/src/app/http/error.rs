@@ -14,6 +14,12 @@ struct ErrorBody {
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("invalid credentials or expired session")]
+    Unauthorized,
+    #[error("user ID does not match session")]
+    Forbidden,
+    #[error("too many authentication attempts; retry later")]
+    RateLimited,
     #[error("{0}")]
     BadRequest(String),
     #[error("{0}")]
@@ -44,6 +50,8 @@ impl From<crate::shared::error::ServiceError> for AppError {
     fn from(error: crate::shared::error::ServiceError) -> Self {
         use crate::shared::error::ServiceError;
         match error {
+            ServiceError::Unauthorized => Self::Unauthorized,
+            ServiceError::RateLimited => Self::RateLimited,
             ServiceError::Validation(message) => Self::BadRequest(message),
             ServiceError::NotFound(message) => Self::NotFound(message),
             ServiceError::Conflict(message) => Self::Conflict(message),
@@ -55,7 +63,21 @@ impl From<crate::shared::error::ServiceError> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let unauthorized = matches!(self, Self::Unauthorized);
+        let limited = matches!(self, Self::RateLimited);
         let (status, message) = match self {
+            Self::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "invalid credentials or expired session".into(),
+            ),
+            Self::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "user ID does not match session".into(),
+            ),
+            Self::RateLimited => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many authentication attempts; retry later".into(),
+            ),
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::Conflict(message) => (StatusCode::CONFLICT, message),
@@ -69,7 +91,18 @@ impl IntoResponse for AppError {
             }
         };
 
-        (status, Json(ErrorBody { error: message })).into_response()
+        let mut response = (status, Json(ErrorBody { error: message })).into_response();
+        if unauthorized {
+            response
+                .headers_mut()
+                .insert("www-authenticate", "Bearer".parse().unwrap());
+        }
+        if limited {
+            response
+                .headers_mut()
+                .insert("retry-after", "60".parse().unwrap());
+        }
+        response
     }
 }
 

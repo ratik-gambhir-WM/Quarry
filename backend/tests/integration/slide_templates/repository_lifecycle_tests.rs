@@ -225,7 +225,7 @@ fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors() {
         let client = SqliteClient::open(&path).unwrap();
         migrations::migrate(&client).unwrap();
         client.with_connection(|connection| {
-            connection.execute("INSERT INTO users (first_name, last_name, email, api_key, role) VALUES (?1, ?2, ?3, ?4, ?5)",
+            connection.execute("INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
                 ["Test", "Owner", "coexist@example.test", "fixture-key", "Analyst"])?;
             Ok(())
         }).unwrap();

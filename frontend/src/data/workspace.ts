@@ -5,13 +5,13 @@ export type WorkspaceLocationState = {
 };
 
 export type WorkspaceAccountUser = {
-  apiKey: string;
+  username: string;
   createdAt: string;
   email: string;
   firstName: string;
   id: number;
   lastName: string;
-  role: string;
+  jobTitle: string | null;
   updatedAt: string;
 };
 

@@ -176,6 +176,8 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "DocumentGraphReader::new(",
         "DocumentGraphWriter::new(",
         "DocumentGraphSearch::new(",
+        "IdentityRepository::new(",
+        "ResourceAccess::new(",
     ];
 
     for (path, source) in rust_sources("src") {
@@ -225,6 +227,7 @@ fn cross_domain_imports_do_not_reach_private_layers() {
         "system",
         "users",
         "templates",
+        "identity",
     ];
     for (path, source) in rust_sources("src/domains") {
         let owner = domain_names

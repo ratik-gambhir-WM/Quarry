@@ -96,7 +96,7 @@ function CompanyResults({ userEmail, query, onAdd, onEdit, onRetry, disabled }: 
   useEffect(() => {
     let active = true;
     const request = ++requestRef.current;
-    void runtime.api.listCompanies(userEmail, { query, limit: 30, offset }).then((page) => {
+    void runtime.api.listCompanies({ query, limit: 30, offset }).then((page) => {
       if (active && request === requestRef.current) setResult({ page });
     }).catch((error: unknown) => {
       if (active && request === requestRef.current) setResult({ error: error instanceof Error ? error.message : String(error) });

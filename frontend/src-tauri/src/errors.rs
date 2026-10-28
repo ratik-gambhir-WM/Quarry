@@ -16,6 +16,8 @@ pub enum ErrorCode {
 #[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub code: ErrorCode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
     pub message: String,
     pub operation_id: String,
     pub retryable: bool,
@@ -48,6 +50,7 @@ impl AppError {
         let sequence = NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             code,
+            status: None,
             message,
             operation_id: format!("operation-{sequence}"),
             retryable,

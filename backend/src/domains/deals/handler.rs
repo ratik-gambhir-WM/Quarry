@@ -1,3 +1,5 @@
+use crate::domains::identity::model::AuthenticatedUser;
+use axum::Extension;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -19,12 +21,19 @@ pub(super) struct DealsHttpState {
 }
 
 pub(super) async fn list_deals_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
 ) -> AppResult<Json<Vec<DealWithMetadata>>> {
-    state.deals.list().await.map(Json).map_err(AppError::from)
+    state
+        .deals
+        .list_owned(actor.user.id)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub(super) async fn get_deal_handler(
+    Extension(_actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<DealWithMetadata>> {
@@ -38,9 +47,11 @@ pub(super) async fn get_deal_handler(
 }
 
 pub(super) async fn create_deal_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
-    Json(input): Json<SaveDealInput>,
+    Json(mut input): Json<SaveDealInput>,
 ) -> crate::app::http::error::AppResult<(StatusCode, Json<SaveDealResponse>)> {
+    input.user_email = actor.user.email;
     validate_deal_input(&input)?;
     state
         .deals
@@ -133,6 +144,7 @@ fn validate_fields(fields: &DealFields) -> AppResult<()> {
     Ok(())
 }
 pub(super) async fn update_deal_handler(
+    Extension(_actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(id): Path<String>,
     Json(fields): Json<DealFields>,
@@ -196,6 +208,7 @@ fn trim_optional(value: Option<&str>) -> Option<&str> {
 }
 
 pub(super) async fn archive_deal_handler(
+    Extension(_actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<Deal>> {

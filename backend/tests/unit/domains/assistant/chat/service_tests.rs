@@ -119,7 +119,7 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
             first_name: "Test".into(),
             last_name: "Owner".into(),
             email: "owner@example.com".into(),
-            api_key: "unused".into(),
+
             role: "Analyst".into(),
         })
         .await

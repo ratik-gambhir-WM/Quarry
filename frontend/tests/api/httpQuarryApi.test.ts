@@ -7,6 +7,21 @@ describe("httpQuarryApi", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps summaries upload-only through the versioned multipart route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ summary: "Summary" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["Report"], "report.txt", { type: "text/plain" });
+
+    await expect(httpQuarryApi.summarizeUpload([file])).resolves.toBe("Summary");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/summarize/upload");
+    expect(init.method).toBe("POST");
+    expect(init.body.getAll("files")).toEqual([file]);
+    for (const method of ["listSummaryFiles", "summarizePath", "summarizeSelected"]) {
+      expect(httpQuarryApi).not.toHaveProperty(method);
+    }
+  });
+
   it("uses the versioned API contract", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("[]", {
@@ -18,7 +33,7 @@ describe("httpQuarryApi", () => {
 
     await httpQuarryApi.listDeals();
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals", expect.objectContaining({ redirect: "error" }));
   });
 
   it("encodes and preserves template preview pages", async () => {
@@ -44,7 +59,7 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(httpQuarryApi.listTemplatePreviews(1)).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/previews?page=1", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/previews?page=1", expect.objectContaining({ redirect: "error" }));
   });
 
   it("deletes an encoded template through the versioned API", async () => {
@@ -54,6 +69,7 @@ describe("httpQuarryApi", () => {
     await expect(httpQuarryApi.deleteTemplate("template/one")).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", {
       method: "DELETE",
+      headers: expect.any(Headers), redirect: "error", signal: expect.any(AbortSignal),
     });
   });
 
@@ -61,11 +77,11 @@ describe("httpQuarryApi", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(httpQuarryApi.deleteAssistantThread("thread/one", "analyst@example.com"))
+    await expect(httpQuarryApi.deleteAssistantThread("thread/one"))
       .resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/assistant/threads/thread%2Fone?userEmail=analyst%40example.com",
-      { method: "DELETE" },
+      "/api/v1/assistant/threads/thread%2Fone",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 
@@ -75,7 +91,7 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(httpQuarryApi.getTemplate("template/one")).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", expect.objectContaining({ redirect: "error" }));
   });
 
   it("exports the current presentation as a validated PowerPoint download", async () => {
@@ -99,8 +115,10 @@ describe("httpQuarryApi", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/export", {
       body: JSON.stringify(document),
-      headers: { "Content-Type": "application/json" },
+      headers: expect.any(Headers),
       method: "POST",
+      redirect: "error",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -146,7 +164,7 @@ describe("httpQuarryApi", () => {
         expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
       );
       const request = fetchMock.mock.calls[0][1] as RequestInit;
-      expect(request.headers).toBeUndefined();
+      expect(new Headers(request.headers).has("Content-Type")).toBe(false);
       const form = request.body as FormData;
       expect(form.getAll("files")).toEqual([file]);
     },
@@ -198,14 +216,14 @@ describe("httpQuarryApi", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await httpQuarryApi.processDocuments("DEAL / 1", " analyst@example.com ", []);
+    await httpQuarryApi.processDocuments("DEAL / 1", []);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/deals/DEAL%20%2F%201/documents/process",
       expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
     );
     const request = fetchMock.mock.calls[0][1] as RequestInit;
-    expect((request.body as FormData).get("userId")).toBe("analyst@example.com");
+    expect((request.body as FormData).get("userId")).toBeNull();
   });
 
   it("preserves XLSX and PPTX names and bytes through the process-file form", async () => {
@@ -219,7 +237,7 @@ describe("httpQuarryApi", () => {
     ];
 
     for (const file of files) {
-      await httpQuarryApi.startProcessFile("DEAL / 1", "analyst@example.com", file);
+      await httpQuarryApi.startProcessFile("DEAL / 1", file);
     }
 
     for (const [index, file] of files.entries()) {
@@ -264,18 +282,19 @@ describe("httpQuarryApi", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "/api/v1/deals/DEAL%20%2F%201/documents",
-      undefined,
+      expect.objectContaining({ redirect: "error" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/v1/deals/DEAL%20%2F%201/documents/file%20%2F%201/pdf",
+      expect.objectContaining({ redirect: "error" }),
     );
     expect(pdf.mimeType).toBe("application/pdf");
     expect(Array.from(pdf.bytes)).toEqual(Array.from(pdfBytes));
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "/api/v1/deals/DEAL%20%2F%201/documents/file%20%2F%201/text",
-      undefined,
+      expect.objectContaining({ redirect: "error" }),
     );
     expect(rawText.text).toBe("Raw report text");
   });
@@ -362,16 +381,16 @@ it("maps company lookup, complete deal replacement, and nullable chat scopes thr
   vi.stubGlobal("fetch", fetchMock);
   try {
     const input = testDealInput();
-    await httpQuarryApi.createCompany({ userEmail: input.userEmail, name: "Same Name", website: null, industry: null, description: null });
-    await httpQuarryApi.listCompanies(input.userEmail, { query: "A & B", limit: 30, offset: 30 });
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/companies?userEmail=analyst%40example.com&query=A+%26+B&limit=30&offset=30", undefined);
+    await httpQuarryApi.createCompany({ name: "Same Name", website: null, industry: null, description: null });
+    await httpQuarryApi.listCompanies({ query: "A & B", limit: 30, offset: 30 });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/companies?query=A+%26+B&limit=30&offset=30", expect.objectContaining({ redirect: "error" }));
     await httpQuarryApi.updateDeal("DEAL/A", { ...input, parties: [], scopes: [] });
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
-    await httpQuarryApi.createAssistantThread(input.userEmail, "linked", "DEAL/A");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ userEmail: input.userEmail, threadId: "linked", dealId: "DEAL/A" }) }));
-    await httpQuarryApi.listAssistantThreads(input.userEmail, { scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads?userEmail=analyst%40example.com&before=cursor%7C1&scope=deal&dealId=DEAL%2FA", undefined);
-    await httpQuarryApi.createAssistantThread(input.userEmail, undefined, null);
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ userEmail: input.userEmail, dealId: null }) }));
+    await httpQuarryApi.createAssistantThread("linked", "DEAL/A");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ threadId: "linked", dealId: "DEAL/A" }) }));
+    await httpQuarryApi.listAssistantThreads({ scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA", expect.objectContaining({ redirect: "error" }));
+    await httpQuarryApi.createAssistantThread(undefined, null);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ dealId: null }) }));
   } finally { vi.unstubAllGlobals(); }
 });

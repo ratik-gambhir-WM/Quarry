@@ -22,6 +22,7 @@ pub use super::model::DealFields;
 #[serde(rename_all = "camelCase")]
 pub struct SaveDealInput {
     pub deal_id: String,
+    #[serde(skip_deserializing)]
     pub user_email: String,
     #[serde(flatten)]
     pub fields: DealFields,
@@ -109,8 +110,8 @@ impl DealService {
         }
     }
 
-    pub async fn list(&self) -> ServiceResult<Vec<DealWithMetadata>> {
-        self.deals.list().await.map_err(Into::into)
+    pub async fn list_owned(&self, owner: i64) -> ServiceResult<Vec<DealWithMetadata>> {
+        self.deals.list_owned(owner).await.map_err(Into::into)
     }
 
     pub async fn get(&self, deal_id: &str) -> ServiceResult<DealWithMetadata> {

@@ -180,9 +180,16 @@ impl DealRepository {
             .await
             .map_err(storage)?
     }
+    pub async fn list_owned(&self, owner: i64) -> Result<Vec<DealWithMetadata>, RepositoryError> {
+        self.sqlite
+            .transaction_async(move |tx| load(tx, None, Some(owner)))
+            .await
+            .map_err(storage)
+    }
+    #[cfg(test)]
     pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
         self.sqlite
-            .transaction_async(|tx| load(tx, None))
+            .transaction_async(|tx| load(tx, None, None))
             .await
             .map_err(storage)
     }
@@ -364,12 +371,13 @@ fn load_one(
     tx: &SqliteTransaction<'_>,
     id: &str,
 ) -> Result<Option<DealWithMetadata>, SqliteClientError> {
-    Ok(load(tx, Some(id))?.pop())
+    Ok(load(tx, Some(id), None)?.pop())
 }
 // Read each collection in bounded batches under one snapshot, without per-deal queries.
 fn load(
     tx: &SqliteTransaction<'_>,
     id: Option<&str>,
+    owner: Option<i64>,
 ) -> Result<Vec<DealWithMetadata>, SqliteClientError> {
     let mut builder = SqlBuilder::select("deals")
         .columns(DEAL_COLUMNS.map(|column| format!("deals.{column}")))
@@ -384,6 +392,9 @@ fn load(
     } else {
         builder.and_where(Condition::is_null("deals.archived_at"))
     };
+    if let Some(owner) = owner {
+        builder = builder.and_where(Condition::equal("deals.user_id", owner));
+    }
     let mut deals = tx.read_with(builder.build(), |row| {
         // key_questions_json is NOT NULL on a metadata row, but nullable after the LEFT JOIN.
         let metadata = if row

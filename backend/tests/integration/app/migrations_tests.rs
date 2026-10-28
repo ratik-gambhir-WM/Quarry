@@ -3,8 +3,8 @@ use super::*;
 fn seed_deal(connection: &Connection, deal_id: &str, status: &str) {
     connection
         .execute(
-            "INSERT INTO users (first_name, last_name, email, api_key, role) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params!["Avery", "Analyst", format!("{deal_id}@example.com"), "key", "Analyst"],
+            "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["Avery", "Analyst", format!("{deal_id}@example.com"), deal_id, "unusable-test-hash"],
         )
         .unwrap();
     let user_id = connection.last_insert_rowid();
@@ -438,24 +438,6 @@ fn schema_nine() -> Connection {
     connection
 }
 
-fn seed_upgrade_records(connection: &Connection) {
-    seed_deal(connection, "upgrade-deal", "active");
-    insert_file_aggregate(
-        connection,
-        "upgrade-deal",
-        "upgrade-file",
-        "upgrade-version",
-    );
-    connection.execute_batch(r#"INSERT INTO companies (company_id, user_id, name, created_at, updated_at) VALUES ('company', 1, 'Upgrade Company', 'now', 'now');
-        INSERT INTO deal_parties VALUES ('party', 'upgrade-deal', 'company', 'target', NULL);
-        INSERT INTO deal_scopes VALUES ('upgrade-deal', 'product_architecture');
-        INSERT INTO deal_metadata (deal_id, key_questions_json) VALUES ('upgrade-deal', '["Keep this question"]');
-        INSERT INTO assistant_threads (thread_id, user_id, deal_id, title) VALUES ('thread', 1, 'upgrade-deal', 'Keep this thread');
-        INSERT INTO assistant_messages (message_id, thread_id, sequence, role, content, status) VALUES ('message', 'thread', 0, 'user', 'Keep this message', 'completed');
-        INSERT INTO reminders (reminder, notes, date, link) VALUES ('Keep reminder', 'notes', 'now', 'link');
-        INSERT INTO app_metadata VALUES ('retained-key', 'retained-value');"#).unwrap();
-}
-
 fn product_snapshot(connection: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
     // All columns, including timestamps and binary bytes, must remain identical.
     [
@@ -493,34 +475,30 @@ fn product_snapshot(connection: &Connection) -> Vec<Vec<Vec<rusqlite::types::Val
 }
 
 #[test]
-fn schema_nine_upgrade_is_additive_and_retains_every_product_record() {
+fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
     let mut connection = schema_nine();
-    seed_upgrade_records(&connection);
+    connection.execute_batch("INSERT INTO users (first_name,last_name,email,api_key,role) VALUES ('Keep','Profile','retained@example.com','legacy-unused-key','Analyst'); INSERT INTO app_metadata VALUES ('retained','value');").unwrap();
     let before = product_snapshot(&connection);
-    run_migrations(&mut connection).unwrap();
+    assert!(matches!(
+        run_migrations(&mut connection),
+        Err(MigrationError::UnsupportedSchemaVersion {
+            found: 9,
+            supported: 11
+        })
+    ));
     assert_eq!(product_snapshot(&connection), before);
     assert_eq!(
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        10
+        9
     );
-    connection
-        .execute(
-            "INSERT INTO templates VALUES (?1, ?2)",
-            ["coexisting", "{}"],
-        )
-        .unwrap();
-    run_migrations(&mut connection).unwrap();
-    assert_eq!(table_count(&connection, "templates"), 1);
-    assert_eq!(product_snapshot(&connection), before);
-    validate_template_schema(&connection).unwrap();
 }
 
 #[test]
 fn failed_schema_nine_upgrade_rolls_back_partial_ddl_and_marker() {
     let mut connection = schema_nine();
-    seed_upgrade_records(&connection);
+
     // This collision occurs after several new tables have already been created.
     connection.execute_batch("CREATE TABLE template_previews (value TEXT); INSERT INTO template_previews VALUES ('retained');").unwrap();
     let before = product_snapshot(&connection);
@@ -555,7 +533,7 @@ fn failed_schema_nine_upgrade_rolls_back_partial_ddl_and_marker() {
 fn current_schema_with_missing_template_table_is_rejected_without_recreation() {
     let mut connection = Connection::open_in_memory().unwrap();
     run_migrations(&mut connection).unwrap();
-    seed_upgrade_records(&connection);
+    seed_deal(&connection, "DEAL-UPGRADE", "active");
     let before = product_snapshot(&connection);
     connection
         .execute("DROP TABLE template_assets", [])

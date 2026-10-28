@@ -2,7 +2,7 @@ import type { DealResource, WorkspaceDeal, WorkspaceLocationState } from "./work
 
 import { codeLabel, type DealFields, type DealParty } from "./dealModel";
 export type SaveDealInput = DealFields & {
-  dealId: string; userEmail: string; localPath: string | null; sharepointLink: string | null;
+  dealId: string; localPath: string | null; sharepointLink: string | null;
 };
 
 export type DealExtractionSourceFile = {

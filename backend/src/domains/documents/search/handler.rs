@@ -1,3 +1,5 @@
+use crate::domains::identity::model::AuthenticatedUser;
+use axum::Extension;
 use axum::{extract::State, Json};
 
 use crate::{
@@ -18,9 +20,11 @@ pub(super) struct DocumentSearchHttpState {
 }
 
 pub(super) async fn vector_search_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DocumentSearchHttpState>,
-    Json(search): Json<FileChunkVectorSearch>,
+    Json(mut search): Json<FileChunkVectorSearch>,
 ) -> AppResult<Json<Vec<VectorFileChunkHit>>> {
+    search.workspace_id = actor.user.id.to_string();
     validate_common(&search.workspace_id, search.limit)?;
     if search.query_embedding.is_empty() {
         return Err(AppError::bad_request("queryEmbedding cannot be empty"));
@@ -36,23 +40,25 @@ pub(super) async fn vector_search_handler(
     }
     state
         .document_search
-        .vector(search)
+        .vector_owned(search, actor.user.id)
         .await
         .map(Json)
         .map_err(AppError::from)
 }
 
 pub(super) async fn keyword_search_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DocumentSearchHttpState>,
-    Json(search): Json<FileChunkKeywordSearch>,
+    Json(mut search): Json<FileChunkKeywordSearch>,
 ) -> AppResult<Json<Vec<KeywordFileChunkHit>>> {
+    search.workspace_id = actor.user.id.to_string();
     validate_common(&search.workspace_id, search.limit)?;
     if search.query_text.trim().is_empty() {
         return Err(AppError::bad_request("queryText cannot be empty"));
     }
     state
         .document_search
-        .keyword(search)
+        .keyword_owned(search, actor.user.id)
         .await
         .map(Json)
         .map_err(AppError::from)

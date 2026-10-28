@@ -178,7 +178,7 @@ describe("DataRoomQuickActions", () => {
     await user.click(await screen.findByRole("menuitem", { name: thread.title }));
 
     expect(await screen.findByText("The largest customer is the primary concentration risk.")).not.toBeNull();
-    expect(api.getAssistantThread).toHaveBeenCalledWith(thread.threadId, "analyst@example.com");
+    expect(api.getAssistantThread).toHaveBeenCalledWith(thread.threadId);
 
     const composer = screen.getByRole("textbox", { name: "Message input" });
     const composerRoot = composer.closest('[data-slot="query-composer"]');

@@ -17,10 +17,12 @@ pub struct StartedDocumentJob {
     pub filename: String,
 }
 
+type OwnedJobs = HashMap<String, (String, watch::Sender<DocumentJobEvent>)>;
+
 #[derive(Clone)]
 pub struct DocumentJobService {
     ingestion: Arc<DocumentIngestionService>,
-    jobs: Arc<RwLock<HashMap<String, watch::Sender<DocumentJobEvent>>>>,
+    jobs: Arc<RwLock<OwnedJobs>>,
     completed_retention: Duration,
 }
 
@@ -45,7 +47,10 @@ impl DocumentJobService {
             job_id.clone(),
             filename.clone(),
         ));
-        self.jobs.write().await.insert(job_id.clone(), sender);
+        self.jobs
+            .write()
+            .await
+            .insert(job_id.clone(), (user_id.clone(), sender));
 
         let service = self.clone();
         let worker_job_id = job_id.clone();
@@ -87,7 +92,7 @@ impl DocumentJobService {
                     error.to_string(),
                 ),
             };
-            if let Some(sender) = service.jobs.read().await.get(&worker_job_id) {
+            if let Some((_, sender)) = service.jobs.read().await.get(&worker_job_id) {
                 sender.send_replace(event);
             }
             tokio::time::sleep(service.completed_retention).await;
@@ -95,6 +100,20 @@ impl DocumentJobService {
         });
 
         Ok(StartedDocumentJob { job_id, filename })
+    }
+
+    pub async fn subscribe_owned(
+        &self,
+        job_id: &str,
+        owner: &str,
+    ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
+        self.jobs
+            .read()
+            .await
+            .get(job_id)
+            .filter(|(id, _)| id == owner)
+            .map(|(_, sender)| sender.subscribe())
+            .ok_or_else(|| ServiceError::not_found("document job not found"))
     }
 
     pub async fn subscribe(
@@ -105,7 +124,7 @@ impl DocumentJobService {
             .read()
             .await
             .get(job_id)
-            .map(watch::Sender::subscribe)
+            .map(|(_, sender)| sender.subscribe())
             .ok_or_else(|| {
                 ServiceError::not_found(format!("document job `{job_id}` was not found"))
             })

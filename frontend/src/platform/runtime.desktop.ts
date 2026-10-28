@@ -1,3 +1,4 @@
+import { credentials, sessionStore } from "../auth/sessionStore";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -18,6 +19,22 @@ import type {
   ReadDealSourceFilesInput,
 } from "../data/dealExtraction";
 import { beginIpcRequest, finishIpcRequest } from "../lib/activityLog";
+
+async function invokeApi<TResult>(command: string, args?: Record<string, unknown>) {
+  if (!command.startsWith("quarry_api_") && command !== "send_query_stream" && command !== "subscribe_document_job") return invoke<TResult>(command, args);
+  const snapshot = credentials();
+  const path = typeof args?.path === "string" ? args.path : "";
+  const publicRequest = /\/auth\/(login|register)$/.test(path);
+  try {
+    const result = await invoke<TResult>(command, { ...args, auth: publicRequest ? null : snapshot.auth });
+    if (sessionStore.getSnapshot().generation !== snapshot.generation) throw new DOMException("Session changed", "AbortError");
+    return result;
+  }
+  catch (error) {
+    if (typeof error === "object" && error && "status" in error && error.status === 401 && !publicRequest) sessionStore.clearIfCurrent(snapshot.generation, "Your session expired. Sign in again.");
+    throw error;
+  }
+}
 
 async function saveFile(input: SaveFileInput) {
   const activityId = beginIpcRequest("save_text_file", {
@@ -82,10 +99,10 @@ async function readDealSourceFiles(input: ReadDealSourceFilesInput) {
 }
 
 async function invokeWithActivity<TResult>(command: string, args?: Record<string, unknown>) {
-  const activityId = beginIpcRequest(command, args);
+  const activityId = beginIpcRequest(command, command.startsWith("quarry_api_") ? { operation: command } : args);
   const startedAt = performance.now();
   try {
-    const result = await invoke<TResult>(command, args);
+    const result = await invokeApi<TResult>(command, args);
     finishIpcRequest(activityId, {
       durationMs: performance.now() - startedAt,
       status: "success",
@@ -106,7 +123,7 @@ async function invokePowerPointExport(path: string, body: unknown) {
   const activityId = beginIpcRequest("quarry_api_post_powerpoint", { path });
   const startedAt = performance.now();
   try {
-    const result = await invoke<PowerPointExport>("quarry_api_post_powerpoint", { body, path });
+    const result = await invokeApi<PowerPointExport>("quarry_api_post_powerpoint", { body, path });
     finishIpcRequest(activityId, {
       durationMs: performance.now() - startedAt,
       status: "success",
@@ -131,9 +148,14 @@ const tauriQuarryApi = createTauriQuarryApi({
     invokeWithActivity<TResult>("quarry_api_post", { body, path }),
   postPowerPoint: (path: string, body: unknown) =>
     invokePowerPointExport(path, body),
-  postMultipart: <TResult>(request: TauriMultipartRequest) =>
-    invokeWithActivity<TResult>("quarry_api_post_multipart", { request }),
+  postMultipart: <TResult>(request: TauriMultipartRequest) => {
+    const { sessionGeneration, ...payload } = request;
+    if (sessionGeneration !== undefined && sessionGeneration !== sessionStore.getSnapshot().generation) return Promise.reject(new DOMException("Session changed", "AbortError"));
+    return invokeWithActivity<TResult>("quarry_api_post_multipart", { request: payload });
+  },
   async startQuery(request: TauriQueryRequest, onPayload: (payload: TauriQueryPayload) => void) {
+    if (request.sessionGeneration !== undefined && request.sessionGeneration !== sessionStore.getSnapshot().generation) throw new DOMException("Session changed", "AbortError");
+    const { sessionGeneration: _generation, ...payloadRequest } = request;
     const subscriptionId = crypto.randomUUID();
     const activityId = beginIpcRequest("send_query_stream", {
       contextMessageCount: request.context?.length ?? 0,
@@ -146,11 +168,16 @@ const tauriQuarryApi = createTauriQuarryApi({
     });
     const startedAt = performance.now();
     let stopped = false;
+    const snapshot = credentials();
     const unlisten = await listen<TauriQueryPayload>("quarry-query-event", ({ payload }) => {
-      if (!stopped && payload.subscriptionId === subscriptionId) onPayload(payload);
+      if (!stopped && payload.subscriptionId === subscriptionId) {
+        if (payload.kind === "connectionError" && payload.status === 401) sessionStore.clearIfCurrent(snapshot.generation, "Your session expired. Sign in again.");
+        onPayload(payload);
+      }
     });
     try {
-      await invoke<void>("send_query_stream", { request, subscriptionId });
+      if (snapshot.generation !== sessionStore.getSnapshot().generation) throw new DOMException("Session changed", "AbortError");
+      await invokeApi<void>("send_query_stream", { request: payloadRequest, subscriptionId });
       finishIpcRequest(activityId, {
         durationMs: performance.now() - startedAt,
         status: "success",
@@ -165,12 +192,17 @@ const tauriQuarryApi = createTauriQuarryApi({
       });
       throw new Error(message);
     }
-    return () => {
+    const controller = new AbortController();
+    const untrack = sessionStore.track(controller);
+    const stop = () => {
       if (stopped) return;
       stopped = true;
+      untrack();
       unlisten();
-      void invoke<void>("cancel_query_stream", { subscriptionId });
+      void invoke<void>("cancel_query_stream", { subscriptionId }).catch(() => undefined);
     };
+    controller.signal.addEventListener("abort", stop, { once: true });
+    return stop;
   },
   async subscribeJob(jobId, onEvent, onError) {
     const subscriptionId = crypto.randomUUID();
@@ -184,7 +216,11 @@ const tauriQuarryApi = createTauriQuarryApi({
     void invokeWithActivity<void>("subscribe_document_job", { jobId, subscriptionId }).catch(
       onError,
     );
-    return unlisten;
+    const controller = new AbortController();
+    const untrack = sessionStore.track(controller);
+    const stop = () => { untrack(); unlisten(); void invoke<void>("cancel_query_stream", { subscriptionId }).catch(() => undefined); };
+    controller.signal.addEventListener("abort", stop, { once: true });
+    return stop;
   },
 });
 

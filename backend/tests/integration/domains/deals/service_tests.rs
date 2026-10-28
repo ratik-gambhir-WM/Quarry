@@ -45,7 +45,7 @@ async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
             first_name: "Avery".to_string(),
             last_name: "Analyst".to_string(),
             email: "analyst@example.com".to_string(),
-            api_key: "test-key".to_string(),
+
             role: "Analyst".to_string(),
         })
         .await
@@ -85,7 +85,7 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
             first_name: "Avery".to_string(),
             last_name: "Analyst".to_string(),
             email: "analyst@example.com".to_string(),
-            api_key: "test-key".to_string(),
+
             role: "Analyst".to_string(),
         })
         .await

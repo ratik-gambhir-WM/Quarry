@@ -1,3 +1,5 @@
+use crate::domains::identity::model::AuthenticatedUser;
+use axum::Extension;
 use std::{convert::Infallible, path::Path as FilePath, time::Duration};
 
 use axum::{
@@ -41,12 +43,14 @@ It works but is pretty slow right now, but I'm going to come back to this
 */
 
 pub(super) async fn process_documents_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DocumentIngestionHttpState>,
     Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<Json<ProcessDocumentsResponse>> {
     let deal_id = normalize_required_request_value(deal_id, "dealId")?;
-    let (user_id, files) = collect_document_upload(multipart).await?;
+    let (_, files) = collect_document_upload(multipart).await?;
+    let user_id = actor.user.id.to_string();
     state
         .document_ingestion
         .process(&deal_id, &user_id, files)
@@ -56,12 +60,14 @@ pub(super) async fn process_documents_handler(
 }
 
 pub(super) async fn start_process_file_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DocumentIngestionHttpState>,
     Path(deal_id): Path<String>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<ProcessFileJobResponse>)> {
     let deal_id = normalize_required_request_value(deal_id, "dealId")?;
-    let (user_id, mut files) = collect_document_upload(multipart).await?;
+    let (_, mut files) = collect_document_upload(multipart).await?;
+    let user_id = actor.user.id.to_string();
     if files.len() != 1 {
         return Err(AppError::bad_request(
             "process_file accepts exactly one file per job",
@@ -84,13 +90,14 @@ pub(super) async fn start_process_file_handler(
 }
 
 pub(super) async fn process_document_job_events_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DocumentIngestionHttpState>,
     Path(job_id): Path<String>,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let job_id = normalize_required_request_value(job_id, "jobId")?;
     let receiver = state
         .document_jobs
-        .subscribe(&job_id)
+        .subscribe_owned(&job_id, &actor.user.id.to_string())
         .await
         .map_err(AppError::from)?;
 
@@ -181,7 +188,7 @@ async fn collect_document_upload(
         });
     }
 
-    let user_id = normalize_required_request_value(user_id.unwrap_or_default(), "userId")?;
+    let user_id = user_id.unwrap_or_default();
     if files.is_empty() {
         return Err(AppError::bad_request(
             "at least one PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, or GIF upload is required",

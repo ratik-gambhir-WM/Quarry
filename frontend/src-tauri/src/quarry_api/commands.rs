@@ -16,104 +16,140 @@ use super::{
 pub async fn quarry_api_delete(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     path: String,
 ) -> AppResult<()> {
     verify_main_window_origin(&window)?;
-    service.delete(&path).await.map_err(api_error)
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .delete(&path)
+        .await
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn quarry_api_get(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     path: String,
 ) -> AppResult<Value> {
     verify_main_window_origin(&window)?;
-    service.get(&path).await.map_err(api_error)
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .get(&path)
+        .await
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn quarry_api_get_pdf(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     path: String,
 ) -> AppResult<Response> {
     verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
     service
         .get_pdf(&path)
         .await
         .map(Response::new)
-        .map_err(api_error)
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn quarry_api_post(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     path: String,
     body: Value,
 ) -> AppResult<Value> {
     verify_main_window_origin(&window)?;
-    service.post(&path, body).await.map_err(api_error)
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .post(&path, body)
+        .await
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn quarry_api_post_powerpoint(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     path: String,
     body: Value,
 ) -> AppResult<PowerPointExportPayload> {
     verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
     service
         .post_powerpoint(&path, body)
         .await
-        .map_err(api_error)
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn quarry_api_post_multipart(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     request: MultipartRequest,
 ) -> AppResult<Value> {
     verify_main_window_origin(&window)?;
-    service.post_multipart(request).await.map_err(api_error)
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .post_multipart(request)
+        .await
+        .map_err(|error| service.api_error(error))
 }
 
 #[tauri::command]
 pub async fn subscribe_document_job(
+    subscriptions: State<'_, Arc<QuerySubscriptions>>,
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     job_id: String,
     subscription_id: String,
 ) -> AppResult<()> {
     verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
     let event_window = window.clone();
-    service
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    subscriptions
+        .register(subscription_id.clone(), cancel_tx)
+        .map_err(api_error)?;
+    let result = tokio::select! {
+        _ = cancel_rx => Ok(()),
+        result = service
         .document_job_events(&job_id, &subscription_id, move |payload| {
             event_window
                 .emit("quarry-document-job-event", payload)
                 .map_err(|error| error.to_string())
         })
-        .await
-        .map_err(api_error)
+        => result.map_err(|error| service.api_error(error)),
+    };
+    subscriptions.remove(&subscription_id);
+    result
 }
 
 #[tauri::command]
 pub async fn send_query_stream(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
     subscriptions: State<'_, Arc<QuerySubscriptions>>,
     request: QueryStreamRequest,
     subscription_id: String,
 ) -> AppResult<()> {
     verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
     subscriptions
         .register(subscription_id.clone(), cancel_tx)
         .map_err(api_error)?;
-    let service = service.inner().clone();
     let subscriptions = Arc::clone(subscriptions.inner());
     let event_window = window.clone();
     tauri::async_runtime::spawn(async move {
@@ -128,6 +164,7 @@ pub async fn send_query_stream(
             let _ = event_window.emit(
                 "quarry-query-event",
                 QueryEventPayload::ConnectionError {
+                    status: service.client.status(),
                     message: error,
                     subscription_id: subscription_id.clone(),
                 },

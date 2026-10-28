@@ -1,3 +1,6 @@
+import { UserProvider } from "@/auth/UserProvider";
+import { sessionStore } from "@/auth/sessionStore";
+import { testSession } from "@/test/fixtures/auth";
 // @vitest-environment happy-dom
 
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -31,6 +34,7 @@ describe("Deals", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    sessionStore.set(testSession);
     listDeals.mockClear();
     listDeals.mockResolvedValue([]);
     window.sessionStorage.clear();
@@ -209,10 +213,10 @@ describe("Deals", () => {
 function renderDeals(dataSource: "demo" | "api" = "demo") {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/hub/deals", state: { email: "analyst@example.com" } }]}>
-      <WorkspaceProvider dataSource={dataSource}>
+      <UserProvider><WorkspaceProvider dataSource={dataSource}>
         <Deals />
         <LocationProbe />
-      </WorkspaceProvider>
+      </WorkspaceProvider></UserProvider>
     </MemoryRouter>,
   );
 }

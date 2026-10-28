@@ -51,13 +51,10 @@ pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryMo
 pub async fn collect_persistent_query_upload(
     mut multipart: Multipart,
     thread_id: String,
+    user_email: String,
 ) -> AppResult<PersistentQueryInput> {
     let fields = collect_fields(&mut multipart, true).await?;
     validate_identifier("threadId", &thread_id)?;
-    let user_email = required(fields.user_email, "userEmail")?;
-    if user_email.trim().is_empty() || user_email.chars().count() > 320 {
-        return Err(AppError::bad_request("userEmail is invalid"));
-    }
     let user_message_id = required(fields.user_message_id, "userMessageId")?;
     let assistant_message_id = required(fields.assistant_message_id, "assistantMessageId")?;
     let request_id = required(fields.request_id, "requestId")?;
@@ -90,7 +87,6 @@ struct CollectedFields {
     prompt: Option<String>,
     request_id: Option<String>,
     system_instructions: Option<String>,
-    user_email: Option<String>,
     user_message_id: Option<String>,
 }
 
@@ -99,7 +95,6 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
     let mut context = None;
     let mut model = None;
     let mut system_instructions = None;
-    let mut user_email = None;
     let mut user_message_id = None;
     let mut assistant_message_id = None;
     let mut parent_message_id = None;
@@ -125,9 +120,6 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
                 field.text().await,
                 "systemInstructions",
             )?,
-            "userEmail" if persistent => {
-                set_once(&mut user_email, field.text().await, "userEmail")?
-            }
             "userMessageId" if persistent => {
                 set_once(&mut user_message_id, field.text().await, "userMessageId")?
             }
@@ -203,7 +195,6 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
         prompt,
         request_id,
         system_instructions,
-        user_email,
         user_message_id,
     })
 }

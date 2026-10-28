@@ -17,11 +17,4 @@ impl UserService {
     pub async fn create(&self, input: AddUserInput) -> ServiceResult<User> {
         self.users.create(input).await.map_err(Into::into)
     }
-
-    pub async fn by_email(&self, email: &str) -> ServiceResult<Option<User>> {
-        self.users
-            .by_email(email.to_string())
-            .await
-            .map_err(Into::into)
-    }
 }

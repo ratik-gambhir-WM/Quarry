@@ -11,7 +11,6 @@ import { DataGridPagination } from "../reui/data-grid/data-grid-pagination";
 import { DataGridScrollArea } from "../reui/data-grid/data-grid-scroll-area";
 import { DataGridTable } from "../reui/data-grid/data-grid-table";
 import { quarryDataGridHeaderClassName, quarryDataGridTableClassNames } from "../reui/data-grid/quarry-data-grid";
-import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { ViewTransition } from "../ui/ViewTransition";
 
 const dealsDataGridTableClassNames = {
@@ -155,10 +154,10 @@ function linkColumn(
 
 export function DealsEmptyState({ onReset }: { onReset: () => void }) {
   return (
-    <WorkspaceCard className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center" radius="small">
+    <section className="flex min-h-64 w-full flex-col items-center justify-center px-6 py-12 text-center">
       <p className="text-[16px] font-medium text-text-main">No deals match these filters</p>
-      <p className="mt-2 max-w-md text-[13px] font-normal leading-5 text-muted">Try a different search or return to the full current and historic portfolio.</p>
+      <p className="mt-2 w-full max-w-[28rem] text-[13px] font-normal leading-5 text-muted">Try a different search or return to the full current and historic portfolio.</p>
       <button className="mt-5 rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-2 text-[12px] font-medium text-text-main transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed" onClick={onReset} type="button">Reset filters</button>
-    </WorkspaceCard>
+    </section>
   );
 }

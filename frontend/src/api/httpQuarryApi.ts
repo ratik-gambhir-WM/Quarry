@@ -1,7 +1,9 @@
+import { sessionStore } from "../auth/sessionStore";
+import { authFetch } from "./authFetch";
 import type { Company, CompanyInput, CompanyPage, CompanySearch, DealFields } from "../data/dealModel";
 import type { AssistantThreadListOptions } from "../contracts/quarryApi";
 import type {
-  AddUserInput,
+  LoginInput, RegisterInput, SessionResponse, CurrentUserResponse,
   AssistantThread,
   AssistantThreadDetail,
   AssistantThreadPage,
@@ -21,7 +23,6 @@ import type {
   QuarryApi,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
-  SummarizableFile,
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
@@ -38,7 +39,6 @@ import type {
   SavedDeal,
 } from "../data/dealExtraction";
 import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
-import type { WorkspaceAccountUser } from "../data/workspace";
 import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 import {
   beginApiRequest,
@@ -100,7 +100,7 @@ async function requestJson<TResponse>(
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(url, init);
+    const response = await authFetch(url, init);
     const bodyText = response.status === 204 ? "" : await response.text();
     let body: unknown;
 
@@ -155,7 +155,7 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(url);
+    const response = await authFetch(url);
     if (!response.ok) {
       const bodyText = await response.text();
       let body: { error?: string; message?: string } | undefined;
@@ -219,7 +219,7 @@ async function exportPowerPoint(
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(url, {
+    const response = await authFetch(url, {
       body: JSON.stringify(document),
       headers: { "Content-Type": "application/json" },
       method: "POST",
@@ -344,8 +344,8 @@ async function postForm<TResponse>(path: string, formData: FormData): Promise<TR
 
 function createCompany(input: CompanyInput) { return post<Company, CompanyInput>("/api/v1/companies", input); }
 function updateCompany(id: string, input: CompanyInput) { return post<Company, CompanyInput>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input); }
-function listCompanies(userEmail: string, options: CompanySearch = {}) {
-  const params = new URLSearchParams({ userEmail });
+function listCompanies(options: CompanySearch = {}) {
+  const params = new URLSearchParams();
   if (options.query !== undefined) params.set("query", options.query);
   if (options.limit !== undefined) params.set("limit", String(options.limit));
   if (options.offset !== undefined) params.set("offset", String(options.offset));
@@ -439,9 +439,8 @@ function archiveDeal(dealId: string) {
   );
 }
 
-function processDocuments(dealId: string, userId: string, files: File[]) {
+function processDocuments(dealId: string, files: File[]) {
   const form = new FormData();
-  form.append("userId", userId.trim());
   appendFiles(form, files);
   return postForm<ProcessDocumentsResponse>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`,
@@ -449,14 +448,15 @@ function processDocuments(dealId: string, userId: string, files: File[]) {
   );
 }
 
-async function startProcessFile(dealId: string, userId: string, file: File) {
+async function startProcessFile(dealId: string, file: File) {
+  const generation = sessionStore.getSnapshot().generation;
   const bytes = await file.arrayBuffer();
+  if (generation !== sessionStore.getSnapshot().generation) throw new DOMException("Session changed", "AbortError");
   const byteFile = new File([bytes], file.name, {
     lastModified: file.lastModified,
     type: file.type,
   });
   const form = new FormData();
-  form.append("userId", userId.trim());
   form.append("files", byteFile, file.name);
   return postForm<ProcessFileJobResponse>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
@@ -469,65 +469,41 @@ function subscribeToProcessFileJob(
   { onConnectionError, onEvent }: ProcessFileJobEventHandlers,
 ) {
   const url = apiUrl(`/api/v1/documents/process_file/${encodeURIComponent(jobId)}/events`);
-  const source = new EventSource(url);
-  const eventNames = ["processing", "completed", "skipped", "failed"] as const;
-
-  const handleJobEvent = (event: MessageEvent<string>) => {
+  const controller = new AbortController();
+  let active = true;
+  let terminal = false;
+  void (async () => {
+    const response = await authFetch(url, { headers: { Accept: "text/event-stream" }, signal: controller.signal });
+    if (!response.ok || !response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) throw new Error("Unable to connect to processing stream.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let buffer = "";
     try {
-      const parsed = JSON.parse(event.data) as ProcessFileJobEvent;
-      logSseEvent({
-        data: parsed,
-        eventName: event.type,
-        status: event.type === "failed" ? "error" : "success",
-        title: `${event.type} event received for ${parsed.filename || jobId}`,
-        url,
-      });
-      onEvent(parsed);
-    } catch {
-      logSseEvent({
-        data: event.data,
-        eventName: event.type,
-        status: "error",
-        title: "Invalid SSE event received",
-        url,
-      });
-      onEvent({
-        error: "The processing stream returned an invalid event.",
-        filename: "",
-        jobId,
-        status: "failed",
-      });
-    }
-  };
+      while (active && !terminal) {
+        const chunk = await reader.read();
+        if (chunk.done) { buffer += decoder.decode(); break; }
+        buffer += decoder.decode(chunk.value, { stream: true });
+        if (buffer.length > 1_048_576) throw new Error("Processing event exceeds size limit.");
+        let boundary: RegExpExecArray | null;
+        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+          const frame = buffer.slice(0, boundary.index); buffer = buffer.slice(boundary.index + boundary[0].length);
+          const lines = frame.split(/\r?\n/);
+          const name = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+          const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+          if (!data && !name) continue;
+          if (!name || !["processing", "completed", "skipped", "failed"].includes(name)) throw new Error("Invalid processing event.");
+          const parsed: unknown = JSON.parse(data);
+          if (typeof parsed !== "object" || !parsed || !("jobId" in parsed) || parsed.jobId !== jobId || !("status" in parsed) || parsed.status !== name || !("filename" in parsed) || typeof parsed.filename !== "string") throw new Error("Invalid processing event.");
+          if (active) onEvent(parsed as ProcessFileJobEvent);
+          terminal = name !== "processing";
+          if (terminal) break;
+        }
+      }
+      if (!terminal && active) throw new Error("Processing stream ended unexpectedly.");
+    } finally { await reader.cancel(); }
+  })().catch(() => { if (active && !terminal && !controller.signal.aborted) onConnectionError?.(); });
+  return () => { active = false; controller.abort(); };
 
-  for (const eventName of eventNames) {
-    source.addEventListener(eventName, handleJobEvent as EventListener);
-  }
-  const handleOpen = () => {
-    logSseEvent({ eventName: "open", status: "success", title: `SSE connected for job ${jobId}`, url });
-  };
-  const handleError = () => {
-    logSseEvent({
-      data: { readyState: source.readyState },
-      eventName: "error",
-      status: "error",
-      title: `SSE connection error for job ${jobId}`,
-      url,
-    });
-    onConnectionError?.();
-  };
-  source.addEventListener("open", handleOpen);
-  source.addEventListener("error", handleError);
-
-  return () => {
-    for (const eventName of eventNames) {
-      source.removeEventListener(eventName, handleJobEvent as EventListener);
-    }
-    source.removeEventListener("open", handleOpen);
-    source.removeEventListener("error", handleError);
-    source.close();
-    logSseEvent({ eventName: "close", status: "info", title: `SSE closed for job ${jobId}`, url });
-  };
 }
 
 function searchDocumentChunksByVector(search: FileChunkVectorSearch) {
@@ -544,45 +520,6 @@ function searchDocumentChunksByKeyword(search: FileChunkKeywordSearch) {
   );
 }
 
-function createUser(input: AddUserInput) {
-  return post<WorkspaceAccountUser, AddUserInput>("/api/v1/users", input);
-}
-
-async function getUserByEmail(email: string) {
-  try {
-    return await get<WorkspaceAccountUser>(
-      `/api/v1/users/by-email?email=${encodeURIComponent(email.trim())}`,
-    );
-  } catch (error) {
-    if (error instanceof BackendApiError && error.status === 404) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function userExistsByEmail(email: string) {
-  return (await getUserByEmail(email)) !== null;
-}
-
-function listSummaryFiles(path: string) {
-  return post<SummarizableFile[], { path: string }>("/api/v1/summarize/files", { path });
-}
-
-async function summarizeSelected(paths: string[]) {
-  const response = await post<{ summary: string }, { paths: string[] }>(
-    "/api/v1/summarize/selected",
-    { paths },
-  );
-  return response.summary;
-}
-
-async function summarizePath(path: string) {
-  const response = await post<{ summary: string }, { path: string }>("/api/v1/summarize", {
-    path,
-  });
-  return response.summary;
-}
 
 function summarizeUpload(files: File[]) {
   const form = new FormData();
@@ -626,7 +563,6 @@ function runAssistantThread(
 ) {
   const form = new FormData();
   form.append("prompt", input.prompt);
-  form.append("userEmail", input.userEmail);
   form.append("userMessageId", input.userMessageId);
   form.append("assistantMessageId", input.assistantMessageId);
   form.append("requestId", input.requestId);
@@ -690,7 +626,7 @@ function streamQuery(
 
   void (async () => {
     try {
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         body: form,
         headers: { Accept: "text/event-stream" },
         method: "POST",
@@ -771,10 +707,9 @@ function assistantThreadPath(threadId: string, suffix = "") {
 }
 
 function listAssistantThreads(
-  userEmail: string,
   options: AssistantThreadListOptions = {},
 ) {
-  const parameters = new URLSearchParams({ userEmail });
+  const parameters = new URLSearchParams();
   if (options.after) parameters.set("before", options.after);
   if (options.archived) parameters.set("archived", "true");
   if (options.scope) parameters.set("scope", options.scope);
@@ -782,36 +717,36 @@ function listAssistantThreads(
   return get<AssistantThreadPage>(`/api/v1/assistant/threads?${parameters.toString()}`);
 }
 
-function createAssistantThread(userEmail: string, threadId?: string, dealId?: string | null) {
-  return post<AssistantThread, { threadId?: string; userEmail: string; dealId?: string | null }>(
+function createAssistantThread(threadId?: string, dealId?: string | null) {
+  return post<AssistantThread, { threadId?: string; dealId?: string | null }>(
     "/api/v1/assistant/threads",
-    { userEmail, ...(threadId ? { threadId } : {}), ...(dealId !== undefined ? { dealId } : {}) },
+    { ...(threadId ? { threadId } : {}), ...(dealId !== undefined ? { dealId } : {}) },
   );
 }
 
-function getAssistantThread(threadId: string, userEmail: string) {
+function getAssistantThread(threadId: string) {
   return get<AssistantThreadDetail>(
-    `${assistantThreadPath(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+    `${assistantThreadPath(threadId)}`,
   );
 }
 
-function renameAssistantThread(threadId: string, userEmail: string, title: string) {
-  return post<void, { title: string; userEmail: string }>(
+function renameAssistantThread(threadId: string, title: string) {
+  return post<void, { title: string }>(
     assistantThreadPath(threadId, "/rename"),
-    { title, userEmail },
+    { title },
   );
 }
 
-function setAssistantThreadArchived(threadId: string, userEmail: string, archived: boolean) {
-  return post<void, { userEmail: string }>(
+function setAssistantThreadArchived(threadId: string, archived: boolean) {
+  return post<void, Record<string, never>>(
     assistantThreadPath(threadId, archived ? "/archive" : "/unarchive"),
-    { userEmail },
+    {},
   );
 }
 
-function deleteAssistantThread(threadId: string, userEmail: string) {
+function deleteAssistantThread(threadId: string) {
   return requestJson<void>(
-    `${assistantThreadPath(threadId)}?userEmail=${encodeURIComponent(userEmail)}`,
+    `${assistantThreadPath(threadId)}`,
     { method: "DELETE" },
   );
 }
@@ -824,8 +759,8 @@ function appendFiles(form: FormData, files: File[]) {
 }
 
 export const httpQuarryApi: QuarryApi = {
-  archiveAssistantThread: (threadId, userEmail) =>
-    setAssistantThreadArchived(threadId, userEmail, true),
+  archiveAssistantThread: (threadId) =>
+    setAssistantThreadArchived(threadId, true),
   archiveDeal,
   createAssistantThread,
   createDeal,
@@ -833,7 +768,10 @@ export const httpQuarryApi: QuarryApi = {
   createCompany,
   updateCompany,
   listCompanies,
-  createUser,
+  login: (input: LoginInput) => requestJson<SessionResponse>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, undefined, false),
+  register: (input: RegisterInput) => requestJson<SessionResponse>("/api/v1/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, undefined, false),
+  currentUser: () => requestJson<CurrentUserResponse>("/api/v1/auth/me", undefined, undefined, false),
+  logout: () => requestJson<void>("/api/v1/auth/logout", { method: "POST" }, undefined, false),
   deleteAssistantThread,
   deleteTemplate,
   exportPowerPoint,
@@ -842,14 +780,12 @@ export const httpQuarryApi: QuarryApi = {
   getDealDocumentPdf,
   getDealDocumentText,
   getTemplate,
-  getUserByEmail,
   importPptxTemplate,
   listDealDataRoom,
   listAssistantThreads,
   listDealDocuments,
   listDeals,
   listTemplatePreviews,
-  listSummaryFiles,
   previewDealDocument,
   processDocuments,
   queryModel,
@@ -860,10 +796,7 @@ export const httpQuarryApi: QuarryApi = {
   searchDocumentChunksByVector,
   startProcessFile,
   subscribeToProcessFileJob,
-  summarizePath,
-  summarizeSelected,
   summarizeUpload,
-  unarchiveAssistantThread: (threadId, userEmail) =>
-    setAssistantThreadArchived(threadId, userEmail, false),
-  userExistsByEmail,
+  unarchiveAssistantThread: (threadId) =>
+    setAssistantThreadArchived(threadId, false),
 };
