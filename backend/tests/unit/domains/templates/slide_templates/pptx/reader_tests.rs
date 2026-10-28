@@ -1,5 +1,90 @@
 use super::*;
 
+#[test]
+fn package_rejects_actual_expansion_above_forged_entry_size() {
+    use std::io::Write;
+    use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    for name in [
+        "[Content_Types].xml",
+        "ppt/presentation.xml",
+        "ppt/_rels/presentation.xml.rels",
+    ] {
+        writer
+            .start_file(
+                name,
+                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated),
+            )
+            .unwrap();
+        if name == "[Content_Types].xml" {
+            std::io::copy(
+                &mut std::io::repeat(b'x').take(MAX_ENTRY_BYTES + 1),
+                &mut writer,
+            )
+            .unwrap();
+        } else {
+            writer.write_all(b"x").unwrap();
+        }
+    }
+    let mut bytes = writer.finish().unwrap().into_inner();
+    // Lie in both headers while keeping compressed bytes and their CRC intact.
+    let central = bytes.windows(4).position(|b| b == b"PK\x01\x02").unwrap();
+    bytes[22..26].copy_from_slice(&1_u32.to_le_bytes());
+    bytes[central + 24..central + 28].copy_from_slice(&1_u32.to_le_bytes());
+    validate_package(&bytes).unwrap();
+    let Err(error) = read_package(&bytes) else {
+        panic!("package exceeded the actual decompression limit");
+    };
+    assert_eq!(error.kind, FailureKind::TooLarge);
+    assert_eq!(error.code, "powerpoint_too_large");
+
+    // Insertion targets must use the same streaming limits as imports.
+    let error = super::super::insertion::insert(&bytes, &bytes, 0).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<SlideTemplateError>().unwrap().code,
+        "powerpoint_too_large"
+    );
+}
+
+#[test]
+fn part_expansion_counts_actual_bytes_against_the_remaining_package_budget() {
+    let mut total = MAX_EXPANDED_BYTES - 8;
+    assert_eq!(
+        read_part(Cursor::new(b"first"), 1, &mut total).unwrap(),
+        b"first"
+    );
+    assert_eq!(total, MAX_EXPANDED_BYTES - 3);
+
+    let mut next = Cursor::new(b"oversized");
+    let error = read_part(&mut next, 1, &mut total).unwrap_err();
+    assert_eq!(error.kind, FailureKind::TooLarge);
+    assert_eq!(
+        next.position(),
+        4,
+        "stop one byte past the remaining budget"
+    );
+}
+
+#[test]
+fn part_expansion_accepts_exact_budget_and_checks_end_of_stream() {
+    let mut total = MAX_EXPANDED_BYTES - 3;
+    assert_eq!(
+        read_part(Cursor::new(b"fit"), 3, &mut total).unwrap(),
+        b"fit"
+    );
+    assert_eq!(total, MAX_EXPANDED_BYTES);
+    assert!(read_part(std::io::empty(), 0, &mut total)
+        .unwrap()
+        .is_empty());
+    let mut next = Cursor::new(b"extra");
+    assert_eq!(
+        read_part(&mut next, 0, &mut total).unwrap_err().kind,
+        FailureKind::TooLarge
+    );
+    assert_eq!(next.position(), 1);
+}
+
 const THEME_XML: &str = r#"
         <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
           <a:themeElements>

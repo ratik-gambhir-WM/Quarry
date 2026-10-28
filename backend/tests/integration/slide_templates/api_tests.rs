@@ -93,6 +93,61 @@ async fn send(
 }
 
 #[tokio::test]
+async fn svg_asset_responses_isolate_active_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("templates.sqlite");
+    let app = compose(
+        SlideTemplateEndpoint::open(SlideTemplateConfig {
+            database_path: path.clone(),
+            max_export_json_bytes: 1024 * 1024,
+            max_upload_bytes: 1024 * 1024,
+            request_timeout: Duration::from_secs(5),
+            preview: TemplatePreviewConfig::Disabled,
+        })
+        .unwrap(),
+    );
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" onload="fetch('/api/v1/deals')"><script>localStorage.setItem('svg-executed','yes')</script><foreignObject><iframe xmlns="http://www.w3.org/1999/xhtml" src="/api/v1/deals"/></foreignObject><rect width="10" height="10" fill="red"/></svg>"#;
+    connection
+        .execute(
+            "INSERT INTO templates (template_id, template_json) VALUES (?1, json(?2))",
+            rusqlite::params![
+                "svg-template",
+                serde_json::to_string(&presentation(false)).unwrap()
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO app_templates VALUES ('Quarry_WestMonroe', ?1, CURRENT_TIMESTAMP)",
+            ["svg-template"],
+        )
+        .unwrap();
+    connection.execute(
+        "INSERT INTO template_assets (asset_id, template_id, content_type, asset_data) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params!["svg-asset", "svg-template", "image/svg+xml", svg.as_slice()],
+    ).unwrap();
+
+    for prefix in ["/api/v1", "/api"] {
+        let request = Request::get(format!(
+            "{prefix}/templates/slide-templates/import/svg-template/assets/svg-asset"
+        ))
+        .body(Body::empty())
+        .unwrap();
+        let (status, headers, body) = send(&app, request).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[header::CONTENT_TYPE], "image/svg+xml");
+        assert_eq!(headers[header::CACHE_CONTROL], "private, no-store");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert_eq!(
+            headers[header::CONTENT_SECURITY_POLICY],
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        );
+        assert_eq!(body, svg);
+    }
+}
+
+#[tokio::test]
 async fn export_returns_valid_powerpoint_and_contract_headers() {
     let app = test_app(1024 * 1024, 1024 * 1024);
     let mut document = presentation(false);

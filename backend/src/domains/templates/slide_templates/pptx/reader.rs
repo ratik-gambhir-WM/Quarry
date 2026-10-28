@@ -883,7 +883,7 @@ fn read_package(source: &[u8]) -> SlideResult<HashMap<String, Vec<u8>>> {
     let mut total = 0_u64;
     let mut parts = HashMap::with_capacity(archive.len());
     for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|_| invalid_powerpoint())?;
+        let entry = archive.by_index(index).map_err(|_| invalid_powerpoint())?;
         let name = entry.name().to_owned();
         if !safe_part_name(&name) || entry.size() > MAX_ENTRY_BYTES {
             return Err(if entry.size() > MAX_ENTRY_BYTES {
@@ -892,18 +892,11 @@ fn read_package(source: &[u8]) -> SlideResult<HashMap<String, Vec<u8>>> {
                 invalid_powerpoint()
             });
         }
-        total = total.saturating_add(entry.size());
-        if total > MAX_EXPANDED_BYTES {
-            return Err(powerpoint_too_large());
-        }
         if entry.is_dir() {
             continue;
         }
-        let capacity = usize::try_from(entry.size()).map_err(|_| powerpoint_too_large())?;
-        let mut bytes = Vec::with_capacity(capacity);
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(|_| invalid_powerpoint())?;
+        let declared_size = entry.size();
+        let bytes = read_part(entry, declared_size, &mut total)?;
         parts.insert(name, bytes);
     }
     for required in [
@@ -916,6 +909,31 @@ fn read_package(source: &[u8]) -> SlideResult<HashMap<String, Vec<u8>>> {
         }
     }
     Ok(parts)
+}
+
+/// Bound decompression independently of attacker-controlled ZIP size declarations.
+/// Shared with insertion so copied target parts have the same expansion budgets.
+pub(super) fn read_part(
+    entry: impl Read,
+    declared_size: u64,
+    total: &mut u64,
+) -> SlideResult<Vec<u8>> {
+    let limit = MAX_ENTRY_BYTES.min(MAX_EXPANDED_BYTES.saturating_sub(*total));
+    if declared_size > limit {
+        return Err(powerpoint_too_large());
+    }
+    let mut bytes = Vec::new();
+    // One extra byte distinguishes an exact fit from an oversized stream without
+    // decompressing the rest of a forged entry. Reaching EOF still checks its CRC.
+    entry
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid_powerpoint())?;
+    if bytes.len() as u64 > limit {
+        return Err(powerpoint_too_large());
+    }
+    *total += bytes.len() as u64;
+    Ok(bytes)
 }
 
 struct SlideParseContext<'a> {

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{Cursor, Read, Write},
+    io::{Cursor, Write},
 };
 
 use anyhow::{ensure, Context};
@@ -8,7 +8,6 @@ use roxmltree::Document;
 use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
-const MAX_EXPANDED_BYTES: u64 = 250 * 1024 * 1024;
 const SLIDE_RELATIONSHIP: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
 
@@ -186,7 +185,7 @@ fn read_package(bytes: &[u8]) -> anyhow::Result<Package> {
     let mut parts = HashMap::with_capacity(archive.len());
     let mut expanded_bytes = 0_u64;
     for index in 0..archive.len() {
-        let mut entry = archive.by_index(index)?;
+        let entry = archive.by_index(index)?;
         if entry.is_dir() {
             continue;
         }
@@ -195,15 +194,8 @@ fn read_package(bytes: &[u8]) -> anyhow::Result<Package> {
             is_safe_part_path(&path),
             "PowerPoint package contains an unsafe part path"
         );
-        expanded_bytes = expanded_bytes
-            .checked_add(entry.size())
-            .context("PowerPoint package expansion size overflow")?;
-        ensure!(
-            expanded_bytes <= MAX_EXPANDED_BYTES,
-            "PowerPoint package expands too far"
-        );
-        let mut part = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
-        entry.read_to_end(&mut part)?;
+        let declared_size = entry.size();
+        let part = super::reader::read_part(entry, declared_size, &mut expanded_bytes)?;
         ensure!(
             parts.insert(path.clone(), part).is_none(),
             "duplicate PowerPoint part"

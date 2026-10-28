@@ -868,6 +868,11 @@ instead of accumulating an unbounded queue. Cancellation on dropped/expired requ
 shutdown reaches previews and is checked inside publication transactions. Blocking workers keep
 their capacity permit until they actually exit. No database guard is held while awaiting a preview
 or provider. ZIP expansion/entry/path checks, JSON/image bounds, and temporary child cleanup remain.
+Imports and insertion enforce the 50 MiB per-part and 250 MiB per-package expansion budgets on
+actual decompressed bytes, independently of ZIP size declarations, stopping after at most one
+byte beyond the remaining budget. Template SVG asset responses retain image rendering but apply
+a CSP sandbox without permissions, deny scripts and network resources, and allow only inline
+styles and embedded data images; direct navigation cannot grant an SVG the API's origin.
 
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
@@ -1728,7 +1733,7 @@ configuration. Never use `clear_helix` as verification.
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
-| Template catalog | Legacy and default embedded SQLite stores are in memory; embedded mode can explicitly use a separate file | Memory imports are lost on restart; embedded startup reconciles Helix from canonical SQLite; changing backend does not transfer imports |
+| Template catalog | Embedded mode uses the shared durable product SQLite database; the legacy Node catalog remains in memory | Embedded imports survive restart and startup reconciles Helix from canonical SQLite; legacy imports are lost on restart; changing backend does not transfer imports |
 | Assistant chat | SQLite transcript with caller-supplied email ownership; no authentication, stale-stream recovery, rate limits, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |

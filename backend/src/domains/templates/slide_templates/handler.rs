@@ -408,6 +408,14 @@ pub(super) async fn asset(
     response
         .headers_mut()
         .insert("x-content-type-options", header_value("nosniff")?);
+    if asset.content_type == "image/svg+xml" {
+        // SVG images can become active documents on direct navigation. Keep their
+        // origin opaque and block scripts, nested documents, and network access.
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            header_value("sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")?,
+        );
+    }
     Ok(private(response))
 }
 pub(super) async fn retrieval(
