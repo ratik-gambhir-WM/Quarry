@@ -31,25 +31,42 @@ const sections: ReadonlyArray<{
   { enabled: true, label: "Settings", value: "settings" },
 ];
 
-export function getDealRoomSection(value: string | null): DealRoomOverviewSection {
-  return sections.find((section) => section.enabled && section.value === value)?.value ?? "overview";
+export function getDealRoomSection(
+  value: string | null,
+): DealRoomOverviewSection {
+  return (
+    sections.find((section) => section.enabled && section.value === value)
+      ?.value ?? "overview"
+  );
 }
 
-export function DealRoomHeader({ activeSection, onActiveSectionChange }: DealRoomHeaderProps) {
+export function DealRoomHeader({
+  activeSection,
+  onActiveSectionChange,
+}: DealRoomHeaderProps) {
   const descriptionId = useId();
 
   return (
     <Tabs
       className="min-w-0 flex-1 self-stretch"
-      onValueChange={(value) => onActiveSectionChange(value as DealRoomOverviewSection)}
+      onValueChange={(value) =>
+        onActiveSectionChange(value as DealRoomOverviewSection)
+      }
       value={activeSection}
     >
       <div className="workspace-scrollbar-hidden min-w-0 flex-1 overflow-x-auto">
-        <TabsList aria-label="Deal room sections" className="h-full min-w-max gap-7">
+        <TabsList
+          aria-label="Deal room sections"
+          className="h-full min-w-max gap-7"
+        >
           {sections.map((section) => (
             <TabsTrigger
               aria-describedby={section.enabled ? undefined : descriptionId}
-              aria-label={section.enabled ? section.label : `${section.label}, coming soon`}
+              aria-label={
+                section.enabled
+                  ? section.label
+                  : `${section.label}, coming soon`
+              }
               className="relative h-full border-b-2 border-transparent px-1 text-[12px] font-semibold data-[state=active]:border-primary data-[state=active]:text-primary"
               disabled={!section.enabled}
               key={section.value}

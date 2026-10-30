@@ -14,7 +14,10 @@ import {
 import { HomeWorkspaceSidebarNavigation } from "./HomeWorkspaceSidebar";
 import { SidebarFrame } from "./SidebarFrame";
 import { SidebarIcon } from "./SidebarIcon";
-import { useAgentRuntimeContext, useThreadRuntimeState } from "../../chat/AgentRuntime";
+import {
+  useAgentRuntimeContext,
+  useThreadRuntimeState,
+} from "../../chat/AgentRuntime";
 
 type AssistantWorkspaceSidebarProps = Pick<
   HomeSidebarProps,
@@ -36,19 +39,27 @@ export function AssistantWorkspaceSidebar({
       return;
     }
 
-    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    const currentTab = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
+    const tabs = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    );
+    const currentTab = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      '[role="tab"]',
+    );
     const currentIndex = currentTab ? tabs.indexOf(currentTab) : -1;
     if (currentIndex < 0) {
       return;
     }
 
     event.preventDefault();
-    const nextIndex = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? tabs.length - 1
-        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (currentIndex +
+              (event.key === "ArrowRight" ? 1 : -1) +
+              tabs.length) %
+            tabs.length;
     const nextTab = tabs[nextIndex];
     const nextView = nextTab.dataset.view;
     if (nextView === "chat" || nextView === "deal-hub") {
@@ -61,7 +72,7 @@ export function AssistantWorkspaceSidebar({
     <SidebarFrame
       alignedHeader
       email={email}
-      headerContent={(
+      headerContent={
         <div
           aria-label="Assistant sidebar views"
           className="flex min-w-0 items-center gap-1"
@@ -83,7 +94,7 @@ export function AssistantWorkspaceSidebar({
             view="chat"
           />
         </div>
-      )}
+      }
       navigationState={navigationState}
       showHeaderBackButton={false}
     >
@@ -168,7 +179,10 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
         disabled={isPreparingThread}
         type="button"
       >
-        <Icon className="h-5 w-5 shrink-0 text-sidebar-muted" name="editSquare" />
+        <Icon
+          className="h-5 w-5 shrink-0 text-sidebar-muted"
+          name="editSquare"
+        />
         {collapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate">New chat</span>
@@ -188,20 +202,39 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
               key={thread.threadId}
               onDelete={() => void runtime.deleteThread(thread.threadId)}
               onSelect={() => void runtime.selectThread(thread.threadId)}
-              actionsDisabled={isPreparingThread || isRunning || deletingThreadId !== null}
+              actionsDisabled={
+                isPreparingThread || isRunning || deletingThreadId !== null
+              }
               title={thread.title}
               association={thread.dealId ? "Deal" : "Freeform"}
             />
           ))}
-          {runtime.state.nextCursor ? <li><button className="px-3 py-2 text-xs text-sidebar-muted" disabled={isThreadListLoading} type="button" onClick={() => void runtime.loadMoreThreads()}>Load more chats</button></li> : null}
+          {runtime.state.nextCursor ? (
+            <li>
+              <button
+                className="px-3 py-2 text-xs text-sidebar-muted"
+                disabled={isThreadListLoading}
+                type="button"
+                onClick={() => void runtime.loadMoreThreads()}
+              >
+                Load more chats
+              </button>
+            </li>
+          ) : null}
           {isThreadListLoading ? (
-            <li className="px-3 py-2 text-xs text-sidebar-muted" role="status">Loading chats…</li>
+            <li className="px-3 py-2 text-xs text-sidebar-muted" role="status">
+              Loading chats…
+            </li>
           ) : null}
           {threadListError ? (
-            <li className="px-3 py-2 text-xs text-error" role="status">Couldn’t load previous chats.</li>
+            <li className="px-3 py-2 text-xs text-error" role="status">
+              Couldn’t load previous chats.
+            </li>
           ) : null}
           {threadDeleteError ? (
-            <li className="px-3 py-2 text-xs text-error" role="status">Couldn’t delete chat. Please try again.</li>
+            <li className="px-3 py-2 text-xs text-error" role="status">
+              Couldn’t delete chat. Please try again.
+            </li>
           ) : null}
         </ul>
       )}
@@ -253,7 +286,11 @@ function AssistantThreadListItem({
             Archive chat
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={actionsDisabled || deleting} onSelect={onDelete} variant="destructive">
+          <DropdownMenuItem
+            disabled={actionsDisabled || deleting}
+            onSelect={onDelete}
+            variant="destructive"
+          >
             <Trash2 />
             {deleting ? "Deleting…" : "Delete chat"}
           </DropdownMenuItem>

@@ -18,7 +18,8 @@ type UploadFilesModalProps = {
   userId: string;
 };
 
-type UploadStatus = "ready" | "uploading" | "processing" | "completed" | "skipped" | "failed";
+type UploadStatus =
+  "ready" | "uploading" | "processing" | "completed" | "skipped" | "failed";
 
 type UploadEntry = {
   chunkCount?: number;
@@ -44,7 +45,11 @@ const supportedExtensions = new Set([
   "gif",
 ]);
 
-export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalProps) {
+export function UploadFilesModal({
+  dealId,
+  onClose,
+  userId,
+}: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chooseFilesButtonRef = useRef<HTMLButtonElement>(null);
   const processingStartedAtRef = useRef<number | null>(null);
@@ -56,7 +61,8 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
   const activeCount = entries.filter((entry) => isActive(entry.status)).length;
   const isProcessing = activeCount > 0;
   const uploadableEntries = entries.filter(
-    (entry) => entry.selected && (entry.status === "ready" || entry.status === "failed"),
+    (entry) =>
+      entry.selected && (entry.status === "ready" || entry.status === "failed"),
   );
   const selectedCount = entries.filter((entry) => entry.selected).length;
 
@@ -77,7 +83,10 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
     }
 
     if (!isProcessing) {
-      const totalSeconds = Math.max(1, Math.ceil((Date.now() - startedAt) / 1000));
+      const totalSeconds = Math.max(
+        1,
+        Math.ceil((Date.now() - startedAt) / 1000),
+      );
       setElapsedSeconds(totalSeconds);
       setProcessedSeconds(totalSeconds);
       processingStartedAtRef.current = null;
@@ -99,7 +108,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
 
     for (const file of files) {
       if (!supportedExtensions.has(getFileExtension(file.name))) {
-        rejected.push(`${file.name} is not a supported document or image file.`);
+        rejected.push(
+          `${file.name} is not a supported document or image file.`,
+        );
       } else if (file.size === 0) {
         rejected.push(`${file.name} is empty.`);
       } else if (file.size > maxFileBytes) {
@@ -139,7 +150,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
   function toggleEntry(entryId: string) {
     setEntries((current) =>
       current.map((entry) =>
-        entry.id === entryId && !isActive(entry.status) && entry.status !== "completed"
+        entry.id === entryId &&
+        !isActive(entry.status) &&
+        entry.status !== "completed"
           ? { ...entry, selected: !entry.selected }
           : entry,
       ),
@@ -173,7 +186,13 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
     setEntries((current) =>
       current.map((entry) =>
         uploadIds.has(entry.id)
-          ? { ...entry, chunkCount: undefined, documentId: undefined, error: undefined, status: "uploading" }
+          ? {
+              ...entry,
+              chunkCount: undefined,
+              documentId: undefined,
+              error: undefined,
+              status: "uploading",
+            }
           : entry,
       ),
     );
@@ -198,8 +217,12 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
         onConnectionError: () => {
           setEntries((current) =>
             current.map((currentEntry) =>
-              currentEntry.id === entry.id && currentEntry.status === "processing"
-                ? { ...currentEntry, error: "Connection interrupted. Reconnecting…" }
+              currentEntry.id === entry.id &&
+              currentEntry.status === "processing"
+                ? {
+                    ...currentEntry,
+                    error: "Connection interrupted. Reconnecting…",
+                  }
                 : currentEntry,
             ),
           );
@@ -256,7 +279,11 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
       }),
     );
 
-    if (event.status === "completed" || event.status === "skipped" || event.status === "failed") {
+    if (
+      event.status === "completed" ||
+      event.status === "skipped" ||
+      event.status === "failed"
+    ) {
       subscriptionsRef.current.get(entryId)?.();
       subscriptionsRef.current.delete(entryId);
     }
@@ -283,15 +310,16 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
         }}
         showCloseButton={false}
       >
-        <DialogHeader
-          className="relative gap-1 border-b border-outline-variant px-6 py-5 pr-14"
-        >
+        <DialogHeader className="relative gap-1 border-b border-outline-variant px-6 py-5 pr-14">
           <p className="order-first text-xs font-medium uppercase tracking-[0.12em] text-muted">
             Data Room
           </p>
-          <DialogTitle className="text-2xl font-semibold text-text-main">Upload files</DialogTitle>
+          <DialogTitle className="text-2xl font-semibold text-text-main">
+            Upload files
+          </DialogTitle>
           <DialogDescription className="text-[13px] leading-5 text-muted">
-            Choose PDF, DOCX, Excel, PowerPoint, PNG, JPEG, WebP, or GIF files, then select which ones to process.
+            Choose PDF, DOCX, Excel, PowerPoint, PNG, JPEG, WebP, or GIF files,
+            then select which ones to process.
           </DialogDescription>
           <button
             aria-label="Close upload files dialog"
@@ -354,7 +382,10 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
                   {selectedCount} of {entries.length} checked
                 </span>
               </div>
-              <ul aria-live="polite" className="divide-y divide-outline-variant">
+              <ul
+                aria-live="polite"
+                className="divide-y divide-outline-variant"
+              >
                 {entries.map((entry) => (
                   <UploadFileRow
                     entry={entry}
@@ -382,7 +413,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
                 Processed in {formatElapsedSeconds(processedSeconds)}
               </p>
             ) : (
-              <p>Files are processed independently and update as jobs finish.</p>
+              <p>
+                Files are processed independently and update as jobs finish.
+              </p>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -392,7 +425,12 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
               onClick={onClose}
               type="button"
             >
-              {entries.some((entry) => entry.status === "completed" || entry.status === "skipped") ? "Done" : "Cancel"}
+              {entries.some(
+                (entry) =>
+                  entry.status === "completed" || entry.status === "skipped",
+              )
+                ? "Done"
+                : "Cancel"}
             </button>
             <button
               className="inline-flex min-w-[150px] items-center justify-center gap-2 rounded-full bg-action px-6 py-3 text-[13px] font-semibold text-on-action shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-50"
@@ -402,7 +440,9 @@ export function UploadFilesModal({ dealId, onClose, userId }: UploadFilesModalPr
             >
               <Icon className="h-4 w-4" name="upload" />
               <span>
-                {uploadableEntries.some((entry) => entry.status === "failed") ? "Retry" : "Upload"}{" "}
+                {uploadableEntries.some((entry) => entry.status === "failed")
+                  ? "Retry"
+                  : "Upload"}{" "}
                 {uploadableEntries.length > 0 ? uploadableEntries.length : ""}
               </span>
             </button>
@@ -436,21 +476,37 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
         type="checkbox"
       />
       <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
-        <Icon className="h-5 w-5" name={getFileExtension(entry.file.name) === "pdf" ? "pdf" : "doc"} />
+        <Icon
+          className="h-5 w-5"
+          name={getFileExtension(entry.file.name) === "pdf" ? "pdf" : "doc"}
+        />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-semibold text-text-main" title={entry.file.name}>
+        <p
+          className="truncate text-[13px] font-semibold text-text-main"
+          title={entry.file.name}
+        >
           {entry.file.name}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
           <span>{formatFileSize(entry.file.size)}</span>
           <span aria-hidden="true">·</span>
-          <span className={failed ? "font-semibold text-error" : completed || skipped ? "font-semibold text-[#168447]" : ""}>
+          <span
+            className={
+              failed
+                ? "font-semibold text-error"
+                : completed || skipped
+                  ? "font-semibold text-[#168447]"
+                  : ""
+            }
+          >
             {getStatusLabel(entry)}
           </span>
         </div>
         {entry.error ? (
-          <p className={`mt-1 text-[11px] leading-4 ${failed ? "text-error" : "text-muted"}`}>
+          <p
+            className={`mt-1 text-[11px] leading-4 ${failed ? "text-error" : "text-muted"}`}
+          >
             {entry.error}
           </p>
         ) : null}
@@ -466,7 +522,9 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
           </span>
         ) : active ? (
           <span
-            aria-label={entry.status === "uploading" ? "Uploading" : "Processing"}
+            aria-label={
+              entry.status === "uploading" ? "Uploading" : "Processing"
+            }
             className="h-5 w-5 rounded-full border-2 border-primary/25 border-t-primary motion-safe:animate-spin"
           />
         ) : (

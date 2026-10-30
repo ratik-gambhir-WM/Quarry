@@ -112,8 +112,10 @@ describe("isUnconfiguredDataRoomError", () => {
         new Error('no local data-room root is configured for deal "DEAL-123"'),
       ),
     ).toBe(true);
-    expect(isUnconfiguredDataRoomError(new Error("the configured folder is unavailable"))).toBe(
-      false,
-    );
+    expect(
+      isUnconfiguredDataRoomError(
+        new Error("the configured folder is unavailable"),
+      ),
+    ).toBe(false);
   });
 });

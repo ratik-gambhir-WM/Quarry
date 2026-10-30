@@ -8,7 +8,12 @@ type SidebarStaticItemProps = {
   onClick?: () => void;
 };
 
-export function SidebarStaticItem({ active = false, icon, label, onClick }: SidebarStaticItemProps) {
+export function SidebarStaticItem({
+  active = false,
+  icon,
+  label,
+  onClick,
+}: SidebarStaticItemProps) {
   return (
     <button
       aria-label={label}
@@ -21,7 +26,10 @@ export function SidebarStaticItem({ active = false, icon, label, onClick }: Side
       onClick={onClick}
       type="button"
     >
-      <SidebarIcon className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`} name={icon} />
+      <SidebarIcon
+        className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`}
+        name={icon}
+      />
       <span className="text-[13px] font-medium leading-5">{label}</span>
     </button>
   );

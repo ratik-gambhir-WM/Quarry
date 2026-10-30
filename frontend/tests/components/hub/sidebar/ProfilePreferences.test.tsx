@@ -14,7 +14,11 @@ describe("ProfilePreferences", () => {
     const user = userEvent.setup();
 
     render(
-      <MemoryRouter initialEntries={[{ pathname: "/hub", state: { email: "analyst@example.com" } }]}>
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/hub", state: { email: "analyst@example.com" } },
+        ]}
+      >
         <ThemeModeProvider>
           <ProfilePreferences
             email="analyst@example.com"
@@ -39,7 +43,9 @@ describe("ProfilePreferences", () => {
       </MemoryRouter>,
     );
 
-    const accountSection = screen.getByRole("menuitem", { name: "Account info" }).parentElement;
+    const accountSection = screen.getByRole("menuitem", {
+      name: "Account info",
+    }).parentElement;
 
     expect(accountSection?.className).not.toContain("border-t");
     expect(accountSection?.className).not.toContain("pt-3");

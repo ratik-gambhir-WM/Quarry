@@ -35,7 +35,9 @@ export function DataRoomExplorer({
   selectedFilePath,
   treeLoading = false,
 }: DataRoomExplorerProps) {
-  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(() => new Set());
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     setExpandedNodeIds((current) => {
@@ -73,7 +75,8 @@ export function DataRoomExplorer({
       {({ collapsed }) =>
         collapsed ? null : (
           <div className="flex min-h-full flex-col gap-3">
-            <DataRoomQuickActions dealId={dealId}
+            <DataRoomQuickActions
+              dealId={dealId}
               documentSearch={documentSearch}
               email={email}
               onUploadNewFile={onUploadNewFile}
@@ -89,7 +92,10 @@ export function DataRoomExplorer({
                 </p>
               ) : null}
               {treeLoading ? (
-                <ExplorerStatus detail="Reading the configured local folder…" title="Loading data room" />
+                <ExplorerStatus
+                  detail="Reading the configured local folder…"
+                  title="Loading data room"
+                />
               ) : null}
               <div className="space-y-1">
                 {nodes.map((node) => (
@@ -131,7 +137,9 @@ function ExplorerNodeItem({
 }: ExplorerNodeItemProps) {
   const isFolder = node.kind === "folder";
   const expanded = expandedNodeIds.has(node.id);
-  const selected = Boolean(node.relativePath && node.relativePath === selectedFilePath);
+  const selected = Boolean(
+    node.relativePath && node.relativePath === selectedFilePath,
+  );
 
   return (
     <div>
@@ -154,10 +162,18 @@ function ExplorerNodeItem({
         type="button"
       >
         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-sidebar-muted">
-          {isFolder ? <Icon className="h-4 w-4" name={expanded ? "chevronDown" : "chevronRight"} /> : null}
+          {isFolder ? (
+            <Icon
+              className="h-4 w-4"
+              name={expanded ? "chevronDown" : "chevronRight"}
+            />
+          ) : null}
         </span>
         <span className="mt-0.5 shrink-0 text-sidebar-muted">
-          <Icon className="h-[18px] w-[18px]" name={iconNameForNode(node.kind)} />
+          <Icon
+            className="h-[18px] w-[18px]"
+            name={iconNameForNode(node.kind)}
+          />
         </span>
         <span
           className={`min-w-0 whitespace-normal break-words leading-snug [overflow-wrap:anywhere] ${
@@ -166,7 +182,9 @@ function ExplorerNodeItem({
         >
           {node.name}
         </span>
-        {node.error ? <span className="ml-auto shrink-0 text-error">!</span> : null}
+        {node.error ? (
+          <span className="ml-auto shrink-0 text-error">!</span>
+        ) : null}
       </button>
 
       {isFolder && expanded ? (
@@ -188,7 +206,10 @@ function ExplorerNodeItem({
   );
 }
 
-function collectDefaultExpandedNodeIds(nodes: DataRoomTreeNode[], target: Set<string>) {
+function collectDefaultExpandedNodeIds(
+  nodes: DataRoomTreeNode[],
+  target: Set<string>,
+) {
   for (const node of nodes) {
     if (node.defaultExpanded) {
       target.add(node.id);
@@ -203,7 +224,9 @@ function ExplorerStatus({ detail, title }: { detail: string; title: string }) {
   return (
     <div className="mx-1 mb-3 rounded-lg border border-outline-variant/70 bg-surface-container-lowest p-3">
       <p className="text-[12px] font-semibold text-sidebar-active">{title}</p>
-      <p className="mt-1 break-words text-[11px] leading-5 text-sidebar-muted">{detail}</p>
+      <p className="mt-1 break-words text-[11px] leading-5 text-sidebar-muted">
+        {detail}
+      </p>
     </div>
   );
 }

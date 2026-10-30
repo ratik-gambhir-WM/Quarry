@@ -1,14 +1,14 @@
-"use client"
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import type { PointerEvent, ReactNode } from "react"
-import { useDataGrid } from "@/components/reui/data-grid/data-grid"
-import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { PointerEvent, ReactNode } from "react";
+import { useDataGrid } from "@/components/reui/data-grid/data-grid";
+import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
-const MIN_THUMB_SIZE = 24
-const FALLBACK_SCROLLBAR_SIZE = 12
+const MIN_THUMB_SIZE = 24;
+const FALLBACK_SCROLLBAR_SIZE = 12;
 
 const INITIAL_METRICS = {
   hasVerticalOverflow: false,
@@ -17,44 +17,44 @@ const INITIAL_METRICS = {
   thumbHeight: 0,
   thumbTop: 0,
   trackHeight: 0,
-} as const
+} as const;
 
 // Track footprint, measured: horizontal is 8px tall and vertical 6px wide, and
 // each loses 1px to its transparent border plus 2px to p-px, so the thumbs land
 // at 5px and 3px. Shrink these further and the thumb stops being a grab target.
 const SCROLLBAR_CLASSNAME =
-  "flex touch-none p-px transition-colors select-none data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:flex-col data-[orientation=horizontal]:border-t data-[orientation=horizontal]:border-t-transparent data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5 data-[orientation=vertical]:border-s data-[orientation=vertical]:border-s-transparent"
+  "flex touch-none p-px transition-colors select-none data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:flex-col data-[orientation=horizontal]:border-t data-[orientation=horizontal]:border-t-transparent data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5 data-[orientation=vertical]:border-s data-[orientation=vertical]:border-s-transparent";
 
-const SCROLLBAR_THUMB_CLASSNAME = "bg-border rounded-full relative flex-1"
+const SCROLLBAR_THUMB_CLASSNAME = "bg-border rounded-full relative flex-1";
 
-type DataGridScrollAreaOrientation = "horizontal" | "vertical" | "both"
+type DataGridScrollAreaOrientation = "horizontal" | "vertical" | "both";
 
 type ScrollbarMetrics = {
-  hasVerticalOverflow: boolean
-  headerHeight: number
-  horizontalScrollbarSize: number
-  thumbHeight: number
-  thumbTop: number
-  trackHeight: number
-}
+  hasVerticalOverflow: boolean;
+  headerHeight: number;
+  horizontalScrollbarSize: number;
+  thumbHeight: number;
+  thumbTop: number;
+  trackHeight: number;
+};
 
 type ObservedElements = {
-  header: HTMLElement | null
-  horizontalScrollbar: HTMLElement | null
-  table: HTMLElement | null
-  tableViewport: HTMLElement | null
-}
+  header: HTMLElement | null;
+  horizontalScrollbar: HTMLElement | null;
+  table: HTMLElement | null;
+  tableViewport: HTMLElement | null;
+};
 
 type DataGridScrollAreaProps = Omit<
   ScrollAreaPrimitive.Root.Props,
   "children"
 > & {
-  children: ReactNode
-  orientation?: DataGridScrollAreaOrientation
-}
+  children: ReactNode;
+  orientation?: DataGridScrollAreaOrientation;
+};
 
 function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
+  return Math.min(max, Math.max(min, value));
 }
 
 function areMetricsEqual(next: ScrollbarMetrics, prev: ScrollbarMetrics) {
@@ -65,26 +65,26 @@ function areMetricsEqual(next: ScrollbarMetrics, prev: ScrollbarMetrics) {
     next.thumbHeight === prev.thumbHeight &&
     next.thumbTop === prev.thumbTop &&
     next.trackHeight === prev.trackHeight
-  )
+  );
 }
 
 function applyMetrics(element: HTMLElement, metrics: ScrollbarMetrics) {
   element.style.setProperty(
     "--data-grid-scrollbar-header-height",
-    `${metrics.headerHeight}px`
-  )
+    `${metrics.headerHeight}px`,
+  );
   element.style.setProperty(
     "--data-grid-scrollbar-thumb-height",
-    `${metrics.thumbHeight}px`
-  )
+    `${metrics.thumbHeight}px`,
+  );
   element.style.setProperty(
     "--data-grid-scrollbar-thumb-top",
-    `${metrics.thumbTop}px`
-  )
+    `${metrics.thumbTop}px`,
+  );
   element.style.setProperty(
     "--data-grid-scrollbar-track-height",
-    `${metrics.trackHeight}px`
-  )
+    `${metrics.trackHeight}px`,
+  );
 }
 
 function DataGridScrollArea({
@@ -93,86 +93,86 @@ function DataGridScrollArea({
   orientation = "both",
   ...props
 }: DataGridScrollAreaProps) {
-  const { props: dataGridProps, table } = useDataGrid()
-  const containerRef = useRef<HTMLDivElement>(null)
-  const overlayRef = useRef<HTMLDivElement | null>(null)
-  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const { props: dataGridProps, table } = useDataGrid();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
-    pointerId: number
-    startScrollTop: number
-    startY: number
-  } | null>(null)
-  const metricsRef = useRef<ScrollbarMetrics>(INITIAL_METRICS)
+    pointerId: number;
+    startScrollTop: number;
+    startY: number;
+  } | null>(null);
+  const metricsRef = useRef<ScrollbarMetrics>(INITIAL_METRICS);
   const observedElementsRef = useRef<ObservedElements>({
     header: null,
     horizontalScrollbar: null,
     table: null,
     tableViewport: null,
-  })
+  });
 
-  const showHorizontal = orientation !== "vertical"
-  const showVertical = orientation !== "horizontal"
+  const showHorizontal = orientation !== "vertical";
+  const showVertical = orientation !== "horizontal";
   const usesCustomVerticalScrollbar =
-    showVertical && !!dataGridProps.tableLayout?.headerSticky
+    showVertical && !!dataGridProps.tableLayout?.headerSticky;
   // Pinned columns are sticky and never scroll, so the horizontal scrollbar
   // track is inset to span only the scrollable center region between them.
-  const isColumnsPinnable = !!dataGridProps.tableLayout?.columnsPinnable
-  const scrollbarInsetStart = isColumnsPinnable ? table.getStartTotalSize() : 0
-  const scrollbarInsetEnd = isColumnsPinnable ? table.getEndTotalSize() : 0
+  const isColumnsPinnable = !!dataGridProps.tableLayout?.columnsPinnable;
+  const scrollbarInsetStart = isColumnsPinnable ? table.getStartTotalSize() : 0;
+  const scrollbarInsetEnd = isColumnsPinnable ? table.getEndTotalSize() : 0;
   const [hasCustomVerticalOverflow, setHasCustomVerticalOverflow] =
-    useState(false)
+    useState(false);
 
   const clearDragState = useCallback(() => {
-    dragRef.current = null
-    document.body.style.userSelect = ""
-    document.body.style.webkitUserSelect = ""
-  }, [])
+    dragRef.current = null;
+    document.body.style.userSelect = "";
+    document.body.style.webkitUserSelect = "";
+  }, []);
 
   // The overlay is mounted one commit after the sync that detected overflow,
   // so it misses that sync's write. Seeding it from the ref callback lands the
   // geometry during commit, before the browser paints the track.
   const setOverlayRef = useCallback((node: HTMLDivElement | null) => {
-    overlayRef.current = node
+    overlayRef.current = node;
 
-    if (node) applyMetrics(node, metricsRef.current)
-  }, [])
+    if (node) applyMetrics(node, metricsRef.current);
+  }, []);
 
   const resetMetrics = useCallback(() => {
     if (!areMetricsEqual(INITIAL_METRICS, metricsRef.current)) {
-      metricsRef.current = INITIAL_METRICS
-      if (overlayRef.current) applyMetrics(overlayRef.current, INITIAL_METRICS)
+      metricsRef.current = INITIAL_METRICS;
+      if (overlayRef.current) applyMetrics(overlayRef.current, INITIAL_METRICS);
     }
 
-    setHasCustomVerticalOverflow((prev) => (prev ? false : prev))
-  }, [])
+    setHasCustomVerticalOverflow((prev) => (prev ? false : prev));
+  }, []);
 
   const syncCustomVerticalScrollbar = useCallback(() => {
-    const container = containerRef.current
-    const viewport = viewportRef.current
+    const container = containerRef.current;
+    const viewport = viewportRef.current;
 
     if (!container || !viewport || !usesCustomVerticalScrollbar) {
-      resetMetrics()
-      return
+      resetMetrics();
+      return;
     }
 
-    const { header, horizontalScrollbar } = observedElementsRef.current
-    const headerHeight = header?.getBoundingClientRect().height ?? 0
-    const viewportHeight = viewport.clientHeight
-    const viewportWidth = viewport.clientWidth
-    const scrollHeight = viewport.scrollHeight
-    const scrollWidth = viewport.scrollWidth
+    const { header, horizontalScrollbar } = observedElementsRef.current;
+    const headerHeight = header?.getBoundingClientRect().height ?? 0;
+    const viewportHeight = viewport.clientHeight;
+    const viewportWidth = viewport.clientWidth;
+    const scrollHeight = viewport.scrollHeight;
+    const scrollWidth = viewport.scrollWidth;
     const hasHorizontalOverflow =
-      showHorizontal && scrollWidth > viewportWidth + 0.5
+      showHorizontal && scrollWidth > viewportWidth + 0.5;
     const horizontalScrollbarSize = hasHorizontalOverflow
       ? horizontalScrollbar?.offsetHeight || FALLBACK_SCROLLBAR_SIZE
-      : 0
+      : 0;
     const trackHeight = Math.max(
       0,
-      viewportHeight - headerHeight - horizontalScrollbarSize
-    )
-    const maxScroll = Math.max(0, scrollHeight - viewportHeight)
+      viewportHeight - headerHeight - horizontalScrollbarSize,
+    );
+    const maxScroll = Math.max(0, scrollHeight - viewportHeight);
 
-    let nextMetrics: ScrollbarMetrics
+    let nextMetrics: ScrollbarMetrics;
 
     if (trackHeight === 0 || maxScroll === 0) {
       nextMetrics = {
@@ -182,20 +182,20 @@ function DataGridScrollArea({
         thumbHeight: trackHeight,
         thumbTop: 0,
         trackHeight,
-      }
+      };
     } else {
       const bodyContentHeight = Math.max(
         trackHeight,
-        scrollHeight - headerHeight
-      )
+        scrollHeight - headerHeight,
+      );
       const thumbHeight = clamp(
         trackHeight * (trackHeight / bodyContentHeight),
         MIN_THUMB_SIZE,
-        trackHeight
-      )
-      const maxThumbTop = Math.max(0, trackHeight - thumbHeight)
+        trackHeight,
+      );
+      const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
       const thumbTop =
-        maxThumbTop > 0 ? (viewport.scrollTop / maxScroll) * maxThumbTop : 0
+        maxThumbTop > 0 ? (viewport.scrollTop / maxScroll) * maxThumbTop : 0;
 
       nextMetrics = {
         hasVerticalOverflow: true,
@@ -204,193 +204,199 @@ function DataGridScrollArea({
         thumbHeight,
         thumbTop,
         trackHeight,
-      }
+      };
     }
 
     if (!areMetricsEqual(nextMetrics, metricsRef.current)) {
-      metricsRef.current = nextMetrics
+      metricsRef.current = nextMetrics;
       // Scoped to the overlay, never to the container. These four properties
       // inherit, and thumbTop changes on essentially every scroll frame, so
       // writing them on the element that wraps the whole grid invalidates
       // computed style for every row and cell each frame. The overlay subtree
       // is their only reader.
-      if (overlayRef.current) applyMetrics(overlayRef.current, nextMetrics)
+      if (overlayRef.current) applyMetrics(overlayRef.current, nextMetrics);
     }
 
     setHasCustomVerticalOverflow((prev) =>
       prev === nextMetrics.hasVerticalOverflow
         ? prev
-        : nextMetrics.hasVerticalOverflow
-    )
-  }, [resetMetrics, showHorizontal, usesCustomVerticalScrollbar])
+        : nextMetrics.hasVerticalOverflow,
+    );
+  }, [resetMetrics, showHorizontal, usesCustomVerticalScrollbar]);
 
   useEffect(() => {
-    const container = containerRef.current
-    const viewport = viewportRef.current
+    const container = containerRef.current;
+    const viewport = viewportRef.current;
 
-    if (!container || !viewport) return
+    if (!container || !viewport) return;
 
     if (!usesCustomVerticalScrollbar) {
-      resetMetrics()
-      return
+      resetMetrics();
+      return;
     }
 
-    let frame = 0
+    let frame = 0;
 
     const scheduleSync = () => {
-      cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(syncCustomVerticalScrollbar)
-    }
+      cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(syncCustomVerticalScrollbar);
+    };
 
     const observer =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(scheduleSync)
-    const observed = new Set<HTMLElement>()
+        : new ResizeObserver(scheduleSync);
+    const observed = new Set<HTMLElement>();
 
     const observeElement = (element: HTMLElement | null) => {
       if (element && observer && !observed.has(element)) {
-        observer.observe(element)
-        observed.add(element)
+        observer.observe(element);
+        observed.add(element);
       }
-    }
+    };
 
     const resolveObservedElements = () => {
       observedElementsRef.current = {
         header: container.querySelector(
-          '[data-slot="data-grid-table"] thead'
+          '[data-slot="data-grid-table"] thead',
         ) as HTMLElement | null,
         horizontalScrollbar: container.querySelector(
-          '[data-slot="data-grid-scrollbar"][data-orientation="horizontal"]'
+          '[data-slot="data-grid-scrollbar"][data-orientation="horizontal"]',
         ) as HTMLElement | null,
         table: container.querySelector(
-          '[data-slot="data-grid-table"]'
+          '[data-slot="data-grid-table"]',
         ) as HTMLElement | null,
         tableViewport: container.querySelector(
-          '[data-slot="data-grid-table-viewport"]'
+          '[data-slot="data-grid-table-viewport"]',
         ) as HTMLElement | null,
-      }
+      };
 
-      observeElement(observedElementsRef.current.header)
-      observeElement(observedElementsRef.current.table)
-      observeElement(observedElementsRef.current.tableViewport)
+      observeElement(observedElementsRef.current.header);
+      observeElement(observedElementsRef.current.table);
+      observeElement(observedElementsRef.current.tableViewport);
 
       return !!(
         observedElementsRef.current.header && observedElementsRef.current.table
-      )
-    }
+      );
+    };
 
-    observeElement(viewport)
-    const resolvedOnMount = resolveObservedElements()
+    observeElement(viewport);
+    const resolvedOnMount = resolveObservedElements();
 
-    scheduleSync()
-    viewport.addEventListener("scroll", scheduleSync, { passive: true })
+    scheduleSync();
+    viewport.addEventListener("scroll", scheduleSync, { passive: true });
 
     // A table that mounts after this effect (empty state swapped for data)
     // would otherwise never be observed and the custom scrollbar would
     // overlap the sticky header. One-shot: disconnects once resolved.
-    let mutationObserver: MutationObserver | null = null
+    let mutationObserver: MutationObserver | null = null;
     if (!resolvedOnMount && typeof MutationObserver !== "undefined") {
       mutationObserver = new MutationObserver(() => {
         if (resolveObservedElements()) {
-          mutationObserver?.disconnect()
-          mutationObserver = null
-          scheduleSync()
+          mutationObserver?.disconnect();
+          mutationObserver = null;
+          scheduleSync();
         }
-      })
-      mutationObserver.observe(container, { childList: true, subtree: true })
+      });
+      mutationObserver.observe(container, { childList: true, subtree: true });
     }
 
     return () => {
-      cancelAnimationFrame(frame)
-      observer?.disconnect()
-      mutationObserver?.disconnect()
-      viewport.removeEventListener("scroll", scheduleSync)
-      clearDragState()
-    }
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      mutationObserver?.disconnect();
+      viewport.removeEventListener("scroll", scheduleSync);
+      clearDragState();
+    };
   }, [
     clearDragState,
     resetMetrics,
     syncCustomVerticalScrollbar,
     usesCustomVerticalScrollbar,
-  ])
+  ]);
 
   const scrollToThumbOffset = (nextThumbTop: number) => {
-    const viewport = viewportRef.current
-    const { thumbHeight, trackHeight } = metricsRef.current
+    const viewport = viewportRef.current;
+    const { thumbHeight, trackHeight } = metricsRef.current;
 
-    if (!viewport) return
+    if (!viewport) return;
 
-    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-    const maxThumbTop = Math.max(0, trackHeight - thumbHeight)
+    const maxScroll = Math.max(
+      0,
+      viewport.scrollHeight - viewport.clientHeight,
+    );
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
 
     if (maxScroll === 0 || maxThumbTop === 0) {
-      viewport.scrollTop = 0
-      return
+      viewport.scrollTop = 0;
+      return;
     }
 
-    const ratio = clamp(nextThumbTop, 0, maxThumbTop) / maxThumbTop
-    viewport.scrollTop = ratio * maxScroll
-  }
+    const ratio = clamp(nextThumbTop, 0, maxThumbTop) / maxThumbTop;
+    viewport.scrollTop = ratio * maxScroll;
+  };
 
   const handleThumbPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    const viewport = viewportRef.current
+    const viewport = viewportRef.current;
 
-    if (!viewport) return
+    if (!viewport) return;
 
-    event.preventDefault()
-    event.stopPropagation()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
 
     dragRef.current = {
       pointerId: event.pointerId,
       startScrollTop: viewport.scrollTop,
       startY: event.clientY,
-    }
+    };
 
-    document.body.style.userSelect = "none"
-    document.body.style.webkitUserSelect = "none"
-  }
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+  };
 
   const handleThumbPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const viewport = viewportRef.current
-    const dragState = dragRef.current
-    const { thumbHeight, trackHeight } = metricsRef.current
+    const viewport = viewportRef.current;
+    const dragState = dragRef.current;
+    const { thumbHeight, trackHeight } = metricsRef.current;
 
     if (!viewport || !dragState || dragState.pointerId !== event.pointerId) {
-      return
+      return;
     }
 
-    const maxThumbTop = Math.max(0, trackHeight - thumbHeight)
-    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+    const maxScroll = Math.max(
+      0,
+      viewport.scrollHeight - viewport.clientHeight,
+    );
 
-    if (maxThumbTop === 0 || maxScroll === 0) return
+    if (maxThumbTop === 0 || maxScroll === 0) return;
 
-    const deltaY = event.clientY - dragState.startY
+    const deltaY = event.clientY - dragState.startY;
     const nextScrollTop =
-      dragState.startScrollTop + (deltaY / maxThumbTop) * maxScroll
+      dragState.startScrollTop + (deltaY / maxThumbTop) * maxScroll;
 
-    viewport.scrollTop = clamp(nextScrollTop, 0, maxScroll)
-  }
+    viewport.scrollTop = clamp(nextScrollTop, 0, maxScroll);
+  };
 
   const handleThumbPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return
-    clearDragState()
-  }
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    clearDragState();
+  };
 
   const handleTrackPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    const { thumbHeight } = metricsRef.current
+    const { thumbHeight } = metricsRef.current;
 
-    if (event.target !== event.currentTarget) return
+    if (event.target !== event.currentTarget) return;
 
-    event.preventDefault()
-    event.stopPropagation()
+    event.preventDefault();
+    event.stopPropagation();
 
-    const rect = event.currentTarget.getBoundingClientRect()
-    const offsetY = event.clientY - rect.top - thumbHeight / 2
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offsetY = event.clientY - rect.top - thumbHeight / 2;
 
-    scrollToThumbOffset(offsetY)
-  }
+    scrollToThumbOffset(offsetY);
+  };
 
   return (
     <div ref={containerRef} className="relative">
@@ -464,7 +470,7 @@ function DataGridScrollArea({
               className={cn(
                 "bg-border absolute end-px w-1.5",
                 "top-(--data-grid-scrollbar-thumb-top) h-(--data-grid-scrollbar-thumb-height)",
-                "rounded-full"
+                "rounded-full",
               )}
               onLostPointerCapture={clearDragState}
               onPointerCancel={handleThumbPointerUp}
@@ -476,8 +482,8 @@ function DataGridScrollArea({
         </div>
       )}
     </div>
-  )
+  );
 }
 
-export { DataGridScrollArea }
-export type { DataGridScrollAreaOrientation, DataGridScrollAreaProps }
+export { DataGridScrollArea };
+export type { DataGridScrollAreaOrientation, DataGridScrollAreaProps };

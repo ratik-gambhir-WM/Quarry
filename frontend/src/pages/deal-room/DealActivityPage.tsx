@@ -6,5 +6,11 @@ import { useDealRoom } from "../DealRoomPage";
 export function DealActivityPage() {
   const { deal } = useDealRoom();
   const location = useLocation();
-  return <Navigate replace state={location.state} to={getDealActivityPath(deal.room.id)} />;
+  return (
+    <Navigate
+      replace
+      state={location.state}
+      to={getDealActivityPath(deal.room.id)}
+    />
+  );
 }

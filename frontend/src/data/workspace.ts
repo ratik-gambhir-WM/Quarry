@@ -1,4 +1,9 @@
-import type { DealParty, EngagementType, TransactionType, DealStatus } from "./dealModel";
+import type {
+  DealParty,
+  EngagementType,
+  TransactionType,
+  DealStatus,
+} from "./dealModel";
 import type { SavedDeal, SavedDealMetadata } from "./dealExtraction";
 export type WorkspaceLocationState = {
   email?: string;
@@ -15,7 +20,8 @@ export type WorkspaceAccountUser = {
   updatedAt: string;
 };
 
-export type WorkspaceSidebarIcon = "personSearch" | "terminal" | "timeline" | "folderOpen" | "sparkles";
+export type WorkspaceSidebarIcon =
+  "personSearch" | "terminal" | "timeline" | "folderOpen" | "sparkles";
 
 export type WorkspaceSidebarTool = {
   href?: string;
@@ -135,7 +141,8 @@ export function getDeliverableTemplatePath(dealId: string, templateId: string) {
 }
 
 export function getTeamLabel(email?: string) {
-  const teamName = email?.split("@")[0]?.replace(/[._-]/g, " ") ?? "Analyst Team";
+  const teamName =
+    email?.split("@")[0]?.replace(/[._-]/g, " ") ?? "Analyst Team";
 
   return teamName.replace(/\b\w/g, (character) => character.toUpperCase());
 }

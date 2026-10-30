@@ -1,5 +1,7 @@
 import * as React from "react";
-import useEmblaCarousel, { type UseEmblaCarouselType } from "embla-carousel-react";
+import useEmblaCarousel, {
+  type UseEmblaCarouselType,
+} from "embla-carousel-react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/Icon";
@@ -30,7 +32,8 @@ const CarouselContext = React.createContext<CarouselContextProps | null>(null);
 
 function useCarousel() {
   const context = React.useContext(CarouselContext);
-  if (!context) throw new Error("useCarousel must be used within a <Carousel />");
+  if (!context)
+    throw new Error("useCarousel must be used within a <Carousel />");
   return context;
 }
 
@@ -117,7 +120,11 @@ function Carousel({
 function CarouselContent({ className, ...props }: React.ComponentProps<"div">) {
   const { carouselRef, orientation } = useCarousel();
   return (
-    <div className="overflow-hidden" data-slot="carousel-content" ref={carouselRef}>
+    <div
+      className="overflow-hidden"
+      data-slot="carousel-content"
+      ref={carouselRef}
+    >
       <div
         className={cn(
           "flex touch-pan-y",
@@ -147,7 +154,10 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function CarouselPrevious({ className, ...props }: React.ComponentProps<typeof Button>) {
+function CarouselPrevious({
+  className,
+  ...props
+}: React.ComponentProps<typeof Button>) {
   const { canScrollPrev, orientation, scrollPrev } = useCarousel();
   return (
     <Button
@@ -172,7 +182,10 @@ function CarouselPrevious({ className, ...props }: React.ComponentProps<typeof B
   );
 }
 
-function CarouselNext({ className, ...props }: React.ComponentProps<typeof Button>) {
+function CarouselNext({
+  className,
+  ...props
+}: React.ComponentProps<typeof Button>) {
   const { canScrollNext, orientation, scrollNext } = useCarousel();
   return (
     <Button

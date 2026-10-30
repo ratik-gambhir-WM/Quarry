@@ -1,5 +1,9 @@
 import { testParty } from "@/test/fixtures/deals";
-import { dealStatusLabels, dealStatusOptions, type DealStatus } from "@/data/dealModel";
+import {
+  dealStatusLabels,
+  dealStatusOptions,
+  type DealStatus,
+} from "@/data/dealModel";
 import { describe, expect, it } from "vitest";
 import {
   buildDealKanbanLanes,
@@ -19,7 +23,12 @@ function makeDeal(
     colorClassName: "bg-primary",
     portfolio: {
       engagementType: "sell_side",
-      parties: [testParty("Northstar Equity", "pe_sponsor"), testParty("Blue River", "buyer"), testParty(`${id} Target`, "target"), testParty("Parent Name", "parent_company")],
+      parties: [
+        testParty("Northstar Equity", "pe_sponsor"),
+        testParty("Blue River", "buyer"),
+        testParty(`${id} Target`, "target"),
+        testParty("Parent Name", "parent_company"),
+      ],
       status,
       transactionType: "strategic_acquisition",
     },
@@ -46,12 +55,26 @@ describe("deals view selectors", () => {
     const deals = dealStatusOptions.map((status) => makeDeal(status, status));
     expect(getDealCounts(deals)).toEqual({ current: 7, historic: 2, total: 9 });
     for (const status of dealStatusOptions) {
-      expect(buildDealPortfolioView(makeDeal(status, status)).status).toBe(dealStatusLabels[status]);
-      expect(filterDealPortfolioViews(deals, dealStatusLabels[status], "all").map((deal) => deal.statusCode)).toContain(status);
+      expect(buildDealPortfolioView(makeDeal(status, status)).status).toBe(
+        dealStatusLabels[status],
+      );
+      expect(
+        filterDealPortfolioViews(deals, dealStatusLabels[status], "all").map(
+          (deal) => deal.statusCode,
+        ),
+      ).toContain(status);
     }
     const lanes = buildDealKanbanLanes(deals.map(buildDealPortfolioView));
-    expect(lanes.find((lane) => lane.id === "closed")?.deals.map((deal) => deal.statusCode)).toEqual(["closed"]);
-    expect(lanes.find((lane) => lane.id === "pencils_down")?.deals.map((deal) => deal.statusCode)).toEqual(["pencils_down"]);
+    expect(
+      lanes
+        .find((lane) => lane.id === "closed")
+        ?.deals.map((deal) => deal.statusCode),
+    ).toEqual(["closed"]);
+    expect(
+      lanes
+        .find((lane) => lane.id === "pencils_down")
+        ?.deals.map((deal) => deal.statusCode),
+    ).toEqual(["pencils_down"]);
     expect(buildDealKanbanLanes([])).toEqual([]);
   });
 
@@ -60,14 +83,22 @@ describe("deals view selectors", () => {
     const historic = makeDeal("Historic Deal", "closed");
     const source = [current, historic];
 
-    expect(filterDealPortfolioViews(source, "northSTAR", "current").map((deal) => deal.id)).toEqual([
-      "Current Deal",
-    ]);
-    expect(filterDealPortfolioViews(source, "historic deal target", "all").map((deal) => deal.id)).toEqual([
-      "Historic Deal",
-    ]);
+    expect(
+      filterDealPortfolioViews(source, "northSTAR", "current").map(
+        (deal) => deal.id,
+      ),
+    ).toEqual(["Current Deal"]);
+    expect(
+      filterDealPortfolioViews(source, "historic deal target", "all").map(
+        (deal) => deal.id,
+      ),
+    ).toEqual(["Historic Deal"]);
     expect(source).toEqual([current, historic]);
-    expect(getDealCounts(source)).toEqual({ current: 1, historic: 1, total: 2 });
+    expect(getDealCounts(source)).toEqual({
+      current: 1,
+      historic: 1,
+      total: 2,
+    });
   });
 
   it("maps typed statuses to explicit lanes with historic last", () => {
@@ -91,13 +122,21 @@ describe("deals view selectors", () => {
       "Closed",
       "Pencils Down",
     ]);
-    expect(lanes.find((lane) => lane.id === "closed")?.deals.map((deal) => deal.id)).toEqual(["historic"]);
+    expect(
+      lanes.find((lane) => lane.id === "closed")?.deals.map((deal) => deal.id),
+    ).toEqual(["historic"]);
     expect(lanes.flatMap((lane) => lane.deals)).toHaveLength(deals.length);
   });
 
   it("creates CSS-safe deterministic transition names for arbitrary identifiers", () => {
-    expect(getDealTransitionName("Deal / 東京")).toMatch(/^deal-surface-[a-z0-9-]+$/);
-    expect(getDealTransitionName("Deal / 東京")).toBe(getDealTransitionName("Deal / 東京"));
-    expect(getDealTransitionName("Deal / 東京")).not.toBe(getDealTransitionName("Deal / 大阪"));
+    expect(getDealTransitionName("Deal / 東京")).toMatch(
+      /^deal-surface-[a-z0-9-]+$/,
+    );
+    expect(getDealTransitionName("Deal / 東京")).toBe(
+      getDealTransitionName("Deal / 東京"),
+    );
+    expect(getDealTransitionName("Deal / 東京")).not.toBe(
+      getDealTransitionName("Deal / 大阪"),
+    );
   });
 });

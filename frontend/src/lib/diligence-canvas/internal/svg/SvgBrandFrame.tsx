@@ -1,19 +1,19 @@
-import { memo } from 'react'
+import { memo } from "react";
 
-import logoAsset from '../../assets/brand-logo.png'
+import logoAsset from "../../assets/brand-logo.png";
 import {
   getWestMonroeBrandFrameLayout,
   WEST_MONROE_BRAND_COLOR,
-} from '../branding/BrandFrame'
+} from "../branding/BrandFrame";
 
 export const SvgBrandFrame = memo(function SvgBrandFrame({
   height,
   width,
 }: {
-  height: number
-  width: number
+  height: number;
+  width: number;
 }) {
-  const frame = getWestMonroeBrandFrameLayout(width, height)
+  const frame = getWestMonroeBrandFrameLayout(width, height);
 
   return (
     <g aria-label="West Monroe branded slide frame" pointerEvents="none">
@@ -46,5 +46,5 @@ export const SvgBrandFrame = memo(function SvgBrandFrame({
         y={frame.logo.y}
       />
     </g>
-  )
-})
+  );
+});

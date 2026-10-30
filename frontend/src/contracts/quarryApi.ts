@@ -1,4 +1,12 @@
-import type { Company, CompanyInput, CompanyPage, CompanySearch, DealFields } from "../data/dealModel";
+import type { NotebookApi } from "./notebooks";
+export type * from "./notebooks";
+import type {
+  Company,
+  CompanyInput,
+  CompanyPage,
+  CompanySearch,
+  DealFields,
+} from "../data/dealModel";
 import type {
   LocalDealDataRoom,
   LocalDealFileContents,
@@ -10,7 +18,10 @@ import type {
   SavedDeal,
   SavedDealMetadata,
 } from "../data/dealExtraction";
-import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
+import type {
+  DealDataRoom,
+  DocumentPreviewResponse,
+} from "../data/dataRoomPreview";
 import type { WorkspaceAccountUser } from "../data/workspace";
 import type { DiligenceCanvasDocument } from "./diligenceCanvas";
 
@@ -19,9 +30,22 @@ export type PersistedDeal = SavedDeal & {
 };
 
 export type LoginInput = { username: string; password: string };
-export type RegisterInput = LoginInput & { email: string; firstName: string; lastName: string; jobTitle?: string };
-export type SessionResponse = { user: WorkspaceAccountUser; accessToken: string; tokenType: "Bearer"; expiresAt: string };
-export type CurrentUserResponse = { user: WorkspaceAccountUser; expiresAt: string };
+export type RegisterInput = LoginInput & {
+  email: string;
+  firstName: string;
+  lastName: string;
+  jobTitle?: string;
+};
+export type SessionResponse = {
+  user: WorkspaceAccountUser;
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresAt: string;
+};
+export type CurrentUserResponse = {
+  user: WorkspaceAccountUser;
+  expiresAt: string;
+};
 
 export type ProcessedDocument = {
   chunkCount: number;
@@ -218,15 +242,23 @@ export type PowerPointExport = {
   warningCount: number;
 };
 
-export type AssistantThreadListOptions = { after?: string; archived?: boolean; scope?: "all" | "freeform" | "deal"; dealId?: string };
-export interface QuarryApi {
+export type AssistantThreadListOptions = {
+  after?: string;
+  archived?: boolean;
+  scope?: "all" | "freeform" | "deal";
+  dealId?: string;
+};
+export interface QuarryApi extends NotebookApi {
   createCompany(input: CompanyInput): Promise<Company>;
   updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
   listCompanies(options?: CompanySearch): Promise<CompanyPage>;
   updateDeal(dealId: string, input: DealFields): Promise<SaveDealResponse>;
   archiveAssistantThread(threadId: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
-  createAssistantThread(threadId?: string, dealId?: string | null): Promise<AssistantThread>;
+  createAssistantThread(
+    threadId?: string,
+    dealId?: string | null,
+  ): Promise<AssistantThread>;
   createDeal(input: SaveDealInput): Promise<SaveDealResponse>;
   login(input: LoginInput): Promise<SessionResponse>;
   register(input: RegisterInput): Promise<SessionResponse>;
@@ -234,7 +266,9 @@ export interface QuarryApi {
   logout(): Promise<void>;
   deleteTemplate(templateId: string): Promise<void>;
   deleteAssistantThread(threadId: string): Promise<void>;
-  exportPowerPoint(document: DiligenceCanvasDocument): Promise<PowerPointExport>;
+  exportPowerPoint(
+    document: DiligenceCanvasDocument,
+  ): Promise<PowerPointExport>;
   saveDealMetadata(
     dealId: string,
     input: SaveDealMetadataInput,
@@ -242,7 +276,10 @@ export interface QuarryApi {
   getDeal(dealId: string): Promise<PersistedDeal>;
   getAssistantThread(threadId: string): Promise<AssistantThreadDetail>;
   getDealDocumentPdf(dealId: string, fileId: string): Promise<DealDocumentPdf>;
-  getDealDocumentText(dealId: string, fileId: string): Promise<DealDocumentText>;
+  getDealDocumentText(
+    dealId: string,
+    fileId: string,
+  ): Promise<DealDocumentText>;
   getTemplate(templateId: string): Promise<DiligenceCanvasDocument>;
   importPptxTemplate(
     file: File,
@@ -263,7 +300,10 @@ export interface QuarryApi {
     dealId: string,
     files: File[],
   ): Promise<ProcessDocumentsResponse>;
-  queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers): () => void;
+  queryModel(
+    input: QueryModelInput,
+    handlers: SendQueryEventHandlers,
+  ): () => void;
   renameAssistantThread(threadId: string, title: string): Promise<void>;
   runAssistantThread(
     input: RunAssistantThreadInput,
@@ -275,10 +315,7 @@ export interface QuarryApi {
   searchDocumentChunksByVector(
     search: FileChunkVectorSearch,
   ): Promise<VectorFileChunkHit[]>;
-  startProcessFile(
-    dealId: string,
-    file: File,
-  ): Promise<ProcessFileJobResponse>;
+  startProcessFile(dealId: string, file: File): Promise<ProcessFileJobResponse>;
   subscribeToProcessFileJob(
     jobId: string,
     handlers: ProcessFileJobEventHandlers,
@@ -302,7 +339,9 @@ export type SavePowerPointInput = {
 };
 
 export interface PlatformCapabilities {
-  readDealSourceFiles(input: ReadDealSourceFilesInput): Promise<LocalDealFileContents[]>;
+  readDealSourceFiles(
+    input: ReadDealSourceFilesInput,
+  ): Promise<LocalDealFileContents[]>;
   saveFile(input: SaveFileInput): Promise<boolean>;
   savePowerPoint(input: SavePowerPointInput): Promise<boolean>;
   selectDealDataRoom(): Promise<LocalDealDataRoom | null>;

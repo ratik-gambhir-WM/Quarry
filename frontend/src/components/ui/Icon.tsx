@@ -64,7 +64,14 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "mail":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="10.5" rx="2" width="16" x="4" y="6.75" />
+          <rect
+            className={iconClassName}
+            height="10.5"
+            rx="2"
+            width="16"
+            x="4"
+            y="6.75"
+          />
           <path className={iconClassName} d="m5 8 7 5 7-5" />
         </svg>
       );
@@ -72,7 +79,10 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="8.5" cy="15.5" r="3.5" />
-          <path className={iconClassName} d="M11.5 13h8.75v2.5h-2v2h-2v-2h-2v-2.5" />
+          <path
+            className={iconClassName}
+            d="M11.5 13h8.75v2.5h-2v2h-2v-2h-2v-2.5"
+          />
         </svg>
       );
     case "arrowRight":
@@ -103,7 +113,10 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "shield":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="M12 3 5.75 5.5v5.75c0 4.25 2.6 8.15 6.25 9.75 3.65-1.6 6.25-5.5 6.25-9.75V5.5z" />
+          <path
+            className={iconClassName}
+            d="M12 3 5.75 5.5v5.75c0 4.25 2.6 8.15 6.25 9.75 3.65-1.6 6.25-5.5 6.25-9.75V5.5z"
+          />
           <path className={iconClassName} d="m9.5 12 1.75 1.75L14.75 10" />
         </svg>
       );
@@ -111,7 +124,10 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="12" cy="12" r="9" />
-          <path className={iconClassName} d="M9.75 9.25a2.25 2.25 0 1 1 4.13 1.23c-.55.77-1.88 1.31-1.88 2.77" />
+          <path
+            className={iconClassName}
+            d="M9.75 9.25a2.25 2.25 0 1 1 4.13 1.23c-.55.77-1.88 1.31-1.88 2.77"
+          />
           <path className={iconClassName} d="M12 17h.01" />
         </svg>
       );
@@ -126,23 +142,68 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "dataset":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="16" rx="2.5" width="16" x="4" y="4" />
-          <path className={iconClassName} d="M8.5 4v16M15.5 4v16M4 9.5h16M4 14.5h16" />
+          <rect
+            className={iconClassName}
+            height="16"
+            rx="2.5"
+            width="16"
+            x="4"
+            y="4"
+          />
+          <path
+            className={iconClassName}
+            d="M8.5 4v16M15.5 4v16M4 9.5h16M4 14.5h16"
+          />
         </svg>
       );
     case "dashboard":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="7" rx="1.5" width="7" x="4" y="4" />
-          <rect className={iconClassName} height="7" rx="1.5" width="7" x="13" y="4" />
-          <rect className={iconClassName} height="7" rx="1.5" width="7" x="4" y="13" />
-          <rect className={iconClassName} height="7" rx="1.5" width="7" x="13" y="13" />
+          <rect
+            className={iconClassName}
+            height="7"
+            rx="1.5"
+            width="7"
+            x="4"
+            y="4"
+          />
+          <rect
+            className={iconClassName}
+            height="7"
+            rx="1.5"
+            width="7"
+            x="13"
+            y="4"
+          />
+          <rect
+            className={iconClassName}
+            height="7"
+            rx="1.5"
+            width="7"
+            x="4"
+            y="13"
+          />
+          <rect
+            className={iconClassName}
+            height="7"
+            rx="1.5"
+            width="7"
+            x="13"
+            y="13"
+          />
         </svg>
       );
     case "sidebar":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="16" rx="2.5" width="18" x="3" y="4" />
+          <rect
+            className={iconClassName}
+            height="16"
+            rx="2.5"
+            width="18"
+            x="3"
+            y="4"
+          />
           <path className={iconClassName} d="M15 4v16M10.5 9 7.5 12l3 3" />
         </svg>
       );
@@ -157,7 +218,10 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="10" cy="8.5" r="2.5" />
-          <path className={iconClassName} d="M5.5 17c.7-2.2 2.5-3.5 4.5-3.5s3.8 1.3 4.5 3.5" />
+          <path
+            className={iconClassName}
+            d="M5.5 17c.7-2.2 2.5-3.5 4.5-3.5s3.8 1.3 4.5 3.5"
+          />
           <circle className={iconClassName} cx="17.5" cy="16.5" r="2.5" />
           <path className={iconClassName} d="m19.2 18.2 2.3 2.3" />
         </svg>
@@ -166,13 +230,23 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="12" cy="8" r="3.25" />
-          <path className={iconClassName} d="M5.75 19c.95-3.2 3.35-5 6.25-5s5.3 1.8 6.25 5" />
+          <path
+            className={iconClassName}
+            d="M5.75 19c.95-3.2 3.35-5 6.25-5s5.3 1.8 6.25 5"
+          />
         </svg>
       );
     case "terminal":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="14" rx="2" width="18" x="3" y="5" />
+          <rect
+            className={iconClassName}
+            height="14"
+            rx="2"
+            width="18"
+            x="3"
+            y="5"
+          />
           <path className={iconClassName} d="m7 10 3 2-3 2M12.5 16H17" />
         </svg>
       );
@@ -189,17 +263,51 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "folderOpen":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="M3.5 8.5h6l2 2h9v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-          <path className={iconClassName} d="M3.5 8.5v-1a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v1" />
+          <path
+            className={iconClassName}
+            d="M3.5 8.5h6l2 2h9v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+          />
+          <path
+            className={iconClassName}
+            d="M3.5 8.5v-1a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v1"
+          />
         </svg>
       );
     case "grid":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="5" rx="1" width="5" x="4" y="4" />
-          <rect className={iconClassName} height="5" rx="1" width="5" x="15" y="4" />
-          <rect className={iconClassName} height="5" rx="1" width="5" x="4" y="15" />
-          <rect className={iconClassName} height="5" rx="1" width="5" x="15" y="15" />
+          <rect
+            className={iconClassName}
+            height="5"
+            rx="1"
+            width="5"
+            x="4"
+            y="4"
+          />
+          <rect
+            className={iconClassName}
+            height="5"
+            rx="1"
+            width="5"
+            x="15"
+            y="4"
+          />
+          <rect
+            className={iconClassName}
+            height="5"
+            rx="1"
+            width="5"
+            x="4"
+            y="15"
+          />
+          <rect
+            className={iconClassName}
+            height="5"
+            rx="1"
+            width="5"
+            x="15"
+            y="15"
+          />
         </svg>
       );
     case "graph":
@@ -208,7 +316,10 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
           <circle className={iconClassName} cx="6" cy="7" r="2.25" />
           <circle className={iconClassName} cx="18" cy="6" r="2.25" />
           <circle className={iconClassName} cx="12" cy="18" r="2.25" />
-          <path className={iconClassName} d="m8 8.2 8 7.6M16.4 7.8l-3.3 8M7.2 9l3.6 7" />
+          <path
+            className={iconClassName}
+            d="m8 8.2 8 7.6M16.4 7.8l-3.3 8M7.2 9l3.6 7"
+          />
         </svg>
       );
     case "plus":
@@ -227,8 +338,14 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "editSquare":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="M12 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V12" />
-          <path className={iconClassName} d="m10 14 .5-3 7-7a1.8 1.8 0 0 1 2.5 2.5l-7 7zM16.5 5.5l2 2" />
+          <path
+            className={iconClassName}
+            d="M12 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V12"
+          />
+          <path
+            className={iconClassName}
+            d="m10 14 .5-3 7-7a1.8 1.8 0 0 1 2.5 2.5l-7 7zM16.5 5.5l2 2"
+          />
         </svg>
       );
     case "refresh":
@@ -242,14 +359,27 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M12 16V4M7.5 8.5 12 4l4.5 4.5" />
-          <path className={iconClassName} d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+          <path
+            className={iconClassName}
+            d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"
+          />
         </svg>
       );
     case "listAlt":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="18" rx="2.5" width="14" x="5" y="3" />
-          <path className={iconClassName} d="M9 8.5h6M9 12h6M9 15.5h6M7.5 8.5h.01M7.5 12h.01M7.5 15.5h.01" />
+          <rect
+            className={iconClassName}
+            height="18"
+            rx="2.5"
+            width="14"
+            x="5"
+            y="3"
+          />
+          <path
+            className={iconClassName}
+            d="M9 8.5h6M9 12h6M9 15.5h6M7.5 8.5h.01M7.5 12h.01M7.5 15.5h.01"
+          />
         </svg>
       );
     case "filter":
@@ -278,21 +408,44 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="15.5" cy="7.5" r="3.5" />
           <circle className={iconClassName} cx="16.5" cy="16" r="3" />
-          <rect className={iconClassName} height="13" rx="2" width="10" x="3.5" y="5.5" />
-          <path className={iconClassName} d="M10.5 9H8a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H6.5" />
+          <rect
+            className={iconClassName}
+            height="13"
+            rx="2"
+            width="10"
+            x="3.5"
+            y="5.5"
+          />
+          <path
+            className={iconClassName}
+            d="M10.5 9H8a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3H6.5"
+          />
         </svg>
       );
     case "sheet":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="16" rx="2" width="16" x="4" y="4" />
-          <path className={iconClassName} d="M4 9.5h16M9.5 9.5V20M14.5 9.5V20" />
+          <rect
+            className={iconClassName}
+            height="16"
+            rx="2"
+            width="16"
+            x="4"
+            y="4"
+          />
+          <path
+            className={iconClassName}
+            d="M4 9.5h16M9.5 9.5V20M14.5 9.5V20"
+          />
         </svg>
       );
     case "sparkles":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="m12 4 1.4 4.6L18 10l-4.6 1.4L12 16l-1.4-4.6L6 10l4.6-1.4zM18.5 4.5 19 6l1.5.5-1.5.5-.5 1.5-.5-1.5L16.5 6l1.5-.5zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z" />
+          <path
+            className={iconClassName}
+            d="m12 4 1.4 4.6L18 10l-4.6 1.4L12 16l-1.4-4.6L6 10l4.6-1.4zM18.5 4.5 19 6l1.5.5-1.5.5-.5 1.5-.5-1.5L16.5 6l1.5-.5zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"
+          />
         </svg>
       );
     case "search":
@@ -305,14 +458,20 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "notification":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="M8 17.5h8M9 17.5v-5a3 3 0 0 1 6 0v5M7 17.5h10l-1.2-1.8a3.2 3.2 0 0 1-.5-1.8v-1.4a5.3 5.3 0 1 0-10.6 0v1.4c0 .64-.18 1.27-.52 1.8z" />
+          <path
+            className={iconClassName}
+            d="M8 17.5h8M9 17.5v-5a3 3 0 0 1 6 0v5M7 17.5h10l-1.2-1.8a3.2 3.2 0 0 1-.5-1.8v-1.4a5.3 5.3 0 1 0-10.6 0v1.4c0 .64-.18 1.27-.52 1.8z"
+          />
         </svg>
       );
     case "settings":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <circle className={iconClassName} cx="12" cy="12" r="3.1" />
-          <path className={iconClassName} d="m12 3.8 1 1.8 2.1.4 1.4-1.4 1.8 1.8-1.4 1.4.4 2.1 1.8 1-1.8 1.8-1.8-1-.4 2.1 1.4 1.4-1.8 1.8-1.4-1.4-2.1.4-1 1.8-1.8-1.8-2.1-.4-1.4 1.4-1.8-1.8 1.4-1.4-.4-2.1-1.8-1 1.8-1.8 1.8 1 .4-2.1-1.4-1.4 1.8-1.8 1.4 1.4 2.1-.4z" />
+          <path
+            className={iconClassName}
+            d="m12 3.8 1 1.8 2.1.4 1.4-1.4 1.8 1.8-1.4 1.4.4 2.1 1.8 1-1.8 1.8-1.8-1-.4 2.1 1.4 1.4-1.8 1.8-1.4-1.4-2.1.4-1 1.8-1.8-1.8-2.1-.4-1.4 1.4-1.8-1.8 1.4-1.4-.4-2.1-1.8-1 1.8-1.8 1.8 1 .4-2.1-1.4-1.4 1.8-1.8 1.4 1.4 2.1-.4z"
+          />
         </svg>
       );
     case "send":
@@ -331,12 +490,20 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
     case "star":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <path className={iconClassName} d="m12 3.75 2.55 5.17 5.7.83-4.12 4.02.98 5.68L12 16.77l-5.1 2.68.98-5.68-4.12-4.02 5.7-.83z" />
+          <path
+            className={iconClassName}
+            d="m12 3.75 2.55 5.17 5.7.83-4.12 4.02.98 5.68L12 16.77l-5.1 2.68.98-5.68-4.12-4.02 5.7-.83z"
+          />
         </svg>
       );
     case "briefcase":
       return (
-        <svg aria-hidden="true" className={className} fill="currentColor" viewBox="0 0 24 24">
+        <svg
+          aria-hidden="true"
+          className={className}
+          fill="currentColor"
+          viewBox="0 0 24 24"
+        >
           <path d="M9 3a2 2 0 0 0-2 2v1H4a2 2 0 0 0-2 2v3.25c2.76 1.17 5.8 1.81 9 1.87V12a1 1 0 1 1 2 0v1.12c3.2-.06 6.24-.7 9-1.87V8a2 2 0 0 0-2-2h-3V5a2 2 0 0 0-2-2H9Zm6 3H9V5h6v1ZM2 13.4V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.6a25.5 25.5 0 0 1-9 1.72V16a1 1 0 1 1-2 0v-.88a25.5 25.5 0 0 1-9-1.72Z" />
         </svg>
       );
@@ -344,15 +511,28 @@ export function Icon({ className = "h-5 w-5", name }: IconProps) {
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
           <path className={iconClassName} d="M14 5h5v5M19 5l-8 8" />
-          <path className={iconClassName} d="M10 7H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3" />
+          <path
+            className={iconClassName}
+            d="M10 7H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3"
+          />
         </svg>
       );
     case "image":
       return (
         <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
-          <rect className={iconClassName} height="14" rx="2" width="18" x="3" y="5" />
+          <rect
+            className={iconClassName}
+            height="14"
+            rx="2"
+            width="18"
+            x="3"
+            y="5"
+          />
           <circle className={iconClassName} cx="9" cy="10" r="1.5" />
-          <path className={iconClassName} d="m5.5 17 4.5-4.5 3.5 3.5 2.5-2.5 2.5 3" />
+          <path
+            className={iconClassName}
+            d="m5.5 17 4.5-4.5 3.5 3.5 2.5-2.5 2.5 3"
+          />
         </svg>
       );
     case "more":

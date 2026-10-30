@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
-import { useAgentRuntimeContext, useThreadRuntimeState } from "../chat/AgentRuntime";
+import {
+  useAgentRuntimeContext,
+  useThreadRuntimeState,
+} from "../chat/AgentRuntime";
 import { QueryChatRuntimeProvider } from "../chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "../chat/QueryChatThread";
 import { Button } from "../ui/button";
@@ -118,13 +121,23 @@ export function DataRoomQuickActions({
             ),
           };
         }}
-        getBoundaryEl={() => documentSearch.boundaryElement ?? document.documentElement}
+        getBoundaryEl={() =>
+          documentSearch.boundaryElement ?? document.documentElement
+        }
         id="data-room-synthesis-canvas"
         finalFocusEl={() => synthesisTriggerRef.current}
-        initialFocusEl={() => synthesisChatRef.current?.querySelector("textarea") ?? null}
+        initialFocusEl={() =>
+          synthesisChatRef.current?.querySelector("textarea") ?? null
+        }
         minSize={{
-          width: Math.min(SYNTHESIS_PANEL_MIN_SIZE.width, synthesisPanelSize.width),
-          height: Math.min(SYNTHESIS_PANEL_MIN_SIZE.height, synthesisPanelSize.height),
+          width: Math.min(
+            SYNTHESIS_PANEL_MIN_SIZE.width,
+            synthesisPanelSize.width,
+          ),
+          height: Math.min(
+            SYNTHESIS_PANEL_MIN_SIZE.height,
+            synthesisPanelSize.height,
+          ),
         }}
         onOpenChange={({ open }) => setSynthesisPanelOpen(open)}
         open={synthesisPanelOpen}
@@ -144,7 +157,13 @@ export function DataRoomQuickActions({
           </Button>
         </FloatingPanelTrigger>
         <FloatingPanelContent>
-          <QueryChatRuntimeProvider dealId={dealId} scope="deal" key={`${email ?? ""}:${dealId}`} onContextTruncated={setContextTruncated} userEmail={email ?? ""}>
+          <QueryChatRuntimeProvider
+            dealId={dealId}
+            scope="deal"
+            key={`${email ?? ""}:${dealId}`}
+            onContextTruncated={setContextTruncated}
+            userEmail={email ?? ""}
+          >
             <FloatingPanelHeader>
               <FloatingPanelTitle>Synthesis Canvas</FloatingPanelTitle>
               <SynthesisChatPicker />
@@ -162,7 +181,10 @@ export function DataRoomQuickActions({
               </FloatingPanelControl>
             </FloatingPanelHeader>
             <div className="min-h-0 flex-1" ref={synthesisChatRef}>
-              <QueryChatThread contextTruncated={contextTruncated} floatingPanel />
+              <QueryChatThread
+                contextTruncated={contextTruncated}
+                floatingPanel
+              />
             </div>
           </QueryChatRuntimeProvider>
         </FloatingPanelContent>
@@ -192,7 +214,11 @@ export function DataRoomQuickActions({
             type="button"
             variant="ghost"
           >
-            <DocumentMagnifyingGlassIcon aria-hidden="true" className="size-4" size={16} />
+            <DocumentMagnifyingGlassIcon
+              aria-hidden="true"
+              className="size-4"
+              size={16}
+            />
           </Button>
         }
       />
@@ -210,13 +236,15 @@ function SynthesisChatPicker() {
     threadListError,
     threads,
   } = useThreadRuntimeState((state) => state);
-  const selectedThread = threads.find((thread) => thread.threadId === selectedThreadId);
+  const selectedThread = threads.find(
+    (thread) => thread.threadId === selectedThreadId,
+  );
   const actionsDisabled = isPreparingThread || isRunning;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={(
+        render={
           <Button
             aria-label="Select previous chat"
             className="max-w-44 gap-1.5 px-2 text-xs font-medium"
@@ -225,31 +253,53 @@ function SynthesisChatPicker() {
             type="button"
             variant="ghost"
           >
-            <span className="truncate">{selectedThread?.title || "New chat"}</span>
+            <span className="truncate">
+              {selectedThread?.title || "New chat"}
+            </span>
             <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0" />
           </Button>
-        )}
+        }
       />
       <DropdownMenuContent align="end" className="z-[60] w-64">
-        <DropdownMenuItem disabled={actionsDisabled} onSelect={() => runtime.newChat()}>
+        <DropdownMenuItem
+          disabled={actionsDisabled}
+          onSelect={() => runtime.newChat()}
+        >
           <PlusIcon />
           New chat
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Previous chats</DropdownMenuLabel>
-        {isThreadListLoading ? <DropdownMenuLabel>Loading chats…</DropdownMenuLabel> : null}
-        {threadListError ? <DropdownMenuLabel className="text-error">Couldn’t load previous chats.</DropdownMenuLabel> : null}
+        {isThreadListLoading ? (
+          <DropdownMenuLabel>Loading chats…</DropdownMenuLabel>
+        ) : null}
+        {threadListError ? (
+          <DropdownMenuLabel className="text-error">
+            Couldn’t load previous chats.
+          </DropdownMenuLabel>
+        ) : null}
         {!isThreadListLoading && !threadListError && threads.length === 0 ? (
           <DropdownMenuLabel>No previous chats yet.</DropdownMenuLabel>
         ) : null}
-        {runtime.state.nextCursor ? <DropdownMenuItem disabled={isThreadListLoading} onSelect={() => void runtime.loadMoreThreads()}>Load more chats</DropdownMenuItem> : null}
+        {runtime.state.nextCursor ? (
+          <DropdownMenuItem
+            disabled={isThreadListLoading}
+            onSelect={() => void runtime.loadMoreThreads()}
+          >
+            Load more chats
+          </DropdownMenuItem>
+        ) : null}
         {threads.map((thread) => (
           <DropdownMenuItem
             disabled={actionsDisabled || selectedThreadId === thread.threadId}
             key={thread.threadId}
             onSelect={() => void runtime.selectThread(thread.threadId)}
           >
-            {selectedThreadId === thread.threadId ? <CheckIcon aria-hidden="true" /> : <span className="size-4" />}
+            {selectedThreadId === thread.threadId ? (
+              <CheckIcon aria-hidden="true" />
+            ) : (
+              <span className="size-4" />
+            )}
             <span className="truncate">{thread.title || "New chat"}</span>
           </DropdownMenuItem>
         ))}

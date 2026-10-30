@@ -4,7 +4,9 @@ type WorkspacePageSkeletonProps = {
   label?: string;
 };
 
-export function WorkspacePageSkeleton({ label = "Loading page" }: WorkspacePageSkeletonProps) {
+export function WorkspacePageSkeleton({
+  label = "Loading page",
+}: WorkspacePageSkeletonProps) {
   return (
     <div
       aria-busy="true"
@@ -51,7 +53,10 @@ export function WorkspacePageSkeleton({ label = "Loading page" }: WorkspacePageS
 
 export function WorkspaceContentSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6" aria-hidden="true">
+    <div
+      className="mx-auto flex w-full max-w-[1100px] flex-col gap-6"
+      aria-hidden="true"
+    >
       <div className="space-y-3">
         <Skeleton className="h-7 w-52" />
         <Skeleton className="h-4 w-full max-w-xl" />

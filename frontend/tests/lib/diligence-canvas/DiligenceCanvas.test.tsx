@@ -29,8 +29,10 @@ describe("DiligenceCanvas", () => {
 
     expect(screen.queryByRole("button", { name: /Import|Export/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show JSON" }));
-    expect(screen.getByRole("complementary", { name: "Presentation JSON" }).textContent)
-      .toContain('"title": "Controlled presentation"');
+    expect(
+      screen.getByRole("complementary", { name: "Presentation JSON" })
+        .textContent,
+    ).toContain('"title": "Controlled presentation"');
 
     fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
     expect(onSlideIndexChange).toHaveBeenCalledWith(1);
@@ -50,13 +52,21 @@ describe("DiligenceCanvas", () => {
     );
 
     expect(screen.queryByText("Diligence Canvas")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Controlled presentation" })).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Controlled presentation" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Show JSON" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Controlled presentation" })).not.toBeNull();
-    const zoomControls = screen.getByRole("toolbar", { name: "Canvas zoom controls" });
+    expect(
+      screen.getByRole("region", { name: "Controlled presentation" }),
+    ).not.toBeNull();
+    const zoomControls = screen.getByRole("toolbar", {
+      name: "Canvas zoom controls",
+    });
     expect(zoomControls.classList.contains("bottom-4")).toBe(true);
     expect(zoomControls.classList.contains("top-4")).toBe(false);
-    const jsonPanel = screen.getByRole("complementary", { name: "Presentation JSON" });
+    const jsonPanel = screen.getByRole("complementary", {
+      name: "Presentation JSON",
+    });
     expect(jsonPanel.id).toBe("host-json-panel");
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -79,8 +89,10 @@ describe("DiligenceCanvas", () => {
     expect(extensionReads).toBe(0);
     fireEvent.click(screen.getByRole("button", { name: "Show JSON" }));
     expect(extensionReads).toBe(1);
-    expect(screen.getByRole("complementary", { name: "Presentation JSON" }).textContent)
-      .toContain('"serializationSentinel": "included"');
+    expect(
+      screen.getByRole("complementary", { name: "Presentation JSON" })
+        .textContent,
+    ).toContain('"serializationSentinel": "included"');
   });
 });
 

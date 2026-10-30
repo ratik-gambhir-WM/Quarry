@@ -1,19 +1,19 @@
-import type { HorizontalAlign } from '../shared/PowerpointTypes'
+import type { HorizontalAlign } from "../shared/PowerpointTypes";
 
 export type PlateTextLeaf = {
-  bold?: boolean
-  color?: string
-  fontFamily?: string
-  fontSize?: string
-  italic?: boolean
-  text: string
-  underline?: boolean
-}
+  bold?: boolean;
+  color?: string;
+  fontFamily?: string;
+  fontSize?: string;
+  italic?: boolean;
+  text: string;
+  underline?: boolean;
+};
 
 export type PlateParagraph = {
-  align?: HorizontalAlign
-  children: PlateTextLeaf[]
-  type: 'p'
-}
+  align?: HorizontalAlign;
+  children: PlateTextLeaf[];
+  type: "p";
+};
 
-export type PlateValue = PlateParagraph[]
+export type PlateValue = PlateParagraph[];

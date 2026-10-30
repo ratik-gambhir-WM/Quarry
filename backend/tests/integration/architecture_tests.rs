@@ -172,6 +172,8 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "UserRepository::new(",
         "DealRepository::new(",
         "CompanyRepository::new(",
+        "NotebookRepository::new(",
+        "NotebookPipeline::new(",
         "DocumentStore::new(",
         "DocumentGraphReader::new(",
         "DocumentGraphWriter::new(",
@@ -228,6 +230,7 @@ fn cross_domain_imports_do_not_reach_private_layers() {
         "users",
         "templates",
         "identity",
+        "notebooks",
     ];
     for (path, source) in rust_sources("src/domains") {
         let owner = domain_names

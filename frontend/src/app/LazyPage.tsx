@@ -4,7 +4,13 @@ import { ViewTransition } from "../components/ui/ViewTransition";
 import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
 import { Skeleton } from "../components/ui/skeleton";
 
-export function LazyPage({ children, label }: { children: ReactNode; label: string }) {
+export function LazyPage({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
   return (
     <Suspense
       fallback={
@@ -20,12 +26,23 @@ export function LazyPage({ children, label }: { children: ReactNode; label: stri
   );
 }
 
-export function LazyContent({ children, label }: { children: ReactNode; label: string }) {
+export function LazyContent({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
   return (
     <Suspense
       fallback={
         <ViewTransition default="none" exit="slide-down">
-          <div aria-busy="true" aria-live="polite" className="space-y-5 p-8" role="status">
+          <div
+            aria-busy="true"
+            aria-live="polite"
+            className="space-y-5 p-8"
+            role="status"
+          >
             <span className="sr-only">{label}</span>
             <Skeleton className="h-8 w-64 max-w-full" />
             <Skeleton className="h-40 w-full" />
@@ -34,7 +51,9 @@ export function LazyContent({ children, label }: { children: ReactNode; label: s
         </ViewTransition>
       }
     >
-      <ViewTransition default="none" enter="slide-up">{children}</ViewTransition>
+      <ViewTransition default="none" enter="slide-up">
+        {children}
+      </ViewTransition>
     </Suspense>
   );
 }

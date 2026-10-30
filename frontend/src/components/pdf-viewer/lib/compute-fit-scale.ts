@@ -31,11 +31,7 @@ export function computeFitWidthScale(inputs: FitInputs): number {
 
 export function computeFitPageScale(inputs: FitInputs): number {
   const rotation = inputs.rotation ?? 0;
-  const [pw, ph] = rotatedSize(
-    inputs.pageWidth,
-    inputs.pageHeight,
-    rotation,
-  );
+  const [pw, ph] = rotatedSize(inputs.pageWidth, inputs.pageHeight, rotation);
   const horizontalPadding = inputs.horizontalPadding ?? 32;
   const verticalPadding = inputs.verticalPadding ?? 32;
   const usableW = Math.max(0, inputs.containerWidth - horizontalPadding);

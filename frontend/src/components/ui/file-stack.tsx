@@ -21,20 +21,16 @@ const FileStackIcon = forwardRef<FileStackIconHandle, FileStackIconProps>(
     const shouldReduceMotion = useReducedMotion() ?? false;
     const isControlledRef = useRef(false);
 
-    useImperativeHandle(
-      ref,
-      () => {
-        isControlledRef.current = true;
+    useImperativeHandle(ref, () => {
+      isControlledRef.current = true;
 
-        return {
-          startAnimation: () => {
-            if (!shouldReduceMotion) controls.start("animate");
-          },
-          stopAnimation: () => controls.start("normal"),
-        };
-      },
-      [controls, shouldReduceMotion],
-    );
+      return {
+        startAnimation: () => {
+          if (!shouldReduceMotion) controls.start("animate");
+        },
+        stopAnimation: () => controls.start("normal"),
+      };
+    }, [controls, shouldReduceMotion]);
 
     const handleMouseEnter = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
@@ -44,7 +40,7 @@ const FileStackIcon = forwardRef<FileStackIconHandle, FileStackIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter, shouldReduceMotion]
+      [controls, onMouseEnter, shouldReduceMotion],
     );
 
     const handleMouseLeave = useCallback(
@@ -55,7 +51,7 @@ const FileStackIcon = forwardRef<FileStackIconHandle, FileStackIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -104,7 +100,7 @@ const FileStackIcon = forwardRef<FileStackIconHandle, FileStackIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 FileStackIcon.displayName = "FileStackIcon";

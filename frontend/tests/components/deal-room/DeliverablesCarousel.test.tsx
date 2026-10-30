@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeliverablesCarousel } from "@/components/deal-room/DeliverablesCarousel";
 
@@ -27,29 +33,44 @@ describe("DeliverablesCarousel", () => {
       />,
     );
 
-    const carousel = screen.getByRole("region", { name: "Start from templates slides" });
+    const carousel = screen.getByRole("region", {
+      name: "Start from templates slides",
+    });
     const image = within(carousel).getByRole("img", {
       name: "Template preview: template exact id",
     });
-    expect(image.getAttribute("src")).toBe("data:image/png;base64,dGVtcGxhdGU=");
+    expect(image.getAttribute("src")).toBe(
+      "data:image/png;base64,dGVtcGxhdGU=",
+    );
     expect(image.getAttribute("width")).toBe("1280");
     expect(image.getAttribute("height")).toBe("720");
-    const slideGroup = within(carousel).getByRole("group", { name: "template-exact-id, slide 1 of 1" });
+    const slideGroup = within(carousel).getByRole("group", {
+      name: "template-exact-id, slide 1 of 1",
+    });
     expect(slideGroup.classList.contains("basis-full")).toBe(true);
     expect(slideGroup.classList.contains("lg:basis-1/2")).toBe(false);
-    expect(slideGroup.querySelector<HTMLElement>('[data-slot="card"]')?.style.aspectRatio).toBe("1280 / 720");
+    expect(
+      slideGroup.querySelector<HTMLElement>('[data-slot="card"]')?.style
+        .aspectRatio,
+    ).toBe("1280 / 720");
     expect(carousel.classList.contains("max-w-[1440px]")).toBe(true);
-    fireEvent.click(within(carousel).getByRole("button", { name: "Open template exact id template" }));
+    fireEvent.click(
+      within(carousel).getByRole("button", {
+        name: "Open template exact id template",
+      }),
+    );
     expect(onSelectSlide).toHaveBeenCalledWith(slide);
-    expect(within(carousel).getByRole("button", { name: "Previous slide" })).toHaveProperty(
-      "disabled",
-      true,
+    expect(
+      within(carousel).getByRole("button", { name: "Previous slide" }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      within(carousel).getByRole("button", { name: "Next slide" }),
+    ).toHaveProperty("disabled", true);
+    fireEvent.click(
+      within(carousel).getByRole("button", {
+        name: "Delete template exact id",
+      }),
     );
-    expect(within(carousel).getByRole("button", { name: "Next slide" })).toHaveProperty(
-      "disabled",
-      true,
-    );
-    fireEvent.click(within(carousel).getByRole("button", { name: "Delete template exact id" }));
     expect(onDeleteSlide).toHaveBeenCalledWith(slide);
     expect(onSelectSlide).toHaveBeenCalledOnce();
   });

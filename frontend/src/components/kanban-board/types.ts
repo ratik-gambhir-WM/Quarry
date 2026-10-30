@@ -131,7 +131,13 @@ export type KanbanNoteData = {
 };
 
 export type KanbanAction =
-  | { type: "move-item"; itemId: string; toColumnId: string; toIndex: number; toSwimlaneId?: string }
+  | {
+      type: "move-item";
+      itemId: string;
+      toColumnId: string;
+      toIndex: number;
+      toSwimlaneId?: string;
+    }
   | { type: "reorder-column"; columnId: string; toIndex: number }
   | { type: "create-item"; columnId: string; item: KanbanItem; index?: number }
   | { type: "update-item"; item: KanbanItem }

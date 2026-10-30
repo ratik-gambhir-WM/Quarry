@@ -27,7 +27,10 @@ export function PptxTemplateUploadEmptyState({
 }: PptxTemplateUploadEmptyStateProps) {
   const slideTrigger = useRef<HTMLButtonElement>(null);
   const deckTrigger = useRef<HTMLButtonElement>(null);
-  const handleFiles = (files: FileWithPreview[], mode: PptxTemplateImportMode) => {
+  const handleFiles = (
+    files: FileWithPreview[],
+    mode: PptxTemplateImportMode,
+  ) => {
     const file = files[0]?.file;
     if (!(file instanceof File)) return;
     void onImport(file, mode).finally(() => {
@@ -49,7 +52,8 @@ export function PptxTemplateUploadEmptyState({
     maxFiles: 1,
     maxSize: MAX_PPTX_TEMPLATE_IMPORT_BYTES,
     multiple: false,
-    onError: (errors) => onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
+    onError: (errors) =>
+      onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
     onFilesAdded: (files) => handleFiles(files, "single"),
   });
   const [, deckActions] = useFileUpload({
@@ -57,7 +61,8 @@ export function PptxTemplateUploadEmptyState({
     maxFiles: 1,
     maxSize: MAX_PPTX_TEMPLATE_IMPORT_BYTES,
     multiple: false,
-    onError: (errors) => onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
+    onError: (errors) =>
+      onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
     onFilesAdded: (files) => handleFiles(files, "batch"),
   });
 
@@ -87,21 +92,33 @@ export function PptxTemplateUploadEmptyState({
         />
 
         <div className="flex flex-col items-center gap-4">
-          <div className={cn(
-            "flex size-16 items-center justify-center rounded-full",
-            isDragging ? "bg-primary/10 text-primary" : "bg-surface-container text-muted",
-          )}>
+          <div
+            className={cn(
+              "flex size-16 items-center justify-center rounded-full",
+              isDragging
+                ? "bg-primary/10 text-primary"
+                : "bg-surface-container text-muted",
+            )}
+          >
             <UploadIcon className="size-6" />
           </div>
           <div className="space-y-2">
-            <h3 className="text-lg font-semibold text-text-main">No slide templates yet</h3>
+            <h3 className="text-lg font-semibold text-text-main">
+              No slide templates yet
+            </h3>
             <p className="text-sm text-muted">
-              Drag and drop one single-slide PowerPoint template here or click to browse.
+              Drag and drop one single-slide PowerPoint template here or click
+              to browse.
             </p>
             <p className="text-xs text-muted">PPTX files only, up to 25 MB</p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button disabled={disabled} onClick={openFileDialog} ref={slideTrigger} type="button">
+            <Button
+              disabled={disabled}
+              onClick={openFileDialog}
+              ref={slideTrigger}
+              type="button"
+            >
               <UploadIcon className="size-4" />
               Import Slide Template
             </Button>

@@ -4,7 +4,11 @@ type ViewColumnsIconProps = SVGAttributes<SVGSVGElement> & {
   size?: number;
 };
 
-export function ViewColumnsIcon({ className, size = 24, ...props }: ViewColumnsIconProps) {
+export function ViewColumnsIcon({
+  className,
+  size = 24,
+  ...props
+}: ViewColumnsIconProps) {
   return (
     <svg
       aria-hidden="true"

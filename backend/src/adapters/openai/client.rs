@@ -479,7 +479,7 @@ impl OpenAiClient {
         contents: &[&str],
         model: Option<&str>,
     ) -> Result<Vec<Vec<f64>>, String> {
-        self.gen_embeddings_with_filename(contents, model, None, None)
+        self.gen_embeddings_with_filename(contents, model, None, None, false)
             .await
     }
 
@@ -490,7 +490,23 @@ impl OpenAiClient {
         filename: &str,
         file_size_bytes: u64,
     ) -> Result<Vec<Vec<f64>>, String> {
-        self.gen_embeddings_with_filename(contents, model, Some(filename), Some(file_size_bytes))
+        self.gen_embeddings_with_filename(
+            contents,
+            model,
+            Some(filename),
+            Some(file_size_bytes),
+            false,
+        )
+        .await
+    }
+
+    /// Embeds private notebook content without including provider error bodies in diagnostics.
+    pub async fn gen_private_embeddings(
+        &self,
+        contents: &[&str],
+        model: Option<&str>,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        self.gen_embeddings_with_filename(contents, model, None, None, true)
             .await
     }
 
@@ -500,6 +516,7 @@ impl OpenAiClient {
         model: Option<&str>,
         filename: Option<&str>,
         file_size_bytes: Option<u64>,
+        private: bool,
     ) -> Result<Vec<Vec<f64>>, String> {
         let request_body =
             build_embeddings_request_body(contents, model, self.embedding_dimensions)?;
@@ -519,7 +536,11 @@ impl OpenAiClient {
                     OPENAI_EMBEDDINGS_API,
                     filename,
                     file_size_bytes,
-                    &error,
+                    &if private {
+                        "embedding transport failed".to_owned()
+                    } else {
+                        error.to_string()
+                    },
                     started_at,
                 );
                 return Err(format!("failed to call OpenAI embeddings API: {error}"));
@@ -534,7 +555,11 @@ impl OpenAiClient {
                     OPENAI_EMBEDDINGS_API,
                     filename,
                     file_size_bytes,
-                    &error,
+                    &if private {
+                        "embedding transport failed".to_owned()
+                    } else {
+                        error.to_string()
+                    },
                     started_at,
                 );
                 return Err(format!(
@@ -547,7 +572,7 @@ impl OpenAiClient {
             filename,
             file_size_bytes,
             status,
-            Some(&response_body),
+            if private { None } else { Some(&response_body) },
             started_at,
         );
 

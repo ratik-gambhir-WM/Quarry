@@ -4,7 +4,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import DocumentSearch, { filterDocumentSearchItems } from "@/components/data-room/document-search/DocumentSearch";
+import DocumentSearch, {
+  filterDocumentSearchItems,
+} from "@/components/data-room/document-search/DocumentSearch";
 import type { DocumentSearchItem } from "@/components/data-room/document-search/documentSearchModel";
 
 const items: DocumentSearchItem[] = [
@@ -30,7 +32,9 @@ function Harness({
   onSelect?: (item: DocumentSearchItem) => void;
   onSelectionFocus?: () => void;
 }) {
-  const [boundaryElement, setBoundaryElement] = useState<HTMLDivElement | null>(null);
+  const [boundaryElement, setBoundaryElement] = useState<HTMLDivElement | null>(
+    null,
+  );
 
   return (
     <div>
@@ -53,7 +57,9 @@ afterEach(cleanup);
 describe("DocumentSearch", () => {
   it("performs a simple local all-terms match", () => {
     expect(
-      filterDocumentSearchItems(items, "synthetic liability").map((item) => item.id),
+      filterDocumentSearchItems(items, "synthetic liability").map(
+        (item) => item.id,
+      ),
     ).toEqual(["current-document"]);
     expect(filterDocumentSearchItems(items, "missing term")).toEqual([]);
   });
@@ -65,15 +71,21 @@ describe("DocumentSearch", () => {
 
     await user.click(trigger);
 
-    const searchbox = screen.getByRole("searchbox", { name: "Search document" });
+    const searchbox = screen.getByRole("searchbox", {
+      name: "Search document",
+    });
     await waitFor(() => expect(searchbox).toBe(document.activeElement));
     const dialog = screen.getByRole("dialog", {
       name: "Search Synthetic_Terms.pdf",
     });
     expect(dialog).toBeTruthy();
     expect(dialog.classList.contains("bg-surface-container-lowest")).toBe(true);
-    expect(dialog.classList.contains("shadow-[var(--theme-panel-shadow)]")).toBe(true);
-    expect(dialog.querySelector('[data-slot="floating-panel-drag-trigger"]')).toBeTruthy();
+    expect(
+      dialog.classList.contains("shadow-[var(--theme-panel-shadow)]"),
+    ).toBe(true);
+    expect(
+      dialog.querySelector('[data-slot="floating-panel-drag-trigger"]'),
+    ).toBeTruthy();
     expect(document.querySelector('[class*="bg-black/50"]')).toBeNull();
     expect(screen.getByTestId("preview-canvas")).toBeTruthy();
 
@@ -112,7 +124,9 @@ describe("DocumentSearch", () => {
       "Global Risk",
     );
 
-    const result = screen.getByRole("option", { name: /Global Risk Assurance/ });
+    const result = screen.getByRole("option", {
+      name: /Global Risk Assurance/,
+    });
     expect(result.getAttribute("aria-disabled")).toBe("true");
     await user.keyboard("{Enter}");
     await user.click(result);
@@ -123,7 +137,9 @@ describe("DocumentSearch", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole("button", { name: "Search document" }));
-    const searchbox = screen.getByRole("searchbox", { name: "Search document" });
+    const searchbox = screen.getByRole("searchbox", {
+      name: "Search document",
+    });
 
     await user.type(searchbox, "no-such-synthetic-term");
     expect(screen.getByText(/No results for/)).toBeTruthy();

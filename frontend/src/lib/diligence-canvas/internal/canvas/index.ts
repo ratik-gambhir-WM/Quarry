@@ -6,7 +6,7 @@ export {
   type ElementEdit,
   type ElementEditRequest,
   type ElementMutationLocator,
-} from './edits'
+} from "./edits";
 export {
   getElementAccessibleLabel,
   getElementGeometry,
@@ -16,16 +16,16 @@ export {
   type ElementGeometry,
   type LineGeometry,
   type RenderedLinePoints,
-} from './geometry'
+} from "./geometry";
 export {
   buildSlideCanvasModel,
   type BuildSlideCanvasModelOptions,
   type SlideCanvasModel,
   type SlideElementRef,
-} from './model'
+} from "./model";
 export {
   buildNormalizedTextRuns,
   buildRawTextRuns,
   normalizeTextRuns,
   textFromNormalizedRuns,
-} from './textRuns'
+} from "./textRuns";

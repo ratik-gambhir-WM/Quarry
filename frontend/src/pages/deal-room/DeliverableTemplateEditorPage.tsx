@@ -35,10 +35,10 @@ export function DeliverableTemplateEditorPage() {
     return null;
   }
 
-  const backToTemplates = () => navigate(
-    getDeliverableTemplatesPath(deal.room.id),
-    { state: navigationState },
-  );
+  const backToTemplates = () =>
+    navigate(getDeliverableTemplatesPath(deal.room.id), {
+      state: navigationState,
+    });
 
   return (
     <TemplateDocumentProvider requestKey={location.key} templateId={templateId}>
@@ -57,7 +57,9 @@ function TemplateEditorWorkspace({ onBack }: { onBack: () => void }) {
   const { retry, updateDocument } = useTemplateDocumentActions();
   const [deliverableName, setDeliverableName] = useState("Unnamed");
   const [isJsonOpen, setIsJsonOpen] = useState(false);
-  const [exportFeedback, setExportFeedback] = useState<ExportFeedback>({ status: "idle" });
+  const [exportFeedback, setExportFeedback] = useState<ExportFeedback>({
+    status: "idle",
+  });
   const exportInFlight = useRef(false);
 
   const exportPowerPoint = async () => {
@@ -75,9 +77,10 @@ function TemplateEditorWorkspace({ onBack }: { onBack: () => void }) {
         setExportFeedback({ status: "idle" });
         return;
       }
-      const warningMessage = result.warningCount === 0
-        ? ""
-        : ` with ${result.warningCount} export ${result.warningCount === 1 ? "warning" : "warnings"}`;
+      const warningMessage =
+        result.warningCount === 0
+          ? ""
+          : ` with ${result.warningCount} export ${result.warningCount === 1 ? "warning" : "warnings"}`;
       setExportFeedback({
         message: `PowerPoint exported${warningMessage}.`,
         status: "success",
@@ -98,14 +101,20 @@ function TemplateEditorWorkspace({ onBack }: { onBack: () => void }) {
       header={
         <DeliverablesHeader
           deliverableName={deliverableName}
-          exportDisabled={state.status !== "success" || exportFeedback.status === "exporting"}
-          exportLabel={exportFeedback.status === "exporting" ? "Exporting…" : "Export"}
+          exportDisabled={
+            state.status !== "success" || exportFeedback.status === "exporting"
+          }
+          exportLabel={
+            exportFeedback.status === "exporting" ? "Exporting…" : "Export"
+          }
           isJsonOpen={isJsonOpen}
           jsonPanelId={TEMPLATE_EDITOR_JSON_PANEL_ID}
           mode="editor"
           onBack={onBack}
           onDeliverableNameChange={setDeliverableName}
-          onExport={() => { void exportPowerPoint(); }}
+          onExport={() => {
+            void exportPowerPoint();
+          }}
           onJsonOpenChange={setIsJsonOpen}
         />
       }
@@ -143,7 +152,9 @@ function TemplateEditorContent({
   onJsonOpenChange: (isOpen: boolean) => void;
   retry: () => void;
   state: TemplateDocumentState;
-  updateDocument: (document: Extract<TemplateDocumentState, { status: "success" }>["document"]) => void;
+  updateDocument: (
+    document: Extract<TemplateDocumentState, { status: "success" }>["document"],
+  ) => void;
 }) {
   if (state.status === "loading") {
     return <EditorLoadingStatus label="Loading template document" />;
@@ -154,7 +165,9 @@ function TemplateEditorContent({
         <div className="max-w-md text-center" role="alert">
           <p className="text-sm text-destructive">{state.message}</p>
           <div className="mt-4 flex justify-center gap-2">
-            <Button onClick={retry} size="sm" type="button">Retry</Button>
+            <Button onClick={retry} size="sm" type="button">
+              Retry
+            </Button>
             <Button onClick={onBack} size="sm" type="button" variant="outline">
               Back to Templates
             </Button>
@@ -168,17 +181,25 @@ function TemplateEditorContent({
     <div className="flex h-full min-h-0 flex-col gap-2 p-3 sm:p-4">
       <div className="flex min-h-4 items-center justify-end text-xs">
         {exportFeedback.status === "exporting" ? (
-          <p className="text-muted" role="status">Building PowerPoint…</p>
+          <p className="text-muted" role="status">
+            Building PowerPoint…
+          </p>
         ) : exportFeedback.status === "idle" ? null : (
           <p
-            className={exportFeedback.status === "error" ? "text-destructive" : "text-muted"}
+            className={
+              exportFeedback.status === "error"
+                ? "text-destructive"
+                : "text-muted"
+            }
             role={exportFeedback.status === "error" ? "alert" : "status"}
           >
             {exportFeedback.message}
           </p>
         )}
       </div>
-      <Suspense fallback={<EditorLoadingStatus label="Loading presentation editor" />}>
+      <Suspense
+        fallback={<EditorLoadingStatus label="Loading presentation editor" />}
+      >
         <DiligenceCanvas
           className="min-h-0 flex-1"
           isJsonOpen={isJsonOpen}
@@ -197,8 +218,14 @@ function EditorLoadingStatus({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-[32rem] flex-col gap-3 p-6" role="status">
       <span className="sr-only">{label}</span>
-      <Skeleton aria-hidden="true" className="h-8 w-64 motion-reduce:animate-none" />
-      <Skeleton aria-hidden="true" className="min-h-[28rem] flex-1 motion-reduce:animate-none" />
+      <Skeleton
+        aria-hidden="true"
+        className="h-8 w-64 motion-reduce:animate-none"
+      />
+      <Skeleton
+        aria-hidden="true"
+        className="min-h-[28rem] flex-1 motion-reduce:animate-none"
+      />
     </div>
   );
 }

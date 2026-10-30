@@ -52,7 +52,7 @@ const TableCellsIcon = forwardRef<TableCellsIconHandle, TableCellsIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -63,7 +63,7 @@ const TableCellsIcon = forwardRef<TableCellsIconHandle, TableCellsIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -91,7 +91,7 @@ const TableCellsIcon = forwardRef<TableCellsIconHandle, TableCellsIconProps>(
         </motion.svg>
       </div>
     );
-  }
+  },
 );
 
 TableCellsIcon.displayName = "TableCellsIcon";

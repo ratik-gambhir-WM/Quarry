@@ -1,8 +1,19 @@
-import type { DealResource, WorkspaceDeal, WorkspaceLocationState } from "./workspace";
+import type {
+  DealResource,
+  WorkspaceDeal,
+  WorkspaceLocationState,
+} from "./workspace";
 
-import { codeLabel, isTerminalDealStatus, type DealFields, type DealParty } from "./dealModel";
+import {
+  codeLabel,
+  isTerminalDealStatus,
+  type DealFields,
+  type DealParty,
+} from "./dealModel";
 export type SaveDealInput = DealFields & {
-  dealId: string; localPath: string | null; sharepointLink: string | null;
+  dealId: string;
+  localPath: string | null;
+  sharepointLink: string | null;
 };
 
 export type DealExtractionSourceFile = {
@@ -36,7 +47,12 @@ export type ReadDealSourceFilesInput = {
 };
 
 export type SavedDeal = Omit<DealFields, "parties"> & {
-  dealId: string; userId: number; archivedAt: string | null; createdAt: string; updatedAt: string; parties: DealParty[];
+  dealId: string;
+  userId: number;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  parties: DealParty[];
 };
 
 export type SavedDealMetadata = {
@@ -105,7 +121,9 @@ function buildWorkspaceDeal(
   files: readonly DealExtractionSourceFile[] = [],
   sowSourceName?: string,
 ): WorkspaceDeal {
-  const roleSummary = deal.parties.map((p) => `${codeLabel(p.role)}: ${p.company.name}`).join("; ");
+  const roleSummary = deal.parties
+    .map((p) => `${codeLabel(p.role)}: ${p.company.name}`)
+    .join("; ");
   return {
     colorClassName: "bg-primary",
     terminal: isTerminalDealStatus(deal.status),
@@ -126,9 +144,15 @@ function buildWorkspaceDeal(
       keyQuestions: extraction.keyQuestions,
       metrics: [
         { label: "Start date", value: deal.startDate ?? "Unavailable" },
-        { label: "Expected close", value: deal.expectedCloseDate ?? "Unavailable" },
+        {
+          label: "Expected close",
+          value: deal.expectedCloseDate ?? "Unavailable",
+        },
         { label: "Actual close", value: deal.actualCloseDate ?? "Unavailable" },
-        { label: "Engagement completed", value: deal.engagementCompletedDate ?? "Unavailable" },
+        {
+          label: "Engagement completed",
+          value: deal.engagementCompletedDate ?? "Unavailable",
+        },
       ],
       name: deal.dealName,
       overviewSubtitle: `${deal.dealName} Due Diligence Overview`,
@@ -141,9 +165,19 @@ function buildWorkspaceDeal(
       summaryDetails: [
         { label: "Engagement", value: codeLabel(deal.engagementType) },
         { label: "Transaction", value: codeLabel(deal.transactionType) },
-        ...deal.parties.map((party) => ({ label: codeLabel(party.role), value: party.company.name })),
-        ...(!deal.parties.length ? [{ label: "Companies", value: "Unspecified" }] : []),
-        { label: "Scope", value: deal.scopes.length ? deal.scopes.map(codeLabel).join(", ") : "Unspecified" },
+        ...deal.parties.map((party) => ({
+          label: codeLabel(party.role),
+          value: party.company.name,
+        })),
+        ...(!deal.parties.length
+          ? [{ label: "Companies", value: "Unspecified" }]
+          : []),
+        {
+          label: "Scope",
+          value: deal.scopes.length
+            ? deal.scopes.map(codeLabel).join(", ")
+            : "Unspecified",
+        },
       ],
       timeline: [],
     },

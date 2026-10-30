@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { cn } from "@/lib/utils";
 import type {
   AnyKanbanCardRenderer,
@@ -68,9 +71,13 @@ export function Board({
       let node = e.target as HTMLElement | null;
       while (node && node !== el) {
         const oy = getComputedStyle(node).overflowY;
-        if ((oy === "auto" || oy === "scroll") && node.scrollHeight > node.clientHeight) {
+        if (
+          (oy === "auto" || oy === "scroll") &&
+          node.scrollHeight > node.clientHeight
+        ) {
           const atTop = node.scrollTop <= 0;
-          const atBottom = Math.ceil(node.scrollTop + node.clientHeight) >= node.scrollHeight;
+          const atBottom =
+            Math.ceil(node.scrollTop + node.clientHeight) >= node.scrollHeight;
           if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) return;
         }
         node = node.parentElement;
@@ -105,7 +112,9 @@ export function Board({
             palette={palette}
             readOnly={readOnly}
             activeRendererId={activeRendererId}
-            onItemCreate={onItemCreate ? (item) => onItemCreate(column.id, item) : undefined}
+            onItemCreate={
+              onItemCreate ? (item) => onItemCreate(column.id, item) : undefined
+            }
             onItemUpdate={onItemUpdate}
             onItemDelete={onItemDelete}
             onItemClick={onItemClick}
@@ -117,7 +126,9 @@ export function Board({
           />
         ))}
       </SortableContext>
-      {!readOnly && onColumnCreate ? <AddColumnButton onCreate={onColumnCreate} /> : null}
+      {!readOnly && onColumnCreate ? (
+        <AddColumnButton onCreate={onColumnCreate} />
+      ) : null}
     </div>
   );
 }

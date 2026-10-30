@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createNotebookSession, getNotebookSession } from "@/data/notebook/notebookSession";
+import {
+  createNotebookSession,
+  getNotebookSession,
+} from "@/data/notebook/notebookSession";
 import { sessionStore } from "@/auth/sessionStore";
 
 describe("Notebook session drafts", () => {
@@ -9,7 +12,9 @@ describe("Notebook session drafts", () => {
     const second = store.create();
     store.update(first.id, { title: "Changed" });
     expect(store.getSnapshot()[0].id).toBe(second.id);
-    expect(store.getSnapshot().find((note) => note.id === first.id)?.title).toBe("Changed");
+    expect(
+      store.getSnapshot().find((note) => note.id === first.id)?.title,
+    ).toBe("Changed");
     store.remove(first.id);
     store.update(first.id, { title: "Late editor callback" });
     expect(store.getSnapshot()).toHaveLength(1);

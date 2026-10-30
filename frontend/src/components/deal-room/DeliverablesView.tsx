@@ -25,10 +25,15 @@ export function DeliverablesView() {
           >
             <div
               className={`flex items-center justify-between ${
-                section.showDivider ? "border-b border-outline-variant pb-3" : "pb-1"
+                section.showDivider
+                  ? "border-b border-outline-variant pb-3"
+                  : "pb-1"
               }`}
             >
-              <h2 className="text-sm font-semibold text-text-main" id={section.id}>
+              <h2
+                className="text-sm font-semibold text-text-main"
+                id={section.id}
+              >
                 {section.title}
               </h2>
             </div>

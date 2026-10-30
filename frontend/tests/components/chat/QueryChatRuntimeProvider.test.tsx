@@ -45,15 +45,24 @@ describe("QueryChatRuntimeProvider", () => {
     api.getAssistantThread.mockReturnValue(threadLoad);
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <MemoryRouter>
-          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <AssistantWorkspaceSidebar
+            activeHomeSection="assistant"
+            email="analyst@example.com"
+            tools={[]}
+          />
           <QueryChatThread contextTruncated={false} />
         </MemoryRouter>
       </QueryChatRuntimeProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: threadMetadata.title }));
+    await user.click(
+      await screen.findByRole("button", { name: threadMetadata.title }),
+    );
 
     expect(await screen.findByTestId("thread-history-skeleton")).toBeTruthy();
     resolveThread?.(threadDetail);
@@ -61,12 +70,17 @@ describe("QueryChatRuntimeProvider", () => {
     const assistantMessage = screen.getByText("Earlier assistant answer");
     expect(userMessage.closest('[data-role="user"]')).toBeTruthy();
     expect(assistantMessage.closest('[data-role="assistant"]')).toBeTruthy();
-    expect(api.getAssistantThread).toHaveBeenCalledWith(threadMetadata.threadId);
+    expect(api.getAssistantThread).toHaveBeenCalledWith(
+      threadMetadata.threadId,
+    );
   });
 
   it("creates a persistent thread before sending its first run", async () => {
     const user = userEvent.setup();
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [],
+    });
     api.createAssistantThread.mockResolvedValue(threadMetadata);
     api.runAssistantThread.mockImplementation((_input, handlers) => {
       handlers.onEvent({ response: "Persisted answer", type: "completed" });
@@ -74,17 +88,25 @@ describe("QueryChatRuntimeProvider", () => {
     });
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <QueryChatThread contextTruncated={false} />
       </QueryChatRuntimeProvider>,
     );
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Persist this question");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Persist this question",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Persisted answer")).toBeTruthy();
     expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, null);
-    await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(api.runAssistantThread).toHaveBeenCalledTimes(1),
+    );
     const run = api.runAssistantThread.mock.calls[0]?.[0];
     expect(run).toMatchObject({
       files: [],
@@ -108,26 +130,41 @@ describe("QueryChatRuntimeProvider", () => {
     });
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <MemoryRouter>
-          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <AssistantWorkspaceSidebar
+            activeHomeSection="assistant"
+            email="analyst@example.com"
+            tools={[]}
+          />
           <QueryChatThread contextTruncated={false} />
         </MemoryRouter>
       </QueryChatRuntimeProvider>,
     );
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Persist this question");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Persist this question",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledOnce());
 
     list.resolve({ nextCursor: null, threads: [] });
 
-    expect(await screen.findByRole("button", { name: threadMetadata.title })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: threadMetadata.title }),
+    ).toBeTruthy();
   });
 
   it("reuses the original user message when retrying a persisted answer", async () => {
     const user = userEvent.setup();
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [],
+    });
     api.createAssistantThread.mockResolvedValue(threadMetadata);
     api.runAssistantThread.mockImplementation((_input, handlers) => {
       handlers.onEvent({ response: "Persisted answer", type: "completed" });
@@ -135,17 +172,25 @@ describe("QueryChatRuntimeProvider", () => {
     });
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <QueryChatThread contextTruncated={false} />
       </QueryChatRuntimeProvider>,
     );
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Persist this question");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Persist this question",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByText("Persisted answer");
     await user.click(screen.getByRole("button", { name: "Retry response" }));
 
-    await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(api.runAssistantThread).toHaveBeenCalledTimes(2),
+    );
     const firstRun = api.runAssistantThread.mock.calls[0]?.[0];
     const retryRun = api.runAssistantThread.mock.calls[1]?.[0];
     expect(retryRun.userMessageId).toBe(firstRun.userMessageId);
@@ -155,22 +200,40 @@ describe("QueryChatRuntimeProvider", () => {
 
   it("shows a load failure and allows the thread to be selected again", async () => {
     const user = userEvent.setup();
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [threadMetadata] });
-    api.getAssistantThread.mockRejectedValueOnce(new Error("network unavailable"));
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [threadMetadata],
+    });
+    api.getAssistantThread.mockRejectedValueOnce(
+      new Error("network unavailable"),
+    );
     api.getAssistantThread.mockResolvedValueOnce(threadDetail);
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <MemoryRouter>
-          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <AssistantWorkspaceSidebar
+            activeHomeSection="assistant"
+            email="analyst@example.com"
+            tools={[]}
+          />
           <QueryChatThread contextTruncated={false} />
         </MemoryRouter>
       </QueryChatRuntimeProvider>,
     );
 
-    const threadButton = await screen.findByRole("button", { name: threadMetadata.title });
+    const threadButton = await screen.findByRole("button", {
+      name: threadMetadata.title,
+    });
     await user.click(threadButton);
-    expect(await screen.findByText("Couldn’t load this chat. Please select it again.")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Couldn’t load this chat. Please select it again.",
+      ),
+    ).toBeTruthy();
 
     await user.click(threadButton);
     expect(await screen.findByText("Earlier assistant answer")).toBeTruthy();
@@ -179,52 +242,97 @@ describe("QueryChatRuntimeProvider", () => {
 
   it("deletes a previous chat from its options menu and clears the selected transcript", async () => {
     const user = userEvent.setup();
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [threadMetadata] });
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [threadMetadata],
+    });
     api.getAssistantThread.mockResolvedValue(threadDetail);
     api.deleteAssistantThread.mockResolvedValue(undefined);
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <MemoryRouter>
-          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <AssistantWorkspaceSidebar
+            activeHomeSection="assistant"
+            email="analyst@example.com"
+            tools={[]}
+          />
           <QueryChatThread contextTruncated={false} />
         </MemoryRouter>
       </QueryChatRuntimeProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: threadMetadata.title }));
+    await user.click(
+      await screen.findByRole("button", { name: threadMetadata.title }),
+    );
     expect(await screen.findByText("Earlier assistant answer")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: `Chat options for ${threadMetadata.title}` }));
-    expect(screen.getByRole("menuitem", { name: "Archive chat" }).getAttribute("data-disabled"))
-      .not.toBeNull();
+    await user.click(
+      screen.getByRole("button", {
+        name: `Chat options for ${threadMetadata.title}`,
+      }),
+    );
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Archive chat" })
+        .getAttribute("data-disabled"),
+    ).not.toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "Delete chat" }));
 
-    await waitFor(() => expect(api.deleteAssistantThread).toHaveBeenCalledWith(
-      threadMetadata.threadId,
-    ));
-    await waitFor(() => expect(screen.queryByRole("button", { name: threadMetadata.title })).toBeNull());
+    await waitFor(() =>
+      expect(api.deleteAssistantThread).toHaveBeenCalledWith(
+        threadMetadata.threadId,
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: threadMetadata.title }),
+      ).toBeNull(),
+    );
     expect(screen.queryByText("Earlier assistant answer")).toBeNull();
   });
 
   it("keeps the thread and reports a sanitized error when deletion fails", async () => {
     const user = userEvent.setup();
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [threadMetadata] });
-    api.deleteAssistantThread.mockRejectedValue(new Error("network unavailable"));
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [threadMetadata],
+    });
+    api.deleteAssistantThread.mockRejectedValue(
+      new Error("network unavailable"),
+    );
 
     render(
-      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatRuntimeProvider
+        onContextTruncated={vi.fn()}
+        userEmail="analyst@example.com"
+      >
         <MemoryRouter>
-          <AssistantWorkspaceSidebar activeHomeSection="assistant" email="analyst@example.com" tools={[]} />
+          <AssistantWorkspaceSidebar
+            activeHomeSection="assistant"
+            email="analyst@example.com"
+            tools={[]}
+          />
         </MemoryRouter>
       </QueryChatRuntimeProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: `Chat options for ${threadMetadata.title}` }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Chat options for ${threadMetadata.title}`,
+      }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Delete chat" }));
 
-    expect(await screen.findByText("Couldn’t delete chat. Please try again.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: threadMetadata.title })).toBeTruthy();
+    expect(
+      await screen.findByText("Couldn’t delete chat. Please try again."),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: threadMetadata.title }),
+    ).toBeTruthy();
   });
 });
 
@@ -283,20 +391,57 @@ function deferred<T>() {
 it("keys drafts, pending lists, and new threads by the active deal", async () => {
   const user = userEvent.setup();
   const pending = deferred<{ nextCursor: null; threads: [] }>();
-  api.listAssistantThreads.mockReturnValueOnce(pending.promise).mockResolvedValue({ nextCursor: null, threads: [] });
-  api.createAssistantThread.mockResolvedValue({ ...threadMetadata, dealId: "DEAL-B" });
+  api.listAssistantThreads
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockResolvedValue({
+    ...threadMetadata,
+    dealId: "DEAL-B",
+  });
   api.runAssistantThread.mockImplementation((_input, handlers) => {
-    queueMicrotask(() => handlers.onEvent({ type: "completed", response: "Answer" }));
+    queueMicrotask(() =>
+      handlers.onEvent({ type: "completed", response: "Answer" }),
+    );
     return () => {};
   });
-  const view = (dealId: string) => <MemoryRouter><QueryChatRuntimeProvider dealId={dealId} scope="deal" onContextTruncated={vi.fn()} userEmail="owner@example.com"><QueryChatThread contextTruncated={false} /></QueryChatRuntimeProvider></MemoryRouter>;
+  const view = (dealId: string) => (
+    <MemoryRouter>
+      <QueryChatRuntimeProvider
+        dealId={dealId}
+        scope="deal"
+        onContextTruncated={vi.fn()}
+        userEmail="owner@example.com"
+      >
+        <QueryChatThread contextTruncated={false} />
+      </QueryChatRuntimeProvider>
+    </MemoryRouter>
+  );
   const { rerender } = render(view("DEAL-A"));
-  await user.type(screen.getByRole("textbox", { name: "Message input" }), "Draft for A");
+  await user.type(
+    screen.getByRole("textbox", { name: "Message input" }),
+    "Draft for A",
+  );
   rerender(view("DEAL-B"));
-  expect((screen.getByRole("textbox", { name: "Message input" }) as HTMLTextAreaElement).value).toBe("");
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Message input",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toBe("");
   pending.resolve({ nextCursor: null, threads: [] });
-  await waitFor(() => expect(api.listAssistantThreads).toHaveBeenLastCalledWith({ scope: "deal", dealId: "DEAL-B" }));
-  await user.type(screen.getByRole("textbox", { name: "Message input" }), "Question for B");
+  await waitFor(() =>
+    expect(api.listAssistantThreads).toHaveBeenLastCalledWith({
+      scope: "deal",
+      dealId: "DEAL-B",
+    }),
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Message input" }),
+    "Question for B",
+  );
   await user.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, "DEAL-B"));
+  await waitFor(() =>
+    expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, "DEAL-B"),
+  );
 });

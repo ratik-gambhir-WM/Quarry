@@ -35,16 +35,19 @@ export type TemplatePreviewState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | {
-    activeOperation: ActiveOperation | null;
-    feedback: ActionFeedback | null;
-    slides: readonly DeliverableSlide[];
-    status: "success";
-  };
+      activeOperation: ActiveOperation | null;
+      feedback: ActionFeedback | null;
+      slides: readonly DeliverableSlide[];
+      status: "success";
+    };
 
 type TemplatePreviewStore = {
   deleteTemplate: (templateId: string) => Promise<void>;
   getSnapshot: () => TemplatePreviewState;
-  importPptxTemplate: (file: File, importMode: PptxTemplateImportMode) => Promise<void>;
+  importPptxTemplate: (
+    file: File,
+    importMode: PptxTemplateImportMode,
+  ) => Promise<void>;
   reload: () => Promise<void>;
   reportImportError: (message: string) => void;
   subscribe: (listener: () => void) => () => void;
@@ -70,7 +73,9 @@ export function TemplatePreviewProvider({
 export function useTemplatePreviewState() {
   const store = useContext(TemplatePreviewContext);
   if (!store) {
-    throw new Error("Template preview state must be used within TemplatePreviewProvider.");
+    throw new Error(
+      "Template preview state must be used within TemplatePreviewProvider.",
+    );
   }
   return useSyncExternalStore(
     store.subscribe,
@@ -82,7 +87,9 @@ export function useTemplatePreviewState() {
 export function useTemplatePreviewActions() {
   const store = useContext(TemplatePreviewContext);
   if (!store) {
-    throw new Error("Template preview actions must be used within TemplatePreviewProvider.");
+    throw new Error(
+      "Template preview actions must be used within TemplatePreviewProvider.",
+    );
   }
   return {
     deleteTemplate: store.deleteTemplate,
@@ -126,9 +133,9 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
 
   const deleteTemplate = async (templateId: string) => {
     if (
-      previewState.status !== "success"
-      || previewState.activeOperation !== null
-      || !previewState.slides.some((slide) => slide.id === templateId)
+      previewState.status !== "success" ||
+      previewState.activeOperation !== null ||
+      !previewState.slides.some((slide) => slide.id === templateId)
     ) {
       return;
     }
@@ -164,7 +171,11 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
   };
 
   const reportImportError = (message: string) => {
-    if (previewState.status !== "success" || previewState.activeOperation !== null) return;
+    if (
+      previewState.status !== "success" ||
+      previewState.activeOperation !== null
+    )
+      return;
     previewState = {
       ...previewState,
       feedback: { canRefresh: false, message, type: "error" },
@@ -173,34 +184,53 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
   };
 
   const reload = async () => {
-    if (previewState.status !== "success" || previewState.activeOperation !== null) return;
+    if (
+      previewState.status !== "success" ||
+      previewState.activeOperation !== null
+    )
+      return;
     const version = ++operationVersion;
     const previousFeedback = previewState.feedback;
     previewState = { ...previewState, activeOperation: { type: "reload" } };
     notify();
     try {
       const slides = await loadTemplatePreviews();
-      if (version !== operationVersion || previewState.status !== "success") return;
-      previewState = { activeOperation: null, feedback: null, slides, status: "success" };
+      if (version !== operationVersion || previewState.status !== "success")
+        return;
+      previewState = {
+        activeOperation: null,
+        feedback: null,
+        slides,
+        status: "success",
+      };
     } catch {
-      if (version !== operationVersion || previewState.status !== "success") return;
+      if (version !== operationVersion || previewState.status !== "success")
+        return;
       previewState = {
         ...previewState,
         activeOperation: null,
-        feedback: previousFeedback?.type === "partial"
-          ? previousFeedback
-          : {
-            canRefresh: true,
-            message: "Template previews could not be refreshed.",
-            type: "error",
-          },
+        feedback:
+          previousFeedback?.type === "partial"
+            ? previousFeedback
+            : {
+                canRefresh: true,
+                message: "Template previews could not be refreshed.",
+                type: "error",
+              },
       };
     }
     notify();
   };
 
-  const importPptxTemplate = async (file: File, importMode: PptxTemplateImportMode) => {
-    if (previewState.status !== "success" || previewState.activeOperation !== null) return;
+  const importPptxTemplate = async (
+    file: File,
+    importMode: PptxTemplateImportMode,
+  ) => {
+    if (
+      previewState.status !== "success" ||
+      previewState.activeOperation !== null
+    )
+      return;
     const validationError = validatePptxImportFile(file);
     if (validationError) {
       reportImportError(validationError);
@@ -218,7 +248,8 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
     try {
       result = await runtime.api.importPptxTemplate(file, importMode);
     } catch (error) {
-      if (version !== operationVersion || previewState.status !== "success") return;
+      if (version !== operationVersion || previewState.status !== "success")
+        return;
       previewState = {
         ...previewState,
         activeOperation: null,
@@ -234,7 +265,8 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
 
     try {
       const slides = await loadTemplatePreviews();
-      if (version !== operationVersion || previewState.status !== "success") return;
+      if (version !== operationVersion || previewState.status !== "success")
+        return;
       previewState = {
         activeOperation: null,
         feedback: {
@@ -246,7 +278,8 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
         status: "success",
       };
     } catch {
-      if (version !== operationVersion || previewState.status !== "success") return;
+      if (version !== operationVersion || previewState.status !== "success")
+        return;
       previewState = {
         ...previewState,
         activeOperation: null,
@@ -275,7 +308,11 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
 }
 
 function validatePptxImportFile(file: File): string | null {
-  if (!file.name.trim() || file.name.includes("/") || file.name.includes("\\")) {
+  if (
+    !file.name.trim() ||
+    file.name.includes("/") ||
+    file.name.includes("\\")
+  ) {
     return "Choose a PowerPoint file with a valid .pptx filename.";
   }
   if (!file.name.toLowerCase().endsWith(".pptx")) {
@@ -298,7 +335,10 @@ function pptxImportSuccessMessage(result: PptxTemplateImportResult) {
   return `${imported} The import completed with ${result.warningCount} ${result.warningCount === 1 ? "warning" : "warnings"}. Templates without generated previews may not appear in this preview-only gallery.`;
 }
 
-function pptxImportErrorMessage(error: unknown, importMode: PptxTemplateImportMode) {
+function pptxImportErrorMessage(
+  error: unknown,
+  importMode: PptxTemplateImportMode,
+) {
   const message = error instanceof Error ? error.message : "";
   if (message.includes("Use Import Deck Template instead")) {
     return "This PowerPoint contains multiple slides. Use Import Deck Template instead.";
@@ -330,9 +370,9 @@ async function loadTemplatePreviews(): Promise<DeliverableSlide[]> {
       totalPages: pagination.totalPages,
     };
     if (
-      pagination.pageSize !== baseline.pageSize
-      || pagination.totalItems !== baseline.totalItems
-      || pagination.totalPages !== baseline.totalPages
+      pagination.pageSize !== baseline.pageSize ||
+      pagination.totalItems !== baseline.totalItems ||
+      pagination.totalPages !== baseline.totalPages
     ) {
       throw new Error("Template preview pagination changed during loading.");
     }
@@ -362,33 +402,34 @@ function validatePage(response: TemplatePreviewPage, expectedPage: number) {
   const { pagination, previews } = response;
   const integer = (value: number) => Number.isSafeInteger(value);
   const emptyCatalog =
-    pagination.page === 1
-    && pagination.totalItems === 0
-    && pagination.totalPages === 0
-    && previews.length === 0
-    && !pagination.hasNextPage
-    && !pagination.hasPreviousPage;
-  const expectedTotalPages = pagination.pageSize > 0
-    ? Math.ceil(pagination.totalItems / pagination.pageSize)
-    : -1;
+    pagination.page === 1 &&
+    pagination.totalItems === 0 &&
+    pagination.totalPages === 0 &&
+    previews.length === 0 &&
+    !pagination.hasNextPage &&
+    !pagination.hasPreviousPage;
+  const expectedTotalPages =
+    pagination.pageSize > 0
+      ? Math.ceil(pagination.totalItems / pagination.pageSize)
+      : -1;
   const valid =
-    integer(pagination.page)
-    && integer(pagination.pageSize)
-    && integer(pagination.totalItems)
-    && integer(pagination.totalPages)
-    && pagination.page === expectedPage
-    && pagination.pageSize >= 1
-    && pagination.pageSize <= 10
-    && pagination.totalItems >= 0
-    && pagination.totalItems <= MAX_TEMPLATE_CATALOG_ITEMS
-    && pagination.totalPages >= 0
-    && pagination.totalPages <= MAX_TEMPLATE_PREVIEW_PAGES
-    && previews.length <= pagination.pageSize
-    && (emptyCatalog
-      || (pagination.totalItems > 0
-        && pagination.totalPages === expectedTotalPages
-        && pagination.page <= pagination.totalPages
-        && pagination.hasPreviousPage === (pagination.page > 1)
-        && pagination.hasNextPage === (pagination.page < pagination.totalPages)));
+    integer(pagination.page) &&
+    integer(pagination.pageSize) &&
+    integer(pagination.totalItems) &&
+    integer(pagination.totalPages) &&
+    pagination.page === expectedPage &&
+    pagination.pageSize >= 1 &&
+    pagination.pageSize <= 10 &&
+    pagination.totalItems >= 0 &&
+    pagination.totalItems <= MAX_TEMPLATE_CATALOG_ITEMS &&
+    pagination.totalPages >= 0 &&
+    pagination.totalPages <= MAX_TEMPLATE_PREVIEW_PAGES &&
+    previews.length <= pagination.pageSize &&
+    (emptyCatalog ||
+      (pagination.totalItems > 0 &&
+        pagination.totalPages === expectedTotalPages &&
+        pagination.page <= pagination.totalPages &&
+        pagination.hasPreviousPage === pagination.page > 1 &&
+        pagination.hasNextPage === pagination.page < pagination.totalPages));
   if (!valid) throw new Error("Template preview pagination is invalid.");
 }

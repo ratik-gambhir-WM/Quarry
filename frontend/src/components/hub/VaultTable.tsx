@@ -36,11 +36,21 @@ const vaultTableColumns: ColumnDef<DataGridFeatures, VaultTableRow>[] = [
   },
   {
     accessorKey: "name",
-    header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Name" />,
+    header: ({ column }) => (
+      <DataGridColumnHeader
+        className={quarryDataGridHeaderClassName}
+        column={column}
+        title="Name"
+      />
+    ),
     cell: ({ row }) => (
       <div className="min-w-0" title={row.original.name}>
-        <p className="truncate text-[15px] font-semibold text-text-main">{row.original.name}</p>
-        <p className="mt-1 truncate text-[13px] text-muted">{row.original.description}</p>
+        <p className="truncate text-[15px] font-semibold text-text-main">
+          {row.original.name}
+        </p>
+        <p className="mt-1 truncate text-[13px] text-muted">
+          {row.original.description}
+        </p>
       </div>
     ),
     enableSorting: false,
@@ -50,13 +60,21 @@ const vaultTableColumns: ColumnDef<DataGridFeatures, VaultTableRow>[] = [
   },
   {
     accessorKey: "type",
-    header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Type" />,
+    header: ({ column }) => (
+      <DataGridColumnHeader
+        className={quarryDataGridHeaderClassName}
+        column={column}
+        title="Type"
+      />
+    ),
     cell: ({ row }) => (
       <div className="flex min-w-0 items-center gap-2.5">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-low text-primary">
           <Icon className="h-4 w-4" name={row.original.typeIcon} />
         </span>
-        <span className="truncate text-[14px] text-text-main">{row.original.type}</span>
+        <span className="truncate text-[14px] text-text-main">
+          {row.original.type}
+        </span>
       </div>
     ),
     enableSorting: false,
@@ -66,8 +84,21 @@ const vaultTableColumns: ColumnDef<DataGridFeatures, VaultTableRow>[] = [
   },
   {
     accessorKey: "practiceArea",
-    header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Practice area" />,
-    cell: ({ row }) => <span className="block truncate text-[14px] text-text-main" title={row.original.practiceArea}>{row.original.practiceArea}</span>,
+    header: ({ column }) => (
+      <DataGridColumnHeader
+        className={quarryDataGridHeaderClassName}
+        column={column}
+        title="Practice area"
+      />
+    ),
+    cell: ({ row }) => (
+      <span
+        className="block truncate text-[14px] text-text-main"
+        title={row.original.practiceArea}
+      >
+        {row.original.practiceArea}
+      </span>
+    ),
     enableSorting: false,
     minSize: 150,
     size: 180,
@@ -75,8 +106,21 @@ const vaultTableColumns: ColumnDef<DataGridFeatures, VaultTableRow>[] = [
   },
   {
     accessorKey: "creator",
-    header: ({ column }) => <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Creator" />,
-    cell: ({ row }) => <span className="block truncate text-[14px] text-text-main" title={row.original.creator}>{row.original.creator}</span>,
+    header: ({ column }) => (
+      <DataGridColumnHeader
+        className={quarryDataGridHeaderClassName}
+        column={column}
+        title="Creator"
+      />
+    ),
+    cell: ({ row }) => (
+      <span
+        className="block truncate text-[14px] text-text-main"
+        title={row.original.creator}
+      >
+        {row.original.creator}
+      </span>
+    ),
     enableSorting: false,
     minSize: 140,
     size: 180,

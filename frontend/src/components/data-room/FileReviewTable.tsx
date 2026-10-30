@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ColumnDef, ColumnPinningState, PaginationState, SortingState } from "@tanstack/react-table";
+import type {
+  ColumnDef,
+  ColumnPinningState,
+  PaginationState,
+  SortingState,
+} from "@tanstack/react-table";
 import { useTable } from "@tanstack/react-table";
 import { Search, X } from "lucide-react";
 import type { DataRoomFileEntry, DataRoomTreeNode } from "../../data/dataRoom";
@@ -48,16 +53,24 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("All types");
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
-  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ end: [], start: ["file"] });
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
+  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({
+    end: [],
+    start: ["file"],
+  });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
 
   const visibleRows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return rows.filter((row) => {
-      const matchesStatus = statusFilter === "All" || row.status === statusFilter;
-      const matchesType = typeFilter === "All types" || row.fileType === typeFilter;
+      const matchesStatus =
+        statusFilter === "All" || row.status === statusFilter;
+      const matchesType =
+        typeFilter === "All types" || row.fileType === typeFilter;
       const searchText = [
         row.fileName,
         row.folderLabel,
@@ -68,7 +81,11 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
       ]
         .join(" ")
         .toLocaleLowerCase();
-      return matchesStatus && matchesType && (!normalizedQuery || searchText.includes(normalizedQuery));
+      return (
+        matchesStatus &&
+        matchesType &&
+        (!normalizedQuery || searchText.includes(normalizedQuery))
+      );
     });
   }, [query, rows, statusFilter, typeFilter]);
 
@@ -87,7 +104,13 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
       {
         accessorKey: "fileName",
         id: "file",
-        header: ({ column }) => <DataGridColumnHeader className={compactHeaderClassName} column={column} title="File" />,
+        header: ({ column }) => (
+          <DataGridColumnHeader
+            className={compactHeaderClassName}
+            column={column}
+            title="File"
+          />
+        ),
         cell: ({ row }) => (
           <div className="min-w-0">
             <button
@@ -142,7 +165,9 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   return (
     <section className="glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-12 shrink-0 items-center gap-4 border-b border-outline-variant bg-background px-5">
-        <h1 className="min-w-0 flex-1 truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">File review</h1>
+        <h1 className="min-w-0 flex-1 truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          File review
+        </h1>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden pb-28">
         <div className="mb-2 flex flex-wrap items-center gap-2 px-5 pt-3">
@@ -153,7 +178,10 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
           >
             {searchExpanded ? (
               <>
-                <Search aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                />
                 <Input
                   aria-label="Search file reviews"
                   className="h-full rounded-full border-0 bg-transparent pr-8 pl-8 text-xs shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-xs dark:bg-transparent"
@@ -170,7 +198,11 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
                   value={query}
                 />
                 <button
-                  aria-label={query ? "Clear file review search" : "Close file review search"}
+                  aria-label={
+                    query
+                      ? "Clear file review search"
+                      : "Close file review search"
+                  }
                   className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => {
                     if (query) {
@@ -199,32 +231,50 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
               </button>
             )}
           </div>
-          {(["All", "Needs attention", "Reviewed", "Pending"] as const).map((status) => (
-            <Button
-              aria-pressed={statusFilter === status}
-              className="text-xs"
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              size="sm"
-              type="button"
-              variant={statusFilter === status ? "default" : "outline"}
-            >
-              {status}
-            </Button>
-          ))}
-          <label className="ml-auto text-xs text-muted-foreground" htmlFor="file-review-type">File type</label>
+          {(["All", "Needs attention", "Reviewed", "Pending"] as const).map(
+            (status) => (
+              <Button
+                aria-pressed={statusFilter === status}
+                className="text-xs"
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                size="sm"
+                type="button"
+                variant={statusFilter === status ? "default" : "outline"}
+              >
+                {status}
+              </Button>
+            ),
+          )}
+          <label
+            className="ml-auto text-xs text-muted-foreground"
+            htmlFor="file-review-type"
+          >
+            File type
+          </label>
           <select
             className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground"
             id="file-review-type"
-            onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+            onChange={(event) =>
+              setTypeFilter(event.target.value as TypeFilter)
+            }
             value={typeFilter}
           >
-            {(["All types", "PDF", "Document", "Spreadsheet"] as const).map((type) => (
-              <option key={type}>{type}</option>
-            ))}
+            {(["All types", "PDF", "Document", "Spreadsheet"] as const).map(
+              (type) => (
+                <option key={type}>{type}</option>
+              ),
+            )}
           </select>
-          {(query || statusFilter !== "All" || typeFilter !== "All types") ? (
-            <Button onClick={resetFilters} size="sm" type="button" variant="ghost">Reset</Button>
+          {query || statusFilter !== "All" || typeFilter !== "All types" ? (
+            <Button
+              onClick={resetFilters}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Reset
+            </Button>
           ) : null}
         </div>
         <DataGrid
@@ -244,7 +294,10 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
           }}
         >
           <DataGridContainer className="border-t border-outline-variant/70">
-            <DataGridScrollArea className="max-h-[calc(100vh-17rem)]" orientation="both">
+            <DataGridScrollArea
+              className="max-h-[calc(100vh-17rem)]"
+              orientation="both"
+            >
               <DataGridTable />
             </DataGridScrollArea>
           </DataGridContainer>
@@ -264,11 +317,22 @@ function reviewColumn(
 ): ColumnDef<DataGridFeatures, FileReviewRow> {
   return {
     accessorKey,
-    header: ({ column }) => <DataGridColumnHeader className={compactHeaderClassName} column={column} title={title} />,
+    header: ({ column }) => (
+      <DataGridColumnHeader
+        className={compactHeaderClassName}
+        column={column}
+        title={title}
+      />
+    ),
     cell: ({ row }) => (
-      <div className="flex min-w-0 items-center gap-1.5" title={row.original[accessorKey]}>
+      <div
+        className="flex min-w-0 items-center gap-1.5"
+        title={row.original[accessorKey]}
+      >
         {levelKey ? <SignalBadge level={row.original[levelKey]} /> : null}
-        <span className="truncate text-[11px] leading-5">{row.original[accessorKey]}</span>
+        <span className="truncate text-[11px] leading-5">
+          {row.original[accessorKey]}
+        </span>
       </div>
     ),
     size: fileReviewColumnSize,
@@ -278,5 +342,9 @@ function reviewColumn(
 }
 
 function SignalBadge({ level }: { level: ReviewSignalLevel }) {
-  return <Badge variant={level === "high" ? "destructive" : "outline"}>{level}</Badge>;
+  return (
+    <Badge variant={level === "high" ? "destructive" : "outline"}>
+      {level}
+    </Badge>
+  );
 }

@@ -1,11 +1,11 @@
-import * as React from "react"
+import * as React from "react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable"
+} from "@/components/ui/resizable";
 
 function PanelBorder({ side }: { side: "left" | "right" }) {
   return (
@@ -13,18 +13,18 @@ function PanelBorder({ side }: { side: "left" | "right" }) {
       aria-label={`Resize ${side} panel`}
       className={cn(
         "pointer-events-auto z-40 w-px bg-border before:absolute before:inset-y-2 before:w-px before:bg-primary/50 before:[mask-image:linear-gradient(to_bottom,transparent,black_8%,black_92%,transparent)] before:opacity-0 before:transition-opacity before:duration-200 before:ease-in-out hover:before:opacity-100 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:before:opacity-100 data-[separator=active]:before:opacity-100 data-[separator=hover]:before:opacity-100 motion-reduce:before:transition-none",
-        side === "left" ? "before:-left-px" : "before:left-full"
+        side === "left" ? "before:-left-px" : "before:left-full",
       )}
     />
-  )
+  );
 }
 function SidebarPanel({
   defaultSize,
   ...props
 }: React.ComponentProps<typeof ResizablePanel>) {
   // Keep the registration size stable until the panel is mounted again.
-  const [initialSize] = React.useState(defaultSize)
-  return <ResizablePanel {...props} defaultSize={initialSize} />
+  const [initialSize] = React.useState(defaultSize);
+  return <ResizablePanel {...props} defaultSize={initialSize} />;
 }
 export function PdfEditorWorkspace({
   children,
@@ -33,25 +33,25 @@ export function PdfEditorWorkspace({
   leftInline,
   rightInline,
 }: {
-  children: React.ReactNode
-  left: React.ReactNode
-  right: React.ReactNode
-  leftInline: boolean
-  rightInline: boolean
+  children: React.ReactNode;
+  left: React.ReactNode;
+  right: React.ReactNode;
+  leftInline: boolean;
+  rightInline: boolean;
 }) {
-  const id = React.useId()
-  const [leftSize, setLeftSize] = React.useState<string | number>("14rem")
-  const [rightSize, setRightSize] = React.useState<string | number>("21rem")
-  const leftElement = React.useRef<HTMLDivElement>(null)
-  const rightElement = React.useRef<HTMLDivElement>(null)
-  const leftId = `${id}-left`
-  const rightId = `${id}-right`
+  const id = React.useId();
+  const [leftSize, setLeftSize] = React.useState<string | number>("14rem");
+  const [rightSize, setRightSize] = React.useState<string | number>("21rem");
+  const leftElement = React.useRef<HTMLDivElement>(null);
+  const rightElement = React.useRef<HTMLDivElement>(null);
+  const leftId = `${id}-left`;
+  const rightId = `${id}-right`;
   const rememberSizes = () => {
     if (leftElement.current)
-      setLeftSize(leftElement.current.getBoundingClientRect().width)
+      setLeftSize(leftElement.current.getBoundingClientRect().width);
     if (rightElement.current)
-      setRightSize(rightElement.current.getBoundingClientRect().width)
-  }
+      setRightSize(rightElement.current.getBoundingClientRect().width);
+  };
   const sidebar = (side: "left" | "right", content: React.ReactNode) => (
     <SidebarPanel
       id={side === "left" ? leftId : rightId}
@@ -69,7 +69,7 @@ export function PdfEditorWorkspace({
         {content}
       </aside>
     </SidebarPanel>
-  )
+  );
   return (
     <div className="relative h-full min-h-0 w-full flex-1 overflow-hidden">
       <ResizablePanelGroup
@@ -89,9 +89,9 @@ export function PdfEditorWorkspace({
         {right && rightInline ? sidebar("right", right) : null}
       </ResizablePanelGroup>
       {(["left", "right"] as const).map((side) => {
-        const content = side === "left" ? left : right
-        const inline = side === "left" ? leftInline : rightInline
-        if (!content || inline) return null
+        const content = side === "left" ? left : right;
+        const inline = side === "left" ? leftInline : rightInline;
+        if (!content || inline) return null;
         return (
           <ResizablePanelGroup
             key={side}
@@ -99,7 +99,7 @@ export function PdfEditorWorkspace({
             onLayoutChanged={rememberSizes}
             className={cn(
               "pointer-events-none absolute inset-y-0 z-30",
-              side === "left" ? "left-0 min-w-60" : "right-0 min-w-88"
+              side === "left" ? "left-0 min-w-60" : "right-0 min-w-88",
             )}
           >
             {side === "right" ? (
@@ -112,8 +112,8 @@ export function PdfEditorWorkspace({
               <ResizablePanel id={`${id}-left-space`} minSize="1rem" />
             ) : null}
           </ResizablePanelGroup>
-        )
+        );
       })}
     </div>
-  )
+  );
 }

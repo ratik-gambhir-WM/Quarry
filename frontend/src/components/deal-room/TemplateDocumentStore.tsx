@@ -21,7 +21,9 @@ type TemplateDocumentStore = {
   updateDocument: (document: DiligenceCanvasDocument) => void;
 };
 
-const TemplateDocumentContext = createContext<TemplateDocumentStore | null>(null);
+const TemplateDocumentContext = createContext<TemplateDocumentStore | null>(
+  null,
+);
 
 export function TemplateDocumentProvider({
   children,
@@ -45,7 +47,11 @@ export function TemplateDocumentProvider({
 
 export function useTemplateDocumentState() {
   const store = useTemplateDocumentStore();
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  return useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
 }
 
 export function useTemplateDocumentActions() {
@@ -56,12 +62,16 @@ export function useTemplateDocumentActions() {
 function useTemplateDocumentStore() {
   const store = useContext(TemplateDocumentContext);
   if (!store) {
-    throw new Error("Template document state must be used within TemplateDocumentProvider.");
+    throw new Error(
+      "Template document state must be used within TemplateDocumentProvider.",
+    );
   }
   return store;
 }
 
-function createTemplateDocumentStore(templateId: string): TemplateDocumentStore {
+function createTemplateDocumentStore(
+  templateId: string,
+): TemplateDocumentStore {
   let state: TemplateDocumentState = { status: "loading" };
   let started = false;
   let generation = 0;

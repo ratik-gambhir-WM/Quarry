@@ -38,7 +38,10 @@ export function ColumnHeader({
   const overCap = column.maxItems !== undefined && itemCount > column.maxItems;
 
   return (
-    <div data-slot="kanban-column-header" className="flex items-center gap-1 px-2.5 py-2">
+    <div
+      data-slot="kanban-column-header"
+      className="flex items-center gap-1 px-2.5 py-2"
+    >
       <div
         {...(readOnly ? {} : dragHandleProps)}
         data-slot="kanban-column-title"
@@ -47,18 +50,28 @@ export function ColumnHeader({
           !readOnly && "cursor-grab active:cursor-grabbing",
         )}
       >
-        <span className="truncate text-sm font-medium text-foreground">{column.title}</span>
+        <span className="truncate text-sm font-medium text-foreground">
+          {column.title}
+        </span>
         <span
           data-slot="kanban-column-count"
           className={cn(
             "shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-            overCap ? "bg-destructive/15 text-destructive" : "text-muted-foreground",
+            overCap
+              ? "bg-destructive/15 text-destructive"
+              : "text-muted-foreground",
           )}
         >
-          {column.maxItems !== undefined ? `${itemCount} / ${column.maxItems}` : itemCount}
+          {column.maxItems !== undefined
+            ? `${itemCount} / ${column.maxItems}`
+            : itemCount}
         </span>
       </div>
-      <div className="flex shrink-0 items-center" data-stop-click onPointerDown={(e) => e.stopPropagation()}>
+      <div
+        className="flex shrink-0 items-center"
+        data-stop-click
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         {!readOnly ? (
           <ColumnColorPicker
             palette={palette}
@@ -85,7 +98,10 @@ export function ColumnHeader({
                 reproduces the ghost/icon look. (v0.4.3) */}
             <DropdownMenuTrigger
               type="button"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "size-6")}
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon" }),
+                "size-6",
+              )}
               aria-label="Column menu"
               data-stop-click
               onPointerDown={(e) => e.stopPropagation()}

@@ -46,7 +46,9 @@ export class QuerySseParser {
     let eventName: string | undefined;
     const data: string[] = [];
     for (const sourceLine of frame.split("\n")) {
-      const line = sourceLine.endsWith("\r") ? sourceLine.slice(0, -1) : sourceLine;
+      const line = sourceLine.endsWith("\r")
+        ? sourceLine.slice(0, -1)
+        : sourceLine;
       if (line.startsWith(":")) continue;
       if (line.startsWith("event:")) eventName = line.slice(6).trim();
       if (line.startsWith("data:")) {
@@ -75,7 +77,8 @@ export class QuerySseParser {
       throw new Error("The query stream started more than once.");
     }
     if (event.type === "started") this.started = true;
-    if (event.type === "completed" || event.type === "failed") this.terminal = true;
+    if (event.type === "completed" || event.type === "failed")
+      this.terminal = true;
     this.onEvent(event);
   }
 }
@@ -86,17 +89,19 @@ export function parseQueryEvent(value: unknown): SendQueryEvent {
   }
   switch (value.type) {
     case "started":
-      requireOptionalKeys(value, ["model", "type"], [
-        "assistantMessageId",
-        "threadId",
-        "userMessageId",
-      ]);
+      requireOptionalKeys(
+        value,
+        ["model", "type"],
+        ["assistantMessageId", "threadId", "userMessageId"],
+      );
       if (
-        typeof value.model === "string"
-        && value.model.length > 0
-        && [value.assistantMessageId, value.threadId, value.userMessageId]
-          .every((item) => item === undefined || typeof item === "string")
-      ) return value as SendQueryEvent;
+        typeof value.model === "string" &&
+        value.model.length > 0 &&
+        [value.assistantMessageId, value.threadId, value.userMessageId].every(
+          (item) => item === undefined || typeof item === "string",
+        )
+      )
+        return value as SendQueryEvent;
       break;
     case "delta":
       requireKeys(value, ["delta", "type"]);
@@ -104,11 +109,13 @@ export function parseQueryEvent(value: unknown): SendQueryEvent {
       break;
     case "completed":
       requireKeys(value, ["response", "type"]);
-      if (typeof value.response === "string" && value.response.trim()) return value as SendQueryEvent;
+      if (typeof value.response === "string" && value.response.trim())
+        return value as SendQueryEvent;
       break;
     case "failed":
       requireKeys(value, ["error", "type"]);
-      if (typeof value.error === "string" && value.error.length > 0) return value as SendQueryEvent;
+      if (typeof value.error === "string" && value.error.length > 0)
+        return value as SendQueryEvent;
       break;
   }
   throw new Error("The query stream returned an invalid event.");
@@ -131,11 +138,11 @@ function utf8ByteLength(value: string, end = value.length) {
     } else if (codeUnit <= 0x7ff) {
       bytes += 2;
     } else if (
-      codeUnit >= 0xd800
-      && codeUnit <= 0xdbff
-      && index + 1 < end
-      && value.charCodeAt(index + 1) >= 0xdc00
-      && value.charCodeAt(index + 1) <= 0xdfff
+      codeUnit >= 0xd800 &&
+      codeUnit <= 0xdbff &&
+      index + 1 < end &&
+      value.charCodeAt(index + 1) >= 0xdc00 &&
+      value.charCodeAt(index + 1) <= 0xdfff
     ) {
       bytes += 4;
       index += 1;
@@ -152,7 +159,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function requireKeys(value: Record<string, unknown>, expected: string[]) {
   const keys = Object.keys(value).sort();
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index])
+  ) {
     throw new Error("The query stream returned an invalid event shape.");
   }
 }
@@ -164,8 +174,8 @@ function requireOptionalKeys(
 ) {
   const keys = Object.keys(value);
   if (
-    required.some((key) => !keys.includes(key))
-    || keys.some((key) => !required.includes(key) && !optional.includes(key))
+    required.some((key) => !keys.includes(key)) ||
+    keys.some((key) => !required.includes(key) && !optional.includes(key))
   ) {
     throw new Error("The query stream returned an invalid event shape.");
   }

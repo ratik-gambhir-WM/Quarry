@@ -38,9 +38,18 @@ const reviewColumns = [
 type ReviewColumnKey = (typeof reviewColumns)[number]["key"];
 type ReviewStatus = "Needs review" | "Reviewed";
 
-const defaultVisibleColumns: ReviewColumnKey[] = ["category", "finding", "confidence", "status"];
+const defaultVisibleColumns: ReviewColumnKey[] = [
+  "category",
+  "finding",
+  "confidence",
+  "status",
+];
 
-export function InsightsStrip({ className = "col-span-12 mt-2", contextLabel = "Across Projects", items }: InsightsStripProps) {
+export function InsightsStrip({
+  className = "col-span-12 mt-2",
+  contextLabel = "Across Projects",
+  items,
+}: InsightsStripProps) {
   return (
     <section className={className}>
       <div className="mb-4 flex items-center justify-between px-2">
@@ -71,9 +80,13 @@ export function InsightsStrip({ className = "col-span-12 mt-2", contextLabel = "
 }
 
 function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
-  const [visibleColumns, setVisibleColumns] = useState<ReviewColumnKey[]>(defaultVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState<ReviewColumnKey[]>(
+    defaultVisibleColumns,
+  );
   const [columnMenuOpen, setColumnMenuOpen] = useState(false);
-  const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>({});
+  const [reviewStatuses, setReviewStatuses] = useState<
+    Record<string, ReviewStatus>
+  >({});
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -111,7 +124,8 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
   function toggleReviewStatus(fileName: string) {
     setReviewStatuses((currentStatuses) => ({
       ...currentStatuses,
-      [fileName]: currentStatuses[fileName] === "Reviewed" ? "Needs review" : "Reviewed",
+      [fileName]:
+        currentStatuses[fileName] === "Reviewed" ? "Needs review" : "Reviewed",
     }));
   }
 
@@ -121,7 +135,11 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
         accessorKey: "fileName",
         id: "document",
         header: ({ column }) => (
-          <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Document" />
+          <DataGridColumnHeader
+            className={quarryDataGridHeaderClassName}
+            column={column}
+            title="Document"
+          />
         ),
         cell: ({ row }) => (
           <div className="flex min-w-0 items-center gap-3">
@@ -129,9 +147,13 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
               <Icon className="size-4.5" name={row.original.fileIcon} />
             </span>
             <div className="min-w-0">
-              <p className="max-w-56 truncate text-[13px] font-semibold text-text-main">{row.original.fileName}</p>
+              <p className="max-w-56 truncate text-[13px] font-semibold text-text-main">
+                {row.original.fileName}
+              </p>
               {row.original.analyzedAtLabel ? (
-                <p className="mt-1 text-[11px] text-muted">{row.original.analyzedAtLabel}</p>
+                <p className="mt-1 text-[11px] text-muted">
+                  {row.original.analyzedAtLabel}
+                </p>
               ) : null}
             </div>
           </div>
@@ -140,75 +162,106 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
         meta: { headerTitle: "Document" },
       },
       ...(visibleColumns.includes("category")
-        ? [{
-            accessorKey: "category",
-            header: ({ column }) => (
-              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Category" />
-            ),
-            cell: ({ row }) => (
-              <span className="inline-flex whitespace-nowrap rounded-lg bg-surface-container-high px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                {row.original.category}
-              </span>
-            ),
-            size: 160,
-            meta: { headerTitle: "Category" },
-          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        ? [
+            {
+              accessorKey: "category",
+              header: ({ column }) => (
+                <DataGridColumnHeader
+                  className={quarryDataGridHeaderClassName}
+                  column={column}
+                  title="Category"
+                />
+              ),
+              cell: ({ row }) => (
+                <span className="inline-flex whitespace-nowrap rounded-lg bg-surface-container-high px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+                  {row.original.category}
+                </span>
+              ),
+              size: 160,
+              meta: { headerTitle: "Category" },
+            } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>,
+          ]
         : []),
       ...(visibleColumns.includes("finding")
-        ? [{
-            accessorKey: "quote",
-            id: "finding",
-            header: ({ column }) => (
-              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Extracted finding" />
-            ),
-            cell: ({ row }) => <p className="whitespace-normal text-[13px] leading-6 text-text-main/82">{row.original.quote}</p>,
-            size: 440,
-            meta: { fillWidth: true, headerTitle: "Extracted finding" },
-          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        ? [
+            {
+              accessorKey: "quote",
+              id: "finding",
+              header: ({ column }) => (
+                <DataGridColumnHeader
+                  className={quarryDataGridHeaderClassName}
+                  column={column}
+                  title="Extracted finding"
+                />
+              ),
+              cell: ({ row }) => (
+                <p className="whitespace-normal text-[13px] leading-6 text-text-main/82">
+                  {row.original.quote}
+                </p>
+              ),
+              size: 440,
+              meta: { fillWidth: true, headerTitle: "Extracted finding" },
+            } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>,
+          ]
         : []),
       ...(visibleColumns.includes("confidence")
-        ? [{
-            accessorKey: "confidenceLabel",
-            id: "confidence",
-            header: ({ column }) => (
-              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Confidence" />
-            ),
-            cell: ({ row }) => (
-              <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-text-main">
-                {row.original.confidenceLabel ? <span className="size-2 rounded-full bg-primary" /> : null}
-                {row.original.confidenceLabel ?? "Unavailable"}
-              </span>
-            ),
-            size: 140,
-            meta: { headerTitle: "Confidence" },
-          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        ? [
+            {
+              accessorKey: "confidenceLabel",
+              id: "confidence",
+              header: ({ column }) => (
+                <DataGridColumnHeader
+                  className={quarryDataGridHeaderClassName}
+                  column={column}
+                  title="Confidence"
+                />
+              ),
+              cell: ({ row }) => (
+                <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-text-main">
+                  {row.original.confidenceLabel ? (
+                    <span className="size-2 rounded-full bg-primary" />
+                  ) : null}
+                  {row.original.confidenceLabel ?? "Unavailable"}
+                </span>
+              ),
+              size: 140,
+              meta: { headerTitle: "Confidence" },
+            } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>,
+          ]
         : []),
       ...(visibleColumns.includes("status")
-        ? [{
-            id: "status",
-            header: ({ column }) => (
-              <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Review status" />
-            ),
-            cell: ({ row }) => {
-              const status = reviewStatuses[row.original.fileName] ?? "Needs review";
-              return (
-                <button
-                  aria-label={`Mark ${row.original.fileName} as ${status === "Reviewed" ? "needing review" : "reviewed"}`}
-                  className={`whitespace-nowrap rounded-xl border px-3 py-2 text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed motion-reduce:transition-none ${
-                    status === "Reviewed"
-                      ? "border-primary/20 bg-primary/10 text-primary"
-                      : "border-outline-variant bg-surface-container-lowest text-muted hover:text-text-main"
-                  }`}
-                  onClick={() => toggleReviewStatus(row.original.fileName)}
-                  type="button"
-                >
-                  {status}
-                </button>
-              );
-            },
-            size: 160,
-            meta: { headerTitle: "Review status" },
-          } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>]
+        ? [
+            {
+              id: "status",
+              header: ({ column }) => (
+                <DataGridColumnHeader
+                  className={quarryDataGridHeaderClassName}
+                  column={column}
+                  title="Review status"
+                />
+              ),
+              cell: ({ row }) => {
+                const status =
+                  reviewStatuses[row.original.fileName] ?? "Needs review";
+                return (
+                  <button
+                    aria-label={`Mark ${row.original.fileName} as ${status === "Reviewed" ? "needing review" : "reviewed"}`}
+                    className={`whitespace-nowrap rounded-xl border px-3 py-2 text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed motion-reduce:transition-none ${
+                      status === "Reviewed"
+                        ? "border-primary/20 bg-primary/10 text-primary"
+                        : "border-outline-variant bg-surface-container-lowest text-muted hover:text-text-main"
+                    }`}
+                    onClick={() => toggleReviewStatus(row.original.fileName)}
+                    type="button"
+                  >
+                    {status}
+                  </button>
+                );
+              },
+              size: 160,
+              meta: { headerTitle: "Review status" },
+            } satisfies ColumnDef<DataGridFeatures, WorkspaceInsight>,
+          ]
         : []),
     ],
     [reviewStatuses, visibleColumns],
@@ -219,7 +272,9 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
     data: tableData,
     features: dataGridFeatures,
     getRowId: (row) => `${row.deal}-${row.fileName}`,
-    state: { pagination: { pageIndex: 0, pageSize: Math.max(tableData.length, 1) } },
+    state: {
+      pagination: { pageIndex: 0, pageSize: Math.max(tableData.length, 1) },
+    },
   });
 
   return (
@@ -227,7 +282,9 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 className="type-h2 text-text-main">Review table</h3>
-          <p className="mt-1 text-[13px] text-muted">Review extracted information across analyzed documents.</p>
+          <p className="mt-1 text-[13px] text-muted">
+            Review extracted information across analyzed documents.
+          </p>
         </div>
 
         <div className="relative self-start sm:self-auto" ref={columnMenuRef}>
@@ -240,7 +297,10 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
           >
             <ViewColumnsIcon className="h-4 w-4 text-muted" />
             Customize columns
-            <Icon className={`h-3.5 w-3.5 text-muted transition ${columnMenuOpen ? "rotate-180" : ""}`} name="chevronDown" />
+            <Icon
+              className={`h-3.5 w-3.5 text-muted transition ${columnMenuOpen ? "rotate-180" : ""}`}
+              name="chevronDown"
+            />
           </button>
 
           {columnMenuOpen ? (
@@ -266,7 +326,9 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
                     <span>{column.label}</span>
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-                        visible ? "border-primary bg-primary text-white" : "border-outline-variant text-transparent"
+                        visible
+                          ? "border-primary bg-primary text-white"
+                          : "border-outline-variant text-transparent"
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" name="check" />
@@ -285,7 +347,14 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
           recordCount={items.length}
           table={table}
           tableClassNames={quarryDataGridTableClassNames}
-          tableLayout={{ cellBorder: true, dense: true, headerBackground: false, headerBorder: true, rowBorder: true, width: "fixed" }}
+          tableLayout={{
+            cellBorder: true,
+            dense: true,
+            headerBackground: false,
+            headerBorder: true,
+            rowBorder: true,
+            width: "fixed",
+          }}
         >
           <DataGridContainer>
             <DataGridScrollArea orientation="horizontal">
@@ -301,20 +370,33 @@ function ReviewTable({ items }: { items: readonly WorkspaceInsight[] }) {
 function InsightChip({ item }: { item: WorkspaceInsight }) {
   return (
     <article className="chip-card group relative flex w-72 shrink-0 flex-col gap-3 overflow-hidden p-4">
-      <div className={`absolute left-0 top-0 h-full w-1 ${item.toneClassName}`} />
+      <div
+        className={`absolute left-0 top-0 h-full w-1 ${item.toneClassName}`}
+      />
       <div className="flex items-start justify-between pl-2">
         <div className="space-y-1">
-          <p className={`text-[11px] font-bold uppercase tracking-[0.16em] ${item.toneTextClassName}`}>{item.deal}</p>
+          <p
+            className={`text-[11px] font-bold uppercase tracking-[0.16em] ${item.toneTextClassName}`}
+          >
+            {item.deal}
+          </p>
           <span className="inline-flex rounded-md bg-surface-container-low px-2 py-1 text-[11px] font-bold uppercase tracking-[0.1em] text-muted">
             {item.category}
           </span>
         </div>
-        <Icon className="h-4 w-4 text-muted opacity-0 transition group-hover:opacity-100" name="openInNew" />
+        <Icon
+          className="h-4 w-4 text-muted opacity-0 transition group-hover:opacity-100"
+          name="openInNew"
+        />
       </div>
 
-      {item.image ? <div className="ml-2 h-20 rounded-xl border border-white/60 bg-[linear-gradient(120deg,rgba(80,101,142,0.22),rgba(206,215,230,0.5),rgba(232,238,248,0.8))]" /> : null}
+      {item.image ? (
+        <div className="ml-2 h-20 rounded-xl border border-white/60 bg-[linear-gradient(120deg,rgba(80,101,142,0.22),rgba(206,215,230,0.5),rgba(232,238,248,0.8))]" />
+      ) : null}
 
-      <p className="line-clamp-3 pl-2 font-heading text-[0.98rem] leading-relaxed text-text-main">{item.quote}</p>
+      <p className="line-clamp-3 pl-2 font-heading text-[0.98rem] leading-relaxed text-text-main">
+        {item.quote}
+      </p>
 
       <div className="mt-auto flex items-center gap-2 pl-2">
         <Icon className="h-4 w-4 text-muted" name={item.fileIcon} />
@@ -329,14 +411,26 @@ function LoadingChip() {
     <WorkspaceCard className="relative flex w-72 shrink-0 flex-col gap-4 overflow-hidden p-4 opacity-55">
       <div className="absolute left-0 top-0 h-full w-1 bg-muted/25" />
       <div className="space-y-2 pl-2 pt-1">
-        <div className={`${shimmerClassName} h-2 w-24 rounded-full bg-muted/10`} />
-        <div className={`${shimmerClassName} h-2 w-16 rounded-full bg-muted/10`} />
+        <div
+          className={`${shimmerClassName} h-2 w-24 rounded-full bg-muted/10`}
+        />
+        <div
+          className={`${shimmerClassName} h-2 w-16 rounded-full bg-muted/10`}
+        />
       </div>
-      <div className={`${shimmerClassName} ml-2 mt-4 h-3 w-full rounded-full bg-muted/10`} />
-      <div className={`${shimmerClassName} ml-2 h-3 w-5/6 rounded-full bg-muted/10`} />
+      <div
+        className={`${shimmerClassName} ml-2 mt-4 h-3 w-full rounded-full bg-muted/10`}
+      />
+      <div
+        className={`${shimmerClassName} ml-2 h-3 w-5/6 rounded-full bg-muted/10`}
+      />
       <div className="mt-auto flex items-center gap-2 pl-2">
-        <div className={`${shimmerClassName} h-4 w-4 rounded-full bg-muted/10`} />
-        <div className={`${shimmerClassName} h-2 w-32 rounded-full bg-muted/10`} />
+        <div
+          className={`${shimmerClassName} h-4 w-4 rounded-full bg-muted/10`}
+        />
+        <div
+          className={`${shimmerClassName} h-2 w-32 rounded-full bg-muted/10`}
+        />
       </div>
     </WorkspaceCard>
   );

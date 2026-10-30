@@ -13,16 +13,19 @@ describe("SummarizeFileTree", () => {
     const onSelectAll = vi.fn();
     const onToggleFile = vi.fn();
     const onToggleFolder = vi.fn();
-    const fileTree = buildFileTree([
-      {
-        filename: "report.pdf",
-        mimeType: "application/pdf",
-        path: "Folder/report.pdf",
-        relativePath: "Folder/report.pdf",
-        sizeBytes: 1024,
-        supported: true,
-      },
-    ], "Folder");
+    const fileTree = buildFileTree(
+      [
+        {
+          filename: "report.pdf",
+          mimeType: "application/pdf",
+          path: "Folder/report.pdf",
+          relativePath: "Folder/report.pdf",
+          sizeBytes: 1024,
+          supported: true,
+        },
+      ],
+      "Folder",
+    );
 
     render(
       <SummarizeFileTree

@@ -338,3 +338,31 @@ fn fts_ranking_rejects_nonfinite_weights() {
         SqlBuilderError::NonFiniteRankWeight
     );
 }
+
+#[test]
+fn notebook_query_increment_and_literal_substring_remain_typed_and_bound() {
+    let query = SqlBuilder::update("notes")
+        .set("folder_id", None::<String>)
+        .increment("revision")
+        .and_where(Condition::equal("folder_id", "folder"))
+        .build()
+        .unwrap();
+    assert!(query.sql().contains("\"revision\" = \"revision\" + 1"));
+    assert_eq!(query.parameters().len(), 2);
+    assert!(SqlBuilder::update("notes")
+        .set("revision", 1_i64)
+        .increment("revision")
+        .and_where(Condition::equal("id", "id"))
+        .build()
+        .is_err());
+    let query = SqlBuilder::select("notes")
+        .and_where(Condition::literal_substring("title", "%_\\' OR 1=1"))
+        .build()
+        .unwrap();
+    assert!(!query.sql().contains("OR 1=1"));
+    assert!(query.sql().contains("LIKE ? ESCAPE"));
+    assert_eq!(
+        query.parameters(),
+        &[SqlValue::Text("%\\%\\_\\\\' OR 1=1%".into())]
+    );
+}

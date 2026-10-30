@@ -1,8 +1,18 @@
 import { runtime } from "@quarry/runtime";
 import { useEffect, useState } from "react";
-import { Navigate, Outlet, useLocation, useOutletContext, useParams, useSearchParams } from "react-router-dom";
+import {
+  Navigate,
+  Outlet,
+  useLocation,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useWorkspace } from "../app/WorkspaceProvider";
-import { getDealRoomSection, type DealRoomOverviewSection } from "../components/deal-room/DealRoomHeader";
+import {
+  getDealRoomSection,
+  type DealRoomOverviewSection,
+} from "../components/deal-room/DealRoomHeader";
 import { WorkspaceShell } from "../components/hub/WorkspaceLayout";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { ActiveDealSection } from "../components/hub/sidebar/sidebarTypes";
@@ -33,17 +43,36 @@ export function useDealRoom() {
 export function DealRoomPage() {
   const { dealId } = useParams();
   const location = useLocation();
-  const { deals: activeDeals, dealsResource, email, navigationState, retryDeals } = useWorkspace();
+  const {
+    deals: activeDeals,
+    dealsResource,
+    email,
+    navigationState,
+    retryDeals,
+  } = useWorkspace();
   const extractionState = location.state as DealExtractionLocationState | null;
   const extractionResult = extractionState?.result;
-  const extractedDeal = extractionResult && extractionResult.deal.dealId === dealId
-    ? buildWorkspaceDealFromExtractionResult(extractionResult, extractionState?.sowSourceName)
-    : undefined;
-  const cachedDeals = dealsResource.status === "success" ? dealsResource.deals : activeDeals;
-  const deal = cachedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId) ?? extractedDeal;
-  const deals = extractedDeal && !activeDeals.some((d) => d.room.id === dealId)
-    ? [extractedDeal, ...activeDeals.filter((workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id)]
-    : activeDeals;
+  const extractedDeal =
+    extractionResult && extractionResult.deal.dealId === dealId
+      ? buildWorkspaceDealFromExtractionResult(
+          extractionResult,
+          extractionState?.sowSourceName,
+        )
+      : undefined;
+  const cachedDeals =
+    dealsResource.status === "success" ? dealsResource.deals : activeDeals;
+  const deal =
+    cachedDeals.find((workspaceDeal) => workspaceDeal.room.id === dealId) ??
+    extractedDeal;
+  const deals =
+    extractedDeal && !activeDeals.some((d) => d.room.id === dealId)
+      ? [
+          extractedDeal,
+          ...activeDeals.filter(
+            (workspaceDeal) => workspaceDeal.room.id !== extractedDeal.room.id,
+          ),
+        ]
+      : activeDeals;
   const dealNavigationState = extractionResult
     ? ({
         ...navigationState,
@@ -54,11 +83,20 @@ export function DealRoomPage() {
 
   if (!deal && dealsResource.status === "error") {
     return (
-      <section className="flex min-h-screen items-center justify-center p-8" role="alert">
+      <section
+        className="flex min-h-screen items-center justify-center p-8"
+        role="alert"
+      >
         <div className="max-w-lg rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center">
-          <h1 className="text-lg font-semibold text-text-main">Deal unavailable</h1>
+          <h1 className="text-lg font-semibold text-text-main">
+            Deal unavailable
+          </h1>
           <p className="mt-2 text-sm text-muted">{dealsResource.message}</p>
-          <button className="mt-4 rounded-full bg-action px-4 py-2 text-sm font-semibold text-on-action" onClick={retryDeals} type="button">
+          <button
+            className="mt-4 rounded-full bg-action px-4 py-2 text-sm font-semibold text-on-action"
+            onClick={retryDeals}
+            type="button"
+          >
             Retry
           </button>
         </div>
@@ -67,9 +105,11 @@ export function DealRoomPage() {
   }
 
   if (!deal && dealsResource.status === "success") {
-    return dealsResource.source === "server" && dealId
-      ? <DealRoomLookup key={`${email ?? ""}:${dealId}`} id={dealId} />
-      : <Navigate replace state={navigationState} to="/hub" />;
+    return dealsResource.source === "server" && dealId ? (
+      <DealRoomLookup key={`${email ?? ""}:${dealId}`} id={dealId} />
+    ) : (
+      <Navigate replace state={navigationState} to="/hub" />
+    );
   }
 
   if (!deal) {
@@ -93,12 +133,37 @@ function DealRoomLookup({ id }: { id: string }) {
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
-    void runtime.api.getDeal(id).then((aggregate) => {
-      if (active) cacheDealResult(aggregate);
-    }).catch((error: unknown) => { if (active) setResult({ error: error instanceof Error ? error.message : String(error) }); });
-    return () => { active = false; };
+    void runtime.api
+      .getDeal(id)
+      .then((aggregate) => {
+        if (active) cacheDealResult(aggregate);
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+      });
+    return () => {
+      active = false;
+    };
   }, [attempt, cacheDealResult, id]);
-  if (result.error) return <section role="alert" className="p-8"><h1>Deal unavailable</h1><p>{result.error}</p><button type="button" onClick={() => { setResult({}); setAttempt((n) => n + 1); }}>Retry deal</button></section>;
+  if (result.error)
+    return (
+      <section role="alert" className="p-8">
+        <h1>Deal unavailable</h1>
+        <p>{result.error}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setResult({});
+            setAttempt((n) => n + 1);
+          }}
+        >
+          Retry deal
+        </button>
+      </section>
+    );
   return <WorkspacePageSkeleton label="Loading deal" />;
 }
 
@@ -117,14 +182,19 @@ function DealRoomWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   const activeOverviewSection = getDealRoomSection(searchParams.get("section"));
   function setActiveOverviewSection(section: DealRoomOverviewSection) {
-    setSearchParams((previous) => {
-      const next = new URLSearchParams(previous);
-      if (section === "overview") next.delete("section");
-      else next.set("section", section);
-      return next;
-    }, { state: location.state });
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (section === "overview") next.delete("section");
+        else next.set("section", section);
+        return next;
+      },
+      { state: location.state },
+    );
   }
-  const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(() => deal.room.timeline);
+  const [timelineItems, setTimelineItems] = useState<DealTimelineItem[]>(
+    () => deal.room.timeline,
+  );
 
   const childPath = getDealRoomChildPath(location.pathname, deal.room.id);
   const activeSection = getActiveDealSection(childPath);

@@ -19,7 +19,11 @@ export function QuarryButton({
       {...props}
     >
       <span>{children}</span>
-      {icon ? <span className="transition-transform group-hover:translate-x-1">{icon}</span> : null}
+      {icon ? (
+        <span className="transition-transform group-hover:translate-x-1">
+          {icon}
+        </span>
+      ) : null}
     </button>
   );
 }

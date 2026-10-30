@@ -3,12 +3,22 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DataTableHeaderRow, DataTableHeading } from "@/components/ui/DataTable";
+import {
+  DataTableHeaderRow,
+  DataTableHeading,
+} from "@/components/ui/DataTable";
 import { MetadataGrid, MetadataItem } from "@/components/ui/MetadataGrid";
 import { ModalTextField } from "@/components/ui/ModalField";
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 afterEach(cleanup);
 
@@ -29,7 +39,9 @@ describe("reusable UI primitives", () => {
       </>,
     );
 
-    expect(screen.getByRole("columnheader", { name: "Deal" }).getAttribute("scope")).toBe("col");
+    expect(
+      screen.getByRole("columnheader", { name: "Deal" }).getAttribute("scope"),
+    ).toBe("col");
     expect(container.querySelector("dl")).not.toBeNull();
     expect(container.querySelector("dt")?.textContent).toBe("Sponsor");
     expect(container.querySelector("dd")?.textContent).toBe("Northwind");
@@ -49,7 +61,9 @@ describe("reusable UI primitives", () => {
       />,
     );
 
-    const input = screen.getByRole<HTMLInputElement>("textbox", { name: "SharePoint link Optional" });
+    const input = screen.getByRole<HTMLInputElement>("textbox", {
+      name: "SharePoint link Optional",
+    });
     expect(input.required).toBe(false);
     expect(screen.getByText("Optional").textContent).toBe("Optional");
 
@@ -61,13 +75,19 @@ describe("reusable UI primitives", () => {
     render(
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger render={<button type="button">Tooltip action</button>} />
+          <TooltipTrigger
+            render={<button type="button">Tooltip action</button>}
+          />
         </Tooltip>
         <Popover>
-          <PopoverTrigger render={<button type="button">Popover action</button>} />
+          <PopoverTrigger
+            render={<button type="button">Popover action</button>}
+          />
         </Popover>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<button type="button">Menu action</button>} />
+          <DropdownMenuTrigger
+            render={<button type="button">Menu action</button>}
+          />
         </DropdownMenu>
       </TooltipProvider>,
     );

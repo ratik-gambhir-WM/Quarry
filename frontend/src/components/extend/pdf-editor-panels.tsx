@@ -1,5 +1,5 @@
-import * as React from "react"
-import { useDocumentState, useRegistry } from "@embedpdf/core/react"
+import * as React from "react";
+import { useDocumentState, useRegistry } from "@embedpdf/core/react";
 import {
   PDF_FORM_FIELD_TYPE,
   PdfActionType,
@@ -11,7 +11,7 @@ import {
   type PdfBookmarkObject,
   type PdfDestinationObject,
   type PdfWidgetAnnoObject,
-} from "@embedpdf/models"
+} from "@embedpdf/models";
 import {
   getGroupLeaderId,
   getSelectedAnnotations,
@@ -19,23 +19,23 @@ import {
   useAnnotation,
   type SidebarAnnotationEntry,
   type TrackedAnnotation,
-} from "@embedpdf/plugin-annotation/react"
-import { useAttachmentCapability } from "@embedpdf/plugin-attachment/react"
-import { useBookmarkCapability } from "@embedpdf/plugin-bookmark/react"
+} from "@embedpdf/plugin-annotation/react";
+import { useAttachmentCapability } from "@embedpdf/plugin-attachment/react";
+import { useBookmarkCapability } from "@embedpdf/plugin-bookmark/react";
 import {
   useFormCapability,
   type FormFieldInfo,
-} from "@embedpdf/plugin-form/react"
+} from "@embedpdf/plugin-form/react";
 import {
   useRedaction,
   type RedactionItem,
-} from "@embedpdf/plugin-redaction/react"
-import { useScrollCapability } from "@embedpdf/plugin-scroll/react"
+} from "@embedpdf/plugin-redaction/react";
+import { useScrollCapability } from "@embedpdf/plugin-scroll/react";
 import {
   SignatureFieldKind,
   useActivePlacement,
   useSignatureEntries,
-} from "@embedpdf/plugin-signature/react"
+} from "@embedpdf/plugin-signature/react";
 import {
   StampImg,
   useActiveStamp,
@@ -43,27 +43,27 @@ import {
   useStampLibraries,
   useStampsByLibrary,
   type StampDefinition,
-} from "@embedpdf/plugin-stamp/react"
+} from "@embedpdf/plugin-stamp/react";
 import {
   ThumbImg,
   useThumbnailPlugin,
   type ThumbMeta,
   type WindowState,
-} from "@embedpdf/plugin-thumbnail/react"
-import type { degrees, ParseSpeeds, PDFDocument } from "pdf-lib"
+} from "@embedpdf/plugin-thumbnail/react";
+import type { degrees, ParseSpeeds, PDFDocument } from "pdf-lib";
 
-import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { getFormFieldTypeLabel } from "@/components/extend/pdf-editor-properties"
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { getFormFieldTypeLabel } from "@/components/extend/pdf-editor-properties";
 import {
   ArrowDownGlyph,
   ArrowUpGlyph,
@@ -100,41 +100,41 @@ import {
   UploadGlyph,
   usePdfEditor,
   withFileNameSuffix,
-} from "@/components/extend/pdf-editor-shared"
-import { LoaderCircle } from "lucide-react"
+} from "@/components/extend/pdf-editor-shared";
+import { LoaderCircle } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
 /* Thumbnails                                                                 */
 /* -------------------------------------------------------------------------- */
 const THUMBNAIL_FOCUS_RING_CLASS =
-  "group-focus-visible/pdf-editor-thumbnails:ring-2 group-focus-visible/pdf-editor-thumbnails:ring-ring group-focus-visible/pdf-editor-thumbnails:ring-offset-1 group-focus-visible/pdf-editor-thumbnails:ring-offset-background"
+  "group-focus-visible/pdf-editor-thumbnails:ring-2 group-focus-visible/pdf-editor-thumbnails:ring-ring group-focus-visible/pdf-editor-thumbnails:ring-offset-1 group-focus-visible/pdf-editor-thumbnails:ring-offset-background";
 function createFormFieldStore(
   scope: {
-    getFormFields: () => FormFieldInfo[]
-    onFormReady: (listener: (fields: FormFieldInfo[]) => void) => () => void
-    onFieldValueChange: (listener: () => void) => () => void
-  } | null
+    getFormFields: () => FormFieldInfo[];
+    onFormReady: (listener: (fields: FormFieldInfo[]) => void) => () => void;
+    onFieldValueChange: (listener: () => void) => () => void;
+  } | null,
 ) {
-  let fields: FormFieldInfo[] = scope?.getFormFields() ?? []
+  let fields: FormFieldInfo[] = scope?.getFormFields() ?? [];
   return {
     getSnapshot: () => fields,
     subscribe: (listener: () => void) => {
-      if (!scope) return () => {}
+      if (!scope) return () => {};
       const update = (next: FormFieldInfo[]) => {
-        fields = next
-        listener()
-      }
-      const unsubscribeReady = scope.onFormReady(update)
+        fields = next;
+        listener();
+      };
+      const unsubscribeReady = scope.onFormReady(update);
       const unsubscribeChange = scope.onFieldValueChange(() =>
-        update(scope.getFormFields())
-      )
-      update(scope.getFormFields())
+        update(scope.getFormFields()),
+      );
+      update(scope.getFormFields());
       return () => {
-        unsubscribeReady()
-        unsubscribeChange()
-      }
+        unsubscribeReady();
+        unsubscribeChange();
+      };
     },
-  }
+  };
 }
 export function PdfEditorThumbnailsPanel({
   documentId,
@@ -142,68 +142,68 @@ export function PdfEditorThumbnailsPanel({
   pageCount,
   onSelectPage,
 }: {
-  documentId: string
-  activePage: number
-  pageCount: number
-  onSelectPage: (pageNumber: number) => void
+  documentId: string;
+  activePage: number;
+  pageCount: number;
+  onSelectPage: (pageNumber: number) => void;
 }) {
-  const { plugin: thumbnailPlugin } = useThumbnailPlugin()
-  const listboxId = React.useId()
-  const viewportRef = React.useRef<HTMLDivElement | null>(null)
+  const { plugin: thumbnailPlugin } = useThumbnailPlugin();
+  const listboxId = React.useId();
+  const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const scope = React.useMemo(
     () => thumbnailPlugin?.provides().forDocument(documentId) ?? null,
-    [documentId, thumbnailPlugin]
-  )
+    [documentId, thumbnailPlugin],
+  );
   const windowState = React.useSyncExternalStore<WindowState | null>(
     React.useCallback(
       (onStoreChange) => {
-        if (!scope) return () => undefined
-        return scope.onWindow(() => onStoreChange())
+        if (!scope) return () => undefined;
+        return scope.onWindow(() => onStoreChange());
       },
-      [scope]
+      [scope],
     ),
     React.useCallback(() => scope?.getWindow() ?? null, [scope]),
-    () => null
-  )
-  const paddingY = thumbnailPlugin?.cfg.paddingY ?? 0
+    () => null,
+  );
+  const paddingY = thumbnailPlugin?.cfg.paddingY ?? 0;
   React.useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport || !scope) return
+    const viewport = viewportRef.current;
+    if (!viewport || !scope) return;
     const updateWindow = () => {
-      scope.updateWindow(viewport.scrollTop, viewport.clientHeight)
-    }
-    updateWindow()
-    viewport.addEventListener("scroll", updateWindow, { passive: true })
-    const resizeObserver = new ResizeObserver(updateWindow)
-    resizeObserver.observe(viewport)
+      scope.updateWindow(viewport.scrollTop, viewport.clientHeight);
+    };
+    updateWindow();
+    viewport.addEventListener("scroll", updateWindow, { passive: true });
+    const resizeObserver = new ResizeObserver(updateWindow);
+    resizeObserver.observe(viewport);
     return () => {
-      viewport.removeEventListener("scroll", updateWindow)
-      resizeObserver.disconnect()
-    }
-  }, [scope])
+      viewport.removeEventListener("scroll", updateWindow);
+      resizeObserver.disconnect();
+    };
+  }, [scope]);
   React.useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport || !scope) return
+    const viewport = viewportRef.current;
+    if (!viewport || !scope) return;
     return scope.onScrollTo(({ top, behavior }) => {
-      viewport.scrollTo({ top, behavior })
-    })
-  }, [scope])
+      viewport.scrollTo({ top, behavior });
+    });
+  }, [scope]);
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (pageCount < 1) return
-      const currentPage = activePage > 0 ? activePage : 1
-      let nextPage: number | null = null
+      if (pageCount < 1) return;
+      const currentPage = activePage > 0 ? activePage : 1;
+      let nextPage: number | null = null;
       if (event.key === "ArrowDown")
-        nextPage = Math.min(pageCount, currentPage + 1)
-      else if (event.key === "ArrowUp") nextPage = Math.max(1, currentPage - 1)
-      else if (event.key === "Home") nextPage = 1
-      else if (event.key === "End") nextPage = pageCount
-      if (nextPage === null) return
-      event.preventDefault()
-      onSelectPage(nextPage)
+        nextPage = Math.min(pageCount, currentPage + 1);
+      else if (event.key === "ArrowUp") nextPage = Math.max(1, currentPage - 1);
+      else if (event.key === "Home") nextPage = 1;
+      else if (event.key === "End") nextPage = pageCount;
+      if (nextPage === null) return;
+      event.preventDefault();
+      onSelectPage(nextPage);
     },
-    [activePage, onSelectPage, pageCount]
-  )
+    [activePage, onSelectPage, pageCount],
+  );
   return (
     <PdfEditorScrollArea
       className="h-full w-full"
@@ -214,7 +214,7 @@ export function PdfEditorThumbnailsPanel({
         "aria-label": "Pages",
         onKeyDown: handleKeyDown,
         onMouseDown: (event) => {
-          event.currentTarget.focus({ preventScroll: true })
+          event.currentTarget.focus({ preventScroll: true });
         },
         role: "listbox",
         style: { paddingBottom: paddingY, paddingTop: paddingY },
@@ -227,15 +227,15 @@ export function PdfEditorThumbnailsPanel({
         style={{ height: windowState?.totalHeight ?? 0 }}
       >
         {windowState?.items.map((meta: ThumbMeta) => {
-          const pageNumber = meta.pageIndex + 1
-          const isActive = pageNumber === activePage
-          const imagePadding = meta.padding ?? 0
+          const pageNumber = meta.pageIndex + 1;
+          const isActive = pageNumber === activePage;
+          const imagePadding = meta.padding ?? 0;
           return (
             <div
               key={meta.pageIndex}
               className={cn(
                 "absolute right-0 left-0 flex justify-center",
-                isActive && "z-10"
+                isActive && "z-10",
               )}
               style={{ top: meta.top, height: meta.wrapperHeight }}
             >
@@ -251,9 +251,9 @@ export function PdfEditorThumbnailsPanel({
                   isActive
                     ? cn(
                         "bg-sidebar-accent text-foreground",
-                        THUMBNAIL_FOCUS_RING_CLASS
+                        THUMBNAIL_FOCUS_RING_CLASS,
                       )
-                    : "text-muted-foreground"
+                    : "text-muted-foreground",
                 )}
                 onClick={() => onSelectPage(pageNumber)}
               >
@@ -280,75 +280,75 @@ export function PdfEditorThumbnailsPanel({
                 </span>
               </div>
             </div>
-          )
+          );
         })}
       </div>
     </PdfEditorScrollArea>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Outline                                                                    */
 /* -------------------------------------------------------------------------- */
 function resolveBookmarkDestination(bookmark: PdfBookmarkObject): {
-  destination: PdfDestinationObject | null
-  uri: string | null
+  destination: PdfDestinationObject | null;
+  uri: string | null;
 } {
-  const target = bookmark.target
-  if (!target) return { destination: null, uri: null }
+  const target = bookmark.target;
+  if (!target) return { destination: null, uri: null };
   if (target.type === "destination") {
-    return { destination: target.destination, uri: null }
+    return { destination: target.destination, uri: null };
   }
-  const action = target.action
+  const action = target.action;
   if (
     action.type === PdfActionType.Goto ||
     action.type === PdfActionType.RemoteGoto
   ) {
-    return { destination: action.destination, uri: null }
+    return { destination: action.destination, uri: null };
   }
   if (action.type === PdfActionType.URI) {
-    return { destination: null, uri: action.uri }
+    return { destination: null, uri: action.uri };
   }
-  return { destination: null, uri: null }
+  return { destination: null, uri: null };
 }
 export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
-  const { provides: bookmark } = useBookmarkCapability()
-  const { provides: scroll } = useScrollCapability()
-  const documentState = useDocumentState(documentId)
-  const document = documentState?.document ?? null
+  const { provides: bookmark } = useBookmarkCapability();
+  const { provides: scroll } = useScrollCapability();
+  const documentState = useDocumentState(documentId);
+  const document = documentState?.document ?? null;
   const [bookmarks, setBookmarks] = React.useState<PdfBookmarkObject[] | null>(
-    null
-  )
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
+    null,
+  );
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   React.useEffect(() => {
-    if (!bookmark || !document) return
-    let cancelled = false
-    const task = bookmark.forDocument(documentId).getBookmarks()
+    if (!bookmark || !document) return;
+    let cancelled = false;
+    const task = bookmark.forDocument(documentId).getBookmarks();
     task.wait(
       (result) => {
-        if (cancelled) return
-        setBookmarks(result.bookmarks)
+        if (cancelled) return;
+        setBookmarks(result.bookmarks);
         setExpanded(
-          new Set(result.bookmarks.map((_, index) => `bookmark-${index}`))
-        )
+          new Set(result.bookmarks.map((_, index) => `bookmark-${index}`)),
+        );
       },
       () => {
-        if (!cancelled) setBookmarks([])
-      }
-    )
+        if (!cancelled) setBookmarks([]);
+      },
+    );
     return () => {
-      cancelled = true
-    }
-  }, [bookmark, document, documentId])
+      cancelled = true;
+    };
+  }, [bookmark, document, documentId]);
   const navigate = React.useCallback(
     (item: PdfBookmarkObject) => {
-      const { destination, uri } = resolveBookmarkDestination(item)
+      const { destination, uri } = resolveBookmarkDestination(item);
       if (uri) {
-        window.open(uri, "_blank", "noopener")
-        return
+        window.open(uri, "_blank", "noopener");
+        return;
       }
-      if (!destination || !scroll) return
-      const scope = scroll.forDocument(documentId)
-      const page = document?.pages[destination.pageIndex]
+      if (!destination || !scroll) return;
+      const scope = scroll.forDocument(documentId);
+      const page = document?.pages[destination.pageIndex];
       if (destination.zoom.mode === PdfZoomMode.XYZ && page) {
         scope.scrollToPage({
           pageNumber: destination.pageIndex + 1,
@@ -357,22 +357,22 @@ export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
             y: page.size.height - destination.zoom.params.y,
           },
           behavior: "smooth",
-        })
-        return
+        });
+        return;
       }
       scope.scrollToPage({
         pageNumber: destination.pageIndex + 1,
         behavior: "smooth",
-      })
+      });
     },
-    [document, documentId, scroll]
-  )
+    [document, documentId, scroll],
+  );
   if (bookmarks === null) {
     return (
       <div className="grid h-full place-items-center">
         <InlineSpinner className="size-4" />
       </div>
-    )
+    );
   }
   if (bookmarks.length === 0) {
     return (
@@ -381,15 +381,15 @@ export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
         title="No outline"
         description="This document does not include bookmarks."
       />
-    )
+    );
   }
   const renderBookmark = (
     item: PdfBookmarkObject,
     id: string,
-    level: number
+    level: number,
   ): React.ReactNode => {
-    const hasChildren = Boolean(item.children && item.children.length > 0)
-    const isExpanded = expanded.has(id)
+    const hasChildren = Boolean(item.children && item.children.length > 0);
+    const isExpanded = expanded.has(id);
     return (
       <div key={id}>
         <div
@@ -402,13 +402,13 @@ export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
               aria-label={isExpanded ? "Collapse" : "Expand"}
               className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground"
               onClick={(event) => {
-                event.stopPropagation()
+                event.stopPropagation();
                 setExpanded((previous) => {
-                  const next = new Set(previous)
-                  if (next.has(id)) next.delete(id)
-                  else next.add(id)
-                  return next
-                })
+                  const next = new Set(previous);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                });
               }}
             >
               {isExpanded ? (
@@ -430,19 +430,19 @@ export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
         </div>
         {hasChildren && isExpanded
           ? item.children?.map((child, index) =>
-              renderBookmark(child, `${id}-${index}`, level + 1)
+              renderBookmark(child, `${id}-${index}`, level + 1),
             )
           : null}
       </div>
-    )
-  }
+    );
+  };
   return (
     <PdfEditorScrollArea className="h-full w-full" viewportClassName="p-2">
       {bookmarks.map((item, index) =>
-        renderBookmark(item, `bookmark-${index}`, 0)
+        renderBookmark(item, `bookmark-${index}`, 0),
       )}
     </PdfEditorScrollArea>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Attachments                                                                */
@@ -450,38 +450,38 @@ export function PdfEditorOutlinePanel({ documentId }: { documentId: string }) {
 export function PdfEditorAttachmentsPanel({
   documentId,
 }: {
-  documentId: string
+  documentId: string;
 }) {
-  const { provides: attachment } = useAttachmentCapability()
-  const { registry } = useRegistry()
-  const documentState = useDocumentState(documentId)
-  const { notify, permissions } = usePdfEditor()
-  const document = documentState?.document ?? null
+  const { provides: attachment } = useAttachmentCapability();
+  const { registry } = useRegistry();
+  const documentState = useDocumentState(documentId);
+  const { notify, permissions } = usePdfEditor();
+  const document = documentState?.document ?? null;
   const [attachments, setAttachments] = React.useState<
     PdfAttachmentObject[] | null
-  >(null)
-  const [version, setVersion] = React.useState(0)
-  const [busy, setBusy] = React.useState(false)
-  const inputRef = React.useRef<HTMLInputElement>(null)
+  >(null);
+  const [version, setVersion] = React.useState(0);
+  const [busy, setBusy] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
-    if (!attachment || !document) return
-    let cancelled = false
+    if (!attachment || !document) return;
+    let cancelled = false;
     attachment
       .forDocument(documentId)
       .getAttachments()
       .wait(
         (result) => {
-          if (!cancelled) setAttachments(result)
+          if (!cancelled) setAttachments(result);
         },
         () => {
-          if (!cancelled) setAttachments([])
-        }
-      )
+          if (!cancelled) setAttachments([]);
+        },
+      );
     return () => {
-      cancelled = true
-    }
-  }, [attachment, document, documentId, version])
-  const refresh = () => setVersion((value) => value + 1)
+      cancelled = true;
+    };
+  }, [attachment, document, documentId, version]);
+  const refresh = () => setVersion((value) => value + 1);
   const handleDownload = (item: PdfAttachmentObject) => {
     attachment
       ?.forDocument(documentId)
@@ -491,34 +491,34 @@ export function PdfEditorAttachmentsPanel({
           downloadArrayBuffer(
             buffer,
             item.name,
-            item.mimeType || "application/octet-stream"
+            item.mimeType || "application/octet-stream",
           ),
-        () => notify("The attachment could not be downloaded.", "error")
-      )
-  }
+        () => notify("The attachment could not be downloaded.", "error"),
+      );
+  };
   const handleRemove = (item: PdfAttachmentObject) => {
-    if (!registry || !document) return
-    setBusy(true)
+    if (!registry || !document) return;
+    setBusy(true);
     registry
       .getEngine()
       .removeAttachment(document, item)
       .wait(
         () => {
-          setBusy(false)
-          refresh()
-          notify("Attachment removed.", "success")
+          setBusy(false);
+          refresh();
+          notify("Attachment removed.", "success");
         },
         () => {
-          setBusy(false)
-          notify("The attachment could not be removed.", "error")
-        }
-      )
-  }
+          setBusy(false);
+          notify("The attachment could not be removed.", "error");
+        },
+      );
+  };
   const handleAdd = async (file: File) => {
-    if (!registry || !document) return
-    setBusy(true)
+    if (!registry || !document) return;
+    setBusy(true);
     try {
-      const data = await file.arrayBuffer()
+      const data = await file.arrayBuffer();
       registry
         .getEngine()
         .addAttachment(document, {
@@ -529,21 +529,21 @@ export function PdfEditorAttachmentsPanel({
         })
         .wait(
           () => {
-            setBusy(false)
-            refresh()
-            notify("Attachment added.", "success")
+            setBusy(false);
+            refresh();
+            notify("Attachment added.", "success");
           },
           () => {
-            setBusy(false)
-            notify("The attachment could not be added.", "error")
-          }
-        )
+            setBusy(false);
+            notify("The attachment could not be added.", "error");
+          },
+        );
     } catch {
-      setBusy(false)
-      notify("The file could not be read.", "error")
+      setBusy(false);
+      notify("The file could not be read.", "error");
     }
-  }
-  const canModify = permissions.canModifyContents && !busy
+  };
+  const canModify = permissions.canModifyContents && !busy;
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
@@ -553,9 +553,9 @@ export function PdfEditorAttachmentsPanel({
           className="sr-only"
           tabIndex={-1}
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void handleAdd(file)
-            event.currentTarget.value = ""
+            const file = event.target.files?.[0];
+            if (file) void handleAdd(file);
+            event.currentTarget.value = "";
           }}
         />
         <Button
@@ -622,33 +622,33 @@ export function PdfEditorAttachmentsPanel({
         </PdfEditorScrollArea>
       )}
     </div>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Pages (organizer)                                                          */
 /* -------------------------------------------------------------------------- */
-const PAGE_TILE_WIDTH = 76
+const PAGE_TILE_WIDTH = 76;
 type PdfLibModule = {
-  PDFDocument: typeof PDFDocument
-  ParseSpeeds: typeof ParseSpeeds
-  degrees: typeof degrees
-}
-let pdfLibPromise: Promise<PdfLibModule> | null = null
+  PDFDocument: typeof PDFDocument;
+  ParseSpeeds: typeof ParseSpeeds;
+  degrees: typeof degrees;
+};
+let pdfLibPromise: Promise<PdfLibModule> | null = null;
 function loadPdfLib() {
-  pdfLibPromise ??= import("pdf-lib")
-  return pdfLibPromise
+  pdfLibPromise ??= import("pdf-lib");
+  return pdfLibPromise;
 }
 export function PdfEditorPagesPanel({
   documentId,
   activePage,
 }: {
-  documentId: string
-  activePage: number
+  documentId: string;
+  activePage: number;
 }) {
-  const { registry } = useRegistry()
-  const documentState = useDocumentState(documentId)
+  const { registry } = useRegistry();
+  const documentState = useDocumentState(documentId);
   const { state: annotationState, provides: annotation } =
-    useAnnotation(documentId)
+    useAnnotation(documentId);
   const {
     fileName,
     getDocumentBuffer,
@@ -657,23 +657,23 @@ export function PdfEditorPagesPanel({
     permissions,
     replaceDocument,
     scrollToPage,
-  } = usePdfEditor()
-  const document = documentState?.document ?? null
-  const pages = React.useMemo(() => document?.pages ?? [], [document])
-  const [selected, setSelected] = React.useState<Set<number>>(() => new Set())
-  const [busy, setBusy] = React.useState<string | null>(null)
-  const anchorRef = React.useRef<number | null>(null)
-  const appendInputRef = React.useRef<HTMLInputElement>(null)
+  } = usePdfEditor();
+  const document = documentState?.document ?? null;
+  const pages = React.useMemo(() => document?.pages ?? [], [document]);
+  const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const anchorRef = React.useRef<number | null>(null);
+  const appendInputRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
-    void loadPdfLib()
-  }, [])
+    void loadPdfLib();
+  }, []);
   const metas = React.useMemo<ThumbMeta[]>(
     () =>
       pages.map((page) => {
         const height = Math.max(
           1,
-          Math.round(PAGE_TILE_WIDTH * (page.size.height / page.size.width))
-        )
+          Math.round(PAGE_TILE_WIDTH * (page.size.height / page.size.width)),
+        );
         return {
           pageIndex: page.index,
           width: PAGE_TILE_WIDTH,
@@ -682,86 +682,86 @@ export function PdfEditorPagesPanel({
           top: 0,
           labelHeight: 0,
           padding: 0,
-        }
+        };
       }),
-    [pages]
-  )
+    [pages],
+  );
   const selectedIndices = React.useMemo(
     () => [...selected].sort((a, b) => a - b),
-    [selected]
-  )
-  const isEncrypted = document?.isEncrypted ?? false
+    [selected],
+  );
+  const isEncrypted = document?.isEncrypted ?? false;
   const canAssemble =
-    permissions.canAssembleDocument && !isEncrypted && busy === null
-  const hasSelection = selectedIndices.length > 0
+    permissions.canAssembleDocument && !isEncrypted && busy === null;
+  const hasSelection = selectedIndices.length > 0;
   const isContiguous =
     hasSelection &&
     selectedIndices[selectedIndices.length - 1] - selectedIndices[0] ===
-      selectedIndices.length - 1
+      selectedIndices.length - 1;
   const select = (pageIndex: number, mode: "replace" | "toggle" | "range") => {
     setSelected((previous) => {
       if (mode === "range" && anchorRef.current !== null) {
-        const start = Math.min(anchorRef.current, pageIndex)
-        const end = Math.max(anchorRef.current, pageIndex)
-        const next = new Set<number>()
-        for (let index = start; index <= end; index += 1) next.add(index)
-        return next
+        const start = Math.min(anchorRef.current, pageIndex);
+        const end = Math.max(anchorRef.current, pageIndex);
+        const next = new Set<number>();
+        for (let index = start; index <= end; index += 1) next.add(index);
+        return next;
       }
       if (mode === "toggle") {
-        const next = new Set(previous)
-        if (next.has(pageIndex)) next.delete(pageIndex)
-        else next.add(pageIndex)
-        anchorRef.current = pageIndex
-        return next
+        const next = new Set(previous);
+        if (next.has(pageIndex)) next.delete(pageIndex);
+        else next.add(pageIndex);
+        anchorRef.current = pageIndex;
+        return next;
       }
-      anchorRef.current = pageIndex
-      return new Set([pageIndex])
-    })
-  }
+      anchorRef.current = pageIndex;
+      return new Set([pageIndex]);
+    });
+  };
   const runOperation = async (
     label: string,
     mutate: (doc: PDFDocument, lib: PdfLibModule) => Promise<void> | void,
     options: {
-      replace?: boolean
-    } = { replace: true }
+      replace?: boolean;
+    } = { replace: true },
   ) => {
-    setBusy(label)
+    setBusy(label);
     try {
       const [buffer, lib] = await Promise.all([
         getDocumentBuffer(),
         loadPdfLib(),
-      ])
+      ]);
       const doc = await lib.PDFDocument.load(buffer, {
         ignoreEncryption: true,
         parseSpeed: lib.ParseSpeeds.Fastest,
         updateMetadata: false,
-      })
-      await mutate(doc, lib)
+      });
+      await mutate(doc, lib);
       if (options.replace !== false) {
-        const bytes = await doc.save({ objectsPerTick: 500 })
-        replaceDocument(toArrayBuffer(bytes), fileName)
-        notify(`${label} applied.`, "success")
+        const bytes = await doc.save({ objectsPerTick: 500 });
+        replaceDocument(toArrayBuffer(bytes), fileName);
+        notify(`${label} applied.`, "success");
       }
     } catch (error) {
-      console.error(error)
-      notify(`${label} failed.`, "error")
+      console.error(error);
+      notify(`${label} failed.`, "error");
     } finally {
-      setBusy(null)
+      setBusy(null);
     }
-  }
+  };
   const rotateSelected = (delta: 90 | -90) =>
     runOperation("Rotate pages", (doc, lib) => {
       for (const index of selectedIndices) {
-        const page = doc.getPage(index)
+        const page = doc.getPage(index);
         page.setRotation(
-          lib.degrees((page.getRotation().angle + delta + 360) % 360)
-        )
+          lib.degrees((page.getRotation().angle + delta + 360) % 360),
+        );
       }
-    })
+    });
   const deleteSelected = () => {
     if (selectedIndices.length >= pages.length) {
-      notify("A document needs at least one page.", "error")
-      return
+      notify("A document needs at least one page.", "error");
+      return;
     }
     openDialog({
       type: "confirm",
@@ -771,85 +771,85 @@ export function PdfEditorPagesPanel({
       confirmLabel: "Delete",
       destructive: true,
       onConfirm: async () => {
-        setBusy("Delete pages")
+        setBusy("Delete pages");
         try {
           if (!registry || !document) {
-            throw new Error("The document is not ready.")
+            throw new Error("The document is not ready.");
           }
           if (annotation && annotationState.hasPendingChanges) {
-            await annotation.commit().toPromise()
+            await annotation.commit().toPromise();
           }
-          const engine = registry.getEngine()
+          const engine = registry.getEngine();
           for (const index of [...selectedIndices].reverse()) {
-            await engine.deletePage(document, index).toPromise()
+            await engine.deletePage(document, index).toPromise();
           }
-          const buffer = await engine.saveAsCopy(document).toPromise()
-          replaceDocument(buffer, fileName)
-          notify("Delete pages applied.", "success")
+          const buffer = await engine.saveAsCopy(document).toPromise();
+          replaceDocument(buffer, fileName);
+          notify("Delete pages applied.", "success");
         } catch (error) {
-          console.error(error)
-          notify("Delete pages failed.", "error")
+          console.error(error);
+          notify("Delete pages failed.", "error");
         } finally {
-          setBusy(null)
+          setBusy(null);
         }
       },
-    })
-  }
+    });
+  };
   const moveSelected = (direction: -1 | 1) => {
-    const first = selectedIndices[0]
-    const last = selectedIndices[selectedIndices.length - 1]
-    if (direction === -1 && first === 0) return
-    if (direction === 1 && last === pages.length - 1) return
+    const first = selectedIndices[0];
+    const last = selectedIndices[selectedIndices.length - 1];
+    if (direction === -1 && first === 0) return;
+    if (direction === 1 && last === pages.length - 1) return;
     void runOperation("Move pages", (doc) => {
       // pdf-lib has no move API: detach the neighbouring page from the page
       // tree and re-insert it on the other side of the selected block.
       if (direction === -1) {
-        const page = doc.getPage(first - 1)
-        doc.removePage(first - 1)
-        doc.insertPage(last, page)
+        const page = doc.getPage(first - 1);
+        doc.removePage(first - 1);
+        doc.insertPage(last, page);
       } else {
-        const page = doc.getPage(last + 1)
-        doc.removePage(last + 1)
-        doc.insertPage(first, page)
+        const page = doc.getPage(last + 1);
+        doc.removePage(last + 1);
+        doc.insertPage(first, page);
       }
-    })
-  }
+    });
+  };
   const insertBlankAfter = () => {
     const referenceIndex = hasSelection
       ? selectedIndices[selectedIndices.length - 1]
-      : Math.max(0, activePage - 1)
+      : Math.max(0, activePage - 1);
     void runOperation("Insert page", (doc) => {
-      const reference = doc.getPage(referenceIndex)
-      const { width, height } = reference.getSize()
-      doc.insertPage(referenceIndex + 1, [width, height])
-    })
-  }
+      const reference = doc.getPage(referenceIndex);
+      const { width, height } = reference.getSize();
+      doc.insertPage(referenceIndex + 1, [width, height]);
+    });
+  };
   const extractSelected = () =>
     runOperation(
       "Extract pages",
       async (doc, lib) => {
-        const output = await lib.PDFDocument.create()
-        const copied = await output.copyPages(doc, selectedIndices)
-        copied.forEach((page) => output.addPage(page))
-        const bytes = await output.save()
-        downloadArrayBuffer(bytes, withFileNameSuffix(fileName, "-pages"))
+        const output = await lib.PDFDocument.create();
+        const copied = await output.copyPages(doc, selectedIndices);
+        copied.forEach((page) => output.addPage(page));
+        const bytes = await output.save();
+        downloadArrayBuffer(bytes, withFileNameSuffix(fileName, "-pages"));
         notify(
           `Extracted ${selectedIndices.length} page${selectedIndices.length === 1 ? "" : "s"}.`,
-          "success"
-        )
+          "success",
+        );
       },
-      { replace: false }
-    )
+      { replace: false },
+    );
   const appendFile = (file: File) =>
     runOperation("Append PDF", async (doc, lib) => {
       const source = await lib.PDFDocument.load(await file.arrayBuffer(), {
         ignoreEncryption: true,
         parseSpeed: lib.ParseSpeeds.Fastest,
         updateMetadata: false,
-      })
-      const copied = await doc.copyPages(source, source.getPageIndices())
-      copied.forEach((page) => doc.addPage(page))
-    })
+      });
+      const copied = await doc.copyPages(source, source.getPageIndices());
+      copied.forEach((page) => doc.addPage(page));
+    });
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b px-2 py-1.5">
@@ -922,9 +922,9 @@ export function PdfEditorPagesPanel({
           className="sr-only"
           tabIndex={-1}
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void appendFile(file)
-            event.currentTarget.value = ""
+            const file = event.target.files?.[0];
+            if (file) void appendFile(file);
+            event.currentTarget.value = "";
           }}
         />
       </div>
@@ -960,9 +960,9 @@ export function PdfEditorPagesPanel({
           className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] items-start gap-2"
         >
           {metas.map((meta) => {
-            const pageNumber = meta.pageIndex + 1
-            const isSelected = selected.has(meta.pageIndex)
-            const isActive = pageNumber === activePage
+            const pageNumber = meta.pageIndex + 1;
+            const isSelected = selected.has(meta.pageIndex);
+            const isActive = pageNumber === activePage;
             return (
               <button
                 key={meta.pageIndex}
@@ -973,7 +973,7 @@ export function PdfEditorPagesPanel({
                   isSelected
                     ? "border-primary bg-primary/5"
                     : "border-transparent hover:bg-sidebar-accent",
-                  isActive && !isSelected && "border-border"
+                  isActive && !isSelected && "border-border",
                 )}
                 onClick={(event) => {
                   select(
@@ -982,8 +982,8 @@ export function PdfEditorPagesPanel({
                       ? "range"
                       : event.metaKey || event.ctrlKey
                         ? "toggle"
-                        : "replace"
-                  )
+                        : "replace",
+                  );
                 }}
                 onDoubleClick={() => scrollToPage(pageNumber)}
               >
@@ -1002,18 +1002,18 @@ export function PdfEditorPagesPanel({
                 <span
                   className={cn(
                     "tabular-nums",
-                    isSelected ? "text-foreground" : "text-muted-foreground"
+                    isSelected ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
                   {pageNumber}
                 </span>
               </button>
-            )
+            );
           })}
         </div>
       </PdfEditorScrollArea>
     </div>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Comments                                                                   */
@@ -1026,14 +1026,14 @@ function CommentComposer({
   onSubmit,
   onCancel,
 }: {
-  placeholder: string
-  initialValue?: string
-  autoFocus?: boolean
-  submitLabel?: string
-  onSubmit: (value: string) => void
-  onCancel?: () => void
+  placeholder: string;
+  initialValue?: string;
+  autoFocus?: boolean;
+  submitLabel?: string;
+  onSubmit: (value: string) => void;
+  onCancel?: () => void;
 }) {
-  const [value, setValue] = React.useState(initialValue)
+  const [value, setValue] = React.useState(initialValue);
   return (
     <div className="space-y-1.5">
       <textarea
@@ -1044,10 +1044,10 @@ function CommentComposer({
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            if (value.trim()) onSubmit(value.trim())
+            event.preventDefault();
+            if (value.trim()) onSubmit(value.trim());
           }
-          if (event.key === "Escape") onCancel?.()
+          if (event.key === "Escape") onCancel?.();
         }}
         className="w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
       />
@@ -1067,7 +1067,7 @@ function CommentComposer({
         </Button>
       </div>
     </div>
-  )
+  );
 }
 function CommentCard({
   entry,
@@ -1078,50 +1078,50 @@ function CommentCard({
   onDelete,
   onReply,
 }: {
-  entry: SidebarAnnotationEntry
-  isSelected: boolean
-  readOnly: boolean
-  onSelect: () => void
-  onUpdate: (annotation: TrackedAnnotation, contents: string) => void
-  onDelete: (annotation: TrackedAnnotation) => void
-  onReply: (annotation: TrackedAnnotation, contents: string) => void
+  entry: SidebarAnnotationEntry;
+  isSelected: boolean;
+  readOnly: boolean;
+  onSelect: () => void;
+  onUpdate: (annotation: TrackedAnnotation, contents: string) => void;
+  onDelete: (annotation: TrackedAnnotation) => void;
+  onReply: (annotation: TrackedAnnotation, contents: string) => void;
 }) {
-  const { annotation, replies } = entry
-  const [isEditing, setIsEditing] = React.useState(false)
-  const [isReplying, setIsReplying] = React.useState(false)
-  const meta = getAnnotationMeta(annotation.object)
+  const { annotation, replies } = entry;
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [isReplying, setIsReplying] = React.useState(false);
+  const meta = getAnnotationMeta(annotation.object);
   const contents =
     typeof annotation.object.contents === "string"
       ? annotation.object.contents
-      : ""
+      : "";
   const quotedText =
     annotation.object.custom &&
     typeof annotation.object.custom === "object" &&
     typeof (
       annotation.object.custom as {
-        text?: unknown
+        text?: unknown;
       }
     ).text === "string"
       ? ((
           annotation.object.custom as {
-            text: string
+            text: string;
           }
         ).text as string)
-      : null
-  const Glyph = meta.glyph
+      : null;
+  const Glyph = meta.glyph;
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(event) => {
-        if (event.key === "Enter") onSelect()
+        if (event.key === "Enter") onSelect();
       }}
       className={cn(
         "rounded-lg border bg-background p-3 text-left shadow-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isSelected
           ? "border-primary ring-1 ring-primary/40"
-          : "hover:bg-accent/40"
+          : "hover:bg-accent/40",
       )}
     >
       <div className="flex items-start gap-2">
@@ -1150,8 +1150,8 @@ function CommentCard({
                   label={contents ? "Edit comment" : "Add comment"}
                   size="icon-xs"
                   onClick={(event) => {
-                    event.stopPropagation()
-                    setIsEditing(true)
+                    event.stopPropagation();
+                    setIsEditing(true);
                   }}
                 >
                   <EditGlyph className="size-3.5" />
@@ -1160,8 +1160,8 @@ function CommentCard({
                   label="Delete"
                   size="icon-xs"
                   onClick={(event) => {
-                    event.stopPropagation()
-                    onDelete(annotation)
+                    event.stopPropagation();
+                    onDelete(annotation);
                   }}
                 >
                   <TrashGlyph className="size-3.5" />
@@ -1181,8 +1181,8 @@ function CommentCard({
                 initialValue={contents}
                 autoFocus
                 onSubmit={(value) => {
-                  onUpdate(annotation, value)
-                  setIsEditing(false)
+                  onUpdate(annotation, value);
+                  setIsEditing(false);
                 }}
                 onCancel={() => setIsEditing(false)}
               />
@@ -1205,7 +1205,7 @@ function CommentCard({
                   {reply.object.author || "Guest"}
                   <span className="ml-1.5 font-normal text-muted-foreground">
                     {formatRelativeDate(
-                      reply.object.modified ?? reply.object.created
+                      reply.object.modified ?? reply.object.created,
                     )}
                   </span>
                 </span>
@@ -1214,8 +1214,8 @@ function CommentCard({
                     label="Delete reply"
                     size="icon-xs"
                     onClick={(event) => {
-                      event.stopPropagation()
-                      onDelete(reply)
+                      event.stopPropagation();
+                      onDelete(reply);
                     }}
                   >
                     <TrashGlyph className="size-3" />
@@ -1235,8 +1235,8 @@ function CommentCard({
               autoFocus
               submitLabel="Reply"
               onSubmit={(value) => {
-                onReply(annotation, value)
-                setIsReplying(false)
+                onReply(annotation, value);
+                setIsReplying(false);
               }}
               onCancel={() => setIsReplying(false)}
             />
@@ -1254,37 +1254,37 @@ function CommentCard({
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
-  const { provides: annotation, state } = useAnnotation(documentId)
-  const { annotationAuthor, permissions, scrollToAnnotation } = usePdfEditor()
+  const { provides: annotation, state } = useAnnotation(documentId);
+  const { annotationAuthor, permissions, scrollToAnnotation } = usePdfEditor();
   const grouped = React.useMemo(
     () => getSidebarAnnotationsWithRepliesGroupedByPage(state),
-    [state]
-  )
+    [state],
+  );
   const selectedLeaderIds = React.useMemo(() => {
-    const ids = new Set<string>()
+    const ids = new Set<string>();
     for (const item of getSelectedAnnotations(state)) {
-      ids.add(getGroupLeaderId(state, item.object.id) ?? item.object.id)
+      ids.add(getGroupLeaderId(state, item.object.id) ?? item.object.id);
     }
-    return ids
-  }, [state])
+    return ids;
+  }, [state]);
   const pageNumbers = React.useMemo(
     () =>
       Object.keys(grouped)
         .map(Number)
         .sort((a, b) => a - b),
-    [grouped]
-  )
-  const readOnly = !permissions.canModifyAnnotations
-  const cardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
-  const firstSelectedId = selectedLeaderIds.values().next().value
+    [grouped],
+  );
+  const readOnly = !permissions.canModifyAnnotations;
+  const cardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+  const firstSelectedId = selectedLeaderIds.values().next().value;
   React.useEffect(() => {
-    if (!firstSelectedId) return
-    const element = cardRefs.current.get(firstSelectedId)
-    element?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-  }, [firstSelectedId])
+    if (!firstSelectedId) return;
+    const element = cardRefs.current.get(firstSelectedId);
+    element?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [firstSelectedId]);
   if (pageNumbers.length === 0) {
     return (
       <PdfEditorEmptyState
@@ -1292,7 +1292,7 @@ export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
         title="No comments yet"
         description="Annotations and notes you add to the document show up here."
       />
-    )
+    );
   }
   return (
     <PdfEditorScrollArea className="h-full w-full" viewportClassName="p-3">
@@ -1308,24 +1308,24 @@ export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
                   key={entry.annotation.object.id}
                   ref={(element) => {
                     if (element) {
-                      cardRefs.current.set(entry.annotation.object.id, element)
+                      cardRefs.current.set(entry.annotation.object.id, element);
                     } else {
-                      cardRefs.current.delete(entry.annotation.object.id)
+                      cardRefs.current.delete(entry.annotation.object.id);
                     }
                   }}
                 >
                   <CommentCard
                     entry={entry}
                     isSelected={selectedLeaderIds.has(
-                      entry.annotation.object.id
+                      entry.annotation.object.id,
                     )}
                     readOnly={readOnly}
                     onSelect={() => {
                       annotation?.selectAnnotation(
                         entry.annotation.object.pageIndex,
-                        entry.annotation.object.id
-                      )
-                      scrollToAnnotation(entry.annotation.object)
+                        entry.annotation.object.id,
+                      );
+                      scrollToAnnotation(entry.annotation.object);
                     }}
                     onUpdate={(item, contents) =>
                       annotation?.updateAnnotation(
@@ -1334,13 +1334,13 @@ export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
                         {
                           contents,
                           modified: new Date(),
-                        }
+                        },
                       )
                     }
                     onDelete={(item) =>
                       annotation?.deleteAnnotation(
                         item.object.pageIndex,
-                        item.object.id
+                        item.object.id,
                       )
                     }
                     onReply={(parent, contents) =>
@@ -1372,7 +1372,7 @@ export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
         ))}
       </div>
     </PdfEditorScrollArea>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Redactions                                                                 */
@@ -1380,32 +1380,32 @@ export function PdfEditorCommentsPanel({ documentId }: { documentId: string }) {
 export function PdfEditorRedactionsPanel({
   documentId,
 }: {
-  documentId: string
+  documentId: string;
 }) {
-  const { state, provides } = useRedaction(documentId)
-  const { provides: scroll } = useScrollCapability()
-  const { openDialog, permissions, notify } = usePdfEditor()
+  const { state, provides } = useRedaction(documentId);
+  const { provides: scroll } = useScrollCapability();
+  const { openDialog, permissions, notify } = usePdfEditor();
   const items = React.useMemo(
     () =>
       Object.entries(state.pending)
         .flatMap(([page, pageItems]) =>
-          pageItems.map((item) => ({ item, pageNumber: Number(page) + 1 }))
+          pageItems.map((item) => ({ item, pageNumber: Number(page) + 1 })),
         )
         .sort((a, b) => a.pageNumber - b.pageNumber),
-    [state.pending]
-  )
-  const [isApplying, setIsApplying] = React.useState(false)
-  const canApply = permissions.canModifyContents && !isApplying
+    [state.pending],
+  );
+  const [isApplying, setIsApplying] = React.useState(false);
+  const canApply = permissions.canModifyContents && !isApplying;
   const selectItem = (item: RedactionItem) => {
-    provides?.selectPending(item.page, item.id)
+    provides?.selectPending(item.page, item.id);
     scroll?.forDocument(documentId).scrollToPage({
       pageNumber: item.page + 1,
       pageCoordinates: { x: item.rect.origin.x, y: item.rect.origin.y },
       alignX: 50,
       alignY: 25,
       behavior: "smooth",
-    })
-  }
+    });
+  };
   const applyAll = () =>
     openDialog({
       type: "confirm",
@@ -1414,17 +1414,17 @@ export function PdfEditorRedactionsPanel({
         "Redaction permanently removes the marked content from the document. This cannot be undone.",
       confirmLabel: "Apply redactions",
       onConfirm: () => {
-        if (!provides) return
-        setIsApplying(true)
+        if (!provides) return;
+        setIsApplying(true);
         provides.commitAllPending().wait(
           () => setIsApplying(false),
           () => {
-            setIsApplying(false)
-            notify("The redactions could not be applied.", "error")
-          }
-        )
+            setIsApplying(false);
+            notify("The redactions could not be applied.", "error");
+          },
+        );
       },
-    })
+    });
   const applyOne = (item: RedactionItem) =>
     openDialog({
       type: "confirm",
@@ -1434,10 +1434,10 @@ export function PdfEditorRedactionsPanel({
       onConfirm: () => {
         provides?.commitPending(item.page, item.id).wait(
           () => undefined,
-          () => notify("The redaction could not be applied.", "error")
-        )
+          () => notify("The redaction could not be applied.", "error"),
+        );
       },
-    })
+    });
   return (
     <div className="flex h-full flex-col">
       {items.length === 0 ? (
@@ -1450,8 +1450,9 @@ export function PdfEditorRedactionsPanel({
         <PdfEditorScrollArea className="min-h-0 flex-1" viewportClassName="p-2">
           <div className="space-y-1.5">
             {items.map(({ item, pageNumber }) => {
-              const isSelected = state.selected?.id === item.id
-              const Glyph = item.kind === "text" ? EyeOffGlyph : RedactAreaGlyph
+              const isSelected = state.selected?.id === item.id;
+              const Glyph =
+                item.kind === "text" ? EyeOffGlyph : RedactAreaGlyph;
               return (
                 <div
                   key={item.id}
@@ -1459,13 +1460,13 @@ export function PdfEditorRedactionsPanel({
                   tabIndex={0}
                   onClick={() => selectItem(item)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") selectItem(item)
+                    if (event.key === "Enter") selectItem(item);
                   }}
                   className={cn(
                     "flex items-start gap-2 rounded-lg border px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isSelected
                       ? "border-primary ring-1 ring-primary/40"
-                      : "hover:bg-accent/40"
+                      : "hover:bg-accent/40",
                   )}
                 >
                   <span
@@ -1496,8 +1497,8 @@ export function PdfEditorRedactionsPanel({
                       size="icon-xs"
                       disabled={!canApply}
                       onClick={(event) => {
-                        event.stopPropagation()
-                        applyOne(item)
+                        event.stopPropagation();
+                        applyOne(item);
                       }}
                     >
                       <CheckGlyph className="size-3.5" />
@@ -1506,15 +1507,15 @@ export function PdfEditorRedactionsPanel({
                       label="Remove mark"
                       size="icon-xs"
                       onClick={(event) => {
-                        event.stopPropagation()
-                        provides?.removePending(item.page, item.id)
+                        event.stopPropagation();
+                        provides?.removePending(item.page, item.id);
                       }}
                     >
                       <TrashGlyph className="size-3.5" />
                     </PdfEditorToolButton>
                   </div>
                 </div>
-              )
+              );
             })}
           </div>
         </PdfEditorScrollArea>
@@ -1544,13 +1545,13 @@ export function PdfEditorRedactionsPanel({
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Stamps                                                                     */
 /* -------------------------------------------------------------------------- */
-const CUSTOM_STAMP_LIBRARY_ID = "custom"
-const STAMP_THUMB_WIDTH = 120
+const CUSTOM_STAMP_LIBRARY_ID = "custom";
+const STAMP_THUMB_WIDTH = 120;
 const UNSUPPORTED_STAMP_SOURCE_TYPES = new Set<PdfAnnotationSubtype>([
   PdfAnnotationSubtype.REDACT,
   PdfAnnotationSubtype.HIGHLIGHT,
@@ -1560,62 +1561,64 @@ const UNSUPPORTED_STAMP_SOURCE_TYPES = new Set<PdfAnnotationSubtype>([
   PdfAnnotationSubtype.CARET,
   PdfAnnotationSubtype.WIDGET,
   PdfAnnotationSubtype.LINK,
-])
+]);
 export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
-  const { libraries } = useStampLibraries()
-  const { provides: stampCapability } = useStampCapability()
+  const { libraries } = useStampLibraries();
+  const { provides: stampCapability } = useStampCapability();
   const { provides: annotation, state: annotationState } =
-    useAnnotation(documentId)
-  const { notify, permissions } = usePdfEditor()
-  const [libraryId, setLibraryId] = React.useState("all")
-  const stamps = useStampsByLibrary(libraryId === "all" ? undefined : libraryId)
-  const activeStamp = useActiveStamp(documentId)
-  const [busy, setBusy] = React.useState(false)
-  const importInputRef = React.useRef<HTMLInputElement>(null)
+    useAnnotation(documentId);
+  const { notify, permissions } = usePdfEditor();
+  const [libraryId, setLibraryId] = React.useState("all");
+  const stamps = useStampsByLibrary(
+    libraryId === "all" ? undefined : libraryId,
+  );
+  const activeStamp = useActiveStamp(documentId);
+  const [busy, setBusy] = React.useState(false);
+  const importInputRef = React.useRef<HTMLInputElement>(null);
   const selected = React.useMemo(
     () => getSelectedAnnotations(annotationState),
-    [annotationState]
-  )
+    [annotationState],
+  );
   const canCreateFromSelection =
     selected.length === 1 &&
-    !UNSUPPORTED_STAMP_SOURCE_TYPES.has(selected[0].object.type)
+    !UNSUPPORTED_STAMP_SOURCE_TYPES.has(selected[0].object.type);
   const customLibrary = libraries.find(
-    (library) => library.id === CUSTOM_STAMP_LIBRARY_ID
-  )
+    (library) => library.id === CUSTOM_STAMP_LIBRARY_ID,
+  );
   const libraryOptions = [
     { label: "All libraries", value: "all" },
     ...libraries.map((library) => ({
       label: library.name,
       value: library.id,
     })),
-  ]
+  ];
   if (
     libraryId !== "all" &&
     !libraries.some((library) => library.id === libraryId)
   ) {
-    setLibraryId("all")
+    setLibraryId("all");
   }
   const placeStamp = (targetLibraryId: string, stamp: StampDefinition) => {
-    if (!stampCapability) return
+    if (!stampCapability) return;
     const isActive =
       activeStamp?.libraryId === targetLibraryId &&
-      activeStamp.stamp.id === stamp.id
+      activeStamp.stamp.id === stamp.id;
     if (isActive) {
-      annotation?.setActiveTool(null)
-      return
+      annotation?.setActiveTool(null);
+      return;
     }
     stampCapability
       .forDocument(documentId)
       .activateStampPlacement(targetLibraryId, stamp)
       .wait(
         () => undefined,
-        () => notify("The stamp could not be activated.", "error")
-      )
-  }
+        () => notify("The stamp could not be activated.", "error"),
+      );
+  };
   const createFromSelection = () => {
-    if (!stampCapability || !canCreateFromSelection) return
-    const count = customLibrary?.stamps.length ?? 0
-    setBusy(true)
+    if (!stampCapability || !canCreateFromSelection) return;
+    const count = customLibrary?.stamps.length ?? 0;
+    setBusy(true);
     stampCapability
       .forDocument(documentId)
       .createStampFromAnnotation(
@@ -1625,36 +1628,36 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
           subject: `Custom stamp ${count + 1}`,
           categories: ["custom", "sidebar"],
         },
-        CUSTOM_STAMP_LIBRARY_ID
+        CUSTOM_STAMP_LIBRARY_ID,
       )
       .wait(
         () => {
-          setBusy(false)
-          setLibraryId(CUSTOM_STAMP_LIBRARY_ID)
-          notify("Stamp saved to your custom library.", "success")
+          setBusy(false);
+          setLibraryId(CUSTOM_STAMP_LIBRARY_ID);
+          notify("Stamp saved to your custom library.", "success");
         },
         () => {
-          setBusy(false)
-          notify("The stamp could not be created from the selection.", "error")
-        }
-      )
-  }
+          setBusy(false);
+          notify("The stamp could not be created from the selection.", "error");
+        },
+      );
+  };
   const exportLibrary = (targetLibraryId: string) => {
     stampCapability?.exportLibrary(targetLibraryId).wait(
       (exported) => downloadArrayBuffer(exported.pdf, `${exported.name}.pdf`),
-      () => notify("The library could not be exported.", "error")
-    )
-  }
+      () => notify("The library could not be exported.", "error"),
+    );
+  };
   const importLibrary = async (file: File) => {
-    if (!stampCapability) return
-    setBusy(true)
+    if (!stampCapability) return;
+    setBusy(true);
     try {
-      const buffer = await file.arrayBuffer()
-      const lib = await import("pdf-lib")
+      const buffer = await file.arrayBuffer();
+      const lib = await import("pdf-lib");
       const pageCount = (
         await lib.PDFDocument.load(buffer, { ignoreEncryption: true })
-      ).getPageCount()
-      const name = file.name.replace(/\.pdf$/i, "") || "Imported stamps"
+      ).getPageCount();
+      const name = file.name.replace(/\.pdf$/i, "") || "Imported stamps";
       stampCapability
         .loadLibrary({
           name,
@@ -1669,23 +1672,23 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
         })
         .wait(
           (id) => {
-            setBusy(false)
-            setLibraryId(id)
+            setBusy(false);
+            setLibraryId(id);
             notify(
               `Imported ${pageCount} stamp${pageCount === 1 ? "" : "s"}.`,
-              "success"
-            )
+              "success",
+            );
           },
           () => {
-            setBusy(false)
-            notify("The stamp library could not be imported.", "error")
-          }
-        )
+            setBusy(false);
+            notify("The stamp library could not be imported.", "error");
+          },
+        );
     } catch {
-      setBusy(false)
-      notify("The file could not be read as a PDF.", "error")
+      setBusy(false);
+      notify("The file could not be read as a PDF.", "error");
     }
-  }
+  };
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 space-y-2 border-b px-3 py-2">
@@ -1725,8 +1728,8 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
               const targets =
                 libraryId === "all"
                   ? libraries.map((library) => library.id)
-                  : [libraryId]
-              targets.forEach(exportLibrary)
+                  : [libraryId];
+              targets.forEach(exportLibrary);
             }}
           >
             <DownloadGlyph className="size-4" />
@@ -1752,9 +1755,9 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
           className="sr-only"
           tabIndex={-1}
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void importLibrary(file)
-            event.currentTarget.value = ""
+            const file = event.target.files?.[0];
+            if (file) void importLibrary(file);
+            event.currentTarget.value = "";
           }}
         />
       </div>
@@ -1770,7 +1773,7 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
             {stamps.map(({ library, stamp }) => {
               const isActive =
                 activeStamp?.libraryId === library.id &&
-                activeStamp.stamp.id === stamp.id
+                activeStamp.stamp.id === stamp.id;
               return (
                 <div
                   key={`${library.id}-${stamp.id}`}
@@ -1785,7 +1788,7 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
                       "flex aspect-square w-full items-center justify-center rounded-lg border p-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
                       isActive
                         ? "border-primary bg-primary/5 ring-1 ring-primary/40"
-                        : "hover:bg-accent/50"
+                        : "hover:bg-accent/50",
                     )}
                     onClick={() => placeStamp(library.id, stamp)}
                   >
@@ -1811,7 +1814,10 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
                           .wait(
                             () => undefined,
                             () =>
-                              notify("The stamp could not be removed.", "error")
+                              notify(
+                                "The stamp could not be removed.",
+                                "error",
+                              ),
                           )
                       }
                     >
@@ -1819,7 +1825,7 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
                     </button>
                   ) : null}
                 </div>
-              )
+              );
             })}
           </div>
         </PdfEditorScrollArea>
@@ -1834,7 +1840,7 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Signatures                                                                 */
@@ -1842,27 +1848,27 @@ export function PdfEditorStampsPanel({ documentId }: { documentId: string }) {
 export function PdfEditorSignaturesPanel({
   documentId,
 }: {
-  documentId: string
+  documentId: string;
 }) {
-  const { entries, provides } = useSignatureEntries()
-  const activePlacement = useActivePlacement(documentId)
-  const { openDialog, permissions } = usePdfEditor()
-  const canPlace = permissions.canModifyAnnotations
+  const { entries, provides } = useSignatureEntries();
+  const activePlacement = useActivePlacement(documentId);
+  const { openDialog, permissions } = usePdfEditor();
+  const canPlace = permissions.canModifyAnnotations;
   const isActive = (entryId: string, kind: SignatureFieldKind) =>
-    activePlacement?.entryId === entryId && activePlacement.kind === kind
+    activePlacement?.entryId === entryId && activePlacement.kind === kind;
   const togglePlacement = (entryId: string, kind: SignatureFieldKind) => {
-    if (!provides) return
-    const scope = provides.forDocument(documentId)
+    if (!provides) return;
+    const scope = provides.forDocument(documentId);
     if (isActive(entryId, kind)) {
-      scope.deactivatePlacement()
-      return
+      scope.deactivatePlacement();
+      return;
     }
     if (kind === SignatureFieldKind.Initials) {
-      scope.activateInitialsPlacement(entryId)
+      scope.activateInitialsPlacement(entryId);
     } else {
-      scope.activateSignaturePlacement(entryId)
+      scope.activateSignaturePlacement(entryId);
     }
-  }
+  };
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b px-3 py-2">
@@ -1906,13 +1912,13 @@ export function PdfEditorSignaturesPanel({
                     disabled={!canPlace}
                     aria-pressed={isActive(
                       entry.id,
-                      SignatureFieldKind.Signature
+                      SignatureFieldKind.Signature,
                     )}
                     className={cn(
                       "flex h-16 min-w-0 flex-[2] items-center justify-center rounded-md border border-dashed bg-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
                       isActive(entry.id, SignatureFieldKind.Signature)
                         ? "border-primary ring-1 ring-primary/40"
-                        : "hover:border-muted-foreground/60"
+                        : "hover:border-muted-foreground/60",
                     )}
                     onClick={() =>
                       togglePlacement(entry.id, SignatureFieldKind.Signature)
@@ -1930,13 +1936,13 @@ export function PdfEditorSignaturesPanel({
                       disabled={!canPlace}
                       aria-pressed={isActive(
                         entry.id,
-                        SignatureFieldKind.Initials
+                        SignatureFieldKind.Initials,
                       )}
                       className={cn(
                         "flex h-16 min-w-0 flex-1 items-center justify-center rounded-md border border-dashed bg-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
                         isActive(entry.id, SignatureFieldKind.Initials)
                           ? "border-primary ring-1 ring-primary/40"
-                          : "hover:border-muted-foreground/60"
+                          : "hover:border-muted-foreground/60",
                       )}
                       onClick={() =>
                         togglePlacement(entry.id, SignatureFieldKind.Initials)
@@ -1965,15 +1971,15 @@ export function PdfEditorSignaturesPanel({
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 /* -------------------------------------------------------------------------- */
 /* Forms                                                                      */
 /* -------------------------------------------------------------------------- */
 export function PdfEditorFormsPanel({ documentId }: { documentId: string }) {
-  const { provides: form } = useFormCapability()
+  const { provides: form } = useFormCapability();
   const { provides: annotation, state: annotationState } =
-    useAnnotation(documentId)
+    useAnnotation(documentId);
   const {
     features,
     fileName,
@@ -1982,63 +1988,66 @@ export function PdfEditorFormsPanel({ documentId }: { documentId: string }) {
     permissions,
     scrollToAnnotation,
     setFormDesignMode,
-  } = usePdfEditor()
+  } = usePdfEditor();
   const scope = React.useMemo(
     () => form?.forDocument(documentId) ?? null,
-    [documentId, form]
-  )
-  const fieldStore = React.useMemo(() => createFormFieldStore(scope), [scope])
+    [documentId, form],
+  );
+  const fieldStore = React.useMemo(() => createFormFieldStore(scope), [scope]);
   const fields = React.useSyncExternalStore(
     fieldStore.subscribe,
     fieldStore.getSnapshot,
-    fieldStore.getSnapshot
-  )
-  const importInputRef = React.useRef<HTMLInputElement>(null)
-  const designModeId = React.useId()
+    fieldStore.getSnapshot,
+  );
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+  const designModeId = React.useId();
   const widgetsByName = React.useMemo(() => {
-    const map = new Map<string, PdfWidgetAnnoObject>()
+    const map = new Map<string, PdfWidgetAnnoObject>();
     for (const tracked of Object.values(annotationState.byUid)) {
-      if (tracked.object.type !== PdfAnnotationSubtype.WIDGET) continue
-      const widget = tracked.object as PdfWidgetAnnoObject
-      if (!map.has(widget.field.name)) map.set(widget.field.name, widget)
+      if (tracked.object.type !== PdfAnnotationSubtype.WIDGET) continue;
+      const widget = tracked.object as PdfWidgetAnnoObject;
+      if (!map.has(widget.field.name)) map.set(widget.field.name, widget);
     }
-    return map
-  }, [annotationState.byUid])
+    return map;
+  }, [annotationState.byUid]);
   const focusField = (field: FormFieldInfo) => {
-    const widget = widgetsByName.get(field.name)
-    if (!widget) return
+    const widget = widgetsByName.get(field.name);
+    if (!widget) return;
     if (formDesignMode) {
-      annotation?.selectAnnotation(widget.pageIndex, widget.id)
+      annotation?.selectAnnotation(widget.pageIndex, widget.id);
     } else {
-      scope?.selectField(widget.id)
+      scope?.selectField(widget.id);
     }
-    scrollToAnnotation(widget)
-  }
+    scrollToAnnotation(widget);
+  };
   const exportValues = () => {
-    if (!scope) return
-    const values = scope.getFormValues()
+    if (!scope) return;
+    const values = scope.getFormValues();
     downloadBlob(
       new Blob([JSON.stringify(values, null, 2)], { type: "application/json" }),
-      `${fileName.replace(/\.pdf$/i, "")}-form-values.json`
-    )
-  }
+      `${fileName.replace(/\.pdf$/i, "")}-form-values.json`,
+    );
+  };
   const importValues = async (file: File) => {
-    if (!scope) return
+    if (!scope) return;
     try {
-      const parsed = JSON.parse(await file.text()) as Record<string, unknown>
+      const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
       const values = Object.fromEntries(
-        Object.entries(parsed).map(([key, value]) => [key, String(value ?? "")])
-      )
+        Object.entries(parsed).map(([key, value]) => [
+          key,
+          String(value ?? ""),
+        ]),
+      );
       scope.setFormValues(values).wait(
         () => notify("Form values imported.", "success"),
-        () => notify("The form values could not be applied.", "error")
-      )
+        () => notify("The form values could not be applied.", "error"),
+      );
     } catch {
-      notify("The file is not valid JSON.", "error")
+      notify("The file is not valid JSON.", "error");
     }
-  }
+  };
   const clearValues = () => {
-    if (!scope || fields.length === 0) return
+    if (!scope || fields.length === 0) return;
     const values = Object.fromEntries(
       fields.map((field) => [
         field.name,
@@ -2046,13 +2055,13 @@ export function PdfEditorFormsPanel({ documentId }: { documentId: string }) {
         field.type === PDF_FORM_FIELD_TYPE.RADIOBUTTON
           ? "Off"
           : "",
-      ])
-    )
+      ]),
+    );
     scope.setFormValues(values).wait(
       () => notify("Form cleared.", "success"),
-      () => notify("The form could not be cleared.", "error")
-    )
-  }
+      () => notify("The form could not be cleared.", "error"),
+    );
+  };
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 space-y-2 border-b px-3 py-2">
@@ -2113,9 +2122,9 @@ export function PdfEditorFormsPanel({ documentId }: { documentId: string }) {
           className="sr-only"
           tabIndex={-1}
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void importValues(file)
-            event.currentTarget.value = ""
+            const file = event.target.files?.[0];
+            if (file) void importValues(file);
+            event.currentTarget.value = "";
           }}
         />
       </div>
@@ -2161,9 +2170,9 @@ export function PdfEditorFormsPanel({ documentId }: { documentId: string }) {
         </PdfEditorScrollArea>
       )}
     </div>
-  )
+  );
 }
-export { GridGlyph as PdfEditorPagesGlyph }
+export { GridGlyph as PdfEditorPagesGlyph };
 function InlineLoadingButton({
   loading,
   disabled,
@@ -2171,7 +2180,7 @@ function InlineLoadingButton({
   className,
   ...props
 }: React.ComponentProps<typeof Button> & {
-  loading?: boolean
+  loading?: boolean;
 }) {
   return (
     <Button
@@ -2185,14 +2194,19 @@ function InlineLoadingButton({
         <InlineSpinner className="pointer-events-none absolute" />
       ) : null}
     </Button>
-  )
+  );
 }
 function InlineSpinner({ className, ...props }: InlineRegistryIconProps) {
   return (
-    <LoaderCircle role="status" aria-label="Loading" className={cn("size-4 animate-spin", className)} {...props} />
-  )
+    <LoaderCircle
+      role="status"
+      aria-label="Loading"
+      className={cn("size-4 animate-spin", className)}
+      {...props}
+    />
+  );
 }
 type InlineRegistryIconProps = Omit<
   React.ComponentProps<"svg">,
   "children" | "strokeWidth"
-> & { strokeWidth?: number }
+> & { strokeWidth?: number };

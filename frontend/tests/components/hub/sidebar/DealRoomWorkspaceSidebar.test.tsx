@@ -8,7 +8,9 @@ import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 describe("DealRoomWorkspaceSidebar", () => {
   it("orders URL-backed sidebar links and keeps only the active route current", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/hub/deals/project-alpha/deliverables/templates"]}>
+      <MemoryRouter
+        initialEntries={["/hub/deals/project-alpha/deliverables/templates"]}
+      >
         <DealRoomWorkspaceSidebar
           activeDealId="project-alpha"
           activeSection="deliverables"
@@ -17,7 +19,9 @@ describe("DealRoomWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const deliverableLink = markup.match(/<a[^>]*aria-label="Deliverable"[^>]*>.*?<\/a>/u)?.[0];
+    const deliverableLink = markup.match(
+      /<a[^>]*aria-label="Deliverable"[^>]*>.*?<\/a>/u,
+    )?.[0];
     const dealRoomIndex = markup.indexOf('aria-label="Deal Room"');
     const artifactsSectionIndex = markup.indexOf(">Deal Artifacts</h2>");
     const dataRoomIndex = markup.indexOf('aria-label="Data Room"');

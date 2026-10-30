@@ -38,7 +38,9 @@ export function PdfPageIndicator({ className }: PdfPageIndicatorProps) {
     >
       <Input
         aria-label={
-          typeof labels.jumpToPage === "string" ? labels.jumpToPage : "Jump to page"
+          typeof labels.jumpToPage === "string"
+            ? labels.jumpToPage
+            : "Jump to page"
         }
         type="text"
         inputMode="numeric"

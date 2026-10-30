@@ -24,7 +24,8 @@ describe("UploadFilesModal", () => {
         userId="analyst@example.com"
       />,
     );
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error("expected the upload file input");
     expect(input.accept).toContain("image/png");
     expect(input.accept).toContain("image/jpeg");
@@ -37,7 +38,9 @@ describe("UploadFilesModal", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     expect(screen.getByText("evidence.PNG")).toBeDefined();
-    expect(screen.getByRole("checkbox", { name: "Select evidence.PNG" })).toBeDefined();
+    expect(
+      screen.getByRole("checkbox", { name: "Select evidence.PNG" }),
+    ).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -49,17 +52,28 @@ describe("UploadFilesModal", () => {
         userId="analyst@example.com"
       />,
     );
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error("expected the upload file input");
     expect(input.accept).toContain(".xlsx");
     expect(input.accept).toContain(".pptx");
-    expect(input.accept).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    expect(input.accept).toContain("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    expect(input.accept).toContain(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    expect(input.accept).toContain(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    );
 
-    const workbook = new File([new Uint8Array([1, 2, 3])], "model.XLSX", { type: "" });
-    const presentation = new File([new Uint8Array([4, 5, 6])], "board.pptx", { type: "" });
+    const workbook = new File([new Uint8Array([1, 2, 3])], "model.XLSX", {
+      type: "",
+    });
+    const presentation = new File([new Uint8Array([4, 5, 6])], "board.pptx", {
+      type: "",
+    });
     const legacy = new File([new Uint8Array([7])], "legacy.xls", { type: "" });
-    fireEvent.change(input, { target: { files: [workbook, presentation, legacy] } });
+    fireEvent.change(input, {
+      target: { files: [workbook, presentation, legacy] },
+    });
 
     expect(screen.getByText("model.XLSX")).toBeDefined();
     expect(screen.getByText("board.pptx")).toBeDefined();

@@ -117,6 +117,10 @@ impl QuarryApiService {
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         validate_api_path(path)?;
+        let resource_path = path.split('?').next().unwrap_or(path);
+        if resource_path == "/api/v1/notebooks" || resource_path.starts_with("/api/v1/notebooks/") {
+            super::notebooks::validate_body(&body)?;
+        }
         self.client.post(path, body).await
     }
 

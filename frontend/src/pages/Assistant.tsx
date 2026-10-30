@@ -20,7 +20,26 @@ export function Assistant() {
       <WorkspaceHomeShell
         activeHomeSection="assistant"
         contentMode="fill"
-        header={<><WorkspaceHeader title="Assistant" /><label className="flex items-center gap-2 text-sm">Chat scope<select className="rounded-md border border-border bg-background p-2" value={scope} onChange={(e) => setScope(e.currentTarget.value === "freeform" ? "freeform" : "all")}><option value="all">All chats</option><option value="freeform">Freeform chats</option></select></label></>}
+        header={
+          <>
+            <WorkspaceHeader title="Assistant" />
+            <label className="flex items-center gap-2 text-sm">
+              Chat scope
+              <select
+                className="rounded-md border border-border bg-background p-2"
+                value={scope}
+                onChange={(e) =>
+                  setScope(
+                    e.currentTarget.value === "freeform" ? "freeform" : "all",
+                  )
+                }
+              >
+                <option value="all">All chats</option>
+                <option value="freeform">Freeform chats</option>
+              </select>
+            </label>
+          </>
+        }
         sidebarMode="assistant"
       >
         <QueryChatThread contextTruncated={contextTruncated} />

@@ -11,8 +11,7 @@ export interface DocumentMagnifyingGlassIconHandle {
   stopAnimation: () => void;
 }
 
-interface DocumentMagnifyingGlassIconProps
-  extends HTMLAttributes<HTMLDivElement> {
+interface DocumentMagnifyingGlassIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
@@ -55,7 +54,7 @@ const DocumentMagnifyingGlassIcon = forwardRef<
         controls.start("animate");
       }
     },
-    [controls, onMouseEnter]
+    [controls, onMouseEnter],
   );
 
   const handleMouseLeave = useCallback(
@@ -66,7 +65,7 @@ const DocumentMagnifyingGlassIcon = forwardRef<
         controls.start("normal");
       }
     },
-    [controls, onMouseLeave]
+    [controls, onMouseLeave],
   );
 
   return (

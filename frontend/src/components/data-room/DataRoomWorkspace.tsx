@@ -10,7 +10,9 @@ import { DataRoomExplorer } from "./DataRoomExplorer";
 import { FileReviewTable } from "./FileReviewTable";
 
 const DocumentPreviewPanel = lazy(() =>
-  import("./DocumentPreviewPanel").then((module) => ({ default: module.DocumentPreviewPanel })),
+  import("./DocumentPreviewPanel").then((module) => ({
+    default: module.DocumentPreviewPanel,
+  })),
 );
 
 type DataRoomWorkspaceProps = {
@@ -34,18 +36,30 @@ export function DataRoomWorkspace({
   onConnectToSharePoint,
   onUploadFiles,
 }: DataRoomWorkspaceProps) {
-  const { closeDocument, requestRawText, selectDocument, state: documentSession } = useDocumentSession(dealId);
+  const {
+    closeDocument,
+    requestRawText,
+    selectDocument,
+    state: documentSession,
+  } = useDocumentSession(dealId);
   const [documentPageCount, setDocumentPageCount] = useState(0);
-  const [requestedPreviewPage, setRequestedPreviewPage] = useState<number | null>(null);
-  const [searchBoundaryElement, setSearchBoundaryElement] = useState<HTMLDivElement | null>(null);
+  const [requestedPreviewPage, setRequestedPreviewPage] = useState<
+    number | null
+  >(null);
+  const [searchBoundaryElement, setSearchBoundaryElement] =
+    useState<HTMLDivElement | null>(null);
   const documentPreviewRef = useRef<DocumentPreviewPanelHandle>(null);
-  const selectedDocument = documentSession.status === "open" ? documentSession.document : null;
+  const selectedDocument =
+    documentSession.status === "open" ? documentSession.document : null;
 
-  const handleSelectDocument = useCallback((document: DataRoomTreeNode) => {
-    setDocumentPageCount(0);
-    setRequestedPreviewPage(null);
-    void selectDocument(document);
-  }, [selectDocument]);
+  const handleSelectDocument = useCallback(
+    (document: DataRoomTreeNode) => {
+      setDocumentPageCount(0);
+      setRequestedPreviewPage(null);
+      void selectDocument(document);
+    },
+    [selectDocument],
+  );
 
   const handleClosePreview = useCallback(() => {
     setDocumentPageCount(0);
@@ -61,7 +75,8 @@ export function DataRoomWorkspace({
     <div className="relative flex h-full min-h-0 min-w-0 flex-1">
       {selectedDocument ? (
         <div className="contents" data-workspace-sidebar-replacement>
-          <DataRoomExplorer dealId={dealId}
+          <DataRoomExplorer
+            dealId={dealId}
             dealName={dealName}
             dealRoomPath={dealRoomPath}
             documentSearch={{
@@ -69,7 +84,8 @@ export function DataRoomWorkspace({
               currentFileName: selectedDocument.name,
               currentPageCount: documentPageCount,
               onActivateResult: (result: DocumentSearchResult) => {
-                if (result.target?.kind === "pdf-page") setRequestedPreviewPage(result.target.page);
+                if (result.target?.kind === "pdf-page")
+                  setRequestedPreviewPage(result.target.page);
               },
               onSelectionFocus: focusDocumentPreview,
             }}
@@ -120,7 +136,10 @@ export function DataRoomWorkspace({
                 />
               </Suspense>
             ) : (
-              <FileReviewTable files={contents.reviewFiles} onSelectFile={handleSelectDocument} />
+              <FileReviewTable
+                files={contents.reviewFiles}
+                onSelectFile={handleSelectDocument}
+              />
             )}
           </div>
         )}
@@ -133,12 +152,30 @@ export function DataRoomWorkspace({
   );
 }
 
-function DocumentPreviewFallback({ fileName, onClose }: { fileName: string; onClose: () => void }) {
+function DocumentPreviewFallback({
+  fileName,
+  onClose,
+}: {
+  fileName: string;
+  onClose: () => void;
+}) {
   return (
-    <section aria-busy="true" aria-label="Selected document preview" className="flex min-h-0 min-w-0 flex-1 flex-col" role="region">
+    <section
+      aria-busy="true"
+      aria-label="Selected document preview"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      role="region"
+    >
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-outline-variant bg-background px-5">
-        <span className="truncate text-sm font-semibold text-text-main">{fileName}</span>
-        <button aria-label="Close document preview" className="text-sm font-semibold text-primary" onClick={onClose} type="button">
+        <span className="truncate text-sm font-semibold text-text-main">
+          {fileName}
+        </span>
+        <button
+          aria-label="Close document preview"
+          className="text-sm font-semibold text-primary"
+          onClick={onClose}
+          type="button"
+        >
           Close
         </button>
       </header>
@@ -159,7 +196,9 @@ function EmptyDataRoomState({
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
-        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room Vault</h1>
+        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          Data Room Vault
+        </h1>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
@@ -168,7 +207,10 @@ function EmptyDataRoomState({
           description="Add deal documents from your device, or connect SharePoint to bring your data room into Quarry."
           frame="dashed"
           headingLevel={2}
-          secondaryAction={{ label: "Connect SharePoint", onClick: onConnectToSharePoint }}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
           size="lg"
           title="Upload your first file"
           variant="first-use"
@@ -188,7 +230,9 @@ function UnavailableDataRoomState({
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
-        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">Data Room Vault</h1>
+        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
+          Data Room Vault
+        </h1>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
@@ -197,7 +241,10 @@ function UnavailableDataRoomState({
           description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
           frame="card"
           headingLevel={2}
-          secondaryAction={{ label: "Connect SharePoint", onClick: onConnectToSharePoint }}
+          secondaryAction={{
+            label: "Connect SharePoint",
+            onClick: onConnectToSharePoint,
+          }}
           size="lg"
           title="Data room unavailable"
           variant="error"

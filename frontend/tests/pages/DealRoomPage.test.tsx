@@ -28,23 +28,29 @@ vi.mock("@/components/hub/WorkspaceSidebar", () => ({
 }));
 
 vi.mock("@/components/deal-room/DeliverableTemplatesView", () => ({
-  DeliverableTemplatesView: ({ onSelectSlide }: { onSelectSlide?: (slide: {
-    id: string;
-    thumbnailAlt: string;
-    thumbnailHeight: number;
-    thumbnailSrc: string;
-    thumbnailWidth: number;
-  }) => void }) => (
+  DeliverableTemplatesView: ({
+    onSelectSlide,
+  }: {
+    onSelectSlide?: (slide: {
+      id: string;
+      thumbnailAlt: string;
+      thumbnailHeight: number;
+      thumbnailSrc: string;
+      thumbnailWidth: number;
+    }) => void;
+  }) => (
     <div>
       Template gallery
       <button
-        onClick={() => onSelectSlide?.({
-          id: "template/one",
-          thumbnailAlt: "Template preview",
-          thumbnailHeight: 720,
-          thumbnailSrc: "data:image/png;base64,",
-          thumbnailWidth: 1280,
-        })}
+        onClick={() =>
+          onSelectSlide?.({
+            id: "template/one",
+            thumbnailAlt: "Template preview",
+            thumbnailHeight: 720,
+            thumbnailSrc: "data:image/png;base64,",
+            thumbnailWidth: 1280,
+          })
+        }
         type="button"
       >
         Open template
@@ -59,7 +65,11 @@ describe("DealRoomPage", () => {
   beforeEach(() => {
     useWorkspaceMock.mockReturnValue({
       deals: workspaceDeals,
-      dealsResource: { deals: workspaceDeals, source: "demo", status: "success" },
+      dealsResource: {
+        deals: workspaceDeals,
+        source: "demo",
+        status: "success",
+      },
       email: "analyst@example.com",
       navigationState: {},
       retryDeals: vi.fn(),
@@ -97,7 +107,9 @@ describe("DealRoomPage", () => {
     );
 
     expect(screen.getByText("Loading deal")).not.toBeNull();
-    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+    expect(
+      document.querySelectorAll('[data-slot="skeleton"]').length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders the requested section order and keeps file summary content in its own tab", async () => {
@@ -122,25 +134,43 @@ describe("DealRoomPage", () => {
       "Open Items",
       "Settings",
     ]);
-    expect(screen.getByRole("heading", { level: 1, name: "Project Alpha" })).not.toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Project Alpha" }),
+    ).not.toBeNull();
     expect(screen.queryByText("Analyzed Files")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Evidence, coming soon" })).toHaveProperty("disabled", true);
+    expect(
+      screen.getByRole("tab", { name: "Evidence, coming soon" }),
+    ).toHaveProperty("disabled", true);
 
-    expect(screen.getByRole("tab", { name: "Settings" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveProperty(
+      "disabled",
+      false,
+    );
     const overviewTab = screen.getByRole("tab", { name: "Overview" });
     const fileSummaryTab = screen.getByRole("tab", { name: "File Summary" });
     overviewTab.focus();
     await user.keyboard("{ArrowRight}");
 
-    const activityTab = await screen.findByRole("tab", { name: "Deal Activity", selected: true });
+    const activityTab = await screen.findByRole("tab", {
+      name: "Deal Activity",
+      selected: true,
+    });
     expect(document.activeElement).toBe(activityTab);
-    expect(screen.getByRole("heading", { level: 1, name: "Deal Activity" }).closest("main")).toBe(overviewTab.closest("main"));
+    expect(
+      screen
+        .getByRole("heading", { level: 1, name: "Deal Activity" })
+        .closest("main"),
+    ).toBe(overviewTab.closest("main"));
     await user.keyboard("{ArrowRight}");
     await screen.findByRole("tab", { name: "File Summary", selected: true });
     expect(document.activeElement).toBe(fileSummaryTab);
     expect(screen.getByText("Analyzed Files")).not.toBeNull();
-    expect(screen.getByRole("heading", { level: 1, name: "Project Alpha" })).not.toBeNull();
-    expect(screen.queryByText(workspaceDeals[0]?.room.summary ?? "")).toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Project Alpha" }),
+    ).not.toBeNull();
+    expect(
+      screen.queryByText(workspaceDeals[0]?.room.summary ?? ""),
+    ).toBeNull();
     expect(document.querySelector('[data-slot="data-grid"]')).not.toBeNull();
   });
 
@@ -151,41 +181,64 @@ describe("DealRoomPage", () => {
         <Routes>
           <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
             <Route element={<DeliverablesPage />} path="deliverables" />
-            <Route element={<DeliverableTemplatesPage />} path="deliverables/templates" />
+            <Route
+              element={<DeliverableTemplatesPage />}
+              path="deliverables/templates"
+            />
           </Route>
         </Routes>
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("region", { name: "Completed Slide(s)" })).not.toBeNull();
-    expect(screen.getByRole("region", { name: "In-progress slides" })).not.toBeNull();
+    expect(
+      screen.getByRole("region", { name: "Completed Slide(s)" }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("region", { name: "In-progress slides" }),
+    ).not.toBeNull();
     expect(screen.queryByText("Start from templates")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "View Templates" }));
-    expect(screen.getByRole("heading", { level: 1, name: "Templates" })).not.toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Templates" }),
+    ).not.toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Back to Deliverables" }));
-    expect(screen.getByRole("heading", { level: 1, name: "Deliverables" })).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Back to Deliverables" }),
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Deliverables" }),
+    ).not.toBeNull();
   });
 
   it("navigates from a selected gallery preview to the encoded editor route", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/hub/deals/project-alpha/deliverables/templates"]}>
+      <MemoryRouter
+        initialEntries={["/hub/deals/project-alpha/deliverables/templates"]}
+      >
         <Routes>
           <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
-            <Route element={<DeliverableTemplatesPage />} path="deliverables/templates" />
-            <Route element={<LocationProbe />} path="deliverables/templates/:templateId" />
+            <Route
+              element={<DeliverableTemplatesPage />}
+              path="deliverables/templates"
+            />
+            <Route
+              element={<LocationProbe />}
+              path="deliverables/templates/:templateId"
+            />
           </Route>
         </Routes>
       </MemoryRouter>,
     );
 
     await user.click(screen.getByRole("button", { name: "Open template" }));
-    expect(screen.getByText("/hub/deals/project-alpha/deliverables/templates/template%2Fone"))
-      .not.toBeNull();
+    expect(
+      screen.getByText(
+        "/hub/deals/project-alpha/deliverables/templates/template%2Fone",
+      ),
+    ).not.toBeNull();
   });
-
 });
 
 function LocationProbe() {

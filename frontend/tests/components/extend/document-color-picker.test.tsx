@@ -12,7 +12,11 @@ describe("ColorPicker", () => {
 
     render(
       <TooltipProvider>
-        <ColorPicker color="#facc15" label="Highlight color" onChange={() => {}} />
+        <ColorPicker
+          color="#facc15"
+          label="Highlight color"
+          onChange={() => {}}
+        />
       </TooltipProvider>,
     );
 

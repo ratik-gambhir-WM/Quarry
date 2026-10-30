@@ -66,7 +66,9 @@ export function PdfPasswordPrompt({
             onChange={(e) => setValue(e.target.value)}
             placeholder={labels.passwordPlaceholder}
             aria-invalid={!!showError}
-            aria-describedby={showError ? "pdf-viewer-password-error" : undefined}
+            aria-describedby={
+              showError ? "pdf-viewer-password-error" : undefined
+            }
           />
           {showError ? (
             <p

@@ -30,8 +30,12 @@ export type DataRoomContents = {
 };
 
 export function useDataRoomContents(dealId: string): DataRoomContents {
-  const [local, setLocal] = useState<DataRoomResource<DealDataRoom>>({ status: "loading" });
-  const [stored, setStored] = useState<DataRoomResource<DealDocumentSummary[]>>({ status: "loading" });
+  const [local, setLocal] = useState<DataRoomResource<DealDataRoom>>({
+    status: "loading",
+  });
+  const [stored, setStored] = useState<DataRoomResource<DealDocumentSummary[]>>(
+    { status: "loading" },
+  );
   const localRequestId = useRef(0);
   const storedRequestId = useRef(0);
   const activeDealId = useRef(dealId);
@@ -39,14 +43,24 @@ export function useDataRoomContents(dealId: string): DataRoomContents {
 
   const loadLocal = useCallback(async () => {
     const requestId = ++localRequestId.current;
-    setLocal((current) => ({ status: "loading", previous: getResourceValue(current) }));
+    setLocal((current) => ({
+      status: "loading",
+      previous: getResourceValue(current),
+    }));
     try {
       const value = await runtime.api.listDealDataRoom(dealId);
-      if (activeDealId.current === dealId && localRequestId.current === requestId) {
+      if (
+        activeDealId.current === dealId &&
+        localRequestId.current === requestId
+      ) {
         setLocal({ status: "ready", value });
       }
     } catch (error) {
-      if (activeDealId.current !== dealId || localRequestId.current !== requestId) return;
+      if (
+        activeDealId.current !== dealId ||
+        localRequestId.current !== requestId
+      )
+        return;
       if (isUnconfiguredDataRoomError(error)) {
         setLocal({
           status: "ready",
@@ -64,14 +78,23 @@ export function useDataRoomContents(dealId: string): DataRoomContents {
 
   const loadStored = useCallback(async () => {
     const requestId = ++storedRequestId.current;
-    setStored((current) => ({ status: "loading", previous: getResourceValue(current) }));
+    setStored((current) => ({
+      status: "loading",
+      previous: getResourceValue(current),
+    }));
     try {
       const value = await runtime.api.listDealDocuments(dealId);
-      if (activeDealId.current === dealId && storedRequestId.current === requestId) {
+      if (
+        activeDealId.current === dealId &&
+        storedRequestId.current === requestId
+      ) {
         setStored({ status: "ready", value });
       }
     } catch (error) {
-      if (activeDealId.current === dealId && storedRequestId.current === requestId) {
+      if (
+        activeDealId.current === dealId &&
+        storedRequestId.current === requestId
+      ) {
         setStored((current) => ({
           message: toErrorMessage(error),
           previous: getResourceValue(current),
@@ -108,7 +131,9 @@ export function useDataRoomContents(dealId: string): DataRoomContents {
     const errorMessage = [
       stored.status === "error" ? stored.message : "",
       local.status === "error" ? local.message : "",
-    ].filter(Boolean).join(" ");
+    ]
+      .filter(Boolean)
+      .join(" ");
     const isLoading = local.status === "loading" || stored.status === "loading";
     const hasFiles = hasDataRoomFiles(explorerNodes);
 
@@ -116,7 +141,8 @@ export function useDataRoomContents(dealId: string): DataRoomContents {
       errorMessage,
       explorerNodes,
       hasFiles,
-      isEmpty: localValue !== undefined && !isLoading && !errorMessage && !hasFiles,
+      isEmpty:
+        localValue !== undefined && !isLoading && !errorMessage && !hasFiles,
       isLoading,
       isUnavailable: !isLoading && Boolean(errorMessage),
       reloadAll,

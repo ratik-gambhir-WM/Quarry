@@ -19,21 +19,29 @@ type CriticalTasksCardProps = {
   tasks: readonly TaskItem[];
 };
 
-export function CriticalTasksCard({ assignees, layout = "wide", tasks }: CriticalTasksCardProps) {
+export function CriticalTasksCard({
+  assignees,
+  layout = "wide",
+  tasks,
+}: CriticalTasksCardProps) {
   if (layout === "rail") {
     return (
       <WorkspaceCard className="col-span-12 flex min-h-[640px] flex-col p-6 lg:col-span-4 lg:row-span-2">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h2 className="type-h3 text-text-main">Critical Tasks</h2>
-            <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.12em] text-muted">4 Pending Actions</p>
+            <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.12em] text-muted">
+              4 Pending Actions
+            </p>
           </div>
 
           <div className="flex -space-x-2">
             {assignees.map((assignee, index) => (
               <div
                 className={`flex h-9 w-9 items-center justify-center rounded-full border-2 border-surface text-[12px] font-bold ${
-                  index === 0 ? "bg-primary-fixed text-on-primary-fixed" : "bg-secondary-fixed text-on-secondary-fixed"
+                  index === 0
+                    ? "bg-primary-fixed text-on-primary-fixed"
+                    : "bg-secondary-fixed text-on-secondary-fixed"
                 }`}
                 key={assignee}
               >
@@ -70,7 +78,9 @@ export function CriticalTasksCard({ assignees, layout = "wide", tasks }: Critica
             </div>
             <div>
               <h2 className="type-h2 text-text-main">Critical Tasks</h2>
-              <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted">4 Pending Actions</p>
+              <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted">
+                4 Pending Actions
+              </p>
             </div>
           </div>
 
@@ -78,7 +88,9 @@ export function CriticalTasksCard({ assignees, layout = "wide", tasks }: Critica
             {assignees.map((assignee, index) => (
               <div
                 className={`flex h-11 w-11 items-center justify-center rounded-full border-2 border-surface text-[13px] font-bold ${
-                  index === 0 ? "bg-primary-fixed text-on-primary-fixed" : "bg-secondary-fixed text-on-secondary-fixed"
+                  index === 0
+                    ? "bg-primary-fixed text-on-primary-fixed"
+                    : "bg-secondary-fixed text-on-secondary-fixed"
                 }`}
                 key={assignee}
               >
@@ -105,13 +117,21 @@ export function CriticalTasksCard({ assignees, layout = "wide", tasks }: Critica
   );
 }
 
-function TaskRow({ item, variant = "default" }: { item: TaskItem; variant?: "compact" | "default" }) {
+function TaskRow({
+  item,
+  variant = "default",
+}: {
+  item: TaskItem;
+  variant?: "compact" | "default";
+}) {
   if (variant === "compact") {
     return (
       <div className="flex min-h-[104px] flex-col justify-between rounded-[1.35rem] border border-white/60 bg-white/40 p-4 transition hover:bg-white/60">
         <div className="flex items-start gap-3">
           <TaskCheckButton checked={item.checked} />
-          <p className="min-w-0 flex-1 text-[16px] font-medium leading-snug text-text-main">{item.label}</p>
+          <p className="min-w-0 flex-1 text-[16px] font-medium leading-snug text-text-main">
+            {item.label}
+          </p>
         </div>
 
         <div className="mt-4 flex justify-end pl-11">
@@ -138,7 +158,9 @@ function TaskCheckButton({ checked }: { checked: boolean }) {
     <button
       aria-label={checked ? "Completed task" : "Incomplete task"}
       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition ${
-        checked ? "border-primary bg-primary text-white" : "border-outline-variant bg-white/70 text-transparent"
+        checked
+          ? "border-primary bg-primary text-white"
+          : "border-outline-variant bg-white/70 text-transparent"
       }`}
       type="button"
     >
@@ -160,7 +182,9 @@ function TaskTagView({ tag }: { tag: TaskTag }) {
         : "text-muted";
 
   return (
-    <span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${className}`}>
+    <span
+      className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${className}`}
+    >
       {tag.value}
     </span>
   );

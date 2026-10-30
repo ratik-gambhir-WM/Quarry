@@ -24,7 +24,9 @@ export function ChatPanel() {
             <Icon className="h-5 w-5" name="plus" />
           </button>
           <div className="flex items-center gap-3">
-            <span className="rounded-full bg-primary/8 px-4 py-2 text-[13px] font-semibold text-primary">Quarry</span>
+            <span className="rounded-full bg-primary/8 px-4 py-2 text-[13px] font-semibold text-primary">
+              Quarry
+            </span>
             <button
               aria-label="Send message"
               className="flex h-10 w-10 items-center justify-center rounded-full bg-action text-on-action transition enabled:hover:bg-action-hover"

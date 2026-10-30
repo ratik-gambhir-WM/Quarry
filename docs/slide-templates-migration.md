@@ -1,10 +1,10 @@
 # Slide Templates Studio migration evidence
 
-Current rollout (2026-10-28): schema **12** adds nine diligence stages to the password/session schema.
-There is no automatic schema upgrade, status conversion, or password backfill. Use the deliberately selected,
-drained development reset described in [authentication](authentication.md#schema-12-and-development-reset),
-paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
-previous rollout and do not authorize running an old migration against the current schema.
+Current rollout (2026-10-28): schema **13** adds personal notebooks/save jobs through a validated,
+additive **12 → 13** upgrade that preserves product and template records. See [notebook recovery](notebook-api.md).
+Schema 11 and older still require the deliberately selected, drained development reset described in
+[authentication](authentication.md#schema-13-and-development-reset), paired with a fresh isolated
+Helix store. Historical schema-9/10 upgrade instructions below do not authorize an older migration.
 
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
 The supplied directory has no Git metadata. The checked-in

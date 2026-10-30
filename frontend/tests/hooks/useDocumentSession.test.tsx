@@ -6,14 +6,17 @@ import type { DataRoomTreeNode } from "@/data/dataRoom";
 import type { DocumentPreviewResponse } from "@/data/dataRoomPreview";
 import { useDocumentSession } from "@/hooks/useDocumentSession";
 
-const { getDealDocumentPdf, getDealDocumentText, previewDealDocument } = vi.hoisted(() => ({
-  getDealDocumentPdf: vi.fn(),
-  getDealDocumentText: vi.fn(),
-  previewDealDocument: vi.fn(),
-}));
+const { getDealDocumentPdf, getDealDocumentText, previewDealDocument } =
+  vi.hoisted(() => ({
+    getDealDocumentPdf: vi.fn(),
+    getDealDocumentText: vi.fn(),
+    previewDealDocument: vi.fn(),
+  }));
 
 vi.mock("@quarry/runtime", () => ({
-  runtime: { api: { getDealDocumentPdf, getDealDocumentText, previewDealDocument } },
+  runtime: {
+    api: { getDealDocumentPdf, getDealDocumentText, previewDealDocument },
+  },
 }));
 
 const localDocument: DataRoomTreeNode = {
@@ -53,36 +56,65 @@ describe("useDocumentSession", () => {
   });
 
   it("loads stored PDF bytes and raw text for the current document", async () => {
-    getDealDocumentPdf.mockResolvedValue({ bytes: new Uint8Array([1]), mimeType: "application/pdf" });
-    getDealDocumentText.mockResolvedValue({ sourceKind: "pdf", text: "Extracted text" });
-    const storedDocument = { ...localDocument, id: "stored:1", storedFileId: "file-1" };
+    getDealDocumentPdf.mockResolvedValue({
+      bytes: new Uint8Array([1]),
+      mimeType: "application/pdf",
+    });
+    getDealDocumentText.mockResolvedValue({
+      sourceKind: "pdf",
+      text: "Extracted text",
+    });
+    const storedDocument = {
+      ...localDocument,
+      id: "stored:1",
+      storedFileId: "file-1",
+    };
     const { result } = renderHook(() => useDocumentSession("deal-1"));
 
     await act(async () => result.current.selectDocument(storedDocument));
-    await waitFor(() => expect(result.current.state.status === "open" && result.current.state.preview.status).toBe("ready"));
+    await waitFor(() =>
+      expect(
+        result.current.state.status === "open" &&
+          result.current.state.preview.status,
+      ).toBe("ready"),
+    );
     await act(async () => result.current.requestRawText());
 
     expect(getDealDocumentPdf).toHaveBeenCalledWith("deal-1", "file-1");
     expect(getDealDocumentText).toHaveBeenCalledWith("deal-1", "file-1");
-    expect(result.current.state.status === "open" && result.current.state.rawText.status).toBe("ready");
+    expect(
+      result.current.state.status === "open" &&
+        result.current.state.rawText.status,
+    ).toBe("ready");
   });
 
   it("keeps preview and text failures scoped to the current document", async () => {
     previewDealDocument.mockRejectedValue(new Error("Preview unavailable"));
-    getDealDocumentPdf.mockResolvedValue({ bytes: new Uint8Array([1]), mimeType: "application/pdf" });
+    getDealDocumentPdf.mockResolvedValue({
+      bytes: new Uint8Array([1]),
+      mimeType: "application/pdf",
+    });
     getDealDocumentText.mockRejectedValue(new Error("Text unavailable"));
     const { result } = renderHook(() => useDocumentSession("deal-1"));
 
     await act(async () => result.current.selectDocument(localDocument));
-    expect(result.current.state.status === "open" && result.current.state.preview).toEqual({
+    expect(
+      result.current.state.status === "open" && result.current.state.preview,
+    ).toEqual({
       message: "Preview unavailable",
       status: "error",
     });
 
-    const storedDocument = { ...localDocument, id: "stored:1", storedFileId: "file-1" };
+    const storedDocument = {
+      ...localDocument,
+      id: "stored:1",
+      storedFileId: "file-1",
+    };
     await act(async () => result.current.selectDocument(storedDocument));
     await act(async () => result.current.requestRawText());
-    expect(result.current.state.status === "open" && result.current.state.rawText).toEqual({
+    expect(
+      result.current.state.status === "open" && result.current.state.rawText,
+    ).toEqual({
       message: "Text unavailable",
       status: "error",
     });

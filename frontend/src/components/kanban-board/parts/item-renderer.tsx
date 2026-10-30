@@ -1,7 +1,14 @@
 "use client";
 
-import type { AnyKanbanCardRenderer, KanbanItem, KanbanRenderContext } from "../types";
-import { MissingRendererFallback, warnMissingRenderer } from "./missing-renderer";
+import type {
+  AnyKanbanCardRenderer,
+  KanbanItem,
+  KanbanRenderContext,
+} from "../types";
+import {
+  MissingRendererFallback,
+  warnMissingRenderer,
+} from "./missing-renderer";
 
 export function ItemRenderer({
   item,

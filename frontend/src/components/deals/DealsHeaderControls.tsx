@@ -93,7 +93,11 @@ type DealsViewMenuProps = {
   view: DealsView;
 };
 
-export function DealsViewMenu({ onPreloadKanban, onViewChange, view }: DealsViewMenuProps) {
+export function DealsViewMenu({
+  onPreloadKanban,
+  onViewChange,
+  view,
+}: DealsViewMenuProps) {
   const iconRef = useRef<AdjustmentsHorizontalIconHandle>(null);
 
   return (
@@ -110,7 +114,11 @@ export function DealsViewMenu({ onPreloadKanban, onViewChange, view }: DealsView
           onMouseEnter={() => iconRef.current?.startAnimation()}
           onMouseLeave={() => iconRef.current?.stopAnimation()}
         >
-          <AdjustmentsHorizontalIcon className="h-4 w-4" ref={iconRef} size={16} />
+          <AdjustmentsHorizontalIcon
+            className="h-4 w-4"
+            ref={iconRef}
+            size={16}
+          />
         </DealsToolbarButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent

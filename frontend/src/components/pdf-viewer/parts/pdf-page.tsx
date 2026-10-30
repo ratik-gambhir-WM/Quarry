@@ -12,7 +12,10 @@ interface PdfPageProps {
   rotation: PdfRotation;
   /** Known intrinsic page size at scale=1, used while the page is loading. */
   basePageSize: { width: number; height: number } | null;
-  onPageSize?: (pageNumber: number, size: { width: number; height: number }) => void;
+  onPageSize?: (
+    pageNumber: number,
+    size: { width: number; height: number },
+  ) => void;
   className?: string;
 }
 

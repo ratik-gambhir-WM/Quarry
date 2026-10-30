@@ -1,6 +1,5 @@
 export type ContentPart =
-  | { text: string; type: "text" }
-  | { image: string; type: "image" };
+  { text: string; type: "text" } | { image: string; type: "image" };
 
 export type UserMessage = {
   attachments: readonly unknown[];

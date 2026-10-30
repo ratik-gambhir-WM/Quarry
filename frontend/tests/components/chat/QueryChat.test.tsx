@@ -1,9 +1,19 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueryModelInput, SendQueryEventHandlers } from "@/contracts/quarryApi";
+import type {
+  QueryModelInput,
+  SendQueryEventHandlers,
+} from "@/contracts/quarryApi";
 import { QueryChat } from "@/components/chat/QueryChat";
 
 const { queryModel, useReducedMotion } = vi.hoisted(() => ({
@@ -14,7 +24,13 @@ const { queryModel, useReducedMotion } = vi.hoisted(() => ({
 vi.mock("@quarry/runtime", () => ({ runtime: { api: { queryModel } } }));
 vi.mock("motion/react", () => ({
   motion: {
-    div: ({ children, layout: _layout, layoutId, transition, ...props }: {
+    div: ({
+      children,
+      layout: _layout,
+      layoutId,
+      transition,
+      ...props
+    }: {
       children: React.ReactNode;
       layout?: boolean;
       layoutId?: string;
@@ -44,21 +60,32 @@ describe("QueryChat", () => {
     const user = userEvent.setup();
     const cleanupStream = vi.fn();
     let handlers: SendQueryEventHandlers | undefined;
-    queryModel.mockImplementation((_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
-      handlers = nextHandlers;
-      return cleanupStream;
-    });
+    queryModel.mockImplementation(
+      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+        handlers = nextHandlers;
+        return cleanupStream;
+      },
+    );
     render(<QueryChat />);
 
-    expect(screen.getByRole("heading", { name: "How can I help you today?" })).toBeTruthy();
-    expect(screen.getAllByRole("textbox", { name: "Message input" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /Summarize deal risks/ })).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "How can I help you today?" }),
+    ).toBeTruthy();
+    expect(
+      screen.getAllByRole("textbox", { name: "Message input" }),
+    ).toHaveLength(1);
+    expect(
+      screen.queryByRole("button", { name: /Summarize deal risks/ }),
+    ).toBeNull();
     const composer = screen.getByRole("textbox", { name: "Message input" });
     const composerRoot = composer.closest('[data-slot="query-composer"]');
     expect(composerRoot?.hasAttribute("data-compact")).toBe(false);
     expect(composer.getAttribute("rows")).toBe("2");
 
-    await user.type(composer, "Summarize the most important deal risks and open questions.");
+    await user.type(
+      composer,
+      "Summarize the most important deal risks and open questions.",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(queryModel).toHaveBeenCalledWith(
@@ -69,21 +96,39 @@ describe("QueryChat", () => {
       },
       expect.any(Object),
     );
-    expect(screen.getByText("Summarize the most important deal risks and open questions.")).toBeTruthy();
-    expect(screen.getByRole("status", { name: "Assistant is typing" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Stop generating" })).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Message input" })).toBe(composer);
+    expect(
+      screen.getByText(
+        "Summarize the most important deal risks and open questions.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("status", { name: "Assistant is typing" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop generating" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBe(
+      composer,
+    );
     expect(composerRoot?.hasAttribute("data-compact")).toBe(true);
     expect(composer.getAttribute("rows")).toBe("1");
 
-    await act(async () => handlers?.onEvent({ delta: "# Finding", type: "delta" }));
-    expect(await screen.findByRole("heading", { name: "Finding" })).toBeTruthy();
-    await act(async () => handlers?.onEvent({
-      response: "<script>alert('unsafe')</script>\n\n# Final answer",
-      type: "completed",
-    }));
+    await act(async () =>
+      handlers?.onEvent({ delta: "# Finding", type: "delta" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Finding" }),
+    ).toBeTruthy();
+    await act(async () =>
+      handlers?.onEvent({
+        response: "<script>alert('unsafe')</script>\n\n# Final answer",
+        type: "completed",
+      }),
+    );
 
-    expect(await screen.findByRole("heading", { name: "Final answer" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Final answer" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Finding" })).toBeNull();
     expect(document.querySelector("script")).toBeNull();
     expect(screen.getByRole("button", { name: "Copy response" })).toBeTruthy();
@@ -94,15 +139,22 @@ describe("QueryChat", () => {
 
   it("supports keyboard submission while preserving Shift+Enter and IME composition", async () => {
     const user = userEvent.setup();
-    queryModel.mockImplementation((_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
-      handlers.onEvent({ response: "Done", type: "completed" });
-      return () => undefined;
-    });
+    queryModel.mockImplementation(
+      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+        handlers.onEvent({ response: "Done", type: "completed" });
+        return () => undefined;
+      },
+    );
     render(<QueryChat />);
     const input = screen.getByRole("textbox", { name: "Message input" });
 
-    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Send message",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
     await user.type(input, "First line");
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     fireEvent.keyDown(input, { isComposing: true, key: "Enter" });
@@ -117,15 +169,22 @@ describe("QueryChat", () => {
     const user = userEvent.setup();
     const cleanupStream = vi.fn();
     let handlers: SendQueryEventHandlers | undefined;
-    queryModel.mockImplementation((_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
-      handlers = nextHandlers;
-      return cleanupStream;
-    });
+    queryModel.mockImplementation(
+      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+        handlers = nextHandlers;
+        return cleanupStream;
+      },
+    );
     render(<QueryChat />);
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Start streaming");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Start streaming",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await act(async () => handlers?.onEvent({ delta: "Partial answer", type: "delta" }));
+    await act(async () =>
+      handlers?.onEvent({ delta: "Partial answer", type: "delta" }),
+    );
     await user.click(screen.getByRole("button", { name: "Stop generating" }));
 
     expect(screen.getByText("Partial answer")).toBeTruthy();
@@ -140,7 +199,10 @@ describe("QueryChat", () => {
     queryModel.mockReturnValue(cleanupStream);
     const { unmount } = render(<QueryChat />);
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Unmount this run");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Unmount this run",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     unmount();
 
@@ -150,22 +212,37 @@ describe("QueryChat", () => {
   it("shows sanitized failures and retries through the custom AgentRuntime", async () => {
     const user = userEvent.setup();
     const handlerRuns: SendQueryEventHandlers[] = [];
-    queryModel.mockImplementation((_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
-      handlerRuns.push(handlers);
-      return () => undefined;
-    });
+    queryModel.mockImplementation(
+      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+        handlerRuns.push(handlers);
+        return () => undefined;
+      },
+    );
     render(<QueryChat />);
 
-    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Retry this");
+    await user.type(
+      screen.getByRole("textbox", { name: "Message input" }),
+      "Retry this",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await act(async () => handlerRuns[0]?.onEvent({ error: "raw provider detail", type: "failed" }));
+    await act(async () =>
+      handlerRuns[0]?.onEvent({ error: "raw provider detail", type: "failed" }),
+    );
 
-    expect(await screen.findByText("The assistant could not complete the response. Please try again.")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "The assistant could not complete the response. Please try again.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText("raw provider detail")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(2));
-    expect(queryModel.mock.calls[1]?.[0]).toEqual({ context: [], files: [], prompt: "Retry this" });
+    expect(queryModel.mock.calls[1]?.[0]).toEqual({
+      context: [],
+      files: [],
+      prompt: "Retry this",
+    });
   });
 
   it("disables composer interpolation when reduced motion is requested", () => {
@@ -174,7 +251,10 @@ describe("QueryChat", () => {
 
     const { container } = render(<QueryChat />);
 
-    expect(container.querySelector("[data-query-composer-host]")?.getAttribute("data-layout-duration"))
-      .toBe("0");
+    expect(
+      container
+        .querySelector("[data-query-composer-host]")
+        ?.getAttribute("data-layout-duration"),
+    ).toBe("0");
   });
 });

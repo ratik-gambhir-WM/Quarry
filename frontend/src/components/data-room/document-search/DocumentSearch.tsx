@@ -1,4 +1,10 @@
-import { ArrowDown, ArrowUp, CornerDownLeft, SearchIcon, XIcon } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  CornerDownLeft,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
 import {
   memo,
   useEffect,
@@ -113,7 +119,11 @@ const SearchInput = memo(function SearchInput({
       />
       <span className="ml-auto flex items-center gap-2">
         {query ? (
-          <Button className="px-2 text-muted-foreground" type="reset" variant="ghost">
+          <Button
+            className="px-2 text-muted-foreground"
+            type="reset"
+            variant="ghost"
+          >
             Clear
           </Button>
         ) : null}
@@ -155,7 +165,9 @@ const HitsList = memo(function HitsList({
       return;
     }
     const container = containerRef.current;
-    const selected = container?.querySelector<HTMLElement>("[aria-selected='true']");
+    const selected = container?.querySelector<HTMLElement>(
+      "[aria-selected='true']",
+    );
     selected?.scrollIntoView?.({ block: "nearest" });
   }, [selectedIndex, shouldScrollSelection]);
 
@@ -275,14 +287,10 @@ export default function DocumentSearch({
     [items, query],
   );
   const visibleItems = query.trim() ? filteredItems : [];
-  const {
-    hoverIndex,
-    moveDown,
-    moveUp,
-    selectedIndex,
-    selectionOrigin,
-  } = useDocumentSearchKeyboardNavigation(visibleItems.map((item) => item.id));
-  const selectedItem = selectedIndex >= 0 ? visibleItems[selectedIndex] : undefined;
+  const { hoverIndex, moveDown, moveUp, selectedIndex, selectionOrigin } =
+    useDocumentSearchKeyboardNavigation(visibleItems.map((item) => item.id));
+  const selectedItem =
+    selectedIndex >= 0 ? visibleItems[selectedIndex] : undefined;
 
   function setOpen(open: boolean) {
     setIsPanelOpen(open);
@@ -326,8 +334,14 @@ export default function DocumentSearch({
         const boundaryHeight = boundaryRect?.height ?? window.innerHeight;
 
         return {
-          x: Math.max(boundaryX, boundaryX + (boundaryWidth - panelSize.width) / 2),
-          y: Math.max(boundaryY, boundaryY + (boundaryHeight - panelSize.height) / 2),
+          x: Math.max(
+            boundaryX,
+            boundaryX + (boundaryWidth - panelSize.width) / 2,
+          ),
+          y: Math.max(
+            boundaryY,
+            boundaryY + (boundaryHeight - panelSize.height) / 2,
+          ),
         };
       }}
       getBoundaryEl={() => boundaryElement ?? document.documentElement}
@@ -342,7 +356,10 @@ export default function DocumentSearch({
     >
       <FloatingPanelTrigger asChild>
         {trigger ?? (
-          <DocumentSearchButton showShortcut={enableKeyboardShortcut} {...buttonProps}>
+          <DocumentSearchButton
+            showShortcut={enableKeyboardShortcut}
+            {...buttonProps}
+          >
             {buttonText}
           </DocumentSearchButton>
         )}
@@ -372,7 +389,9 @@ export default function DocumentSearch({
         <div className="flex min-h-0 flex-1 flex-col">
           <SearchInput
             activeItemId={
-              selectedItem ? `local-search-result-${selectedItem.id}` : undefined
+              selectedItem
+                ? `local-search-result-${selectedItem.id}`
+                : undefined
             }
             inputRef={inputRef}
             onArrowDown={moveDown}

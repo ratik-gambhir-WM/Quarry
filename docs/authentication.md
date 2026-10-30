@@ -90,9 +90,11 @@ The `/_internal/template-preview` route stays outside the product session guard.
 injected snapshots for Chromium and makes no authenticated API requests. It is not a secret
 bypass and supplies no backend credentials.
 
-## Schema 12 and development reset
+## Schema 13 and development reset
 
-Schema 12 replaces the deal-status CHECK with nine diligence stages. Schema 11 and older
+Schema 13 adds personal notebooks and durable save jobs through a narrowly supported additive
+12 → 13 upgrade that preserves existing accounts/sessions/product/template data. Schema 12
+introduced the deal-status CHECK with nine diligence stages. Schema 11 and older
 layouts require the same explicit reset; no status remapping or credential backfill runs.
 Stop old clients/writers and rebuild/reload matching web and desktop clients after reset.
 
@@ -102,11 +104,13 @@ expiry indexes. Registration commits user and initial session together. SQLite r
 Helix is a recoverable projection, not an identity database.
 
 Deploy the backend and updated web/desktop clients together: old profile-only clients cannot
-authenticate against the new contract. There is no conversion from old profiles to passwords. Normal startup only initializes an empty
-database or validates schema 12; older/newer/forged layouts fail without erasing records. Use the
+authenticate against the new contract. There is no conversion from old profiles to passwords. Normal startup initializes an empty
+database, additively upgrades a validated schema 12, or validates schema 13; other older/newer/forged
+layouts fail without erasing records. See [notebook rollout and recovery](notebook-api.md#additive-schema-12--13-and-recovery)
+for backup, drained rollout and binary/backup rollback requirements. Use the
 explicit offline `reset_development --discard <absolute-disposable-database-path>` binary after
 stopping producers. Reset discards all dependent product and embedded template records together,
-including sessions, chats, blobs, previews, classification/embeddings and memberships. It is never
+including sessions, chats, blobs, notebooks/folders/notes/jobs/cleanup, previews, classification/embeddings and memberships. It is never
 called automatically at startup. New data survives normal restart.
 
 The single canonical local pair is `backend/data/quarry.sqlite3` and the launcher-managed

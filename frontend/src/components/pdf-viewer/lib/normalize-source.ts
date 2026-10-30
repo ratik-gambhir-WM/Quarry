@@ -9,9 +9,7 @@ import type { PdfSource } from "../types";
  * We unify all of those into something the <Document file={...}> prop accepts.
  */
 export type NormalizedPdfSource =
-  | string
-  | { data: Uint8Array | ArrayBuffer }
-  | Blob;
+  string | { data: Uint8Array | ArrayBuffer } | Blob;
 
 export function normalizeSource(
   input: PdfSource | null | undefined,
@@ -28,8 +26,7 @@ export function normalizeSource(
 
 export function isPdfFile(file: File): boolean {
   return (
-    file.type === "application/pdf" ||
-    file.name.toLowerCase().endsWith(".pdf")
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
   );
 }
 

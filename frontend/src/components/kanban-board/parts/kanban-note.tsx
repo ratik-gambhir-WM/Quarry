@@ -6,7 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DEFAULT_PALETTE, findSwatch, swatchCssColor } from "../lib/palette";
-import type { KanbanCardRenderer, KanbanNoteData, KanbanRenderContext } from "../types";
+import type {
+  KanbanCardRenderer,
+  KanbanNoteData,
+  KanbanRenderContext,
+} from "../types";
 
 // `data.color` keys into the kanban palette (KanbanNoteData.color); default
 // "amber" preserves the v0.1 visual (amber-tinted note) but via the swatch's
@@ -24,7 +28,10 @@ export function KanbanNoteView({
   data: KanbanNoteData;
   ctx: KanbanRenderContext;
 }) {
-  const swatch = findSwatch(DEFAULT_PALETTE, data.color ?? NOTE_FALLBACK_COLOR_ID);
+  const swatch = findSwatch(
+    DEFAULT_PALETTE,
+    data.color ?? NOTE_FALLBACK_COLOR_ID,
+  );
   const accentColor = swatchCssColor(swatch);
   return (
     <div
@@ -40,7 +47,9 @@ export function KanbanNoteView({
         {data.title}
       </span>
       {data.body ? (
-        <p className="text-xs leading-relaxed text-foreground/80">{data.body}</p>
+        <p className="text-xs leading-relaxed text-foreground/80">
+          {data.body}
+        </p>
       ) : null}
     </div>
   );
@@ -57,7 +66,10 @@ function KanbanNoteEditForm({
 }) {
   const [title, setTitle] = useState(data.title);
   const [body, setBody] = useState(data.body ?? "");
-  const swatch = findSwatch(DEFAULT_PALETTE, data.color ?? NOTE_FALLBACK_COLOR_ID);
+  const swatch = findSwatch(
+    DEFAULT_PALETTE,
+    data.color ?? NOTE_FALLBACK_COLOR_ID,
+  );
   const accentColor = swatchCssColor(swatch);
 
   function handleSave() {

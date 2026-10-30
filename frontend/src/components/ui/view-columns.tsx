@@ -58,7 +58,7 @@ const ViewColumnsIcon = forwardRef<ViewColumnsIconHandle, ViewColumnsIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
@@ -69,7 +69,7 @@ const ViewColumnsIcon = forwardRef<ViewColumnsIconHandle, ViewColumnsIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -104,7 +104,7 @@ const ViewColumnsIcon = forwardRef<ViewColumnsIconHandle, ViewColumnsIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 ViewColumnsIcon.displayName = "ViewColumnsIcon";

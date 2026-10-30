@@ -9,7 +9,9 @@ const { listDealDataRoom, listDealDocuments } = vi.hoisted(() => ({
   listDealDocuments: vi.fn(),
 }));
 
-vi.mock("@quarry/runtime", () => ({ runtime: { api: { listDealDataRoom, listDealDocuments } } }));
+vi.mock("@quarry/runtime", () => ({
+  runtime: { api: { listDealDataRoom, listDealDocuments } },
+}));
 
 afterEach(cleanup);
 
@@ -21,16 +23,28 @@ describe("useDataRoomContents", () => {
       dealId: "deal-1",
       rootName: "Data Room",
       rootPath: "/synthetic/deal-1",
-      tree: [{ id: "local:file.pdf", kind: "pdf", name: "file.pdf", relativePath: "file.pdf" }],
+      tree: [
+        {
+          id: "local:file.pdf",
+          kind: "pdf",
+          name: "file.pdf",
+          relativePath: "file.pdf",
+        },
+      ],
     });
-    listDealDocuments.mockResolvedValue([{ displayName: "saved.xlsx", fileId: "stored-1" }]);
+    listDealDocuments.mockResolvedValue([
+      { displayName: "saved.xlsx", fileId: "stored-1" },
+    ]);
   });
 
   it("merges stored documents before local nodes and refreshes stored data independently", async () => {
     const { result } = renderHook(() => useDataRoomContents("deal-1"));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.explorerNodes.map((node) => node.id)).toEqual(["stored-documents", "local:file.pdf"]);
+    expect(result.current.explorerNodes.map((node) => node.id)).toEqual([
+      "stored-documents",
+      "local:file.pdf",
+    ]);
     expect(result.current.reviewFiles).toHaveLength(2);
     expect(result.current.rootPath).toBe("/synthetic/deal-1");
 
@@ -40,7 +54,9 @@ describe("useDataRoomContents", () => {
   });
 
   it("normalizes an unconfigured local root without hiding stored documents", async () => {
-    listDealDataRoom.mockRejectedValue(new Error("no local data-room root is configured"));
+    listDealDataRoom.mockRejectedValue(
+      new Error("no local data-room root is configured"),
+    );
     const { result } = renderHook(() => useDataRoomContents("deal-1"));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -49,11 +65,15 @@ describe("useDataRoomContents", () => {
   });
 
   it("preserves the aggregate unavailable state when either source fails", async () => {
-    listDealDocuments.mockRejectedValue(new Error("Stored documents unavailable"));
+    listDealDocuments.mockRejectedValue(
+      new Error("Stored documents unavailable"),
+    );
     const { result } = renderHook(() => useDataRoomContents("deal-1"));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.isUnavailable).toBe(true);
-    expect(result.current.errorMessage).toContain("Stored documents unavailable");
+    expect(result.current.errorMessage).toContain(
+      "Stored documents unavailable",
+    );
   });
 });

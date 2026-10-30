@@ -1,9 +1,20 @@
+import { createNotebookApi } from "./notebookApi";
+import { subscribeNotebookSse } from "./notebookSse";
 import { sessionStore } from "../auth/sessionStore";
 import { authFetch } from "./authFetch";
-import type { Company, CompanyInput, CompanyPage, CompanySearch, DealFields } from "../data/dealModel";
+import type {
+  Company,
+  CompanyInput,
+  CompanyPage,
+  CompanySearch,
+  DealFields,
+} from "../data/dealModel";
 import type { AssistantThreadListOptions } from "../contracts/quarryApi";
 import type {
-  LoginInput, RegisterInput, SessionResponse, CurrentUserResponse,
+  LoginInput,
+  RegisterInput,
+  SessionResponse,
+  CurrentUserResponse,
   AssistantThread,
   AssistantThreadDetail,
   AssistantThreadPage,
@@ -38,7 +49,10 @@ import type {
   SaveDealResponse,
   SavedDeal,
 } from "../data/dealExtraction";
-import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
+import type {
+  DealDataRoom,
+  DocumentPreviewResponse,
+} from "../data/dataRoomPreview";
 import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 import {
   beginApiRequest,
@@ -47,7 +61,10 @@ import {
   summarizeFormData,
 } from "../lib/activityLog";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
+  /\/$/,
+  "",
+);
 
 validateApiBaseUrl(API_BASE_URL);
 
@@ -62,8 +79,14 @@ export class BackendApiError extends Error {
 }
 
 function apiUrl(path: string) {
-  if (import.meta.env.MODE === "desktop" && !import.meta.env.DEV && !API_BASE_URL) {
-    throw new Error("VITE_API_BASE_URL is required for packaged desktop builds.");
+  if (
+    import.meta.env.MODE === "desktop" &&
+    !import.meta.env.DEV &&
+    !API_BASE_URL
+  ) {
+    throw new Error(
+      "VITE_API_BASE_URL is required for packaged desktop builds.",
+    );
   }
 
   return `${API_BASE_URL}${path}`;
@@ -80,11 +103,14 @@ function validateApiBaseUrl(baseUrl: string) {
   } catch {
     throw new Error("VITE_API_BASE_URL must be an absolute URL.");
   }
-  const localDevelopmentUrl = import.meta.env.DEV
-    && parsed.protocol === "http:"
-    && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+  const localDevelopmentUrl =
+    import.meta.env.DEV &&
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
   if (parsed.protocol !== "https:" && !localDevelopmentUrl) {
-    throw new Error("VITE_API_BASE_URL must use HTTPS outside local development.");
+    throw new Error(
+      "VITE_API_BASE_URL must use HTTPS outside local development.",
+    );
   }
 }
 
@@ -96,7 +122,11 @@ async function requestJson<TResponse>(
 ) {
   const url = apiUrl(path);
   const method = init?.method ?? "GET";
-  const requestId = beginApiRequest({ method, request: requestDetails, url });
+  const requestId = beginApiRequest({
+    method,
+    request: requestDetails,
+    url: logResponseBody ? url : url.split("?")[0],
+  });
   const startedAt = performance.now();
 
   try {
@@ -113,9 +143,12 @@ async function requestJson<TResponse>(
     }
 
     if (!response.ok) {
-      const errorBody = body as { error?: string; message?: string } | undefined;
+      const errorBody = body as
+        { error?: string; message?: string } | undefined;
       const message =
-        (typeof errorBody === "object" ? errorBody?.error ?? errorBody?.message : bodyText) ||
+        (typeof errorBody === "object"
+          ? (errorBody?.error ?? errorBody?.message)
+          : bodyText) ||
         response.statusText ||
         `Request failed with status ${response.status}`;
 
@@ -141,7 +174,8 @@ async function requestJson<TResponse>(
       finishApiRequest(requestId, {
         details: error,
         durationMs: performance.now() - startedAt,
-        message: error instanceof Error ? error.message : "Network request failed",
+        message:
+          error instanceof Error ? error.message : "Network request failed",
         status: "error",
       });
     }
@@ -165,7 +199,10 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
         body = undefined;
       }
       const message =
-        body?.error || body?.message || bodyText || response.statusText ||
+        body?.error ||
+        body?.message ||
+        bodyText ||
+        response.statusText ||
         `Request failed with status ${response.status}`;
       finishApiRequest(requestId, {
         details: body ?? bodyText,
@@ -177,9 +214,14 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
       throw new BackendApiError(message, response.status);
     }
 
-    const mimeType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+    const mimeType = response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      .trim();
     if (mimeType !== "application/pdf") {
-      throw new Error(`The preview backend returned ${mimeType || "an unknown content type"}.`);
+      throw new Error(
+        `The preview backend returned ${mimeType || "an unknown content type"}.`,
+      );
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
     finishApiRequest(requestId, {
@@ -194,7 +236,8 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
       finishApiRequest(requestId, {
         details: error,
         durationMs: performance.now() - startedAt,
-        message: error instanceof Error ? error.message : "Network request failed",
+        message:
+          error instanceof Error ? error.message : "Network request failed",
         status: "error",
       });
     }
@@ -232,8 +275,12 @@ async function exportPowerPoint(
       } catch {
         body = undefined;
       }
-      const message = body?.error || body?.message || bodyText || response.statusText
-        || `Request failed with status ${response.status}`;
+      const message =
+        body?.error ||
+        body?.message ||
+        bodyText ||
+        response.statusText ||
+        `Request failed with status ${response.status}`;
       finishApiRequest(requestId, {
         durationMs: performance.now() - startedAt,
         httpStatus: response.status,
@@ -243,11 +290,18 @@ async function exportPowerPoint(
       throw new BackendApiError(message, response.status);
     }
 
-    const mimeType = response.headers.get("content-type")?.split(";", 1)[0].trim();
+    const mimeType = response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      .trim();
     if (mimeType !== POWERPOINT_CONTENT_TYPE) {
-      throw new Error("The export backend returned an invalid PowerPoint content type.");
+      throw new Error(
+        "The export backend returned an invalid PowerPoint content type.",
+      );
     }
-    const fileName = parsePowerPointFileName(response.headers.get("content-disposition"));
+    const fileName = parsePowerPointFileName(
+      response.headers.get("content-disposition"),
+    );
     const warningCount = parsePowerPointWarningCount(
       response.headers.get("x-powerpoint-warning-count"),
     );
@@ -255,22 +309,28 @@ async function exportPowerPoint(
     if (declaredLength) {
       const length = Number(declaredLength);
       if (!/^\d+$/.test(declaredLength) || !Number.isSafeInteger(length)) {
-        throw new Error("The export backend returned an invalid PowerPoint size.");
+        throw new Error(
+          "The export backend returned an invalid PowerPoint size.",
+        );
       }
       if (length > MAX_POWERPOINT_EXPORT_BYTES) {
-        throw new Error("The export backend returned an oversized PowerPoint file.");
+        throw new Error(
+          "The export backend returned an oversized PowerPoint file.",
+        );
       }
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (
-      bytes.byteLength === 0
-      || bytes.byteLength > MAX_POWERPOINT_EXPORT_BYTES
-      || bytes[0] !== 0x50
-      || bytes[1] !== 0x4b
-      || bytes[2] !== 0x03
-      || bytes[3] !== 0x04
+      bytes.byteLength === 0 ||
+      bytes.byteLength > MAX_POWERPOINT_EXPORT_BYTES ||
+      bytes[0] !== 0x50 ||
+      bytes[1] !== 0x4b ||
+      bytes[2] !== 0x03 ||
+      bytes[3] !== 0x04
     ) {
-      throw new Error("The export backend returned invalid or oversized PowerPoint bytes.");
+      throw new Error(
+        "The export backend returned invalid or oversized PowerPoint bytes.",
+      );
     }
     const dataBase64 = bytesToBase64(bytes);
     finishApiRequest(requestId, {
@@ -279,12 +339,18 @@ async function exportPowerPoint(
       httpStatus: response.status,
       status: "success",
     });
-    return { dataBase64, fileName, mimeType: POWERPOINT_CONTENT_TYPE, warningCount };
+    return {
+      dataBase64,
+      fileName,
+      mimeType: POWERPOINT_CONTENT_TYPE,
+      warningCount,
+    };
   } catch (error) {
     if (!(error instanceof BackendApiError)) {
       finishApiRequest(requestId, {
         durationMs: performance.now() - startedAt,
-        message: error instanceof Error ? error.message : "Network request failed",
+        message:
+          error instanceof Error ? error.message : "Network request failed",
         status: "error",
       });
     }
@@ -295,7 +361,9 @@ async function exportPowerPoint(
 function parsePowerPointFileName(value: string | null) {
   const match = value?.match(/^attachment; filename="([^"\\/\r\n]+\.pptx)"$/i);
   if (!match || match[1].length > 255 || match[1].trim() !== match[1]) {
-    throw new Error("The export backend returned an invalid PowerPoint filename.");
+    throw new Error(
+      "The export backend returned an invalid PowerPoint filename.",
+    );
   }
   return match[1];
 }
@@ -315,7 +383,9 @@ function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
   const chunkSize = 32_768;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
   }
   return btoa(binary);
 }
@@ -328,30 +398,54 @@ async function post<TResponse, TPayload>(
   path: string,
   payload: TPayload,
 ): Promise<TResponse> {
-  return requestJson<TResponse>(path, {
-    body: JSON.stringify(payload),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  }, payload);
+  return requestJson<TResponse>(
+    path,
+    {
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+    payload,
+  );
 }
 
-async function postForm<TResponse>(path: string, formData: FormData): Promise<TResponse> {
-  return requestJson<TResponse>(path, {
-    body: formData,
-    method: "POST",
-  }, summarizeFormData(formData));
+async function postForm<TResponse>(
+  path: string,
+  formData: FormData,
+): Promise<TResponse> {
+  return requestJson<TResponse>(
+    path,
+    {
+      body: formData,
+      method: "POST",
+    },
+    summarizeFormData(formData),
+  );
 }
 
-function createCompany(input: CompanyInput) { return post<Company, CompanyInput>("/api/v1/companies", input); }
-function updateCompany(id: string, input: CompanyInput) { return post<Company, CompanyInput>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input); }
+function createCompany(input: CompanyInput) {
+  return post<Company, CompanyInput>("/api/v1/companies", input);
+}
+function updateCompany(id: string, input: CompanyInput) {
+  return post<Company, CompanyInput>(
+    `/api/v1/companies/${encodeURIComponent(id)}/update`,
+    input,
+  );
+}
 function listCompanies(options: CompanySearch = {}) {
   const params = new URLSearchParams();
   if (options.query !== undefined) params.set("query", options.query);
   if (options.limit !== undefined) params.set("limit", String(options.limit));
-  if (options.offset !== undefined) params.set("offset", String(options.offset));
+  if (options.offset !== undefined)
+    params.set("offset", String(options.offset));
   return get<CompanyPage>(`/api/v1/companies?${params}`);
 }
-function updateDeal(id: string, input: DealFields) { return post<SaveDealResponse, DealFields>(`/api/v1/deals/${encodeURIComponent(id)}/update`, input); }
+function updateDeal(id: string, input: DealFields) {
+  return post<SaveDealResponse, DealFields>(
+    `/api/v1/deals/${encodeURIComponent(id)}/update`,
+    input,
+  );
+}
 
 function createDeal(input: SaveDealInput) {
   return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
@@ -451,7 +545,8 @@ function processDocuments(dealId: string, files: File[]) {
 async function startProcessFile(dealId: string, file: File) {
   const generation = sessionStore.getSnapshot().generation;
   const bytes = await file.arrayBuffer();
-  if (generation !== sessionStore.getSnapshot().generation) throw new DOMException("Session changed", "AbortError");
+  if (generation !== sessionStore.getSnapshot().generation)
+    throw new DOMException("Session changed", "AbortError");
   const byteFile = new File([bytes], file.name, {
     lastModified: file.lastModified,
     type: file.type,
@@ -468,42 +563,85 @@ function subscribeToProcessFileJob(
   jobId: string,
   { onConnectionError, onEvent }: ProcessFileJobEventHandlers,
 ) {
-  const url = apiUrl(`/api/v1/documents/process_file/${encodeURIComponent(jobId)}/events`);
+  const url = apiUrl(
+    `/api/v1/documents/process_file/${encodeURIComponent(jobId)}/events`,
+  );
   const controller = new AbortController();
   let active = true;
   let terminal = false;
   void (async () => {
-    const response = await authFetch(url, { headers: { Accept: "text/event-stream" }, signal: controller.signal });
-    if (!response.ok || !response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) throw new Error("Unable to connect to processing stream.");
+    const response = await authFetch(url, {
+      headers: { Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    if (
+      !response.ok ||
+      !response.body ||
+      !response.headers.get("content-type")?.startsWith("text/event-stream")
+    )
+      throw new Error("Unable to connect to processing stream.");
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let buffer = "";
     try {
       while (active && !terminal) {
         const chunk = await reader.read();
-        if (chunk.done) { buffer += decoder.decode(); break; }
+        if (chunk.done) {
+          buffer += decoder.decode();
+          break;
+        }
         buffer += decoder.decode(chunk.value, { stream: true });
-        if (buffer.length > 1_048_576) throw new Error("Processing event exceeds size limit.");
+        if (buffer.length > 1_048_576)
+          throw new Error("Processing event exceeds size limit.");
         let boundary: RegExpExecArray | null;
         while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
-          const frame = buffer.slice(0, boundary.index); buffer = buffer.slice(boundary.index + boundary[0].length);
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
           const lines = frame.split(/\r?\n/);
-          const name = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
-          const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+          const name = lines
+            .find((line) => line.startsWith("event:"))
+            ?.slice(6)
+            .trim();
+          const data = lines
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
           if (!data && !name) continue;
-          if (!name || !["processing", "completed", "skipped", "failed"].includes(name)) throw new Error("Invalid processing event.");
+          if (
+            !name ||
+            !["processing", "completed", "skipped", "failed"].includes(name)
+          )
+            throw new Error("Invalid processing event.");
           const parsed: unknown = JSON.parse(data);
-          if (typeof parsed !== "object" || !parsed || !("jobId" in parsed) || parsed.jobId !== jobId || !("status" in parsed) || parsed.status !== name || !("filename" in parsed) || typeof parsed.filename !== "string") throw new Error("Invalid processing event.");
+          if (
+            typeof parsed !== "object" ||
+            !parsed ||
+            !("jobId" in parsed) ||
+            parsed.jobId !== jobId ||
+            !("status" in parsed) ||
+            parsed.status !== name ||
+            !("filename" in parsed) ||
+            typeof parsed.filename !== "string"
+          )
+            throw new Error("Invalid processing event.");
           if (active) onEvent(parsed as ProcessFileJobEvent);
           terminal = name !== "processing";
           if (terminal) break;
         }
       }
-      if (!terminal && active) throw new Error("Processing stream ended unexpectedly.");
-    } finally { await reader.cancel(); }
-  })().catch(() => { if (active && !terminal && !controller.signal.aborted) onConnectionError?.(); });
-  return () => { active = false; controller.abort(); };
-
+      if (!terminal && active)
+        throw new Error("Processing stream ended unexpectedly.");
+    } finally {
+      await reader.cancel();
+    }
+  })().catch(() => {
+    if (active && !terminal && !controller.signal.aborted)
+      onConnectionError?.();
+  });
+  return () => {
+    active = false;
+    controller.abort();
+  };
 }
 
 function searchDocumentChunksByVector(search: FileChunkVectorSearch) {
@@ -520,7 +658,6 @@ function searchDocumentChunksByKeyword(search: FileChunkKeywordSearch) {
   );
 }
 
-
 function summarizeUpload(files: File[]) {
   const form = new FormData();
   appendFiles(form, files);
@@ -530,7 +667,9 @@ function summarizeUpload(files: File[]) {
 }
 
 function listDealDataRoom(dealId: string) {
-  return get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`);
+  return get<DealDataRoom>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/data-room`,
+  );
 }
 
 function previewDealDocument(dealId: string, relativePath: string) {
@@ -549,12 +688,17 @@ function queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
     form.append("systemInstructions", input.systemInstructions);
   }
   for (const file of input.files) form.append("files", file, file.name);
-  return streamQuery("/api/v1/query_model", form, {
-    contextMessageCount: input.context.length,
-    fileCount: input.files.length,
-    fileBytes: input.files.reduce((total, file) => total + file.size, 0),
-    model: input.model,
-  }, handlers);
+  return streamQuery(
+    "/api/v1/query_model",
+    form,
+    {
+      contextMessageCount: input.context.length,
+      fileCount: input.files.length,
+      fileBytes: input.files.reduce((total, file) => total + file.size, 0),
+      model: input.model,
+    },
+    handlers,
+  );
 }
 
 function runAssistantThread(
@@ -566,7 +710,8 @@ function runAssistantThread(
   form.append("userMessageId", input.userMessageId);
   form.append("assistantMessageId", input.assistantMessageId);
   form.append("requestId", input.requestId);
-  if (input.parentMessageId !== undefined) form.append("parentMessageId", input.parentMessageId);
+  if (input.parentMessageId !== undefined)
+    form.append("parentMessageId", input.parentMessageId);
   if (input.model !== undefined) form.append("model", input.model);
   if (input.systemInstructions !== undefined) {
     form.append("systemInstructions", input.systemInstructions);
@@ -599,7 +744,11 @@ function streamQuery(
     request: requestDetails,
     url,
   });
-  console.info("[chat] http.stream.started", { path, requestId, requestDetails });
+  console.info("[chat] http.stream.started", {
+    path,
+    requestId,
+    requestDetails,
+  });
   let active = true;
   let settled = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -614,7 +763,12 @@ function streamQuery(
     settled = true;
     active = false;
     stopStream();
-    console.error("[chat] http.stream.failed", { httpStatus, message, path, requestId });
+    console.error("[chat] http.stream.failed", {
+      httpStatus,
+      message,
+      path,
+      requestId,
+    });
     finishApiRequest(requestId, {
       durationMs: performance.now() - startedAt,
       httpStatus,
@@ -633,21 +787,36 @@ function streamQuery(
         signal: controller.signal,
       });
       if (!response.ok) {
-        failConnection(`The query request failed with status ${response.status}.`, response.status);
+        failConnection(
+          `The query request failed with status ${response.status}.`,
+          response.status,
+        );
         return;
       }
-      const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim();
-      console.info("[chat] http.stream.connected", { contentType, path, requestId, status: response.status });
+      const contentType = response.headers
+        .get("content-type")
+        ?.split(";", 1)[0]
+        .trim();
+      console.info("[chat] http.stream.connected", {
+        contentType,
+        path,
+        requestId,
+        status: response.status,
+      });
       if (contentType !== "text/event-stream" || !response.body) {
-        failConnection("The query backend returned an invalid streaming response.", response.status);
+        failConnection(
+          "The query backend returned an invalid streaming response.",
+          response.status,
+        );
         return;
       }
       const parser = new QuerySseParser((event) => {
         if (!active || settled) return;
         logSseEvent({
-          data: event.type === "delta"
-            ? { characterCount: [...event.delta].length }
-            : { type: event.type },
+          data:
+            event.type === "delta"
+              ? { characterCount: [...event.delta].length }
+              : { type: event.type },
           eventName: event.type,
           status: event.type === "failed" ? "error" : "success",
           title: `Query ${event.type} event`,
@@ -657,9 +826,12 @@ function streamQuery(
           event: event.type,
           path,
           requestId,
-          valueCharacters: event.type === "delta"
-            ? [...event.delta].length
-            : event.type === "completed" ? [...event.response].length : undefined,
+          valueCharacters:
+            event.type === "delta"
+              ? [...event.delta].length
+              : event.type === "completed"
+                ? [...event.response].length
+                : undefined,
         });
         onEvent(event);
         if (event.type === "completed" || event.type === "failed") {
@@ -682,8 +854,15 @@ function streamQuery(
       if (active) parser.finish();
     } catch (error) {
       console.error("[chat] http.stream.exception", { error, path, requestId });
-      if (!active && error instanceof DOMException && error.name === "AbortError") return;
-      failConnection(error instanceof Error ? error.message : "The query connection failed.");
+      if (
+        !active &&
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      )
+        return;
+      failConnection(
+        error instanceof Error ? error.message : "The query connection failed.",
+      );
     }
   })();
 
@@ -706,28 +885,29 @@ function assistantThreadPath(threadId: string, suffix = "") {
   return `/api/v1/assistant/threads/${encodeURIComponent(threadId)}${suffix}`;
 }
 
-function listAssistantThreads(
-  options: AssistantThreadListOptions = {},
-) {
+function listAssistantThreads(options: AssistantThreadListOptions = {}) {
   const parameters = new URLSearchParams();
   if (options.after) parameters.set("before", options.after);
   if (options.archived) parameters.set("archived", "true");
   if (options.scope) parameters.set("scope", options.scope);
   if (options.dealId) parameters.set("dealId", options.dealId);
-  return get<AssistantThreadPage>(`/api/v1/assistant/threads?${parameters.toString()}`);
+  return get<AssistantThreadPage>(
+    `/api/v1/assistant/threads?${parameters.toString()}`,
+  );
 }
 
 function createAssistantThread(threadId?: string, dealId?: string | null) {
   return post<AssistantThread, { threadId?: string; dealId?: string | null }>(
     "/api/v1/assistant/threads",
-    { ...(threadId ? { threadId } : {}), ...(dealId !== undefined ? { dealId } : {}) },
+    {
+      ...(threadId ? { threadId } : {}),
+      ...(dealId !== undefined ? { dealId } : {}),
+    },
   );
 }
 
 function getAssistantThread(threadId: string) {
-  return get<AssistantThreadDetail>(
-    `${assistantThreadPath(threadId)}`,
-  );
+  return get<AssistantThreadDetail>(`${assistantThreadPath(threadId)}`);
 }
 
 function renameAssistantThread(threadId: string, title: string) {
@@ -745,10 +925,9 @@ function setAssistantThreadArchived(threadId: string, archived: boolean) {
 }
 
 function deleteAssistantThread(threadId: string) {
-  return requestJson<void>(
-    `${assistantThreadPath(threadId)}`,
-    { method: "DELETE" },
-  );
+  return requestJson<void>(`${assistantThreadPath(threadId)}`, {
+    method: "DELETE",
+  });
 }
 
 function appendFiles(form: FormData, files: File[]) {
@@ -759,6 +938,29 @@ function appendFiles(form: FormData, files: File[]) {
 }
 
 export const httpQuarryApi: QuarryApi = {
+  ...createNotebookApi({
+    request: <T>(
+      method: "GET" | "POST" | "PATCH" | "DELETE",
+      path: string,
+      body?: unknown,
+    ) =>
+      requestJson<T>(
+        path,
+        {
+          method,
+          ...(body === undefined
+            ? {}
+            : {
+                body: JSON.stringify(body),
+                headers: { "Content-Type": "application/json" },
+              }),
+        },
+        undefined,
+        false,
+      ),
+    subscribe: (n, j, handlers) =>
+      subscribeNotebookSse(API_BASE_URL, n, j, handlers),
+  }),
   archiveAssistantThread: (threadId) =>
     setAssistantThreadArchived(threadId, true),
   archiveDeal,
@@ -768,10 +970,42 @@ export const httpQuarryApi: QuarryApi = {
   createCompany,
   updateCompany,
   listCompanies,
-  login: (input: LoginInput) => requestJson<SessionResponse>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, undefined, false),
-  register: (input: RegisterInput) => requestJson<SessionResponse>("/api/v1/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }, undefined, false),
-  currentUser: () => requestJson<CurrentUserResponse>("/api/v1/auth/me", undefined, undefined, false),
-  logout: () => requestJson<void>("/api/v1/auth/logout", { method: "POST" }, undefined, false),
+  login: (input: LoginInput) =>
+    requestJson<SessionResponse>(
+      "/api/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+      undefined,
+      false,
+    ),
+  register: (input: RegisterInput) =>
+    requestJson<SessionResponse>(
+      "/api/v1/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+      undefined,
+      false,
+    ),
+  currentUser: () =>
+    requestJson<CurrentUserResponse>(
+      "/api/v1/auth/me",
+      undefined,
+      undefined,
+      false,
+    ),
+  logout: () =>
+    requestJson<void>(
+      "/api/v1/auth/logout",
+      { method: "POST" },
+      undefined,
+      false,
+    ),
   deleteAssistantThread,
   deleteTemplate,
   exportPowerPoint,

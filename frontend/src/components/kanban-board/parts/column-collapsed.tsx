@@ -52,7 +52,9 @@ export function ColumnCollapsed({
           {column.title}
         </span>
       </div>
-      <span className="text-[10px] tabular-nums text-muted-foreground">{column.items.length}</span>
+      <span className="text-[10px] tabular-nums text-muted-foreground">
+        {column.items.length}
+      </span>
     </div>
   );
 }

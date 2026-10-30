@@ -17,7 +17,9 @@ const pieces = [
   { rotation: 45, x: 7, y: 41 },
 ];
 
-export function WestMonroeMark({ className = "h-14 w-14" }: WestMonroeMarkProps) {
+export function WestMonroeMark({
+  className = "h-14 w-14",
+}: WestMonroeMarkProps) {
   return (
     <svg
       aria-hidden="true"
@@ -30,7 +32,11 @@ export function WestMonroeMark({ className = "h-14 w-14" }: WestMonroeMarkProps)
           height={squareSize}
           key={`${piece.x}-${piece.y}`}
           rx={radius}
-          transform={piece.rotation ? `rotate(${piece.rotation} ${piece.x + squareSize / 2} ${piece.y + squareSize / 2})` : undefined}
+          transform={
+            piece.rotation
+              ? `rotate(${piece.rotation} ${piece.x + squareSize / 2} ${piece.y + squareSize / 2})`
+              : undefined
+          }
           width={squareSize}
           x={piece.x}
           y={piece.y}

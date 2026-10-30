@@ -71,7 +71,7 @@ capabilities each domain receives and merges already-state-bound feature routers
 | `workflow` | Durable tasks, approvals, and workflow execution | Reserved; there is no durable queue or workflow engine |
 | `deliverables` | Generated/user-managed deal artifacts and provenance | Reserved; current completed/in-progress UI has no backing API |
 | `vaults` | Durable knowledge collections and access rules | Reserved; current vault screens are presentation/staging experiences |
-| `notebooks` | Personal note UI; source links and organization remain proposed | Session-only frontend drafts; no persisted notebook model or API |
+| `notebooks` | Owner-scoped notebooks, folders, native notes, durable save jobs and Helix projection | Durable API, both transports and explicit-save editor; folder UI deferred |
 | `unified_search` | Authorized cross-domain search composition | Reserved; implemented search is document-chunk search only |
 | `assistant` | Conversations, messages, citations, and interaction orchestration | Reserved; no assistant conversation API or durable thread model |
 | `activity` | Durable product activity history | Reserved; frontend activity logs are session-local and separate |
@@ -232,7 +232,7 @@ working stages and Closed; Pipeline and Pencils Down permit incomplete parties. 
 stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
 independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
 
-Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-12-and-development-reset).
+Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-13-and-development-reset).
 
 ### 4.3 Logical file aggregate
 
@@ -356,20 +356,44 @@ and search results may combine server data with explicit frontend fixtures. They
 models, not automatically canonical backend entities. Fixture-backed findings, metrics, tasks,
 timeline entries, and search excerpts must not be documented or treated as persisted facts.
 
-### 7.6 Notebook UI drafts
+### 7.6 Notebook edit buffers and saves
 
-The Notebook UI currently holds user-created drafts in frontend module memory for the active
+The Notebook UI holds local edit buffers in frontend module memory for the active
 authentication session. Each draft has a UUID, title, native restricted-schema BlockNote blocks,
 `contentSchemaVersion: 1`, and creation/edit timestamps. The URL selects a draft; changing routes
 retains it, while reload and authentication changes clear it. Search filters all session titles.
-There is no persisted owner/revision contract, note API, autosave, or collaboration model yet.
-The UI labels this lifetime explicitly; it is not canonical product storage.
+Explicit Save chooses/creates a notebook for a new note and later PATCHes the same server note
+with its revision. Saved-note summaries load after sign-in and full native blocks load on selection.
+A session-scoped external store tracks immutable operation snapshots, jobs, revisions and content
+acknowledgements. Completion marks only that submitted snapshot Saved; newer edits remain unsaved.
+An uncertain response reuses its operation ID or reconciles status, while indexing retry resumes
+the same job. A loaded canonical note is labelled Stored on server until a completed save confirms
+indexing. Conflicts require an explicit reload; saved-note deletion is server-backed. The edit buffer
+is not canonical storage; only saved content survives reload/sign-out. Autosave and collaboration
+remain absent.
+
+### 7.7 Durable notebook aggregate
+
+`notebooks.user_id` is the ownership authority. A notebook may reference one same-owner deal or
+stand alone; multiple notebooks may share a deal link. Folders have one notebook and no parent.
+Notes require one notebook and may reference a folder in that notebook, enforced by a deferred
+composite FK. Notes store native BlockNote blocks/schema version, title, immutable IDs and audit
+times, plus a JS-safe revision. Every save/move increments revision. Folder deletion preserves
+content by relocating notes to root and incrementing revisions; notebook deletion cascades.
+
+`notebook_save_jobs` stores actor-scoped operation IDs/request hashes, immutable accepted input,
+committed revision, pinned pipeline fingerprint, state/stage, attempt/sequence, leases and sanitized
+terminal outcomes. A completed save confirms both SQLite and a published Helix revision. Failed
+indexing retains canonical content and supports retry without reapplying the mutation. Independent
+`notebook_cleanup` tombstones survive parent cascades and drive recoverable physical graph cleanup.
+Helix's notebook revision/chunk labels are separate from document and template projections. There
+is no notebook search integration yet. See [notebook API and recovery](notebook-api.md).
 
 ## 8. State ownership by durability
 
 | Class | Current examples | Owner | Lifetime/recovery |
 | --- | --- | --- | --- |
-| Canonical durable state | Users, deals, metadata, files, versions, blobs | SQLite through owning domain repositories | Survives restart; subject to current schema migration policy |
+| Canonical durable state | Users, deals, metadata, files, versions, blobs, notebooks/folders/notes/save jobs | SQLite through owning domain repositories | Survives restart; subject to current schema migration policy |
 | Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from SQLite, but general tooling is missing |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
 | Legacy service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
@@ -392,7 +416,7 @@ The UI labels this lifetime explicitly; it is not canonical product storage.
 - Document jobs, workflow-like processing, caches, and locks are not durable or distributed.
 - Local paths and SharePoint links describe mutually exclusive deal sources, but only local
   filesystem browsing is active; SharePoint import is not wired.
-- Diligence questions/findings/evidence, deliverables, notebooks, vaults, assistant conversations,
+- Diligence questions/findings/evidence, deliverables, vaults, assistant conversations,
   notifications, and durable activity have reserved owners but no canonical backend models.
 - `reminders` and `app_metadata` tables have no current domain consumer and should not be expanded
   until ownership is decided.

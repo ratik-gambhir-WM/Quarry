@@ -17,7 +17,10 @@ vi.mock("@/components/chat/QueryChatRuntimeProvider", () => ({
   QueryChatRuntimeProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/components/hub/WorkspaceHomeShell", () => ({
-  WorkspaceHomeShell: ({ children, ...props }: {
+  WorkspaceHomeShell: ({
+    children,
+    ...props
+  }: {
     activeHomeSection?: string;
     children: ReactNode;
     contentMode?: string;
@@ -25,7 +28,12 @@ vi.mock("@/components/hub/WorkspaceHomeShell", () => ({
     sidebarMode?: string;
   }) => {
     shellProps(props);
-    return <>{props.header}{children}</>;
+    return (
+      <>
+        {props.header}
+        {children}
+      </>
+    );
   },
 }));
 
@@ -37,10 +45,12 @@ describe("Assistant", () => {
 
     expect(screen.getByText("Assistant chat")).toBeTruthy();
     expect(screen.getByText("Assistant")).toBeTruthy();
-    expect(shellProps).toHaveBeenCalledWith(expect.objectContaining({
-      activeHomeSection: "assistant",
-      contentMode: "fill",
-      sidebarMode: "assistant",
-    }));
+    expect(shellProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeHomeSection: "assistant",
+        contentMode: "fill",
+        sidebarMode: "assistant",
+      }),
+    );
   });
 });

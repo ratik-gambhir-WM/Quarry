@@ -3,7 +3,12 @@ import type { WorkspaceSidebarTool } from "../../data/workspace";
 import { AssistantWorkspaceSidebar } from "./sidebar/AssistantWorkspaceSidebar";
 import { DealRoomWorkspaceSidebar } from "./sidebar/DealRoomWorkspaceSidebar";
 import { HomeWorkspaceSidebar } from "./sidebar/HomeWorkspaceSidebar";
-import type { ActiveDealSection, ActiveHomeSection, SidebarBaseProps, SidebarMode } from "./sidebar/sidebarTypes";
+import type {
+  ActiveDealSection,
+  ActiveHomeSection,
+  SidebarBaseProps,
+  SidebarMode,
+} from "./sidebar/sidebarTypes";
 
 type WorkspaceSidebarProps = SidebarBaseProps & {
   activeDealId?: string;

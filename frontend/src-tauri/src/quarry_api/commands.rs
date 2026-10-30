@@ -188,3 +188,44 @@ pub async fn cancel_query_stream(
 fn api_error(message: String) -> AppError {
     AppError::validation(message)
 }
+
+#[tauri::command]
+pub async fn quarry_api_patch(
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
+    path: String,
+    body: Value,
+) -> AppResult<Value> {
+    verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .patch(&path, body)
+        .await
+        .map_err(|error| service.api_error(error))
+}
+
+#[tauri::command]
+pub async fn subscribe_notebook_job(
+    subscriptions: State<'_, Arc<QuerySubscriptions>>,
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
+    notebook_id: String,
+    job_id: String,
+    subscription_id: String,
+) -> AppResult<()> {
+    verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
+    let event_window = window.clone();
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    subscriptions
+        .register(subscription_id.clone(), cancel_tx)
+        .map_err(api_error)?;
+    let result = tokio::select! {
+        _ = cancel_rx => Ok(()),
+        result = service.notebook_job_events(&notebook_id,&job_id,&subscription_id,move |payload| event_window.emit("quarry-notebook-job-event",payload).map_err(|_| "notebook event delivery failed".into())) => result.map_err(|error| service.api_error(error)),
+    };
+    subscriptions.remove(&subscription_id);
+    result
+}

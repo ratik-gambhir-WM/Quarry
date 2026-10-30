@@ -43,11 +43,17 @@ export function DocumentSearchResultCard({
       ) : null}
       <span className="min-w-0 flex-1">
         <span className="block font-medium [&_mark]:bg-transparent [&_mark]:text-secondary-foreground [&_mark]:underline [&_mark]:underline-offset-4">
-          <DocumentSearchHighlightedText query={query} text={item.primaryText} />
+          <DocumentSearchHighlightedText
+            query={query}
+            text={item.primaryText}
+          />
         </span>
         {item.secondaryText ? (
           <span className="mt-2 block text-sm text-muted-foreground">
-            <DocumentSearchHighlightedText query={query} text={item.secondaryText} />
+            <DocumentSearchHighlightedText
+              query={query}
+              text={item.secondaryText}
+            />
           </span>
         ) : null}
         {item.tertiaryText ? (

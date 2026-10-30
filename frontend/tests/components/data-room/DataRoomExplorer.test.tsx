@@ -11,7 +11,8 @@ describe("DataRoomExplorer", () => {
   it("places evenly distributed Data Room tools above Saved documents", () => {
     render(
       <MemoryRouter>
-        <DataRoomExplorer dealId="DEAL-000184"
+        <DataRoomExplorer
+          dealId="DEAL-000184"
           dealName="Project Alpha"
           dealRoomPath="/hub/deals/project-alpha"
           documentSearch={{
@@ -35,10 +36,15 @@ describe("DataRoomExplorer", () => {
     );
 
     const tools = screen.getByRole("toolbar", { name: "Data room tools" });
-    const savedDocuments = screen.getByRole("button", { name: "Saved documents" });
+    const savedDocuments = screen.getByRole("button", {
+      name: "Saved documents",
+    });
 
     expect(screen.queryByRole("button", { name: "New analysis" })).toBeNull();
     expect(tools.className).toContain("grid-cols-4");
-    expect(tools.compareDocumentPosition(savedDocuments) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      tools.compareDocumentPosition(savedDocuments) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
   });
 });

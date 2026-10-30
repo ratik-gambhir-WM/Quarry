@@ -1,13 +1,31 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { testCompany, testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
+import {
+  testCompany,
+  testDeal,
+  testMetadata,
+  testParty,
+} from "@/test/fixtures/deals";
 import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
 
-const { createDeal, createCompany, updateCompany, updateDeal, saveDealMetadata, listCompanies } = vi.hoisted(() => ({
+const {
+  createDeal,
+  createCompany,
+  updateCompany,
+  updateDeal,
+  saveDealMetadata,
+  listCompanies,
+} = vi.hoisted(() => ({
   createDeal: vi.fn(),
   createCompany: vi.fn(),
   updateCompany: vi.fn(),
@@ -18,13 +36,22 @@ const { createDeal, createCompany, updateCompany, updateDeal, saveDealMetadata, 
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
-    api: { createDeal, createCompany, updateCompany, updateDeal, saveDealMetadata, listCompanies },
+    api: {
+      createDeal,
+      createCompany,
+      updateCompany,
+      updateDeal,
+      saveDealMetadata,
+      listCompanies,
+    },
     platform: {},
     target: "web",
   },
 }));
 
-vi.mock("@/app/WorkspaceProvider", () => ({ useWorkspace: () => ({ saveDealResult: vi.fn(), saveCompanyResult: vi.fn() }) }));
+vi.mock("@/app/WorkspaceProvider", () => ({
+  useWorkspace: () => ({ saveDealResult: vi.fn(), saveCompanyResult: vi.fn() }),
+}));
 
 afterEach(cleanup);
 
@@ -45,60 +72,140 @@ describe("AddDealModal", () => {
     });
   });
 
-  it.each(["create", "edit"] as const)("blocks deal submission until a %s company draft is cancelled", async (mode) => {
-    const user = userEvent.setup();
-    const company = testCompany("Reusable");
-    listCompanies.mockResolvedValue({ companies: [company], hasMore: false });
-    updateDeal.mockResolvedValue({ deal: savedDeal, metadata: emptyMetadata });
-    const onClose = vi.fn();
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" initialDeal={savedDeal} onClose={onClose} /></MemoryRouter>);
-    await user.click(await screen.findByRole("button", { name: mode === "create" ? "Create company" : "Edit shared company Reusable" }));
-    fireEvent.change(screen.getByLabelText("Company name"), { target: { value: "Unsaved company" } });
-    expect(screen.getByRole("button", { name: "Save deal" }).hasAttribute("disabled")).toBe(true);
-    const form = screen.getByRole("button", { name: "Save deal" }).closest("form");
-    if (!form) throw new Error("expected the deal form");
-    fireEvent.submit(form);
-    expect(updateDeal).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Cancel company" }));
-    await user.click(screen.getByRole("button", { name: "Save deal" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-  });
+  it.each(["create", "edit"] as const)(
+    "blocks deal submission until a %s company draft is cancelled",
+    async (mode) => {
+      const user = userEvent.setup();
+      const company = testCompany("Reusable");
+      listCompanies.mockResolvedValue({ companies: [company], hasMore: false });
+      updateDeal.mockResolvedValue({
+        deal: savedDeal,
+        metadata: emptyMetadata,
+      });
+      const onClose = vi.fn();
+      render(
+        <MemoryRouter>
+          <AddDealModal
+            email="analyst@example.com"
+            initialDeal={savedDeal}
+            onClose={onClose}
+          />
+        </MemoryRouter>,
+      );
+      await user.click(
+        await screen.findByRole("button", {
+          name:
+            mode === "create"
+              ? "Create company"
+              : "Edit shared company Reusable",
+        }),
+      );
+      fireEvent.change(screen.getByLabelText("Company name"), {
+        target: { value: "Unsaved company" },
+      });
+      expect(
+        screen
+          .getByRole("button", { name: "Save deal" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      const form = screen
+        .getByRole("button", { name: "Save deal" })
+        .closest("form");
+      if (!form) throw new Error("expected the deal form");
+      fireEvent.submit(form);
+      expect(updateDeal).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Cancel company" }));
+      await user.click(screen.getByRole("button", { name: "Save deal" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    },
+  );
 
   it("waits for a company save before submitting its new assignment", async () => {
     const user = userEvent.setup();
     const company = testCompany("New company");
     let finishSave: ((value: typeof company) => void) | undefined;
-    createCompany.mockReturnValue(new Promise<typeof company>((resolve) => { finishSave = resolve; }));
+    createCompany.mockReturnValue(
+      new Promise<typeof company>((resolve) => {
+        finishSave = resolve;
+      }),
+    );
     updateDeal.mockResolvedValue({ deal: savedDeal, metadata: emptyMetadata });
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" initialDeal={savedDeal} onClose={vi.fn()} /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <AddDealModal
+          email="analyst@example.com"
+          initialDeal={savedDeal}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
     await user.click(screen.getByRole("button", { name: "Create company" }));
     await user.type(screen.getByLabelText("Company name"), company.name);
     await user.click(screen.getByRole("button", { name: "Save company" }));
-    expect(screen.getByRole("button", { name: "Save deal" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Save deal" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
     if (!finishSave) throw new Error("company save was not started");
     finishSave(company);
     await screen.findByRole("combobox", { name: "Role for company 1" });
     await user.click(screen.getByRole("button", { name: "Save deal" }));
-    await waitFor(() => expect(updateDeal).toHaveBeenCalledWith(savedDeal.dealId, expect.objectContaining({
-      parties: [{ companyId: company.companyId, role: "target", notes: null }],
-    })));
+    await waitFor(() =>
+      expect(updateDeal).toHaveBeenCalledWith(
+        savedDeal.dealId,
+        expect.objectContaining({
+          parties: [
+            { companyId: company.companyId, role: "target", notes: null },
+          ],
+        }),
+      ),
+    );
   });
 
   it("edits a persisted party without sending read-only company or relationship fields", async () => {
     const user = userEvent.setup();
-    const initialDeal = testDeal({ parties: [testParty("Reusable", "target")] });
+    const initialDeal = testDeal({
+      parties: [testParty("Reusable", "target")],
+    });
     const onClose = vi.fn();
-    updateDeal.mockResolvedValue({ deal: initialDeal, metadata: emptyMetadata });
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" initialDeal={initialDeal} onClose={onClose} /></MemoryRouter>);
-    fireEvent.change(screen.getByLabelText("Engagement completed (optional)"), { target: { value: "2026-10-15" } });
+    updateDeal.mockResolvedValue({
+      deal: initialDeal,
+      metadata: emptyMetadata,
+    });
+    render(
+      <MemoryRouter>
+        <AddDealModal
+          email="analyst@example.com"
+          initialDeal={initialDeal}
+          onClose={onClose}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.change(screen.getByLabelText("Engagement completed (optional)"), {
+      target: { value: "2026-10-15" },
+    });
     await user.click(screen.getByRole("button", { name: "Save deal" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(updateDeal).toHaveBeenCalledWith(initialDeal.dealId, {
-      dealName: initialDeal.dealName, dealCode: null, engagementType: "buy_side",
-      transactionType: "unknown", status: "pipeline", startDate: null,
-      expectedCloseDate: null, actualCloseDate: null, engagementCompletedDate: "2026-10-15",
-      parties: [{ companyId: initialDeal.parties[0]?.companyId, role: "target", notes: null }], scopes: [],
+      dealName: initialDeal.dealName,
+      dealCode: null,
+      engagementType: "buy_side",
+      transactionType: "unknown",
+      status: "pipeline",
+      startDate: null,
+      expectedCloseDate: null,
+      actualCloseDate: null,
+      engagementCompletedDate: "2026-10-15",
+      parties: [
+        {
+          companyId: initialDeal.parties[0]?.companyId,
+          role: "target",
+          notes: null,
+        },
+      ],
+      scopes: [],
     });
     expect(createDeal).not.toHaveBeenCalled();
   });
@@ -120,12 +227,18 @@ describe("AddDealModal", () => {
       screen.getByLabelText("SharePoint link"),
       "https://northwind.sharepoint.com/sites/acme",
     );
-    await user.type(screen.getByLabelText("SOW link"), "https://example.com/sow");
+    await user.type(
+      screen.getByLabelText("SOW link"),
+      "https://example.com/sow",
+    );
     await user.type(
       screen.getByLabelText("Fact sheet link"),
       "https://example.com/fact-sheet",
     );
-    await user.type(screen.getByLabelText("Request list link"), "https://example.com/request-list");
+    await user.type(
+      screen.getByLabelText("Request list link"),
+      "https://example.com/request-list",
+    );
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
 
     await waitFor(() => {
@@ -137,10 +250,12 @@ describe("AddDealModal", () => {
         sowLink: "https://example.com/sow",
       });
     });
-    expect(createDeal).toHaveBeenCalledWith(expect.objectContaining({
-      dealId: savedDeal.dealId,
-      sharepointLink: null,
-    }));
+    expect(createDeal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dealId: savedDeal.dealId,
+        sharepointLink: null,
+      }),
+    );
   });
 
   it("skips metadata without saving populated links or selected files", async () => {
@@ -153,66 +268,116 @@ describe("AddDealModal", () => {
     );
 
     await completeDealDetails(user);
-    await user.type(screen.getByLabelText("SOW link"), "https://example.com/sow");
-    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
-    if (!fileInput) throw new Error("expected the source file input to be rendered");
+    await user.type(
+      screen.getByLabelText("SOW link"),
+      "https://example.com/sow",
+    );
+    const fileInput =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput)
+      throw new Error("expected the source file input to be rendered");
     fireEvent.change(fileInput, {
-      target: { files: [new File(["source"], "scope.pdf", { type: "application/pdf" })] },
+      target: {
+        files: [new File(["source"], "scope.pdf", { type: "application/pdf" })],
+      },
     });
 
     await user.click(screen.getByRole("button", { name: "Skip metadata" }));
 
     expect(saveDealMetadata).not.toHaveBeenCalled();
     expect(createDeal).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("location").textContent).toBe(`/hub/deals/${savedDeal.dealId}`);
+    expect(screen.getByTestId("location").textContent).toBe(
+      `/hub/deals/${savedDeal.dealId}`,
+    );
   });
 
   it("keeps details, company roles, company drafts, and sources when moving back and forth", async () => {
     const user = userEvent.setup();
     const company = testCompany("Reusable");
     createCompany.mockResolvedValue(company);
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <AddDealModal email="analyst@example.com" onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
     expect(screen.queryByRole("button", { name: "Create company" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "SOW link" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
-    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
+    fireEvent.change(screen.getByLabelText("Deal ID"), {
+      target: { value: savedDeal.dealId },
+    });
+    fireEvent.change(screen.getByLabelText("Deal name"), {
+      target: { value: savedDeal.dealName },
+    });
     await user.click(screen.getByRole("button", { name: "Next" }));
     await screen.findByRole("heading", { name: "Assign companies and roles" });
     expect(createDeal).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Create company" }));
     await user.type(screen.getByLabelText("Company name"), "Reusable");
-    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Next" }).hasAttribute("disabled"),
+    ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Save company" }));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Role for company 1" }), "buyer");
-    await user.type(screen.getByLabelText("Deal-specific notes for company 1"), "Lead buyer");
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Role for company 1" }),
+      "buyer",
+    );
+    await user.type(
+      screen.getByLabelText("Deal-specific notes for company 1"),
+      "Lead buyer",
+    );
     await user.click(screen.getByRole("button", { name: "Back" }));
-    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(savedDeal.dealName);
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(
+      savedDeal.dealName,
+    );
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Reusable")).toBeTruthy();
-    expect((screen.getByLabelText("Role for company 1") as HTMLSelectElement).value).toBe("buyer");
+    expect(
+      (screen.getByLabelText("Role for company 1") as HTMLSelectElement).value,
+    ).toBe("buyer");
     await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.type(screen.getByLabelText("SOW link"), "https://example.com/sow");
+    await user.type(
+      screen.getByLabelText("SOW link"),
+      "https://example.com/sow",
+    );
     const file = new File(["source"], "scope.pdf", { type: "application/pdf" });
-    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const fileInput =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!fileInput) throw new Error("expected source file input");
     fireEvent.change(fileInput, { target: { files: [file] } });
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect((screen.getByLabelText("SOW link") as HTMLInputElement).value).toBe("https://example.com/sow");
+    expect((screen.getByLabelText("SOW link") as HTMLInputElement).value).toBe(
+      "https://example.com/sow",
+    );
     expect(screen.getByText("scope.pdf")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
-    await waitFor(() => expect(saveDealMetadata).toHaveBeenCalledWith(savedDeal.dealId, expect.objectContaining({ files: [file] })));
-    expect(createDeal).toHaveBeenCalledWith(expect.objectContaining({
-      parties: [{ companyId: company.companyId, role: "buyer", notes: "Lead buyer" }],
-    }));
+    await waitFor(() =>
+      expect(saveDealMetadata).toHaveBeenCalledWith(
+        savedDeal.dealId,
+        expect.objectContaining({ files: [file] }),
+      ),
+    );
+    expect(createDeal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parties: [
+          { companyId: company.companyId, role: "buyer", notes: "Lead buyer" },
+        ],
+      }),
+    );
   });
 
   it("does not persist a deal when cancelled after assigning companies", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={onClose} /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <AddDealModal email="analyst@example.com" onClose={onClose} />
+      </MemoryRouter>,
+    );
     await completeDealDetails(user);
-    await user.click(screen.getByRole("button", { name: "Close add deal dialog" }));
+    await user.click(
+      screen.getByRole("button", { name: "Close add deal dialog" }),
+    );
     expect(onClose).toHaveBeenCalled();
     expect(createDeal).not.toHaveBeenCalled();
     expect(saveDealMetadata).not.toHaveBeenCalled();
@@ -221,11 +386,19 @@ describe("AddDealModal", () => {
   it("retries failed metadata without creating the deal again", async () => {
     const user = userEvent.setup();
     saveDealMetadata.mockRejectedValueOnce(new Error("Extraction unavailable"));
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <AddDealModal email="analyst@example.com" onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
     await completeDealDetails(user);
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Deal created, but metadata could not be saved");
-    expect(screen.getByRole("button", { name: "Back" }).hasAttribute("disabled")).toBe(true);
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Deal created, but metadata could not be saved",
+    );
+    expect(
+      screen.getByRole("button", { name: "Back" }).hasAttribute("disabled"),
+    ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
     await waitFor(() => expect(saveDealMetadata).toHaveBeenCalledTimes(2));
     expect(createDeal).toHaveBeenCalledTimes(1);
@@ -233,12 +406,20 @@ describe("AddDealModal", () => {
 
   it("returns to company assignments if the core deal is rejected and allows retry", async () => {
     const user = userEvent.setup();
-    createDeal.mockRejectedValueOnce(new Error("A working-stage acquisition requires exactly one target"));
-    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    createDeal.mockRejectedValueOnce(
+      new Error("A working-stage acquisition requires exactly one target"),
+    );
+    render(
+      <MemoryRouter>
+        <AddDealModal email="analyst@example.com" onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
     await completeDealDetails(user);
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
     await screen.findByRole("heading", { name: "Assign companies and roles" });
-    expect(screen.getByRole("alert").textContent).toContain("exactly one target");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "exactly one target",
+    );
     expect(saveDealMetadata).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
@@ -248,8 +429,12 @@ describe("AddDealModal", () => {
 });
 
 async function completeDealDetails(user: ReturnType<typeof userEvent.setup>) {
-  fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
-  fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
+  fireEvent.change(screen.getByLabelText("Deal ID"), {
+    target: { value: savedDeal.dealId },
+  });
+  fireEvent.change(screen.getByLabelText("Deal name"), {
+    target: { value: savedDeal.dealName },
+  });
   await user.click(screen.getByRole("button", { name: "Next" }));
   await screen.findByRole("heading", { name: "Assign companies and roles" });
   await user.click(screen.getByRole("button", { name: "Next" }));

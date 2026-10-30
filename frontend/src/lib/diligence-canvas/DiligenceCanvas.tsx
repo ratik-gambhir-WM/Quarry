@@ -1,42 +1,38 @@
-import {
-  useId,
-  useMemo,
-  useState,
-} from 'react'
+import { useId, useMemo, useState } from "react";
 
-import type { DiligenceCanvasDocument } from '../../contracts/diligenceCanvas'
-import { SvgSlideCanvas } from './internal/svg/SvgSlideCanvas'
-import type { TextEditorOptions } from './internal/editor/textEditorConfig'
+import type { DiligenceCanvasDocument } from "../../contracts/diligenceCanvas";
+import { SvgSlideCanvas } from "./internal/svg/SvgSlideCanvas";
+import type { TextEditorOptions } from "./internal/editor/textEditorConfig";
 
 const CONTROL_CLASSES = [
-  'min-h-[2.35rem] rounded-[0.45rem] border border-[#28304a] bg-[#080c1c]',
-  'text-[0.78rem] [font-weight:750] text-[#eef3ff]',
-  'focus-visible:border-[#f3c316] focus-visible:text-[#f3c316]',
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(243,195,22,0.35)]',
-].join(' ')
+  "min-h-[2.35rem] rounded-[0.45rem] border border-[#28304a] bg-[#080c1c]",
+  "text-[0.78rem] [font-weight:750] text-[#eef3ff]",
+  "focus-visible:border-[#f3c316] focus-visible:text-[#f3c316]",
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(243,195,22,0.35)]",
+].join(" ");
 
 const BUTTON_CLASSES = [
   CONTROL_CLASSES,
-  'cursor-pointer px-3 py-[0.55rem] enabled:hover:border-[#f3c316]',
-  'enabled:hover:text-[#f3c316] disabled:cursor-not-allowed disabled:opacity-50',
-].join(' ')
+  "cursor-pointer px-3 py-[0.55rem] enabled:hover:border-[#f3c316]",
+  "enabled:hover:text-[#f3c316] disabled:cursor-not-allowed disabled:opacity-50",
+].join(" ");
 
 export interface DiligenceCanvasProps {
-  className?: string
-  description?: string
-  isJsonOpen?: boolean
-  jsonPanelId?: string
-  onChange: (document: DiligenceCanvasDocument) => void
-  onJsonOpenChange?: (isOpen: boolean) => void
-  onSlideIndexChange?: (slideIndex: number) => void
-  resolveImageSource?: (source: string) => string
-  showBranding?: boolean
-  showJsonByDefault?: boolean
-  showPresentationHeader?: boolean
-  slideIndex?: number
-  title?: string
-  textEditorOptions?: TextEditorOptions
-  value: DiligenceCanvasDocument
+  className?: string;
+  description?: string;
+  isJsonOpen?: boolean;
+  jsonPanelId?: string;
+  onChange: (document: DiligenceCanvasDocument) => void;
+  onJsonOpenChange?: (isOpen: boolean) => void;
+  onSlideIndexChange?: (slideIndex: number) => void;
+  resolveImageSource?: (source: string) => string;
+  showBranding?: boolean;
+  showJsonByDefault?: boolean;
+  showPresentationHeader?: boolean;
+  slideIndex?: number;
+  title?: string;
+  textEditorOptions?: TextEditorOptions;
+  value: DiligenceCanvasDocument;
 }
 
 /**
@@ -45,7 +41,7 @@ export interface DiligenceCanvasProps {
  */
 export function DiligenceCanvas({
   className,
-  description = 'Inspect and edit this presentation in the current view.',
+  description = "Inspect and edit this presentation in the current view.",
   isJsonOpen: controlledIsJsonOpen,
   jsonPanelId: controlledJsonPanelId,
   onChange,
@@ -60,42 +56,47 @@ export function DiligenceCanvas({
   textEditorOptions,
   value,
 }: DiligenceCanvasProps) {
-  const [internalSlideIndex, setInternalSlideIndex] = useState(0)
-  const [internalIsJsonOpen, setInternalIsJsonOpen] = useState(showJsonByDefault)
-  const generatedJsonPanelId = `${useId()}-json-panel`
-  const isJsonOpen = controlledIsJsonOpen ?? internalIsJsonOpen
-  const jsonPanelId = controlledJsonPanelId ?? generatedJsonPanelId
-  const slideCount = value.presentation.slides.length
-  const requestedSlideIndex = slideIndex ?? internalSlideIndex
-  const activeSlideIndex = clampSlideIndex(requestedSlideIndex, slideCount)
+  const [internalSlideIndex, setInternalSlideIndex] = useState(0);
+  const [internalIsJsonOpen, setInternalIsJsonOpen] =
+    useState(showJsonByDefault);
+  const generatedJsonPanelId = `${useId()}-json-panel`;
+  const isJsonOpen = controlledIsJsonOpen ?? internalIsJsonOpen;
+  const jsonPanelId = controlledJsonPanelId ?? generatedJsonPanelId;
+  const slideCount = value.presentation.slides.length;
+  const requestedSlideIndex = slideIndex ?? internalSlideIndex;
+  const activeSlideIndex = clampSlideIndex(requestedSlideIndex, slideCount);
 
   function updateJsonOpen(nextIsOpen: boolean) {
     if (controlledIsJsonOpen === undefined) {
-      setInternalIsJsonOpen(nextIsOpen)
+      setInternalIsJsonOpen(nextIsOpen);
     }
-    onJsonOpenChange?.(nextIsOpen)
+    onJsonOpenChange?.(nextIsOpen);
   }
 
   function updateSlideIndex(nextIndex: number) {
-    const clampedIndex = clampSlideIndex(nextIndex, slideCount)
+    const clampedIndex = clampSlideIndex(nextIndex, slideCount);
     if (slideIndex === undefined) {
-      setInternalSlideIndex(clampedIndex)
+      setInternalSlideIndex(clampedIndex);
     }
-    onSlideIndexChange?.(clampedIndex)
+    onSlideIndexChange?.(clampedIndex);
   }
 
   return (
     <section
-      aria-label={showPresentationHeader ? undefined : title ?? value.presentation.title}
+      aria-label={
+        showPresentationHeader ? undefined : (title ?? value.presentation.title)
+      }
       className={[
-        'diligence-canvas',
-        'box-border flex w-full flex-col overflow-hidden font-sans',
-        'motion-reduce:[&_*]:scroll-auto motion-reduce:[&_*]:duration-[0.01ms]',
+        "diligence-canvas",
+        "box-border flex w-full flex-col overflow-hidden font-sans",
+        "motion-reduce:[&_*]:scroll-auto motion-reduce:[&_*]:duration-[0.01ms]",
         showPresentationHeader
-          ? 'min-h-[42rem] gap-4 border border-white/10 bg-[#070a1b] text-[#eef3ff]'
-          : 'min-h-0 bg-transparent text-foreground',
+          ? "min-h-[42rem] gap-4 border border-white/10 bg-[#070a1b] text-[#eef3ff]"
+          : "min-h-0 bg-transparent text-foreground",
         className,
-      ].filter(Boolean).join(' ')}
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       {showPresentationHeader ? (
         <header className="flex items-start justify-between gap-4 px-5 pt-5 max-[760px]:flex-col">
@@ -123,19 +124,23 @@ export function DiligenceCanvas({
               onClick={() => updateJsonOpen(!isJsonOpen)}
               type="button"
             >
-              {isJsonOpen ? 'Hide JSON' : 'Show JSON'}
+              {isJsonOpen ? "Hide JSON" : "Show JSON"}
             </button>
           </div>
         </header>
       ) : null}
 
-      <div className={[
-        'flex min-h-0 flex-1 max-[760px]:flex-col',
-        showPresentationHeader ? 'border-t border-white/10' : '',
-      ].filter(Boolean).join(' ')}>
+      <div
+        className={[
+          "flex min-h-0 flex-1 max-[760px]:flex-col",
+          showPresentationHeader ? "border-t border-white/10" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
         <div className="min-w-0 flex-1">
           <SvgSlideCanvas
-            className={showPresentationHeader ? 'min-h-[32rem]' : 'min-h-0'}
+            className={showPresentationHeader ? "min-h-[32rem]" : "min-h-0"}
             input={value}
             onChange={onChange}
             resolveImageSource={resolveImageSource}
@@ -168,7 +173,9 @@ export function DiligenceCanvas({
             <span>Slide</span>
             <select
               className={`${CONTROL_CLASSES} max-w-[18rem] cursor-pointer py-[0.45rem] pr-8 pl-[0.65rem]`}
-              onChange={(event) => updateSlideIndex(Number(event.currentTarget.value))}
+              onChange={(event) =>
+                updateSlideIndex(Number(event.currentTarget.value))
+              }
               value={activeSlideIndex}
             >
               {value.presentation.slides.map((slide, index) => (
@@ -189,7 +196,7 @@ export function DiligenceCanvas({
         </footer>
       ) : null}
     </section>
-  )
+  );
 }
 
 function PresentationJsonPanel({
@@ -197,11 +204,11 @@ function PresentationJsonPanel({
   onClose,
   value,
 }: {
-  id: string
-  onClose: () => void
-  value: DiligenceCanvasDocument
+  id: string;
+  onClose: () => void;
+  value: DiligenceCanvasDocument;
 }) {
-  const json = useMemo(() => JSON.stringify(value, null, 2), [value])
+  const json = useMemo(() => JSON.stringify(value, null, 2), [value]);
 
   return (
     <aside
@@ -219,10 +226,10 @@ function PresentationJsonPanel({
         {json}
       </pre>
     </aside>
-  )
+  );
 }
 
 function clampSlideIndex(index: number, slideCount: number) {
-  const safeIndex = Number.isFinite(index) ? Math.trunc(index) : 0
-  return Math.max(0, Math.min(safeIndex, Math.max(slideCount - 1, 0)))
+  const safeIndex = Number.isFinite(index) ? Math.trunc(index) : 0;
+  return Math.max(0, Math.min(safeIndex, Math.max(slideCount - 1, 0)));
 }

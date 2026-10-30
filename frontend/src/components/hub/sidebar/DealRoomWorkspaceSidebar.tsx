@@ -16,7 +16,11 @@ const primaryDealRoomLinks = [
 ];
 
 const dealArtifactLinks = [
-  { icon: "folderTree" as const, key: "data-room" as const, label: "Data Room" },
+  {
+    icon: "folderTree" as const,
+    key: "data-room" as const,
+    label: "Data Room",
+  },
   { icon: "fileStack" as const, key: "analysis" as const, label: "Analysis" },
   { icon: "ship" as const, key: "deliverables" as const, label: "Deliverable" },
 ];
@@ -28,16 +32,20 @@ export function DealRoomWorkspaceSidebar({
   email,
   navigationState,
 }: DealRoomSidebarProps) {
-  const activeDeal = deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
-  const renderLink = (link: (typeof primaryDealRoomLinks | typeof dealArtifactLinks)[number]) => {
+  const activeDeal =
+    deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
+  const renderLink = (
+    link: (typeof primaryDealRoomLinks | typeof dealArtifactLinks)[number],
+  ) => {
     if (activeDeal) {
-      const destination = link.key === "deal-room"
-        ? getDealRoomPath(activeDeal.room.id)
-        : link.key === "data-room"
-          ? getDataRoomPath(activeDeal.room.id)
-          : link.key === "analysis"
-            ? getDealAnalysisPath(activeDeal.room.id)
-            : getDeliverablesPath(activeDeal.room.id);
+      const destination =
+        link.key === "deal-room"
+          ? getDealRoomPath(activeDeal.room.id)
+          : link.key === "data-room"
+            ? getDataRoomPath(activeDeal.room.id)
+            : link.key === "analysis"
+              ? getDealAnalysisPath(activeDeal.room.id)
+              : getDeliverablesPath(activeDeal.room.id);
 
       return (
         <NavLink
@@ -56,12 +64,16 @@ export function DealRoomWorkspaceSidebar({
           to={destination}
         >
           <SidebarIcon className="h-5 w-5" name={link.icon} />
-          <span className="text-[13px] font-medium leading-5">{link.label}</span>
+          <span className="text-[13px] font-medium leading-5">
+            {link.label}
+          </span>
         </NavLink>
       );
     }
 
-    return <SidebarStaticItem icon={link.icon} key={link.label} label={link.label} />;
+    return (
+      <SidebarStaticItem icon={link.icon} key={link.label} label={link.label} />
+    );
   };
 
   return (
@@ -75,9 +87,7 @@ export function DealRoomWorkspaceSidebar({
       sidebarIcon="dashboard"
       sidebarLabel="Deal Room"
     >
-      <nav className="space-y-1">
-        {primaryDealRoomLinks.map(renderLink)}
-      </nav>
+      <nav className="space-y-1">{primaryDealRoomLinks.map(renderLink)}</nav>
 
       <SidebarSection title="Deal Artifacts">
         {dealArtifactLinks.map(renderLink)}

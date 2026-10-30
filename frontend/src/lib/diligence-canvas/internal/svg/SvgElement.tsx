@@ -1,13 +1,10 @@
-import { memo, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, type PointerEvent as ReactPointerEvent } from "react";
 
-import {
-  getElementAccessibleLabel,
-  type SlideElementRef,
-} from '../canvas'
-import { SvgImage } from './SvgImage'
-import { getLinePath, getLineTransform, SvgLine } from './SvgLine'
-import { SvgShape } from './SvgShape'
-import { SvgTextBlock } from './SvgText'
+import { getElementAccessibleLabel, type SlideElementRef } from "../canvas";
+import { SvgImage } from "./SvgImage";
+import { getLinePath, getLineTransform, SvgLine } from "./SvgLine";
+import { SvgShape } from "./SvgShape";
+import { SvgTextBlock } from "./SvgText";
 
 export const SvgElement = memo(function SvgElement({
   definitionPrefix,
@@ -19,25 +16,29 @@ export const SvgElement = memo(function SvgElement({
   onPointerDown,
   textFontScale,
 }: {
-  definitionPrefix: string
-  elementRef: SlideElementRef
-  isEditing: boolean
-  isSelected: boolean
-  onDoubleClick: (ref: SlideElementRef) => void
-  onFocus: (ref: SlideElementRef) => void
-  onPointerDown: (ref: SlideElementRef, event: ReactPointerEvent<SVGElement>) => void
-  textFontScale?: number
+  definitionPrefix: string;
+  elementRef: SlideElementRef;
+  isEditing: boolean;
+  isSelected: boolean;
+  onDoubleClick: (ref: SlideElementRef) => void;
+  onFocus: (ref: SlideElementRef) => void;
+  onPointerDown: (
+    ref: SlideElementRef,
+    event: ReactPointerEvent<SVGElement>,
+  ) => void;
+  textFontScale?: number;
 }) {
-  const element = elementRef.element
-  const label = getElementAccessibleLabel(element)
-  const supportsTextEditing = element.kind === 'shape' || element.kind === 'text'
+  const element = elementRef.element;
+  const label = getElementAccessibleLabel(element);
+  const supportsTextEditing =
+    element.kind === "shape" || element.kind === "text";
   const title = supportsTextEditing
     ? `${label}. Click again, double-click, or press Enter to edit.`
-    : label
-  const clipId = `${definitionPrefix}-clip`
-  const textClipId = `${definitionPrefix}-text-clip`
+    : label;
+  const clipId = `${definitionPrefix}-clip`;
+  const textClipId = `${definitionPrefix}-text-clip`;
 
-  if (element.kind === 'line') {
+  if (element.kind === "line") {
     return (
       <g
         aria-label={label}
@@ -64,20 +65,24 @@ export const SvgElement = memo(function SvgElement({
           transform={getLineTransform(element)}
         />
       </g>
-    )
+    );
   }
 
   const transform = [
     `translate(${element.x} ${element.y})`,
-    element.rotate ? `rotate(${element.rotate} ${element.w / 2} ${element.h / 2})` : '',
+    element.rotate
+      ? `rotate(${element.rotate} ${element.w / 2} ${element.h / 2})`
+      : "",
     element.flipH || element.flipV
       ? `translate(${element.flipH ? element.w : 0} ${element.flipV ? element.h : 0}) scale(${element.flipH ? -1 : 1} ${element.flipV ? -1 : 1})`
-      : '',
-  ].filter(Boolean).join(' ')
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <g
       aria-label={label}
-      aria-keyshortcuts={supportsTextEditing ? 'Enter' : undefined}
+      aria-keyshortcuts={supportsTextEditing ? "Enter" : undefined}
       aria-pressed={isSelected}
       className="group cursor-grab outline-none active:cursor-grabbing"
       data-element-key={elementRef.key}
@@ -85,9 +90,9 @@ export const SvgElement = memo(function SvgElement({
       onDoubleClick={
         supportsTextEditing
           ? (event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              onDoubleClick(elementRef)
+              event.preventDefault();
+              event.stopPropagation();
+              onDoubleClick(elementRef);
             }
           : undefined
       }
@@ -98,14 +103,14 @@ export const SvgElement = memo(function SvgElement({
       transform={transform}
     >
       <title>{title}</title>
-      {element.kind === 'shape' ? (
+      {element.kind === "shape" ? (
         <SvgShape
           element={element}
           fontScale={textFontScale}
           hideText={isEditing}
           textClipId={textClipId}
         />
-      ) : element.kind === 'text' ? (
+      ) : element.kind === "text" ? (
         <SvgTextBlock
           clipId={textClipId}
           element={element}
@@ -125,5 +130,5 @@ export const SvgElement = memo(function SvgElement({
         y={0}
       />
     </g>
-  )
-})
+  );
+});

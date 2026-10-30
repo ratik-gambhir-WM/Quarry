@@ -1,6 +1,6 @@
-export { SvgSlideCanvas, type SvgSlideCanvasProps } from './SvgSlideCanvas'
-export { getLinePath } from './SvgLine'
-export { SUPPORTED_SHAPE_NAMES, renderShapePrimitive } from './shapes'
+export { SvgSlideCanvas, type SvgSlideCanvasProps } from "./SvgSlideCanvas";
+export { getLinePath } from "./SvgLine";
+export { SUPPORTED_SHAPE_NAMES, renderShapePrimitive } from "./shapes";
 export {
   createCanvasTextMeasurer,
   layoutSvgText,
@@ -9,4 +9,4 @@ export {
   type SvgTextLine,
   type SvgTextSegment,
   type TextMeasure,
-} from './textLayout'
+} from "./textLayout";

@@ -15,11 +15,17 @@ import {
 } from "../components/deals/DealsHeaderControls";
 import { DealsEmptyState, DealsTable } from "../components/deals/DealsTable";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
-import { useWorkspaceHomeDeals, WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
+import {
+  useWorkspaceHomeDeals,
+  WorkspaceHomeShell,
+} from "../components/hub/WorkspaceHomeShell";
 import { Skeleton } from "../components/ui/skeleton";
 import { markViewTransitionType } from "../components/ui/ViewTransition";
 import { filterDealPortfolioViews, getDealCounts } from "../data/dealsView";
-import { getDealRoomPath, type WorkspaceLocationState } from "../data/workspace";
+import {
+  getDealRoomPath,
+  type WorkspaceLocationState,
+} from "../data/workspace";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession";
 
 const loadDealsKanban = () => import("../components/deals/DealsKanban");
@@ -84,9 +90,24 @@ function DealsHeaderMetrics() {
       aria-live="polite"
       className="mr-2 flex items-center gap-4 whitespace-nowrap text-[12px] font-normal text-muted"
     >
-      <span><span className="font-medium tabular-nums text-text-main">{counts.total}</span> total</span>
-      <span><span className="font-medium tabular-nums text-text-main">{counts.current}</span> current</span>
-      <span><span className="font-medium tabular-nums text-text-main">{counts.historic}</span> historic</span>
+      <span>
+        <span className="font-medium tabular-nums text-text-main">
+          {counts.total}
+        </span>{" "}
+        total
+      </span>
+      <span>
+        <span className="font-medium tabular-nums text-text-main">
+          {counts.current}
+        </span>{" "}
+        current
+      </span>
+      <span>
+        <span className="font-medium tabular-nums text-text-main">
+          {counts.historic}
+        </span>{" "}
+        historic
+      </span>
     </div>
   );
 }
@@ -98,7 +119,12 @@ type DealsContentProps = {
   view: DealsView;
 };
 
-function DealsContent({ navigationState, onQueryChange, query, view }: DealsContentProps) {
+function DealsContent({
+  navigationState,
+  onQueryChange,
+  query,
+  view,
+}: DealsContentProps) {
   const deals = useWorkspaceHomeDeals();
   const navigate = useNavigate();
   const deferredQuery = useDeferredValue(query);
@@ -117,7 +143,11 @@ function DealsContent({ navigationState, onQueryChange, query, view }: DealsCont
       {visibleDeals.length === 0 ? (
         <DealsEmptyState onReset={resetFilters} />
       ) : view === "table" ? (
-        <DealsTable deals={visibleDeals} navigationState={navigationState} onReset={resetFilters} />
+        <DealsTable
+          deals={visibleDeals}
+          navigationState={navigationState}
+          onReset={resetFilters}
+        />
       ) : (
         // Keep the lazy boundary unanimated so it does not suppress the per-deal shared morphs.
         <Suspense fallback={<KanbanFallback />}>

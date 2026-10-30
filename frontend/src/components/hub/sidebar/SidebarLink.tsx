@@ -12,7 +12,13 @@ type SidebarLinkProps = {
   navigationState?: WorkspaceLocationState;
 };
 
-export function SidebarLink({ homeSection, href, icon, label, navigationState }: SidebarLinkProps) {
+export function SidebarLink({
+  homeSection,
+  href,
+  icon,
+  label,
+  navigationState,
+}: SidebarLinkProps) {
   if (href) {
     const isVaultLink = label === "Global Vault";
 

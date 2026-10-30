@@ -11,3 +11,5 @@ pub mod users;
 pub mod companies;
 
 pub mod identity;
+
+pub mod notebooks;

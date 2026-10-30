@@ -439,6 +439,19 @@ impl SqliteClient {
         run_blocking(move || client.write(query)).await
     }
 
+    /// Offloads a typed transaction; every error rolls back before leaving the blocking pool.
+    pub async fn transaction_result_async<T, E, F>(&self, operation: F) -> Result<T, E>
+    where
+        T: Send + 'static,
+        E: From<SqliteClientError> + Send + 'static,
+        F: for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, E> + Send + 'static,
+    {
+        let client = self.clone();
+        tokio::task::spawn_blocking(move || client.transaction_result(operation))
+            .await
+            .map_err(|error| E::from(SqliteClientError::BlockingWorker(error.to_string())))?
+    }
+
     pub async fn transaction_async<T, F>(&self, operation: F) -> Result<T, SqliteClientError>
     where
         T: Send + 'static,

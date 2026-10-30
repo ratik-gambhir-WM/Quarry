@@ -26,7 +26,10 @@ type DealSummaryCardProps = {
   onAddResources?: () => void;
 };
 
-export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) {
+export function DealSummaryCard({
+  deal,
+  onAddResources,
+}: DealSummaryCardProps) {
   return (
     <div className="grid grid-cols-12 gap-4 lg:gap-6">
       <WorkspaceCard
@@ -37,8 +40,13 @@ export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) 
       >
         <div className="flex flex-col gap-5">
           <div>
-            <p className="type-label uppercase tracking-[0.14em] text-muted">Due Diligence Overview</p>
-            <h1 className="type-display mt-2 break-words text-text-main" id="deal-overview-heading">
+            <p className="type-label uppercase tracking-[0.14em] text-muted">
+              Due Diligence Overview
+            </p>
+            <h1
+              className="type-display mt-2 break-words text-text-main"
+              id="deal-overview-heading"
+            >
               {deal.name}
             </h1>
           </div>
@@ -49,11 +57,19 @@ export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) 
           </div>
           <Separator className="bg-outline-variant/70" />
           {deal.summaryDetails?.length ? (
-            <dl aria-label="Engagement overview" className="grid gap-3 text-sm leading-6">
+            <dl
+              aria-label="Engagement overview"
+              className="grid gap-3 text-sm leading-6"
+            >
               {deal.summaryDetails.map((detail, index) => (
-                <div className="grid min-w-0 gap-0.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4" key={`${detail.label}-${index}`}>
+                <div
+                  className="grid min-w-0 gap-0.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4"
+                  key={`${detail.label}-${index}`}
+                >
                   <dt className="font-medium text-muted">{detail.label}</dt>
-                  <dd className="min-w-0 break-words text-text-main">{detail.value}</dd>
+                  <dd className="min-w-0 break-words text-text-main">
+                    {detail.value}
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -77,14 +93,32 @@ export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) 
               <Icon className="size-4.5" name="folderOpen" />
             </span>
             <div>
-              <h2 className="type-h3 text-text-main" id="deal-resources-heading">Deal Resources</h2>
-              <p className="mt-0.5 text-[11px] text-muted">Source documents and connected rooms</p>
+              <h2
+                className="type-h3 text-text-main"
+                id="deal-resources-heading"
+              >
+                Deal Resources
+              </h2>
+              <p className="mt-0.5 text-[11px] text-muted">
+                Source documents and connected rooms
+              </p>
             </div>
           </div>
-          {onAddResources ? <Button className="shrink-0" size="sm" variant="outline" onClick={onAddResources}>Add deal resources</Button> : null}
+          {onAddResources ? (
+            <Button
+              className="shrink-0"
+              size="sm"
+              variant="outline"
+              onClick={onAddResources}
+            >
+              Add deal resources
+            </Button>
+          ) : null}
         </div>
         <div className="space-y-2" role="list">
-          {deal.resources.map((resource) => <ResourceRow key={resource.id} resource={resource} />)}
+          {deal.resources.map((resource) => (
+            <ResourceRow key={resource.id} resource={resource} />
+          ))}
         </div>
       </WorkspaceCard>
 
@@ -96,8 +130,12 @@ export function DealSummaryCard({ deal, onAddResources }: DealSummaryCardProps) 
       >
         <div className="flex items-center px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
           <div>
-            <h2 className="type-h3 text-text-main" id="key-questions-heading">Key Questions</h2>
-            <p className="mt-0.5 text-[11px] text-muted">Questions extracted from submitted SOW</p>
+            <h2 className="type-h3 text-text-main" id="key-questions-heading">
+              Key Questions
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted">
+              Questions extracted from submitted SOW
+            </p>
           </div>
         </div>
         <KeyQuestionsGrid questions={deal.keyQuestions} />
@@ -110,31 +148,51 @@ function ResourceRow({ resource }: { resource: DealResource }) {
   const content = (
     <>
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-lowest text-primary">
-        <Icon className="size-4" name={resource.id === "sharepoint" ? "sharepoint" : "doc"} />
+        <Icon
+          className="size-4"
+          name={resource.id === "sharepoint" ? "sharepoint" : "doc"}
+        />
       </span>
       <span className="min-w-0 flex-1 text-left">
         <span className="flex min-w-0 items-center justify-between gap-3">
-          <span className="min-w-0 break-words text-[13px] font-semibold text-text-main">{resource.label}</span>
-          <Badge className="shrink-0" variant={resource.availability === "available" ? "secondary" : "outline"}>
+          <span className="min-w-0 break-words text-[13px] font-semibold text-text-main">
+            {resource.label}
+          </span>
+          <Badge
+            className="shrink-0"
+            variant={
+              resource.availability === "available" ? "secondary" : "outline"
+            }
+          >
             {resource.availability === "available"
-              ? resource.href ? "Available" : "Submitted"
+              ? resource.href
+                ? "Available"
+                : "Submitted"
               : resource.availability === "coming-soon"
                 ? "Coming soon"
                 : "Unavailable"}
           </Badge>
         </span>
         {resource.sourceName ? (
-          <span className="mt-0.5 block break-words text-[11px] font-normal text-muted">{resource.sourceName}</span>
+          <span className="mt-0.5 block break-words text-[11px] font-normal text-muted">
+            {resource.sourceName}
+          </span>
         ) : null}
       </span>
-      {resource.href ? <Icon className="size-4 shrink-0 text-muted" name="openInNew" /> : null}
+      {resource.href ? (
+        <Icon className="size-4 shrink-0 text-muted" name="openInNew" />
+      ) : null}
     </>
   );
 
   if (resource.href) {
     return (
       <div role="listitem">
-        <Button asChild className="h-auto w-full justify-start gap-3 rounded-xl px-3 py-3" variant="ghost">
+        <Button
+          asChild
+          className="h-auto w-full justify-start gap-3 rounded-xl px-3 py-3"
+          variant="ghost"
+        >
           <a
             aria-label={`Open ${resource.label} in a new tab`}
             href={resource.href}
@@ -167,7 +225,12 @@ type KeyQuestionRow = {
 
 function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
   const rows = useMemo<KeyQuestionRow[]>(
-    () => questions.map((question, index) => ({ answer: "", id: `question-${index}`, question })),
+    () =>
+      questions.map((question, index) => ({
+        answer: "",
+        id: `question-${index}`,
+        question,
+      })),
     [questions],
   );
   const columns = useMemo<ColumnDef<DataGridFeatures, KeyQuestionRow>[]>(
@@ -176,9 +239,17 @@ function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
         accessorKey: "question",
         enableSorting: false,
         header: ({ column }) => (
-          <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Question" />
+          <DataGridColumnHeader
+            className={quarryDataGridHeaderClassName}
+            column={column}
+            title="Question"
+          />
         ),
-        cell: ({ row }) => <p className="whitespace-normal break-words text-[13px] leading-6">{row.original.question}</p>,
+        cell: ({ row }) => (
+          <p className="whitespace-normal break-words text-[13px] leading-6">
+            {row.original.question}
+          </p>
+        ),
         size: 520,
         meta: { fillWidth: true, headerTitle: "Question" },
       },
@@ -186,9 +257,17 @@ function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
         accessorKey: "answer",
         enableSorting: false,
         header: ({ column }) => (
-          <DataGridColumnHeader className={quarryDataGridHeaderClassName} column={column} title="Answer" />
+          <DataGridColumnHeader
+            className={quarryDataGridHeaderClassName}
+            column={column}
+            title="Answer"
+          />
         ),
-        cell: () => <span aria-label="No answer yet" className="text-muted">—</span>,
+        cell: () => (
+          <span aria-label="No answer yet" className="text-muted">
+            —
+          </span>
+        ),
         size: 320,
         meta: { headerTitle: "Answer" },
       },
@@ -209,7 +288,14 @@ function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
       recordCount={rows.length}
       table={table}
       tableClassNames={quarryDataGridTableClassNames}
-      tableLayout={{ cellBorder: true, dense: true, headerBackground: false, headerBorder: true, rowBorder: true, width: "fixed" }}
+      tableLayout={{
+        cellBorder: true,
+        dense: true,
+        headerBackground: false,
+        headerBorder: true,
+        rowBorder: true,
+        width: "fixed",
+      }}
     >
       <DataGridContainer className="border-t border-outline-variant/70 bg-surface-container-lowest">
         <DataGridScrollArea orientation="horizontal">

@@ -38,6 +38,7 @@ use crate::{
         identity::{
             self, access::ResourceAccess, repository::IdentityRepository, service::IdentityService,
         },
+        notebooks::{self, NotebookPipeline, NotebookRepository, NotebookService},
         research::{
             self,
             service::{ResearchService, WmAiClients},
@@ -102,6 +103,19 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         .await
         .map_err(|error| BootstrapError::HelixIndexes(error.to_string()))?;
 
+    NotebookPipeline::new(
+        helix.clone(),
+        None,
+        config.helix.vector_dimension,
+        config
+            .openai
+            .as_ref()
+            .map(|c| c.embedding_model.clone())
+            .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.into()),
+    )
+    .initialize()
+    .await
+    .map_err(BootstrapError::HelixIndexes)?;
     let http = reqwest::Client::builder()
         .build()
         .map_err(BootstrapError::HttpClient)?;
@@ -145,7 +159,7 @@ fn assemble_api_with_templates(
     let document_files = DocumentStore::new(sqlite.clone());
     let document_graph_reader = DocumentGraphReader::new(document_graph.clone());
     let document_graph_writer = DocumentGraphWriter::new(document_graph.clone());
-    let document_graph_search = DocumentGraphSearch::new(document_graph);
+    let document_graph_search = DocumentGraphSearch::new(document_graph.clone());
     let openai = config.openai.as_ref().map(|openai_config| {
         Arc::new(OpenAiClient::from_config(
             http.clone(),
@@ -153,6 +167,19 @@ fn assemble_api_with_templates(
             prompts.clone(),
         ))
     });
+    let notebooks = NotebookService::new(
+        NotebookRepository::new(sqlite.clone()),
+        Arc::new(NotebookPipeline::new(
+            document_graph,
+            openai.clone(),
+            config.helix.vector_dimension,
+            config
+                .openai
+                .as_ref()
+                .map(|c| c.embedding_model.clone())
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.into()),
+        )),
+    );
     let office = OfficeConverter::new(config.data_room.office_executable.clone());
     let wm_clients = config.wm_ai.as_ref().map(|wm| WmAiClients {
         files: FileUploadServiceClient::new(
@@ -251,6 +278,7 @@ fn assemble_api_with_templates(
         .merge(native_routes)
         .merge(deals::route::routes(deals))
         .merge(companies::route::routes(companies))
+        .merge(notebooks::route::routes(notebooks))
         .merge(data_rooms::route::routes(data_rooms))
         .merge(ingestion::route::routes(document_ingestion, document_jobs))
         .merge(viewing::route::routes(stored_documents))

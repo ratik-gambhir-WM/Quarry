@@ -1,7 +1,11 @@
+import { createNotebookApi, notebookEventReceiver } from "./notebookApi";
 import { sessionStore } from "../auth/sessionStore";
 import type { Company, CompanyPage } from "../data/dealModel";
 import type {
-  LoginInput, RegisterInput, SessionResponse, CurrentUserResponse,
+  LoginInput,
+  RegisterInput,
+  SessionResponse,
+  CurrentUserResponse,
   AssistantThread,
   AssistantThreadDetail,
   AssistantThreadPage,
@@ -34,7 +38,10 @@ import type {
   SaveDealResponse,
   SavedDeal,
 } from "../data/dealExtraction";
-import type { DealDataRoom, DocumentPreviewResponse } from "../data/dataRoomPreview";
+import type {
+  DealDataRoom,
+  DocumentPreviewResponse,
+} from "../data/dataRoomPreview";
 import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 
 export type TauriMultipartRequest = {
@@ -65,13 +72,25 @@ export type TauriQueryRequest = {
 
 export type TauriQueryPayload =
   | { event: unknown; kind: "serverEvent"; subscriptionId: string }
-  | { kind: "connectionError"; message: string; status?: number; subscriptionId: string };
+  | {
+      kind: "connectionError";
+      message: string;
+      status?: number;
+      subscriptionId: string;
+    };
 
 type TauriTransport = {
   delete(path: string): Promise<void>;
   get<T>(path: string): Promise<T>;
   getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
+  patch?<T>(path: string, body: unknown): Promise<T>;
+  subscribeNotebookJob?(
+    notebookId: string,
+    jobId: string,
+    onData: (data: string) => void,
+    onError: () => void,
+  ): Promise<() => void>;
   postPowerPoint(path: string, body: unknown): Promise<PowerPointExport>;
   postMultipart<T>(request: TauriMultipartRequest): Promise<T>;
   startQuery?(
@@ -96,38 +115,128 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     return {
       sessionGeneration,
       fields,
-      files: await Promise.all(files.map((file) => fileToMultipart(file, fallbackMimeType))),
+      files: await Promise.all(
+        files.map((file) => fileToMultipart(file, fallbackMimeType)),
+      ),
       path,
     } satisfies TauriMultipartRequest;
   }
 
   return {
+    ...createNotebookApi({
+      request: <T>(
+        method: "GET" | "POST" | "PATCH" | "DELETE",
+        path: string,
+        body?: unknown,
+      ): Promise<T> => {
+        if (method === "GET") return transport.get<T>(path);
+        if (method === "PATCH") {
+          if (!transport.patch)
+            return Promise.reject(
+              new Error("Desktop PATCH transport unavailable."),
+            );
+          return transport.patch<T>(path, body);
+        }
+        if (method === "DELETE")
+          return transport.delete(path).then(() => undefined as T);
+        return transport.post<T>(path, body);
+      },
+      subscribe: (n, j, handlers) => {
+        let active = true;
+        let stop: (() => void) | undefined;
+        const receive = notebookEventReceiver(n, j, handlers);
+        const cleanup = () => {
+          active = false;
+          stop?.();
+        };
+        if (!transport.subscribeNotebookJob) {
+          queueMicrotask(() => {
+            if (active)
+              handlers.onConnectionError?.(
+                "Desktop notebook transport unavailable.",
+              );
+          });
+          return cleanup;
+        }
+        void transport
+          .subscribeNotebookJob(
+            n,
+            j,
+            (data) => {
+              if (!active) return;
+              try {
+                if (receive(data)) cleanup();
+              } catch {
+                handlers.onConnectionError?.("Invalid notebook save event.");
+                cleanup();
+              }
+            },
+            () => {
+              if (active) {
+                handlers.onConnectionError?.(
+                  "Notebook save connection failed; check job status.",
+                );
+                cleanup();
+              }
+            },
+          )
+          .then((cancel) => {
+            stop = cancel;
+            if (!active) cancel();
+          })
+          .catch(() => {
+            if (active) {
+              handlers.onConnectionError?.(
+                "Notebook save connection failed; check job status.",
+              );
+              cleanup();
+            }
+          });
+        return cleanup;
+      },
+    }),
     archiveAssistantThread: (threadId) =>
       transport.post<void>(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/archive`,
         {},
       ),
     archiveDeal: (dealId) =>
-      transport.post<SavedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}/archive`, {}),
+      transport.post<SavedDeal>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/archive`,
+        {},
+      ),
     createAssistantThread: (threadId, dealId) =>
       transport.post<AssistantThread>("/api/v1/assistant/threads", {
         ...(threadId ? { threadId } : {}),
         ...(dealId !== undefined ? { dealId } : {}),
       }),
-    createCompany: (input) => transport.post<Company>("/api/v1/companies", input),
-    updateCompany: (id, input) => transport.post<Company>(`/api/v1/companies/${encodeURIComponent(id)}/update`, input),
+    createCompany: (input) =>
+      transport.post<Company>("/api/v1/companies", input),
+    updateCompany: (id, input) =>
+      transport.post<Company>(
+        `/api/v1/companies/${encodeURIComponent(id)}/update`,
+        input,
+      ),
     listCompanies: (options = {}) => {
       const params = new URLSearchParams();
       if (options.query !== undefined) params.set("query", options.query);
-      if (options.limit !== undefined) params.set("limit", String(options.limit));
-      if (options.offset !== undefined) params.set("offset", String(options.offset));
+      if (options.limit !== undefined)
+        params.set("limit", String(options.limit));
+      if (options.offset !== undefined)
+        params.set("offset", String(options.offset));
       return transport.get<CompanyPage>(`/api/v1/companies?${params}`);
     },
-    updateDeal: (id, input) => transport.post<SaveDealResponse>(`/api/v1/deals/${encodeURIComponent(id)}/update`, input),
+    updateDeal: (id, input) =>
+      transport.post<SaveDealResponse>(
+        `/api/v1/deals/${encodeURIComponent(id)}/update`,
+        input,
+      ),
     createDeal: (input: SaveDealInput) =>
       transport.post<SaveDealResponse>("/api/v1/deals", input),
-    login: (input: LoginInput) => transport.post<SessionResponse>("/api/v1/auth/login", input),
-    register: (input: RegisterInput) => transport.post<SessionResponse>("/api/v1/auth/register", input),
+    login: (input: LoginInput) =>
+      transport.post<SessionResponse>("/api/v1/auth/login", input),
+    register: (input: RegisterInput) =>
+      transport.post<SessionResponse>("/api/v1/auth/register", input),
     currentUser: () => transport.get<CurrentUserResponse>("/api/v1/auth/me"),
     logout: () => transport.post<void>("/api/v1/auth/logout", {}),
     deleteAssistantThread: (threadId) =>
@@ -139,7 +248,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     exportPowerPoint: (document) =>
       transport.postPowerPoint("/api/v1/templates/export", document),
     getDeal: (dealId) =>
-      transport.get<PersistedDeal>(`/api/v1/deals/${encodeURIComponent(dealId)}`),
+      transport.get<PersistedDeal>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}`,
+      ),
     getAssistantThread: (threadId) =>
       transport.get<AssistantThreadDetail>(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}`,
@@ -154,9 +265,12 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.get<DealDocumentText>(
         `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
       ),
-    getTemplate: async (templateId) => parseDiligenceCanvasDocument(
-      await transport.get<unknown>(`/api/v1/templates/${encodeURIComponent(templateId)}`),
-    ),
+    getTemplate: async (templateId) =>
+      parseDiligenceCanvasDocument(
+        await transport.get<unknown>(
+          `/api/v1/templates/${encodeURIComponent(templateId)}`,
+        ),
+      ),
     async importPptxTemplate(
       file,
       importMode: PptxTemplateImportMode,
@@ -174,7 +288,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       );
     },
     listDealDataRoom: (dealId) =>
-      transport.get<DealDataRoom>(`/api/v1/deals/${encodeURIComponent(dealId)}/data-room`),
+      transport.get<DealDataRoom>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/data-room`,
+      ),
     listAssistantThreads: (options = {}) => {
       const parameters = new URLSearchParams();
       if (options.after) parameters.set("before", options.after);
@@ -201,8 +317,11 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       ),
     async processDocuments(dealId, files) {
       return transport.postMultipart<ProcessDocumentsResponse>(
-        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`, files, [
-        ]),
+        await multipartFiles(
+          `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process`,
+          files,
+          [],
+        ),
       );
     },
     queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
@@ -215,46 +334,55 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         stop = undefined;
         cleanup?.();
       };
-      void Promise.all(input.files.map((file) => fileToMultipart(file, "application/octet-stream", false)))
+      void Promise.all(
+        input.files.map((file) =>
+          fileToMultipart(file, "application/octet-stream", false),
+        ),
+      )
         .then((files) => {
           if (!active) return undefined;
           if (!transport.startQuery) {
             throw new Error("The desktop query transport is unavailable.");
           }
-          return transport.startQuery({
-            sessionGeneration,
-            context: input.context.map((message) => ({ ...message })),
-            files,
-            model: input.model,
-            path: "/api/v1/query_model",
-            prompt: input.prompt,
-            systemInstructions: input.systemInstructions,
-          }, (payload) => {
-            if (!active || settled) return;
-            if (payload.kind === "connectionError") {
-              settled = true;
-              active = false;
-              stopTransport();
-              handlers.onConnectionError?.(payload.message);
-              return;
-            }
-            try {
-              const event = parseQueryEvent(payload.event);
-              handlers.onEvent(event);
-              if (event.type === "completed" || event.type === "failed") {
+          return transport.startQuery(
+            {
+              sessionGeneration,
+              context: input.context.map((message) => ({ ...message })),
+              files,
+              model: input.model,
+              path: "/api/v1/query_model",
+              prompt: input.prompt,
+              systemInstructions: input.systemInstructions,
+            },
+            (payload) => {
+              if (!active || settled) return;
+              if (payload.kind === "connectionError") {
                 settled = true;
                 active = false;
                 stopTransport();
+                handlers.onConnectionError?.(payload.message);
+                return;
               }
-            } catch (error) {
-              settled = true;
-              active = false;
-              stopTransport();
-              handlers.onConnectionError?.(
-                error instanceof Error ? error.message : "The query stream returned an invalid event.",
-              );
-            }
-          });
+              try {
+                const event = parseQueryEvent(payload.event);
+                handlers.onEvent(event);
+                if (event.type === "completed" || event.type === "failed") {
+                  settled = true;
+                  active = false;
+                  stopTransport();
+                }
+              } catch (error) {
+                settled = true;
+                active = false;
+                stopTransport();
+                handlers.onConnectionError?.(
+                  error instanceof Error
+                    ? error.message
+                    : "The query stream returned an invalid event.",
+                );
+              }
+            },
+          );
         })
         .then((cleanup) => {
           if (!cleanup) return;
@@ -266,7 +394,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
             settled = true;
             active = false;
             handlers.onConnectionError?.(
-              error instanceof Error ? error.message : "The desktop query connection failed.",
+              error instanceof Error
+                ? error.message
+                : "The desktop query connection failed.",
             );
           }
         });
@@ -276,7 +406,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         stopTransport();
       };
     },
-    runAssistantThread(input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) {
+    runAssistantThread(
+      input: RunAssistantThreadInput,
+      handlers: SendQueryEventHandlers,
+    ) {
       const sessionGeneration = sessionStore.getSnapshot().generation;
       let active = true;
       let settled = false;
@@ -287,52 +420,57 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         cleanup?.();
       };
       void Promise.all(
-        input.files.map((file) => fileToMultipart(file, "application/octet-stream", false)),
+        input.files.map((file) =>
+          fileToMultipart(file, "application/octet-stream", false),
+        ),
       )
         .then((files) => {
           if (!active) return undefined;
           if (!transport.startQuery) {
             throw new Error("The desktop query transport is unavailable.");
           }
-          return transport.startQuery({
-            sessionGeneration,
-            assistantMessageId: input.assistantMessageId,
-            files,
-            model: input.model,
-            parentMessageId: input.parentMessageId,
-            path: `/api/v1/assistant/threads/${encodeURIComponent(input.threadId)}/runs`,
-            prompt: input.prompt,
-            requestId: input.requestId,
-            systemInstructions: input.systemInstructions,
-            userMessageId: input.userMessageId,
-          }, (payload) => {
-            if (!active || settled) return;
-            if (payload.kind === "connectionError") {
-              settled = true;
-              active = false;
-              stopTransport();
-              handlers.onConnectionError?.(payload.message);
-              return;
-            }
-            try {
-              const event = parseQueryEvent(payload.event);
-              handlers.onEvent(event);
-              if (event.type === "completed" || event.type === "failed") {
+          return transport.startQuery(
+            {
+              sessionGeneration,
+              assistantMessageId: input.assistantMessageId,
+              files,
+              model: input.model,
+              parentMessageId: input.parentMessageId,
+              path: `/api/v1/assistant/threads/${encodeURIComponent(input.threadId)}/runs`,
+              prompt: input.prompt,
+              requestId: input.requestId,
+              systemInstructions: input.systemInstructions,
+              userMessageId: input.userMessageId,
+            },
+            (payload) => {
+              if (!active || settled) return;
+              if (payload.kind === "connectionError") {
                 settled = true;
                 active = false;
                 stopTransport();
+                handlers.onConnectionError?.(payload.message);
+                return;
               }
-            } catch (error) {
-              settled = true;
-              active = false;
-              stopTransport();
-              handlers.onConnectionError?.(
-                error instanceof Error
-                  ? error.message
-                  : "The query stream returned an invalid event.",
-              );
-            }
-          });
+              try {
+                const event = parseQueryEvent(payload.event);
+                handlers.onEvent(event);
+                if (event.type === "completed" || event.type === "failed") {
+                  settled = true;
+                  active = false;
+                  stopTransport();
+                }
+              } catch (error) {
+                settled = true;
+                active = false;
+                stopTransport();
+                handlers.onConnectionError?.(
+                  error instanceof Error
+                    ? error.message
+                    : "The query stream returned an invalid event.",
+                );
+              }
+            },
+          );
         })
         .then((cleanup) => {
           if (!cleanup) return;
@@ -344,7 +482,9 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
             settled = true;
             active = false;
             handlers.onConnectionError?.(
-              error instanceof Error ? error.message : "The desktop query connection failed.",
+              error instanceof Error
+                ? error.message
+                : "The desktop query connection failed.",
             );
           }
         });
@@ -373,13 +513,22 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         ),
       ),
     searchDocumentChunksByKeyword: (search: FileChunkKeywordSearch) =>
-      transport.post<KeywordFileChunkHit[]>("/api/v1/documents/search/keyword", search),
+      transport.post<KeywordFileChunkHit[]>(
+        "/api/v1/documents/search/keyword",
+        search,
+      ),
     searchDocumentChunksByVector: (search: FileChunkVectorSearch) =>
-      transport.post<VectorFileChunkHit[]>("/api/v1/documents/search/vector", search),
+      transport.post<VectorFileChunkHit[]>(
+        "/api/v1/documents/search/vector",
+        search,
+      ),
     async startProcessFile(dealId, file) {
       return transport.postMultipart<ProcessFileJobResponse>(
-        await multipartFiles(`/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`, [file], [
-        ]),
+        await multipartFiles(
+          `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
+          [file],
+          [],
+        ),
       );
     },
     subscribeToProcessFileJob(jobId, handlers: ProcessFileJobEventHandlers) {
@@ -424,16 +573,21 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/unarchive`,
         {},
       ),
-
   };
 }
 
-async function fileToMultipart(file: File, fallbackMimeType: string, preserveRelativePath = true) {
+async function fileToMultipart(
+  file: File,
+  fallbackMimeType: string,
+  preserveRelativePath = true,
+) {
   const relativeFile = file as File & { webkitRelativePath?: string };
   return {
     dataBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
     fieldName: "files",
-    filename: preserveRelativePath ? relativeFile.webkitRelativePath || file.name : file.name,
+    filename: preserveRelativePath
+      ? relativeFile.webkitRelativePath || file.name
+      : file.name,
     mimeType: file.type || fallbackMimeType,
   };
 }
@@ -442,7 +596,9 @@ function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
   const chunkSize = 32_768;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
   }
   return btoa(binary);
 }

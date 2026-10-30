@@ -26,14 +26,18 @@ export function DialogHeader({
   return (
     <header className={cn("flex items-start justify-between gap-5", className)}>
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">{eyebrow}</p>
+        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted">
+          {eyebrow}
+        </p>
         <h2
           className="mt-2 text-[2rem] font-bold leading-none text-text-main [font-family:var(--font-heading)]"
           id={titleId}
         >
           {title}
         </h2>
-        {description ? <p className="mt-2 text-[13px] leading-5 text-muted">{description}</p> : null}
+        {description ? (
+          <p className="mt-2 text-[13px] leading-5 text-muted">{description}</p>
+        ) : null}
       </div>
       <button
         aria-label={closeLabel}

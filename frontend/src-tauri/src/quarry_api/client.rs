@@ -124,6 +124,16 @@ impl QuarryHttpClient {
         Err("Quarry API returned an invalid delete response".to_string())
     }
 
+    pub async fn patch(&self, path: &str, body: Value) -> Result<Value, String> {
+        self.send_json(
+            self.client
+                .patch(self.url(path)?)
+                .headers(self.headers.clone())
+                .json(&body),
+        )
+        .await
+    }
+
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         self.send_json(
             self.client

@@ -33,7 +33,9 @@ export function PdfErrorState({
         <p className="text-base font-semibold text-foreground">
           {labels.errorTitle}
         </p>
-        <p className="max-w-md text-sm text-muted-foreground">{error.message}</p>
+        <p className="max-w-md text-sm text-muted-foreground">
+          {error.message}
+        </p>
       </div>
       {onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry}>

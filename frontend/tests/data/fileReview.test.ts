@@ -14,7 +14,12 @@ const summary: FileReviewSummary = {
 
 describe("buildFileReviewRows", () => {
   it("combines runtime file identity with clearly separate illustrative review content", () => {
-    const node = { id: "file-1", kind: "sheet" as const, name: "model.xlsx", relativePath: "Finance/model.xlsx" };
+    const node = {
+      id: "file-1",
+      kind: "sheet" as const,
+      name: "model.xlsx",
+      relativePath: "Finance/model.xlsx",
+    };
     const [row] = buildFileReviewRows(
       [{ folderPath: ["Finance"], node, source: "local" }],
       [summary],

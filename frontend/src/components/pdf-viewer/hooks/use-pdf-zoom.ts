@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   PDF_VIEWER_MAX_SCALE,
   PDF_VIEWER_MIN_SCALE,
@@ -133,18 +139,15 @@ export function usePdfZoom(args: UsePdfZoomArgs): UsePdfZoomReturn {
     container.scrollTop = target.docY * factor - target.cursorY;
   }, [scale, containerRef]);
 
-  const setScale = useCallback(
-    (next: number | "fit-width" | "fit-page") => {
-      if (next === "fit-width" || next === "fit-page") {
-        setFitMode(next);
-        // recompute via effect
-        return;
-      }
-      setFitMode(null);
-      setScaleState(clampScale(next));
-    },
-    [],
-  );
+  const setScale = useCallback((next: number | "fit-width" | "fit-page") => {
+    if (next === "fit-width" || next === "fit-page") {
+      setFitMode(next);
+      // recompute via effect
+      return;
+    }
+    setFitMode(null);
+    setScaleState(clampScale(next));
+  }, []);
 
   const zoomIn = useCallback(() => {
     setFitMode(null);
@@ -181,7 +184,8 @@ export function usePdfZoom(args: UsePdfZoomArgs): UsePdfZoomReturn {
       };
       setFitMode(null);
       setScaleState((current) => {
-        const target = e.deltaY > 0 ? nextZoomOut(current) : nextZoomIn(current);
+        const target =
+          e.deltaY > 0 ? nextZoomOut(current) : nextZoomIn(current);
         return target;
       });
     };
@@ -264,7 +268,9 @@ export function usePdfZoom(args: UsePdfZoomArgs): UsePdfZoomReturn {
     };
 
     container.addEventListener("pointerdown", onPointerDown);
-    container.addEventListener("pointermove", onPointerMove, { passive: false });
+    container.addEventListener("pointermove", onPointerMove, {
+      passive: false,
+    });
     container.addEventListener("pointerup", onPointerUp);
     container.addEventListener("pointercancel", onPointerUp);
     return () => {

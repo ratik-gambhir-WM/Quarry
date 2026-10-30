@@ -36,13 +36,17 @@ vi.mock("@/lib/diligence-canvas/DiligenceCanvas", () => ({
   }) => (
     <div>
       <p>Canvas: {value.presentation.title}</p>
-      <p>Canvas header: {showPresentationHeader === false ? "hidden" : "visible"}</p>
+      <p>
+        Canvas header: {showPresentationHeader === false ? "hidden" : "visible"}
+      </p>
       <p id={jsonPanelId}>JSON panel: {isJsonOpen ? "open" : "closed"}</p>
       <button
-        onClick={() => onChange({
-          ...value,
-          presentation: { ...value.presentation, title: "Edited" },
-        })}
+        onClick={() =>
+          onChange({
+            ...value,
+            presentation: { ...value.presentation, title: "Edited" },
+          })
+        }
         type="button"
       >
         Edit canvas
@@ -69,16 +73,23 @@ describe("DeliverableTemplateEditorPage", () => {
 
     expect(await screen.findByText("Canvas: Template One")).not.toBeNull();
     expect(getTemplate).toHaveBeenCalledWith("template/one");
-    expect(screen.queryByText("Edits are local to this view and are not saved.")).toBeNull();
-    const nameText = screen.getByRole("button", { name: "Edit deliverable name: Unnamed" });
+    expect(
+      screen.queryByText("Edits are local to this view and are not saved."),
+    ).toBeNull();
+    const nameText = screen.getByRole("button", {
+      name: "Edit deliverable name: Unnamed",
+    });
     expect(nameText.textContent).toBe("Unnamed");
     await userEvent.dblClick(nameText);
     const nameInput = screen.getByRole("textbox", { name: "Deliverable name" });
     expect(nameInput.getAttribute("value")).toBe("Unnamed");
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "Technology diligence{Enter}");
-    expect(screen.getByRole("button", { name: "Edit deliverable name: Technology diligence" }).textContent)
-      .toBe("Technology diligence");
+    expect(
+      screen.getByRole("button", {
+        name: "Edit deliverable name: Technology diligence",
+      }).textContent,
+    ).toBe("Technology diligence");
     expect(getTemplate).toHaveBeenCalledOnce();
     expect(exportPowerPoint).not.toHaveBeenCalled();
     expect(screen.getByText("Canvas header: hidden")).not.toBeNull();
@@ -97,7 +108,8 @@ describe("DeliverableTemplateEditorPage", () => {
     exportPowerPoint.mockResolvedValue({
       dataBase64: "UEsDBA==",
       fileName: "Edited.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       warningCount: 1,
     });
     savePowerPoint.mockResolvedValue(true);
@@ -105,15 +117,19 @@ describe("DeliverableTemplateEditorPage", () => {
     expect(exportButton.dataset.size).toBe("sm");
     await userEvent.click(exportButton);
 
-    expect(exportPowerPoint).toHaveBeenCalledWith(expect.objectContaining({
-      presentation: expect.objectContaining({ title: "Edited" }),
-    }));
+    expect(exportPowerPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        presentation: expect.objectContaining({ title: "Edited" }),
+      }),
+    );
     expect(savePowerPoint).toHaveBeenCalledWith({
       dataBase64: "UEsDBA==",
       suggestedName: "Edited.pptx",
       title: "Save PowerPoint presentation",
     });
-    expect(await screen.findByText("PowerPoint exported with 1 export warning.")).not.toBeNull();
+    expect(
+      await screen.findByText("PowerPoint exported with 1 export warning."),
+    ).not.toBeNull();
   });
 
   it("returns explicitly to the template gallery", async () => {
@@ -121,7 +137,9 @@ describe("DeliverableTemplateEditorPage", () => {
     renderEditor("example");
 
     await screen.findByText("Canvas: Example");
-    await userEvent.click(screen.getByRole("button", { name: "Back to Templates" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Back to Templates" }),
+    );
     expect(screen.getByText("Template gallery")).not.toBeNull();
   });
 
@@ -151,7 +169,11 @@ describe("DeliverableTemplateEditorPage", () => {
 function renderEditor(templateId: string) {
   const deal = workspaceDeals[0];
   return render(
-    <MemoryRouter initialEntries={[`/hub/deals/${deal.room.id}/deliverables/templates/${templateId}`]}>
+    <MemoryRouter
+      initialEntries={[
+        `/hub/deals/${deal.room.id}/deliverables/templates/${templateId}`,
+      ]}
+    >
       <Routes>
         <Route
           element={<Outlet context={{ deal, navigationState: {} }} />}
@@ -161,7 +183,10 @@ function renderEditor(templateId: string) {
             element={<DeliverableTemplateEditorPage />}
             path="deliverables/templates/:templateId"
           />
-          <Route element={<div>Template gallery</div>} path="deliverables/templates" />
+          <Route
+            element={<div>Template gallery</div>}
+            path="deliverables/templates"
+          />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -173,14 +198,16 @@ function makeDocument(title: string): DiligenceCanvasDocument {
     presentation: {
       preserveElementOrder: true,
       showBranding: false,
-      slides: [{
-        backgroundColor: "FFFFFF",
-        elements: [],
-        height: 720,
-        id: "slide-1",
-        name: "Slide 1",
-        width: 1280,
-      }],
+      slides: [
+        {
+          backgroundColor: "FFFFFF",
+          elements: [],
+          height: 720,
+          id: "slide-1",
+          name: "Slide 1",
+          width: 1280,
+        },
+      ],
       title,
     },
   };

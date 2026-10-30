@@ -4,29 +4,34 @@ import { PptxTemplateImportButtons } from "../examples/c-file-upload-3";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/Icon";
 import { Input } from "../ui/input";
-import { useTemplatePreviewActions, useTemplatePreviewState } from "./TemplatePreviewStore";
+import {
+  useTemplatePreviewActions,
+  useTemplatePreviewState,
+} from "./TemplatePreviewStore";
 
 type DeliverablesHeaderProps =
   | { mode: "deliverables"; onViewTemplates: () => void }
   | { mode: "templates"; onBack: () => void }
   | {
-    deliverableName: string;
-    exportDisabled: boolean;
-    exportLabel: string;
-    isJsonOpen: boolean;
-    jsonPanelId: string;
-    mode: "editor";
-    onBack: () => void;
-    onDeliverableNameChange: (name: string) => void;
-    onExport: () => void;
-    onJsonOpenChange: (isOpen: boolean) => void;
-  };
+      deliverableName: string;
+      exportDisabled: boolean;
+      exportLabel: string;
+      isJsonOpen: boolean;
+      jsonPanelId: string;
+      mode: "editor";
+      onBack: () => void;
+      onDeliverableNameChange: (name: string) => void;
+      onExport: () => void;
+      onJsonOpenChange: (isOpen: boolean) => void;
+    };
 
 export function DeliverablesHeader(props: DeliverablesHeaderProps) {
   if (props.mode === "deliverables") {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-between gap-4 self-stretch">
-        <h1 className="text-[12px] font-semibold leading-none text-text-main">Deliverables</h1>
+        <h1 className="text-[12px] font-semibold leading-none text-text-main">
+          Deliverables
+        </h1>
         <Button
           className="bg-primary-container text-white hover:bg-primary-container/90"
           onClick={props.onViewTemplates}
@@ -45,7 +50,13 @@ export function DeliverablesHeader(props: DeliverablesHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 items-center justify-between gap-4 self-stretch">
       <div className="flex min-w-0 items-center gap-3">
-        <Button aria-label="Back to Templates" onClick={props.onBack} size="icon-sm" type="button" variant="ghost">
+        <Button
+          aria-label="Back to Templates"
+          onClick={props.onBack}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
           <Icon className="h-4 w-4" name="chevronLeft" />
         </Button>
         <EditableDeliverableName
@@ -78,8 +89,7 @@ export function DeliverablesHeader(props: DeliverablesHeaderProps) {
 }
 
 type DeliverableNameEditState =
-  | { status: "display" }
-  | { draft: string; status: "editing" };
+  { status: "display" } | { draft: string; status: "editing" };
 
 function EditableDeliverableName({
   name,
@@ -88,7 +98,9 @@ function EditableDeliverableName({
   name: string;
   onChange: (name: string) => void;
 }) {
-  const [editState, setEditState] = useState<DeliverableNameEditState>({ status: "display" });
+  const [editState, setEditState] = useState<DeliverableNameEditState>({
+    status: "display",
+  });
 
   if (editState.status === "editing") {
     const commit = () => {
@@ -104,10 +116,12 @@ function EditableDeliverableName({
         className="w-56 max-w-[40vw] rounded-sm px-1.5 text-sm font-semibold text-text-main"
         maxLength={80}
         onBlur={commit}
-        onChange={(event) => setEditState({
-          draft: event.currentTarget.value,
-          status: "editing",
-        })}
+        onChange={(event) =>
+          setEditState({
+            draft: event.currentTarget.value,
+            status: "editing",
+          })
+        }
         onFocus={(event) => event.currentTarget.select()}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
@@ -147,27 +161,42 @@ function EditableDeliverableName({
 function TemplatesHeader({ onBack }: { onBack: () => void }) {
   const previewState = useTemplatePreviewState();
   const { importPptxTemplate, reportImportError } = useTemplatePreviewActions();
-  const hasTemplates = previewState.status === "success" && previewState.slides.length > 0;
-  const activeMode = previewState.status === "success"
-    && previewState.activeOperation?.type === "pptxImport"
-    ? previewState.activeOperation.importMode
-    : null;
+  const hasTemplates =
+    previewState.status === "success" && previewState.slides.length > 0;
+  const activeMode =
+    previewState.status === "success" &&
+    previewState.activeOperation?.type === "pptxImport"
+      ? previewState.activeOperation.importMode
+      : null;
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-between gap-4 self-stretch">
       <div className="flex min-w-0 items-center gap-3">
-        <Button aria-label="Back to Deliverables" onClick={onBack} size="icon-sm" type="button" variant="ghost">
+        <Button
+          aria-label="Back to Deliverables"
+          onClick={onBack}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
           <Icon className="h-4 w-4" name="chevronLeft" />
         </Button>
         <div className="min-w-0">
-          <h1 className="text-sm font-semibold leading-none text-text-main">Templates</h1>
-          <p className="mt-1 hidden truncate text-xs leading-none text-muted sm:block">Browse available slides to start a deliverable.</p>
+          <h1 className="text-sm font-semibold leading-none text-text-main">
+            Templates
+          </h1>
+          <p className="mt-1 hidden truncate text-xs leading-none text-muted sm:block">
+            Browse available slides to start a deliverable.
+          </p>
         </div>
       </div>
       {hasTemplates ? (
         <PptxTemplateImportButtons
           activeMode={activeMode}
-          disabled={previewState.status !== "success" || previewState.activeOperation !== null}
+          disabled={
+            previewState.status !== "success" ||
+            previewState.activeOperation !== null
+          }
           onError={reportImportError}
           onImport={importPptxTemplate}
         />
