@@ -7,7 +7,7 @@ import {
   WorkspaceLocationState,
 } from "../../../data/workspace";
 import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/navigation";
-import { WestMonroeMark } from "../../brand/WestMonroeMark";
+import { DataRoomToolsDial } from "../../data-room/DataRoomToolsProvider";
 import { Icon } from "../../ui/Icon";
 import { SidebarIcon } from "./SidebarIcon";
 import { ProfilePreferences } from "./ProfilePreferences";
@@ -143,7 +143,7 @@ export function SidebarFrame({
                   navigationState={navigationState}
                 />
               ) : null}
-              <div className="flex items-center gap-2">
+              <div className={`flex items-center gap-2 ${collapsed ? "flex-col" : ""}`}>
                 <button
                   aria-expanded={!collapsed && profileMenuOpen}
                   aria-haspopup={collapsed ? undefined : "menu"}
@@ -180,16 +180,9 @@ export function SidebarFrame({
                     </div>
                   )}
                 </button>
-                {collapsed ? null : (
-                  <div
-                    aria-label="Quarry"
-                    className="flex h-8 w-8 shrink-0 items-center justify-center"
-                    role="img"
-                    title="Quarry"
-                  >
-                    <WestMonroeMark className="h-7 w-7" framed />
-                  </div>
-                )}
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+                  <DataRoomToolsDial />
+                </div>
               </div>
             </div>
           </div>

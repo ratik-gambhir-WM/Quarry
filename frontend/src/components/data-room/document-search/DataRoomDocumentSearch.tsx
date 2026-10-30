@@ -14,6 +14,9 @@ export type DataRoomDocumentSearchProps = {
   finalFocusEl?: () => HTMLElement | null;
   onActivateResult: (result: DocumentSearchResult) => void;
   onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  hideTrigger?: boolean;
+  dialogTitle?: string;
   onSelectionFocus?: () => void;
   boundaryElement?: HTMLElement | null;
   trigger?: ReactElement;
@@ -25,6 +28,9 @@ export function DataRoomDocumentSearch({
   finalFocusEl,
   onActivateResult,
   onOpenChange,
+  open,
+  hideTrigger,
+  dialogTitle,
   onSelectionFocus,
   boundaryElement,
   trigger,
@@ -70,7 +76,9 @@ export function DataRoomDocumentSearch({
     <DocumentSearch
       buttonProps={{ "aria-label": "Search document", iconOnly: true }}
       dialogDescription={`Search local mock excerpts for ${currentFileName}.`}
-      dialogTitle={`Search ${currentFileName}`}
+      dialogTitle={dialogTitle ?? `Search ${currentFileName}`}
+      open={open}
+      hideTrigger={hideTrigger}
       finalFocusEl={finalFocusEl}
       items={items}
       onOpenChange={onOpenChange}

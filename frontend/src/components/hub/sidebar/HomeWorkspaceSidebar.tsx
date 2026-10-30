@@ -52,7 +52,7 @@ export function HomeWorkspaceSidebarNavigation({
         <SidebarLink
           homeSection={activeHomeSection}
           href="/hub/assistant"
-          icon="twitch"
+          icon="assistant"
           label="Assistant"
           navigationState={navigationState}
         />

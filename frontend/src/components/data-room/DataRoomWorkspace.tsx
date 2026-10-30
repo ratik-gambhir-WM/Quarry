@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import type { DocumentSearchResult } from "./document-search/documentSearchModel";
 import type { DocumentPreviewPanelHandle } from "./DocumentPreviewPanel";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
@@ -8,6 +8,7 @@ import { useDocumentSession } from "../../hooks/useDocumentSession";
 import { EmptyState } from "../empty-state/empty-state";
 import { DataRoomExplorer } from "./DataRoomExplorer";
 import { FileReviewTable } from "./FileReviewTable";
+import { useDataRoomDocumentSearch } from "./DataRoomToolsProvider";
 
 const DocumentPreviewPanel = lazy(() =>
   import("./DocumentPreviewPanel").then((module) => ({
@@ -71,24 +72,29 @@ export function DataRoomWorkspace({
     documentPreviewRef.current?.focusViewer();
   }, []);
 
+  const searchContext = useMemo(() => {
+    if (!selectedDocument) return null;
+    return {
+      boundaryElement: searchBoundaryElement,
+      currentFileName: selectedDocument.name,
+      currentPageCount: documentPageCount,
+      onActivateResult: (result: DocumentSearchResult) => {
+        if (result.target?.kind === "pdf-page") {
+          setRequestedPreviewPage(result.target.page);
+        }
+      },
+      onSelectionFocus: focusDocumentPreview,
+    };
+  }, [selectedDocument, searchBoundaryElement, documentPageCount, focusDocumentPreview]);
+  useDataRoomDocumentSearch(searchContext);
+
   return (
     <div className="relative flex h-full min-h-0 min-w-0 flex-1">
       {selectedDocument ? (
         <div className="contents" data-workspace-sidebar-replacement>
           <DataRoomExplorer
-            dealId={dealId}
             dealName={dealName}
             dealRoomPath={dealRoomPath}
-            documentSearch={{
-              boundaryElement: searchBoundaryElement,
-              currentFileName: selectedDocument.name,
-              currentPageCount: documentPageCount,
-              onActivateResult: (result: DocumentSearchResult) => {
-                if (result.target?.kind === "pdf-page")
-                  setRequestedPreviewPage(result.target.page);
-              },
-              onSelectionFocus: focusDocumentPreview,
-            }}
             email={email}
             navigationState={navigationState}
             nodes={contents.explorerNodes}

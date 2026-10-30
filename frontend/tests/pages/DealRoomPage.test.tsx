@@ -87,6 +87,25 @@ describe("DealRoomPage", () => {
     });
   });
 
+  it.each([
+    ["data-room", true],
+    ["analysis", false],
+    ["", false],
+  ])("enables logo tools only for the Data Room route (%s)", (section, enabled) => {
+    render(
+      <MemoryRouter initialEntries={[`/hub/deals/project-alpha/${section}`]}>
+        <Routes>
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route index element={<p>Overview</p>} />
+            <Route path="data-room" element={<p>Data Room</p>} />
+            <Route path="analysis" element={<p>Analysis</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "Data Room tools" }) !== null).toBe(enabled);
+  });
+
   it("renders the shared workspace skeleton while the deal request is pending", () => {
     useWorkspaceMock.mockReturnValue({
       deals: [],

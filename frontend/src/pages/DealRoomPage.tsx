@@ -14,6 +14,7 @@ import {
   type DealRoomOverviewSection,
 } from "../components/deal-room/DealRoomHeader";
 import { WorkspaceShell } from "../components/hub/WorkspaceLayout";
+import { DataRoomToolsProvider } from "../components/data-room/DataRoomToolsProvider";
 import { WorkspaceSidebar } from "../components/hub/WorkspaceSidebar";
 import type { ActiveDealSection } from "../components/hub/sidebar/sidebarTypes";
 import { WorkspacePageSkeleton } from "../components/ui/WorkspacePageSkeleton";
@@ -208,7 +209,7 @@ function DealRoomWorkspace({
     setTimelineItems,
     timelineItems,
   };
-  return (
+  const shell = (
     <WorkspaceShell
       sidebar={
         <WorkspaceSidebar
@@ -224,6 +225,11 @@ function DealRoomWorkspace({
       <Outlet context={context} />
     </WorkspaceShell>
   );
+  return activeSection === "data-room" ? (
+    <DataRoomToolsProvider dealId={deal.room.id} email={email} key={`${email ?? ""}:${deal.room.id}`}>
+      {shell}
+    </DataRoomToolsProvider>
+  ) : shell;
 }
 
 function getDealRoomChildPath(pathname: string, dealId: string) {

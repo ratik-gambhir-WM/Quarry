@@ -40,14 +40,9 @@ vi.mock("@/pages/DealRoomPage", () => ({
 vi.mock("@/components/data-room/DataRoomExplorer", () => ({
   DataRoomExplorer: ({
     dealRoomPath,
-    documentSearch,
     onUploadNewFile,
   }: {
     dealRoomPath: string;
-    documentSearch: {
-      boundaryElement: HTMLElement | null;
-      currentFileName: string;
-    };
     onUploadNewFile: () => void;
   }) => (
     <aside>
@@ -57,11 +52,6 @@ vi.mock("@/components/data-room/DataRoomExplorer", () => ({
         <button onClick={onUploadNewFile} type="button">
           Upload files
         </button>
-        <button type="button">Search document</button>
-        <span>{documentSearch.currentFileName}</span>
-        <span data-testid="search-boundary-class">
-          {documentSearch.boundaryElement?.className}
-        </span>
       </nav>
     </aside>
   ),
@@ -132,7 +122,7 @@ describe("DataRoomPage", () => {
     });
   });
 
-  it("renders Data Room tools in the explorer and keeps their search boundary above preview chrome", async () => {
+  it("renders the selected-document explorer and opens its upload dialog", async () => {
     const user = userEvent.setup({ skipHover: true });
     render(
       <MemoryRouter initialEntries={["/hub/deals/project-alpha/data-room"]}>
@@ -173,10 +163,6 @@ describe("DataRoomPage", () => {
     expect(
       screen.getByRole("navigation", { name: "Data room tools" }),
     ).not.toBeNull();
-    expect(screen.getByTestId("search-boundary-class").textContent).toContain(
-      "z-50",
-    );
-    expect(screen.getByText("test.pdf")).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Upload files" }));
     expect(

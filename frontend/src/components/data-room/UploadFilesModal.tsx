@@ -54,6 +54,7 @@ export function UploadFilesModal({
 }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chooseFilesButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const processingStartedAtRef = useRef<number | null>(null);
@@ -309,7 +310,13 @@ export function UploadFilesModal({
         }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
+          returnFocusRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement : null;
           chooseFilesButtonRef.current?.focus();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
         }}
         onPointerDownOutside={(event) => {
           if (activeCount > 0) event.preventDefault();

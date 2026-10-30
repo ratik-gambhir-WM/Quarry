@@ -493,15 +493,20 @@ global state or query-cache library.
   in-memory edits are preserved. The selected-document session also owns the sidebar swap: the
   Data Room explorer exists only while the preview surface is open, and the
   workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
-- `DataRoomWorkspace` owns selected-document search coordination. When a selected preview replaces
-  the workspace sidebar with the Data Room explorer, it passes current-document page-count,
-  requested-page, and focus capabilities to the explorer's quick actions. This preserves
-  current-document page jumps without coupling the reusable search UI to the editor implementation.
-- `DataRoomQuickActions` owns the Synthesis Canvas panel's open state and invokes its owning
-  route's existing upload-modal callback from the animated Upload icon. Its Synthesis Canvas panel
-  reuses the Assistant runtime and thread view with a panel-local provider keyed by user and deal.
-  Its picker lists only that deal's chats, and new threads persist the active deal association.
-  Closing the panel preserves that provider for the current Data Room explorer mount.
+- `DataRoomWorkspace` owns selected-document search coordination. It registers live current-file,
+  page-count, requested-page, boundary, and focus capabilities with the Data Room tools registry;
+  unmounting the viewer removes those capabilities. This preserves page jumps without coupling
+  the reusable search UI to the editor implementation.
+- `DealRoomPage` mounts `DataRoomToolsProvider` only for its Data Room route. The West Monroe logo
+  opens a Stealth speed dial with Assistant and Workspace Search; outside that route the logo is
+  non-interactive. The shared shell and replacement explorer use the same provider. A floating
+  logo trigger keeps the tools reachable below the desktop sidebar breakpoint.
+- `DataRoomToolPanels` lazy-loads on first tool invocation. Its draggable Assistant panel reuses
+  the Assistant runtime and thread view with a provider keyed by user and deal. Its picker lists
+  only that deal's chats, and new threads persist the active deal association. Closing the panel
+  preserves chat state for the Data Room route mount; leaving the route releases it. Search
+  continues to expose sample excerpts and current-document page navigation only; without a selected
+  document it explains that workspace-wide search is not connected.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Direct API lookup also resolves archived deals excluded
   from the default portfolio list. Lookup results enter the shared deal cache so company edits
@@ -625,19 +630,18 @@ requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions 
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
 Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
 data-grid implementation on TanStack React Table. When a selected document replaces the normal
-workspace sidebar with the Data Room explorer, its direct quick-action toolbar appears above Saved
-documents. The toolbar distributes bare animated Upload, Pencil Square (Synthesis Canvas), Notes,
-and Document Magnifying Glass (Search) icons evenly across the sidebar. Upload opens the existing
-Data Room file-upload modal through the ReUI dialog primitives, including focus trapping and a
-scrollable body. Its compact dropzone and selected-file rows use motion-aware transitions; per-file
-processing retains the existing activity circle, completion check, selection, and retry behavior.
-Notes remains an unpersisted placeholder, while Search exposes fixture-backed
-results. Synthesis Canvas opens a draggable, resizable floating Assistant chat panel. Its header
-offers a New chat action and a dropdown list of persisted previous chats, while its body reuses the
-Assistant thread viewport and composer. The Search
-floating panel opens centered within the usable Data Room surface without a backdrop. Its title bar
-supports dragging, it remains above sticky file-review chrome, and each panel restores focus to its
-originating sidebar action when closed.
+workspace sidebar with the Data Room explorer, Saved documents has a separate plus button that
+opens the existing file-upload modal without toggling the folder; dismissing it restores focus to
+the plus button. The former four-icon toolbar is removed. Upload uses the ReUI dialog primitives,
+including focus trapping and a scrollable body.
+Its compact dropzone and selected-file rows use motion-aware transitions; per-file processing
+retains the activity circle, completion check, selection, and retry behavior. The sidebar's West
+Monroe logo opens a motion-aware, keyboard-accessible speed dial with Assistant and Workspace
+Search, using custom SVGs rather than a plus trigger. The search floating panel opens centered
+within the usable Data Room surface without a backdrop. Its title bar supports dragging and stays
+above sticky file-review chrome. Closing either panel restores focus to the originating logo;
+selecting an available search result returns focus to the document viewer. The logo remains static
+outside the Data Room.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens

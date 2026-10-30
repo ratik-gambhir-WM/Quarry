@@ -3,6 +3,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UploadFilesModal } from "@/components/data-room/UploadFilesModal";
+import { useState } from "react";
+import userEvent from "@testing-library/user-event";
 
 const { startProcessFile, subscribeToProcessFileJob } = vi.hoisted(() => ({
   startProcessFile: vi.fn(),
@@ -24,6 +26,22 @@ afterEach(() => {
 });
 
 describe("UploadFilesModal", () => {
+  it("returns focus to the upload action when dismissed", async () => {
+    function UploadAction() {
+      const [open, setOpen] = useState(false);
+      return <>
+        <button onClick={() => setOpen(true)}>Upload files to Saved documents</button>
+        {open ? <UploadFilesModal dealId="deal-1" userId="user-1" onClose={() => setOpen(false)} /> : null}
+      </>;
+    }
+    const user = userEvent.setup();
+    render(<UploadAction />);
+    const trigger = screen.getByRole("button", { name: "Upload files to Saved documents" });
+    await user.click(trigger);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Browse files to upload" }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
   it("accepts supported image files for document ingestion", () => {
     render(
       <UploadFilesModal

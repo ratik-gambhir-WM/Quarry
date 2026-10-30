@@ -1,9 +1,11 @@
 import { AnimatedIcon } from "../../ui/AnimatedIcon";
 import type { AnimatedIconName } from "../../ui/AnimatedIcon";
 import { Icon } from "../../ui/Icon";
+import { AssistantIcon } from "../../ui/workspace-tool-icons";
 
 export type SidebarIconName =
   | AnimatedIconName
+  | "assistant"
   | "bookmark"
   | "briefcase"
   | "dashboard"
@@ -39,6 +41,7 @@ export function SidebarIcon({
   className: string;
   name: SidebarIconName;
 }) {
+  if (name === "assistant") return <AssistantIcon className={className} />;
   return isAnimatedIconName(name) ? (
     <AnimatedIcon className={className} name={name} />
   ) : (

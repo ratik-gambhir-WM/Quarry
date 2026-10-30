@@ -3,14 +3,10 @@ import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DealExtractionLocationState } from "../../data/dealExtraction";
 import { SidebarFrame } from "../hub/sidebar/SidebarFrame";
 import { Icon } from "../ui/Icon";
-import { DataRoomQuickActions } from "./DataRoomQuickActions";
-import type { DataRoomDocumentSearchProps } from "./document-search/DataRoomDocumentSearch";
 
 type DataRoomExplorerProps = {
-  dealId: string;
   dealName: string;
   dealRoomPath: string;
-  documentSearch: Omit<DataRoomDocumentSearchProps, "finalFocusEl" | "trigger">;
   email?: string;
   navigationState?: DealExtractionLocationState;
   nodes: DataRoomTreeNode[];
@@ -22,10 +18,8 @@ type DataRoomExplorerProps = {
 };
 
 export function DataRoomExplorer({
-  dealId,
   dealName,
   dealRoomPath,
-  documentSearch,
   email,
   navigationState,
   nodes,
@@ -75,13 +69,6 @@ export function DataRoomExplorer({
       {({ collapsed }) =>
         collapsed ? null : (
           <div className="flex min-h-full flex-col gap-3">
-            <DataRoomQuickActions
-              dealId={dealId}
-              documentSearch={documentSearch}
-              email={email}
-              onUploadNewFile={onUploadNewFile}
-            />
-
             <div className="min-h-0 flex-1 pt-2">
               {rootPath ? (
                 <p
@@ -105,6 +92,7 @@ export function DataRoomExplorer({
                     key={node.id}
                     node={node}
                     onSelectFile={onSelectFile}
+                    onUploadNewFile={onUploadNewFile}
                     onToggle={toggleNode}
                     selectedFilePath={selectedFilePath}
                   />
@@ -124,6 +112,7 @@ type ExplorerNodeItemProps = {
   node: DataRoomTreeNode;
   onSelectFile: (node: DataRoomTreeNode) => void;
   onToggle: (nodeId: string) => void;
+  onUploadNewFile: () => void;
   selectedFilePath?: string;
 };
 
@@ -133,6 +122,7 @@ function ExplorerNodeItem({
   node,
   onSelectFile,
   onToggle,
+  onUploadNewFile,
   selectedFilePath,
 }: ExplorerNodeItemProps) {
   const isFolder = node.kind === "folder";
@@ -143,49 +133,63 @@ function ExplorerNodeItem({
 
   return (
     <div>
-      <button
-        aria-current={selected ? "true" : undefined}
-        className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ${
-          selected
-            ? "bg-sidebar-selected text-sidebar-active"
-            : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active"
-        }`}
-        onClick={() => {
-          if (isFolder) {
-            onToggle(node.id);
-          } else {
-            onSelectFile(node);
-          }
-        }}
-        style={{ paddingLeft: `${depth * 18 + 8}px` }}
-        title={node.error ? `${node.name} — ${node.error}` : node.name}
-        type="button"
-      >
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-sidebar-muted">
-          {isFolder ? (
-            <Icon
-              className="h-4 w-4"
-              name={expanded ? "chevronDown" : "chevronRight"}
-            />
-          ) : null}
-        </span>
-        <span className="mt-0.5 shrink-0 text-sidebar-muted">
-          <Icon
-            className="h-[18px] w-[18px]"
-            name={iconNameForNode(node.kind)}
-          />
-        </span>
-        <span
-          className={`min-w-0 whitespace-normal break-words leading-snug [overflow-wrap:anywhere] ${
-            isFolder ? "text-[13px] font-medium" : "text-[13px]"
+      <div className="flex items-center">
+        <button
+          aria-current={selected ? "true" : undefined}
+          aria-expanded={isFolder ? expanded : undefined}
+          className={`flex min-w-0 flex-1 items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ${
+            selected
+              ? "bg-sidebar-selected text-sidebar-active"
+              : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-active"
           }`}
+          onClick={() => {
+            if (isFolder) {
+              onToggle(node.id);
+            } else {
+              onSelectFile(node);
+            }
+          }}
+          style={{ paddingLeft: `${depth * 18 + 8}px` }}
+          title={node.error ? `${node.name} — ${node.error}` : node.name}
+          type="button"
         >
-          {node.name}
-        </span>
-        {node.error ? (
-          <span className="ml-auto shrink-0 text-error">!</span>
+          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-sidebar-muted">
+            {isFolder ? (
+              <Icon
+                className="h-4 w-4"
+                name={expanded ? "chevronDown" : "chevronRight"}
+              />
+            ) : null}
+          </span>
+          <span className="mt-0.5 shrink-0 text-sidebar-muted">
+            <Icon
+              className="h-[18px] w-[18px]"
+              name={iconNameForNode(node.kind)}
+            />
+          </span>
+          <span
+            className={`min-w-0 whitespace-normal break-words leading-snug [overflow-wrap:anywhere] ${
+              isFolder ? "text-[13px] font-medium" : "text-[13px]"
+            }`}
+          >
+            {node.name}
+          </span>
+          {node.error ? (
+            <span className="ml-auto shrink-0 text-error">!</span>
+          ) : null}
+        </button>
+        {isFolder && depth === 0 && node.id === "stored-documents" ? (
+          <button
+            aria-label="Upload files to Saved documents"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={onUploadNewFile}
+            title="Upload files"
+            type="button"
+          >
+            <Icon aria-hidden="true" className="size-4" name="plus" />
+          </button>
         ) : null}
-      </button>
+      </div>
 
       {isFolder && expanded ? (
         <div className="space-y-0.5">
@@ -197,6 +201,7 @@ function ExplorerNodeItem({
               node={child}
               onSelectFile={onSelectFile}
               onToggle={onToggle}
+              onUploadNewFile={onUploadNewFile}
               selectedFilePath={selectedFilePath}
             />
           ))}

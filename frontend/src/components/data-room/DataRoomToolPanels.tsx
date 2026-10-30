@@ -7,6 +7,7 @@ import {
 import { QueryChatRuntimeProvider } from "../chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "../chat/QueryChatThread";
 import { Button } from "../ui/button";
+import { getFloatingPanelInitialPosition } from "../ui/floating-panel-position";
 import {
   FloatingPanel,
   FloatingPanelCloseTrigger,
@@ -14,7 +15,6 @@ import {
   FloatingPanelControl,
   FloatingPanelHeader,
   FloatingPanelTitle,
-  FloatingPanelTrigger,
 } from "../ui/floating-panel";
 import {
   DropdownMenu,
@@ -24,27 +24,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Icon } from "../ui/Icon";
-import { DocumentMagnifyingGlassIcon } from "../ui/document-magnifying-glass";
-import { PencilSquareIcon } from "../ui/pencil-square";
-import { UploadIcon } from "../ui/upload";
-import {
-  DataRoomDocumentSearch,
-  type DataRoomDocumentSearchProps,
-} from "./document-search/DataRoomDocumentSearch";
-
-type DataRoomQuickActionsProps = {
-  documentSearch: Omit<DataRoomDocumentSearchProps, "finalFocusEl" | "trigger">;
-  email?: string;
-  dealId: string;
-  onUploadNewFile: () => void;
-};
+import { DataRoomDocumentSearch } from "./document-search/DataRoomDocumentSearch";
+import DocumentSearch from "./document-search/DocumentSearch";
+import type { DocumentSearchContext } from "./DataRoomToolsProvider";
 
 const SYNTHESIS_PANEL_DEFAULT_SIZE = { width: 520, height: 512 };
 const SYNTHESIS_PANEL_DEFAULT_INSET = { right: 72, bottom: 48 };
 const SYNTHESIS_PANEL_MIN_SIZE = { width: 360, height: 360 };
-const SIDEBAR_ACTION_CLASSNAME =
-  "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-active";
 
 function getInitialSynthesisPanelSize() {
   if (typeof window === "undefined") {
@@ -63,69 +49,41 @@ function getInitialSynthesisPanelSize() {
   };
 }
 
-export function DataRoomQuickActions({
-  documentSearch,
+export default function DataRoomToolPanels({
+  search,
   dealId,
   email,
-  onUploadNewFile,
-}: DataRoomQuickActionsProps) {
+  panel,
+  finalFocusEl,
+  onAssistantOpenChange,
+  onSearchOpenChange,
+}: {
+  search: DocumentSearchContext | null;
+  dealId: string;
+  email?: string;
+  panel: "assistant" | "search" | null;
+  finalFocusEl: () => HTMLElement | null;
+  onAssistantOpenChange: (open: boolean) => void;
+  onSearchOpenChange: (open: boolean) => void;
+}) {
   const [contextTruncated, setContextTruncated] = useState(false);
-  const [synthesisPanelOpen, setSynthesisPanelOpen] = useState(false);
   const [synthesisPanelSize] = useState(getInitialSynthesisPanelSize);
   const synthesisChatRef = useRef<HTMLDivElement | null>(null);
-  const synthesisTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const searchTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div
-      aria-label="Data room tools"
-      className="grid grid-cols-4 items-center px-2"
-      role="toolbar"
-    >
-      <Button
-        aria-label="Upload files"
-        className={`${SIDEBAR_ACTION_CLASSNAME} justify-self-center`}
-        onClick={onUploadNewFile}
-        size="icon-lg"
-        title="Upload files"
-        type="button"
-        variant="ghost"
-      >
-        <UploadIcon aria-hidden="true" className="size-4" size={16} />
-      </Button>
-
+    <>
       <FloatingPanel
         allowOverflow={false}
         closeOnEscape
         defaultSize={synthesisPanelSize}
-        getAnchorPosition={({ boundaryRect }) => {
-          const boundaryX = boundaryRect?.x ?? 0;
-          const boundaryY = boundaryRect?.y ?? 0;
-          const boundaryWidth = boundaryRect?.width ?? window.innerWidth;
-          const boundaryHeight = boundaryRect?.height ?? window.innerHeight;
-
-          return {
-            x: Math.max(
-              boundaryX,
-              boundaryX +
-                boundaryWidth -
-                synthesisPanelSize.width -
-                SYNTHESIS_PANEL_DEFAULT_INSET.right,
-            ),
-            y: Math.max(
-              boundaryY,
-              boundaryY +
-                boundaryHeight -
-                synthesisPanelSize.height -
-                SYNTHESIS_PANEL_DEFAULT_INSET.bottom,
-            ),
-          };
-        }}
+        defaultPosition={getFloatingPanelInitialPosition(
+          synthesisPanelSize, search?.boundaryElement, SYNTHESIS_PANEL_DEFAULT_INSET,
+        )}
         getBoundaryEl={() =>
-          documentSearch.boundaryElement ?? document.documentElement
+          search?.boundaryElement ?? document.documentElement
         }
         id="data-room-synthesis-canvas"
-        finalFocusEl={() => synthesisTriggerRef.current}
+        finalFocusEl={finalFocusEl}
         initialFocusEl={() =>
           synthesisChatRef.current?.querySelector("textarea") ?? null
         }
@@ -139,23 +97,10 @@ export function DataRoomQuickActions({
             synthesisPanelSize.height,
           ),
         }}
-        onOpenChange={({ open }) => setSynthesisPanelOpen(open)}
-        open={synthesisPanelOpen}
+        onOpenChange={({ open }) => onAssistantOpenChange(open)}
+        open={panel === "assistant"}
         unmountOnExit={false}
       >
-        <FloatingPanelTrigger asChild>
-          <Button
-            aria-label="Open Synthesis Canvas"
-            className={`${SIDEBAR_ACTION_CLASSNAME} justify-self-center`}
-            ref={synthesisTriggerRef}
-            size="icon-lg"
-            title="Synthesis Canvas"
-            type="button"
-            variant="ghost"
-          >
-            <PencilSquareIcon aria-hidden="true" className="size-4" size={16} />
-          </Button>
-        </FloatingPanelTrigger>
         <FloatingPanelContent>
           <QueryChatRuntimeProvider
             dealId={dealId}
@@ -165,12 +110,12 @@ export function DataRoomQuickActions({
             userEmail={email ?? ""}
           >
             <FloatingPanelHeader>
-              <FloatingPanelTitle>Synthesis Canvas</FloatingPanelTitle>
+              <FloatingPanelTitle>Assistant</FloatingPanelTitle>
               <SynthesisChatPicker />
               <FloatingPanelControl>
                 <FloatingPanelCloseTrigger asChild>
                   <Button
-                    aria-label="Close Synthesis Canvas"
+                    aria-label="Close Assistant"
                     size="icon-xs"
                     type="button"
                     variant="ghost"
@@ -190,39 +135,29 @@ export function DataRoomQuickActions({
         </FloatingPanelContent>
       </FloatingPanel>
 
-      <Button
-        aria-label="Notes"
-        className={`${SIDEBAR_ACTION_CLASSNAME} justify-self-center`}
-        size="icon-lg"
-        title="Notes"
-        type="button"
-        variant="ghost"
-      >
-        <Icon aria-hidden="true" className="size-4" name="doc" />
-      </Button>
-
-      <DataRoomDocumentSearch
-        {...documentSearch}
-        finalFocusEl={() => searchTriggerRef.current}
-        trigger={
-          <Button
-            aria-label="Search document"
-            className={`${SIDEBAR_ACTION_CLASSNAME} justify-self-center`}
-            ref={searchTriggerRef}
-            size="icon-lg"
-            title="Search document"
-            type="button"
-            variant="ghost"
-          >
-            <DocumentMagnifyingGlassIcon
-              aria-hidden="true"
-              className="size-4"
-              size={16}
-            />
-          </Button>
-        }
-      />
-    </div>
+      {search ? (
+        <DataRoomDocumentSearch
+          {...search}
+          dialogTitle="Workspace Search"
+          finalFocusEl={finalFocusEl}
+          open={panel === "search"}
+          onOpenChange={onSearchOpenChange}
+          hideTrigger
+        />
+      ) : (
+        <DocumentSearch
+          dialogTitle="Workspace Search"
+          dialogDescription="Open a document in the Data Room to search its sample excerpts. Workspace-wide search is not connected yet."
+          showDescription
+          finalFocusEl={finalFocusEl}
+          items={[]}
+          onSelect={() => {}}
+          open={panel === "search"}
+          onOpenChange={onSearchOpenChange}
+          hideTrigger
+        />
+      )}
+    </>
   );
 }
 

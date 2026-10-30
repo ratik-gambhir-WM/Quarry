@@ -39,7 +39,7 @@ describe("HomeWorkspaceSidebar", () => {
     expect(markup).toContain('href="/hub/logs"');
     expect(markup).toContain('href="/hub/assistant"');
     expect(markup).toContain('href="/hub/notebook"');
-    expect(markup).toContain('d="M21 2H3v16h5v4l4-4h5l4-4V2z"');
+    expect(markup).toContain('d="M12 7.60279L12.4521 10.5685M15.9543 7L16.4064 9.96574"');
     expect(markup).toContain("Deal Hub");
     expect(markup).not.toContain(">Research<");
     expect(markup).not.toContain(">Topics<");

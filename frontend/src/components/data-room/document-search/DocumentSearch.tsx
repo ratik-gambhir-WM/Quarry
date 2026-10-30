@@ -15,6 +15,7 @@ import {
   type ReactElement,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { getFloatingPanelInitialPosition } from "@/components/ui/floating-panel-position";
 import {
   FloatingPanel,
   FloatingPanelCloseTrigger,
@@ -42,6 +43,9 @@ export type DocumentSearchConfig = {
   finalFocusEl?: () => HTMLElement | null;
   items: DocumentSearchItem[];
   onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  hideTrigger?: boolean;
+  showDescription?: boolean;
   onSelect: (item: DocumentSearchItem) => void;
   onSelectionFocus?: () => void;
   placeholder?: string;
@@ -96,6 +100,7 @@ const SearchInput = memo(function SearchInput({
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"
+        autoFocus
         className="peer h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent text-xl font-light text-foreground shadow-none outline-none focus-visible:ring-0"
         inputMode="search"
         maxLength={512}
@@ -273,15 +278,20 @@ export default function DocumentSearch({
   finalFocusEl,
   items,
   onOpenChange,
+  open: controlledOpen,
+  hideTrigger = false,
+  showDescription = false,
   onSelect,
   onSelectionFocus,
   placeholder = "What are you looking for?",
   boundaryElement,
   trigger,
 }: DocumentSearchConfig) {
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [internalOpen, setIsPanelOpen] = useState(false);
+  const isPanelOpen = controlledOpen ?? internalOpen;
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionFocusPending = useRef(false);
   const [panelSize] = useState(getInitialDocumentSearchSize);
   const filteredItems = useMemo(
     () => filterDocumentSearchItems(items, query),
@@ -294,6 +304,7 @@ export default function DocumentSearch({
     selectedIndex >= 0 ? visibleItems[selectedIndex] : undefined;
 
   function setOpen(open: boolean) {
+    if (open) selectionFocusPending.current = false;
     setIsPanelOpen(open);
     onOpenChange?.(open);
   }
@@ -303,10 +314,8 @@ export default function DocumentSearch({
       return;
     }
     onSelect(item);
+    selectionFocusPending.current = Boolean(onSelectionFocus);
     setOpen(false);
-    if (onSelectionFocus) {
-      queueMicrotask(onSelectionFocus);
-    }
   }
 
   useEffect(() => {
@@ -328,26 +337,17 @@ export default function DocumentSearch({
       allowOverflow={false}
       closeOnEscape
       defaultSize={panelSize}
-      getAnchorPosition={({ boundaryRect }) => {
-        const boundaryX = boundaryRect?.x ?? 0;
-        const boundaryY = boundaryRect?.y ?? 0;
-        const boundaryWidth = boundaryRect?.width ?? window.innerWidth;
-        const boundaryHeight = boundaryRect?.height ?? window.innerHeight;
-
-        return {
-          x: Math.max(
-            boundaryX,
-            boundaryX + (boundaryWidth - panelSize.width) / 2,
-          ),
-          y: Math.max(
-            boundaryY,
-            boundaryY + (boundaryHeight - panelSize.height) / 2,
-          ),
-        };
-      }}
+      defaultPosition={getFloatingPanelInitialPosition(panelSize, boundaryElement)}
       getBoundaryEl={() => boundaryElement ?? document.documentElement}
       initialFocusEl={() => inputRef.current}
-      finalFocusEl={finalFocusEl}
+      finalFocusEl={() => {
+        if (selectionFocusPending.current && onSelectionFocus) {
+          selectionFocusPending.current = false;
+          onSelectionFocus();
+          return document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }
+        return finalFocusEl?.() ?? null;
+      }}
       minSize={{
         width: Math.min(DOCUMENT_SEARCH_MIN_SIZE.width, panelSize.width),
         height: Math.min(DOCUMENT_SEARCH_MIN_SIZE.height, panelSize.height),
@@ -355,7 +355,7 @@ export default function DocumentSearch({
       onOpenChange={({ open }) => setOpen(open)}
       open={isPanelOpen}
     >
-      <FloatingPanelTrigger asChild>
+      {!hideTrigger ? <FloatingPanelTrigger asChild>
         {trigger ?? (
           <DocumentSearchButton
             showShortcut={enableKeyboardShortcut}
@@ -364,7 +364,7 @@ export default function DocumentSearch({
             {buttonText}
           </DocumentSearchButton>
         )}
-      </FloatingPanelTrigger>
+      </FloatingPanelTrigger> : null}
       <FloatingPanelContent
         aria-describedby="local-search-description"
         className="max-w-[calc(100vw-2rem)] overflow-hidden"
@@ -384,7 +384,7 @@ export default function DocumentSearch({
             </FloatingPanelCloseTrigger>
           </FloatingPanelControl>
         </FloatingPanelHeader>
-        <p className="sr-only" id="local-search-description">
+        <p className={showDescription ? "px-4 py-2 text-xs text-muted" : "sr-only"} id="local-search-description">
           {dialogDescription}
         </p>
         <div className="flex min-h-0 flex-1 flex-col">
