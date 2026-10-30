@@ -1050,3 +1050,14 @@
     animation-duration: 0s !important;
   }
 }
+
+/* Sign-in steps retain their native inputs for password-manager autofill. */
+@media (prefers-reduced-motion: no-preference) {
+  .auth-step:not([hidden]) { animation: auth-step-in 0.32s ease-out both; }
+  .auth-step-back { --auth-step-offset: -12px; }
+  .auth-step-forward { --auth-step-offset: 20px; }
+  @keyframes auth-step-in {
+    from { opacity: 0; transform: translateX(var(--auth-step-offset)); filter: blur(2px); }
+    to { opacity: 1; transform: translateX(0); filter: blur(0); }
+  }
+}

@@ -59,6 +59,7 @@ it("submits autofilled credentials, preserves them through visibility and retry,
     .mockResolvedValue(testSession);
   form();
   const username = autofill("Username", "analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   const password = autofill("Password", "  a sufficiently long password  ");
   const button = screen.getByRole("button", { name: "Sign in" });
   expect(button).toHaveProperty("disabled", false);
@@ -87,10 +88,35 @@ it("submits autofilled credentials, preserves them through visibility and retry,
 });
 it("keeps empty required fields from submitting without a misleading disabled button", () => {
   form();
-  const button = screen.getByRole("button", { name: "Sign in" });
+  const button = screen.getByRole("button", { name: "Continue" });
   expect(button).toHaveProperty("disabled", false);
   fireEvent.click(button);
   expect(login).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Username")).toBeTruthy();
+});
+it("moves focus between steps and preserves credentials when changing username", () => {
+  form();
+  fill("Username", "analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(document.activeElement).toBe(screen.getByLabelText("Password"));
+  fill("Password", "a sufficiently long password");
+  fireEvent.click(screen.getByRole("button", { name: /Use a different username/ }));
+  expect(document.activeElement).toBe(screen.getByLabelText("Username"));
+  expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("a sufficiently long password");
+});
+it("reveals registration passwords independently without losing autofilled values", () => {
+  form(true);
+  const password = autofill("Password", "  account secret  ");
+  const confirmation = autofill("Confirm password", "  account secret  ");
+  fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+  expect(password.type).toBe("text");
+  expect(confirmation.type).toBe("password");
+  expect(password.value).toBe("  account secret  ");
+  fireEvent.click(screen.getByRole("button", { name: "Show confirm password" }));
+  expect(confirmation.type).toBe("text");
+  expect(confirmation.value).toBe("  account secret  ");
 });
 it("registers autofilled fields using the fixed email domain and excludes confirmation", async () => {
   register.mockResolvedValue(testSession);
@@ -117,6 +143,7 @@ it("logs in with username/password and exposes a memory-only session", async () 
   login.mockResolvedValue(testSession);
   form();
   fill("Username", "analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fill("Password", "a sufficiently long password");
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   expect(await screen.findByText("Signed in workspace")).toBeTruthy();
@@ -156,6 +183,7 @@ it("shows login failure and allows a retry", async () => {
   login.mockRejectedValue(new Error("Invalid credentials"));
   form();
   fill("Username", "analyst");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fill("Password", "incorrect long password");
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   expect((await screen.findByRole("alert")).textContent).toBe(

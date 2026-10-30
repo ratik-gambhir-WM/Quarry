@@ -1,3 +1,4 @@
+import { Input } from "../ui/input";
 import { useRef, useState } from "react";
 import { Columns3Icon, ListIcon, XIcon } from "lucide-react";
 import {
@@ -55,10 +56,10 @@ export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
       >
         <Icon className="h-4 w-4" name="search" />
       </button>
-      <input
+      <Input
         aria-hidden={!open}
         aria-label="Search deals"
-        className={`h-full min-w-0 flex-1 appearance-none bg-transparent pl-8 pr-8 text-[12px] text-text-main outline-none transition-opacity duration-200 placeholder:text-muted motion-reduce:transition-none [&::-webkit-search-cancel-button]:hidden ${
+        className={`h-full min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 pl-8 pr-8 text-[12px] text-text-main outline-none transition-opacity duration-200 placeholder:text-muted motion-reduce:transition-none [&::-webkit-search-cancel-button]:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onChange={(event) => onQueryChange(event.currentTarget.value)}

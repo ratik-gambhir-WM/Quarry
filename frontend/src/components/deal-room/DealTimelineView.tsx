@@ -1,3 +1,7 @@
+import { DatePicker } from "../ui/stealth-date/date-picker";
+import { parseISODate, toISODate } from "../ui/stealth-date/calendar";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import {
   FormEvent,
   PointerEvent,
@@ -580,7 +584,7 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
                     <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-muted">
                       New reminder
                     </span>
-                    <input
+                    <Input
                       autoFocus
                       className="h-11 w-full rounded-[16px] border border-outline-variant bg-white/75 px-4 text-[14px] font-semibold text-text-main outline-none transition placeholder:text-muted/60 focus:border-primary focus:ring-2 focus:ring-primary/16"
                       onChange={(event) =>
@@ -751,7 +755,14 @@ function NewActivityModal({
         aria-modal="true"
         className="shrink-0 rounded-[19px] border border-white/80 bg-white/78 p-8 shadow-[0_28px_80px_rgba(7,1,84,0.18)] backdrop-blur-xl"
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
+          if (
+            event.key === "Escape" &&
+            !event.defaultPrevented &&
+            !(
+              event.target instanceof Element &&
+              event.target.closest('[data-slot="date-calendar"]')
+            )
+          ) {
             event.preventDefault();
             onClose();
           }
@@ -775,9 +786,10 @@ function NewActivityModal({
         </div>
 
         <div className="space-y-5">
-          <ActivityFormField label="Activity Title">
-            <input
+          <ActivityFormField label="Activity Title" htmlFor="activity-title">
+            <Input
               autoFocus
+              id="activity-title"
               className={activityControlClassName}
               onChange={(event) =>
                 onChange({ ...formState, title: event.target.value })
@@ -790,8 +802,9 @@ function NewActivityModal({
           </ActivityFormField>
 
           <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <ActivityFormField label="Category">
+            <ActivityFormField label="Category" htmlFor="activity-category">
               <select
+                id="activity-category"
                 className={activityControlClassName}
                 onChange={(event) =>
                   onChange({
@@ -807,21 +820,22 @@ function NewActivityModal({
               </select>
             </ActivityFormField>
 
-            <ActivityFormField label="Date">
-              <input
-                className={activityControlClassName}
-                onChange={(event) =>
-                  onChange({ ...formState, date: event.target.value })
+            <ActivityFormField label="Date" htmlFor="activity-date">
+              <DatePicker
+                id="activity-date"
+                calendarLabel="activity date"
+                value={formState.date ? parseISODate(formState.date) : null}
+                onValueChange={(date) =>
+                  onChange({ ...formState, date: date ? toISODate(date) : "" })
                 }
                 required
-                type="date"
-                value={formState.date}
               />
             </ActivityFormField>
           </div>
 
-          <ActivityFormField label="Time">
-            <input
+          <ActivityFormField label="Time" htmlFor="activity-time">
+            <Input
+              id="activity-time"
               className={activityControlClassName}
               onChange={(event) =>
                 onChange({ ...formState, time: event.target.value })
@@ -832,8 +846,9 @@ function NewActivityModal({
             />
           </ActivityFormField>
 
-          <ActivityFormField label="Notes">
-            <textarea
+          <ActivityFormField label="Notes" htmlFor="activity-notes">
+            <Textarea
+              id="activity-notes"
               className="min-h-24 w-full resize-y rounded-xl border border-outline-variant bg-white/55 px-4 py-3 text-[15px] leading-6 text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
               onChange={(event) =>
                 onChange({ ...formState, detail: event.target.value })
@@ -860,17 +875,22 @@ function NewActivityModal({
 function ActivityFormField({
   children,
   label,
+  htmlFor,
 }: {
   children: ReactNode;
   label: string;
+  htmlFor: string;
 }) {
   return (
-    <label className="block min-w-0">
-      <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">
+    <div className="block min-w-0">
+      <label
+        htmlFor={htmlFor}
+        className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75"
+      >
         {label}
-      </span>
+      </label>
       {children}
-    </label>
+    </div>
   );
 }
 

@@ -330,13 +330,16 @@ module loads. Reduced-motion CSS disables transition animation.
 
 The product tree is wrapped in `UserProvider`, backed by one memory-only session store. Login and
 registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
-workspace state by its generation. Registration uses a responsive two-column card (900px max),
-while login uses a 560px card; small screens stack the fields. Registration shows a fixed
+workspace state by its generation. Registration uses a responsive two-column card (900px max);
+small screens stack the fields. Login uses a compact card with a username step followed by a
+password step, retaining the entered identity and allowing users to go back. The card and steps
+animate unless reduced motion is requested. Registration shows a fixed
 `@westmonroe.com` suffix and the backend enforces that exact email domain. Auth fields use native,
 named inputs and read their current values through `FormData` at submission so browser/password-manager
 autofill does not depend on React change events. Native required-field validation blocks empty
-submissions; submit buttons disable only while a request is pending. Password visibility and error
-rerenders preserve the entered values, and passwords are never trimmed. Reload requires sign-in. Router state and the removed
+submissions; submit buttons disable only while a request is pending. Password fields expose an
+inline eye control, report Caps Lock, and preserve entered values across visibility and error
+rerenders; passwords are never trimmed. Reload requires sign-in. Router state and the removed
 `quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
 
 ### 5.3 Layer responsibilities
@@ -455,7 +458,9 @@ global state or query-cache library.
   a fresh load marks the resource available only when its metadata contains a saved link.
   API-backed deals retain their typed persisted fields for
   editing. Creation and editing share optional date, engagement/transaction, scope, and company-role
-  controls; company search is bounded, stale results are ignored, and directory creation is explicit.
+  controls. Date fields accept typed dates and calendar selection, preserve date-only values, and
+  reject unreadable drafts before submission; company search is bounded, stale results are ignored,
+  and directory creation is explicit.
   Enter in a company text input saves that company; Save and Cancel buttons retain their native
   keyboard activation and do not submit the surrounding deal form.
   Directory entries remain saved when a deal form is cancelled or its write fails. Closed and
@@ -624,7 +629,9 @@ workspace sidebar with the Data Room explorer, its direct quick-action toolbar a
 documents. The toolbar distributes bare animated Upload, Pencil Square (Synthesis Canvas), Notes,
 and Document Magnifying Glass (Search) icons evenly across the sidebar. Upload opens the existing
 Data Room file-upload modal through the ReUI dialog primitives, including focus trapping and a
-scrollable body; Notes remains an unpersisted placeholder, while Search exposes fixture-backed
+scrollable body. Its compact dropzone and selected-file rows use motion-aware transitions; per-file
+processing retains the existing activity circle, completion check, selection, and retry behavior.
+Notes remains an unpersisted placeholder, while Search exposes fixture-backed
 results. Synthesis Canvas opens a draggable, resizable floating Assistant chat panel. Its header
 offers a New chat action and a dropdown list of persisted previous chats, while its body reuses the
 Assistant thread viewport and composer. The Search
@@ -635,8 +642,11 @@ originating sidebar action when closed.
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
 and primitives instead of adding hard-coded parallel color/spacing systems.
-The Deals add-deal flow composes the shared ReUI/shadcn dialog, field, input, select, and button
-primitives. Its portal overlay remains separate from the legacy named modal view transition so
+Shared text, search, password, textarea, and checkbox controls adapt Stealth interactions to
+Quarry's theme and retain native form values and event contracts. Search fields with a clear action
+return focus to the input, and textareas retain their feature-specific keyboard behavior. Native
+file inputs remain behind their existing upload controls. The Deals add-deal flow composes the
+shared ReUI/shadcn dialog, field, input, select, and button primitives. Its portal overlay remains separate from the legacy named modal view transition so
 opening the dialog does not capture the page chrome as part of that transition.
 
 The live working tree includes React canary View Transition wrappers and CSS transition recipes.
@@ -1359,8 +1369,10 @@ upload/indexing is a separate operation with the cross-store recovery contract i
 
 The shared add-deal modal has three steps: deal identity/details, company directory selection or
 creation and deal-specific roles, then optional SharePoint, SOW, fact-sheet, and request-list links
-alongside one or two SOW/timeline files. Next and Back preserve the draft, assigned companies, and
-selected sources; company forms must be saved or cancelled before continuing. Core deal creation
+alongside one or two SOW/timeline files. A stepper shows the current stage and offers top or side
+placement through tabs; completed stages can be revisited when navigation is not locked. Next, Back,
+and the stepper preserve the draft, assigned companies, and selected sources; company forms must be
+saved or cancelled before continuing. Core deal creation
 is deferred until **Finish deal** (or **Skip metadata**), followed by the metadata request when
 included. A failed metadata request keeps the created core response for retry without duplicating
 the deal; earlier steps are then locked because the core fields have already been persisted.
@@ -1374,7 +1386,8 @@ definition-list rows from the persisted deal view model. Labels stack above valu
 screens; long company names and scope text wrap. Narrative-only demo summaries retain their
 paragraph presentation.
 The overview omits the date section; start, expected/actual close, and engagement completion dates
-remain persisted and editable in the deal form.
+remain persisted and editable in the deal form. The activity form uses the same date picker for its
+local event date; its time field retains its existing native time semantics.
 
 Both transports send the link fields and files through the same multipart Axum endpoint. A submitted
 link field containing only whitespace (including an empty string) clears that optional link;

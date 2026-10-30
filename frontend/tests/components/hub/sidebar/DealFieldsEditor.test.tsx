@@ -56,6 +56,7 @@ describe("DealFieldsEditor", () => {
     fireEvent.change(screen.getByLabelText("Actual close (optional)"), {
       target: { value: "2026-10-01" },
     });
+    fireEvent.blur(screen.getByLabelText("Actual close (optional)"));
     for (const code of ["closed", "pencils_down", "prepare", "pipeline"]) {
       await user.selectOptions(status, code);
       const fields: DealFields = JSON.parse(
@@ -146,9 +147,11 @@ describe("DealFieldsEditor", () => {
     fireEvent.change(screen.getByLabelText("Expected close (optional)"), {
       target: { value: "2026-12-01" },
     });
+    fireEvent.blur(screen.getByLabelText("Expected close (optional)"));
     fireEvent.change(screen.getByLabelText("Expected close (optional)"), {
       target: { value: "" },
     });
+    fireEvent.blur(screen.getByLabelText("Expected close (optional)"));
     const fields: DealFields = JSON.parse(
       screen.getByTestId("fields").textContent ?? "{}",
     );

@@ -1,5 +1,7 @@
 "use client";
 
+import { Textarea } from "@/components/ui/textarea";
+
 import * as React from "react";
 import {
   blendModeLabel,
@@ -1872,7 +1874,7 @@ function NoteEditor({
     setDraft(value);
   }
   return (
-    <textarea
+    <Textarea
       value={draft}
       disabled={disabled}
       rows={3}

@@ -1,0 +1,59 @@
+.deal-stepper {
+  display: flex;
+  min-width: 0;
+}
+
+.deal-stepper--horizontal { width: 100%; }
+.deal-stepper--vertical { flex-direction: column; }
+.deal-stepper-step { position: relative; min-width: 0; }
+.deal-stepper--horizontal .deal-stepper-step:not(:last-child) { flex: 1; }
+.deal-stepper--vertical .deal-stepper-step:not(:last-child) { padding-bottom: 1.5rem; }
+.deal-stepper-target {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  border-radius: 0.5rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: left;
+}
+.deal-stepper-target:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.deal-stepper-target:disabled { opacity: 0.5; }
+.deal-stepper-indicator {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 9999px;
+  background: var(--color-surface-container-lowest);
+  color: var(--color-on-surface-variant);
+}
+.deal-stepper-indicator.is-current { border-color: var(--color-primary); color: var(--color-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 10%, transparent); }
+.deal-stepper-indicator.is-complete { border-color: var(--color-action); background: var(--color-action); color: var(--color-on-action); }
+.deal-stepper-rail { position: absolute; background: var(--color-outline-variant); }
+.deal-stepper-rail::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: var(--color-action);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.deal-stepper--vertical .deal-stepper-rail::after { transform: scaleY(0); transform-origin: top; }
+.deal-stepper-rail.is-complete::after { transform: scaleX(1); }
+.deal-stepper--vertical .deal-stepper-rail.is-complete::after { transform: scaleY(1); }
+.deal-stepper--horizontal .deal-stepper-rail { top: 0.875rem; left: 1.75rem; right: 0.5rem; height: 1px; }
+.deal-stepper--horizontal .deal-stepper-target { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+.deal-stepper--vertical .deal-stepper-rail { top: 1.75rem; bottom: 0; left: 0.875rem; width: 1px; }
+@media (prefers-reduced-motion: no-preference) {
+  .deal-stepper-rail::after { transition: transform 300ms ease-out; }
+  .deal-stepper-indicator { transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease; }
+  .deal-stepper-check path { stroke-dasharray: 32; animation: deal-stepper-draw 300ms ease-out both; }
+  @keyframes deal-stepper-draw { from { stroke-dashoffset: 32; } to { stroke-dashoffset: 0; } }
+  .deal-dialog[data-state="open"] { animation-duration: 260ms; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+}

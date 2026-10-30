@@ -1,3 +1,4 @@
+import { CheckboxField } from "../ui/checkbox-field";
 import { useState } from "react";
 import { DealTask } from "../../data/workspace";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
@@ -47,9 +48,9 @@ export function PendingTasksCard({
               }`}
               key={task.id}
             >
-              <input
+              <CheckboxField
                 checked={isChecked}
-                className={`${embedded ? "mt-1 h-4 w-4" : "h-5 w-5"} rounded border-white/80 bg-white/80 accent-primary`}
+                className={embedded ? "mt-1 h-4 w-4" : "h-5 w-5"}
                 onChange={() =>
                   setCheckedState((current) =>
                     current.map((value, valueIndex) =>
@@ -57,7 +58,6 @@ export function PendingTasksCard({
                     ),
                   )
                 }
-                type="checkbox"
               />
               <span
                 className={`flex items-center gap-2 ${embedded ? "text-[0.92rem] leading-6" : "text-[1rem] font-medium"} ${

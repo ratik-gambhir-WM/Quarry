@@ -186,6 +186,7 @@ describe("AddDealModal", () => {
     fireEvent.change(screen.getByLabelText("Engagement completed (optional)"), {
       target: { value: "2026-10-15" },
     });
+    fireEvent.blur(screen.getByLabelText("Engagement completed (optional)"));
     await user.click(screen.getByRole("button", { name: "Save deal" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(updateDeal).toHaveBeenCalledWith(initialDeal.dealId, {
@@ -208,6 +209,36 @@ describe("AddDealModal", () => {
       scopes: [],
     });
     expect(createDeal).not.toHaveBeenCalled();
+  });
+
+  it("switches stepper position and returns to completed steps without losing the draft", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    expect(document.activeElement).toBe(screen.getByLabelText("Deal ID"));
+    expect(screen.getByRole("tab", { name: "Top" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("list", { name: "Add deal progress" }).className).toContain("horizontal");
+    await user.click(screen.getByRole("tab", { name: "Side" }));
+    expect(screen.getByRole("list", { name: "Add deal progress" }).className).toContain("vertical");
+    expect(screen.getByRole("tab", { name: "Side" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
+    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("tab", { name: "Side" }).getAttribute("aria-selected")).toBe("true");
+    await user.click(screen.getByRole("button", { name: /Deal details.*completed/ }));
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(savedDeal.dealName);
+    expect(createDeal).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: "Top" }));
+    expect(screen.getByRole("list", { name: "Add deal progress" }).className).toContain("horizontal");
+  });
+
+  it("locks completed steps while a company draft is open", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
+    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Create company" }));
+    expect(screen.getByRole("button", { name: /Deal details.*completed/ })).toHaveProperty("disabled", true);
   });
 
   it("collects three steps before creating the deal and saving metadata on Finish deal", async () => {
@@ -286,8 +317,10 @@ describe("AddDealModal", () => {
 
     expect(saveDealMetadata).not.toHaveBeenCalled();
     expect(createDeal).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("location").textContent).toBe(
-      `/hub/deals/${savedDeal.dealId}`,
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(
+        `/hub/deals/${savedDeal.dealId}`,
+      ),
     );
   });
 
@@ -399,6 +432,7 @@ describe("AddDealModal", () => {
     expect(
       screen.getByRole("button", { name: "Back" }).hasAttribute("disabled"),
     ).toBe(true);
+    expect(screen.getByRole("button", { name: /Deal details.*completed/ })).toHaveProperty("disabled", true);
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
     await waitFor(() => expect(saveDealMetadata).toHaveBeenCalledTimes(2));
     expect(createDeal).toHaveBeenCalledTimes(1);

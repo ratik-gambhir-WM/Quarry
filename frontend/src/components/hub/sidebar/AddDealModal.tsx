@@ -29,6 +29,9 @@ import {
 import { Field, FieldError, FieldLabel } from "../../ui/field";
 import { Icon } from "../../ui/Icon";
 import { Input } from "../../ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
+import { DealStepper, type DealStep, type StepperOrientation } from "./DealStepper";
+import "./deal-stepper.css";
 
 import {
   DealCompanyRolesEditor,
@@ -101,10 +104,12 @@ export function AddDealModal({
   const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] =
     useState(emptySourceFiles);
-  const [step, setStep] = useState<"details" | "companies" | "sources">(
+  const [step, setStep] = useState<DealStep>(
     "details",
   );
+  const [stepperOrientation, setStepperOrientation] = useState<StepperOrientation>("horizontal");
   const [companyFormOpen, setCompanyFormOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [fieldError, setFieldError] = useState("");
@@ -257,7 +262,14 @@ export function AddDealModal({
       open
     >
       <DialogContent
-        className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+        className="deal-dialog flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest p-0 shadow-xl sm:max-w-[720px]"
+        onOpenAutoFocus={(event) => {
+          const input = formRef.current?.querySelector<HTMLInputElement>("input:not(:disabled)");
+          if (input) {
+            event.preventDefault();
+            input.focus();
+          }
+        }}
         onCloseAutoFocus={(event) => {
           if (returnFocusRef.current?.isConnected) {
             event.preventDefault();
@@ -273,11 +285,12 @@ export function AddDealModal({
         showCloseButton={false}
       >
         <form
-          className="flex max-h-[calc(100vh-2rem)] min-h-0 flex-col"
+          ref={formRef}
+          className="flex max-h-[calc(100dvh-2rem)] min-h-0 flex-col"
           onSubmit={handleSubmit}
         >
-          <DialogHeader className="relative shrink-0 gap-1 border-b border-border px-6 py-5 pr-14">
-            <DialogDescription className="order-first text-xs font-medium uppercase tracking-[0.12em]">
+          <DialogHeader className="relative shrink-0 gap-1 px-5 pb-1 pt-5 pr-14 sm:px-6 sm:pt-6">
+            <DialogDescription className="order-first text-xs font-medium uppercase tracking-[0.12em] text-muted">
               {initialDeal
                 ? "Active Deals"
                 : `Step ${step === "details" ? 1 : step === "companies" ? 2 : 3} of 3`}
@@ -285,7 +298,7 @@ export function AddDealModal({
             <DialogTitle
               ref={titleRef}
               tabIndex={-1}
-              className="text-xl font-semibold"
+              className="text-lg font-semibold tracking-tight text-text-main"
             >
               {initialDeal
                 ? "Edit deal"
@@ -297,7 +310,33 @@ export function AddDealModal({
             </DialogTitle>
           </DialogHeader>
 
-          <div ref={scrollRef} className="min-h-0 overflow-y-auto px-6 py-5">
+          <Tabs
+            value={stepperOrientation}
+            onValueChange={(value) => {
+              if (value === "horizontal" || value === "vertical") setStepperOrientation(value);
+            }}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            {!initialDeal && (
+              <div className="flex justify-end px-5 pt-2 sm:px-6">
+                <TabsList aria-label="Stepper position" className="rounded-lg bg-surface-container-low p-0.5">
+                  <TabsTrigger value="horizontal" className="rounded-md px-3 py-1 text-xs font-medium data-[state=active]:bg-surface-container-lowest data-[state=active]:shadow-sm">Top</TabsTrigger>
+                  <TabsTrigger value="vertical" className="rounded-md px-3 py-1 text-xs font-medium data-[state=active]:bg-surface-container-lowest data-[state=active]:shadow-sm">Side</TabsTrigger>
+                </TabsList>
+              </div>
+            )}
+            <div className={`flex min-h-0 flex-1 ${stepperOrientation === "vertical" && !initialDeal ? "flex-row" : "flex-col"}`}>
+              {!initialDeal && (
+                <>
+                  <TabsContent value="horizontal" tabIndex={-1} className="shrink-0 px-5 pb-1 pt-3 sm:px-6">
+                    <DealStepper step={step} orientation="horizontal" onStepChange={changeStep} disabled={isSubmitting || companyFormOpen || Boolean(createdDeal)} />
+                  </TabsContent>
+                  <TabsContent value="vertical" tabIndex={-1} className="w-28 shrink-0 border-r border-outline-variant px-3 pt-4 sm:w-44 sm:px-6">
+                    <DealStepper step={step} orientation="vertical" onStepChange={changeStep} disabled={isSubmitting || companyFormOpen || Boolean(createdDeal)} />
+                  </TabsContent>
+                </>
+              )}
+          <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
             <div hidden={step !== "details"}>
               <fieldset
                 className="grid gap-4"
@@ -388,8 +427,10 @@ export function AddDealModal({
               </p>
             ) : null}
           </div>
+            </div>
+          </Tabs>
 
-          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none rounded-b-xl border-border px-6 py-4">
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-outline-variant bg-surface-container-low/60 px-5 py-4 sm:px-6">
             {step === "details" ? (
               <DialogClose asChild>
                 <Button disabled={isSubmitting} type="button" variant="outline">

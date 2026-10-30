@@ -1,3 +1,4 @@
+import { Input } from "../ui/input";
 import { useState } from "react";
 import { LoaderCircle, Save } from "lucide-react";
 import { useNotebook } from "./NotebookProvider";
@@ -92,7 +93,7 @@ export function NotebookSaveButton() {
                 >
                   Notebook name
                 </label>
-                <input
+                <Input
                   id="save-notebook-title"
                   value={title}
                   maxLength={300}

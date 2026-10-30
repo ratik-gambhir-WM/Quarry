@@ -1,5 +1,7 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+
 import * as React from "react";
 
 import {
@@ -158,7 +160,7 @@ function DraftInput({
     requestAnimationFrame(() => internalRef.current?.select());
   };
   return (
-    <input
+    <Input
       autoComplete="off"
       autoCorrect="off"
       spellCheck={false}

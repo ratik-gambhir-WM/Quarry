@@ -1,3 +1,4 @@
+import { PasswordField } from "@/components/ui/password-field";
 import * as React from "react";
 import type { DocumentState } from "@embedpdf/core";
 import {
@@ -441,9 +442,8 @@ function PasswordInput({
   onEnter?: () => void;
 }) {
   return (
-    <Input
+    <PasswordField
       id={id}
-      type="password"
       autoComplete="off"
       value={value}
       placeholder={placeholder}

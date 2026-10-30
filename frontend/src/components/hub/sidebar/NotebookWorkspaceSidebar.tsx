@@ -1,6 +1,7 @@
+import { SearchField } from "../../ui/search-field";
 import { useId } from "react";
 import { NavLink } from "react-router-dom";
-import { BookOpen, ChevronDown, FileText, Plus, Search } from "lucide-react";
+import { BookOpen, ChevronDown, FileText, Plus } from "lucide-react";
 import { useNotebook } from "@/components/notebook/NotebookProvider";
 import { notebookTitle } from "@/data/notebook/notebookSession";
 import { Button } from "@/components/ui/button";
@@ -79,15 +80,14 @@ export function NotebookNotesList() {
         <label className="sr-only" htmlFor={searchId}>
           Search notes
         </label>
-        <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-sidebar-muted" />
-        <input
+        <SearchField
           id={searchId}
-          type="search"
           value={query}
           maxLength={100}
           placeholder="Search notes"
-          className="h-9 w-full rounded-lg border border-border bg-background/60 pl-9 pr-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          clearLabel="Clear note search"
+          className="h-9 border-border bg-background/60 text-[13px] focus-visible:ring-2 focus-visible:ring-ring"
+          onValueChange={setQuery}
         />
       </div>
       <div>

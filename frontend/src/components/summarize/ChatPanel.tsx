@@ -1,3 +1,4 @@
+import { Textarea } from "../ui/textarea";
 import { Icon } from "../ui/Icon";
 
 export function ChatPanel() {
@@ -11,7 +12,7 @@ export function ChatPanel() {
       </div>
 
       <div className="w-full max-w-[640px] rounded-[19px] border border-white/85 bg-white/82 p-4 shadow-[0_18px_48px_rgba(7,1,84,0.08)] backdrop-blur-md">
-        <textarea
+        <Textarea
           className="min-h-[86px] w-full resize-none bg-transparent px-2 py-2 text-[16px] text-text-main outline-none placeholder:text-muted"
           placeholder="Type a message..."
         />

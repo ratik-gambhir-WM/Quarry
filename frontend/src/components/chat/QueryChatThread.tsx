@@ -1,3 +1,4 @@
+import { Textarea } from "../ui/textarea";
 import {
   ArrowDown,
   Check,
@@ -190,11 +191,11 @@ function ComposerBar({
       data-compact={compact ? "" : undefined}
       data-slot="query-composer"
     >
-      <textarea
+      <Textarea
         aria-label="Message input"
         autoFocus
         className={cn(
-          "max-h-48 min-h-16 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 text-on-surface outline-none placeholder:text-muted",
+          "max-h-48 min-h-16 w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 px-2.5 py-2 text-[15px] leading-6 text-on-surface outline-none placeholder:text-muted",
           compact &&
             (condensed
               ? "min-h-[1.875rem] px-3.5 py-[0.1875rem]"

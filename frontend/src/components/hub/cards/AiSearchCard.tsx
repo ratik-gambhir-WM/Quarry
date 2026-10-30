@@ -1,3 +1,4 @@
+import { Input } from "../../ui/input";
 import { Icon } from "../../ui/Icon";
 
 type AiSearchCardProps = {
@@ -23,7 +24,7 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
         <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted">
           <Icon className="h-6 w-6" name="search" />
         </div>
-        <input
+        <Input
           className="h-16 w-full rounded-[1.35rem] border border-white/80 bg-white/55 pl-14 pr-40 text-[15px] font-medium text-text-main shadow-sm outline-none transition placeholder:text-muted/70 focus:border-primary/25 focus:bg-white focus:ring-4 focus:ring-primary/10"
           placeholder="Search across deals or ask AI a question..."
           type="text"

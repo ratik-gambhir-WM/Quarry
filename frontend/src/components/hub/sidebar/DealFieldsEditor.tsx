@@ -1,3 +1,4 @@
+import { CheckboxField } from "../../ui/checkbox-field";
 import { useEffect, useRef, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import {
@@ -15,6 +16,11 @@ import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Field, FieldLabel } from "../../ui/field";
 import { CodeSelect, TransactionTypePicker } from "./DealTypePicker";
+import { DatePicker } from "../../ui/stealth-date/date-picker";
+import { parseISODate, toISODate } from "../../ui/stealth-date/calendar";
+
+const minDealDate = parseISODate("0001-01-01") ?? undefined;
+const maxDealDate = parseISODate("9999-12-31") ?? undefined;
 
 type DealFieldsEditorProps = {
   fields: DealFields;
@@ -88,11 +94,13 @@ export function DealDetailsEditor({
         ).map(([key, label]) => (
           <Field key={key}>
             <FieldLabel htmlFor={`deal-${key}`}>{label} (optional)</FieldLabel>
-            <Input
+            <DatePicker
               id={`deal-${key}`}
-              type="date"
-              value={fields[key] ?? ""}
-              onChange={(e) => update(key, e.currentTarget.value || null)}
+              calendarLabel={label.toLowerCase()}
+              min={minDealDate}
+              max={maxDealDate}
+              value={fields[key] ? parseISODate(fields[key]) : null}
+              onValueChange={(date) => update(key, date ? toISODate(date) : null)}
             />
           </Field>
         ))}
@@ -104,8 +112,7 @@ export function DealDetailsEditor({
         <div className="grid gap-2 sm:grid-cols-2">
           {diligenceScopeOptions.map((scope) => (
             <label className="flex items-center gap-2 text-sm" key={scope}>
-              <input
-                type="checkbox"
+              <CheckboxField
                 checked={fields.scopes.includes(scope)}
                 onChange={(e) =>
                   update(

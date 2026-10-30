@@ -184,7 +184,7 @@ describe("DataRoomPage", () => {
         .slot,
     ).toBe("dialog-content");
     expect(
-      screen.getByRole("button", { name: "Browse files on your Mac" }),
+      screen.getByRole("button", { name: "Browse files to upload" }),
     ).toBe(document.activeElement);
 
     await user.keyboard("{Escape}");

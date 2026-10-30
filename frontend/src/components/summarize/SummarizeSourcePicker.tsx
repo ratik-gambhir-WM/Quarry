@@ -1,3 +1,4 @@
+import { Input } from "../ui/input";
 import { useRef } from "react";
 import type { FormEvent } from "react";
 import { Icon } from "../ui/Icon";
@@ -50,8 +51,8 @@ export function SummarizeSourcePicker({
         type="file"
       />
       <Icon className="h-6 w-6 shrink-0 text-primary" name="search" />
-      <input
-        className="min-w-0 flex-1 bg-transparent text-[16px] text-text-main outline-none placeholder:text-muted"
+      <Input
+        className="h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 text-[16px] text-text-main outline-none placeholder:text-muted"
         onChange={(event) => onPathChange(event.target.value)}
         placeholder="Search or browse files in Finder..."
         value={selectedPath}

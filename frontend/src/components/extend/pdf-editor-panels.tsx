@@ -1,3 +1,4 @@
+import { Textarea } from "@/components/ui/textarea";
 import * as React from "react";
 import { useDocumentState, useRegistry } from "@embedpdf/core/react";
 import {
@@ -1036,7 +1037,7 @@ function CommentComposer({
   const [value, setValue] = React.useState(initialValue);
   return (
     <div className="space-y-1.5">
-      <textarea
+      <Textarea
         value={value}
         autoFocus={autoFocus}
         rows={2}

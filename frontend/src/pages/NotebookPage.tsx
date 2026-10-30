@@ -1,3 +1,4 @@
+import { Input } from "../components/ui/input";
 import {
   Component,
   lazy,
@@ -235,13 +236,13 @@ function NotebookDocument({ note }: { note: NotebookDraft }) {
           <label className="sr-only" htmlFor="notebook-title">
             Note title
           </label>
-          <input
+          <Input
             ref={titleRef}
             id="notebook-title"
             value={note.title}
             maxLength={300}
             placeholder="Untitled note"
-            className="w-full rounded-sm border-0 bg-transparent py-2 pr-10 text-3xl font-semibold tracking-tight text-text-main outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring sm:text-4xl"
+            className="h-auto w-full rounded-sm border-0 bg-transparent py-2 pr-10 text-3xl font-semibold tracking-tight text-text-main outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring sm:text-4xl"
             onChange={(event) =>
               session.update(note.id, { title: event.currentTarget.value })
             }

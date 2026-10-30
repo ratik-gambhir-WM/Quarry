@@ -1,3 +1,4 @@
+import { Input } from "./input";
 import {
   forwardRef,
   type ComponentPropsWithoutRef,
@@ -63,8 +64,8 @@ export function ModalField({
 export const ModalInput = forwardRef<HTMLInputElement, ModalInputProps>(
   function ModalInput({ className, onValueChange, ...props }, ref) {
     return (
-      <input
-        className={cn(modalControlClassName, className)}
+      <Input
+        className={cn("h-auto", modalControlClassName, className)}
         onChange={
           onValueChange
             ? (event) => onValueChange(event.currentTarget.value)

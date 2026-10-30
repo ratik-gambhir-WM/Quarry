@@ -1,3 +1,4 @@
+import { Input } from "../../ui/input";
 import {
   ArrowDown,
   ArrowUp,
@@ -88,14 +89,14 @@ const SearchInput = memo(function SearchInput({
       >
         <SearchIcon strokeWidth={1.5} />
       </span>
-      <input
+      <Input
         aria-activedescendant={activeItemId}
         aria-controls="local-search-results"
         aria-label="Search document"
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"
-        className="peer min-w-0 flex-1 bg-transparent text-xl font-light text-foreground outline-none"
+        className="peer h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent text-xl font-light text-foreground shadow-none outline-none focus-visible:ring-0"
         inputMode="search"
         maxLength={512}
         onChange={(event) => onQueryChange(event.currentTarget.value)}

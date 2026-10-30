@@ -1,5 +1,7 @@
 "use client";
 
+import { PasswordField } from "@/components/ui/password-field";
+
 import { useState, type FormEvent } from "react";
 import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { ResolvedPdfViewerLabels } from "../types";
 
@@ -59,9 +60,9 @@ export function PdfPasswordPrompt({
           <DialogDescription>{labels.passwordHint}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <Input
+          <PasswordField
             autoFocus
-            type="password"
+            aria-label={labels.passwordPlaceholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder={labels.passwordPlaceholder}

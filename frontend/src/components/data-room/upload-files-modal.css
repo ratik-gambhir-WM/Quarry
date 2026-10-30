@@ -1,0 +1,46 @@
+/* The full-area button must not cover the dropzone on hover. */
+#upload-dropzone-trigger:hover {
+  background-color: transparent;
+}
+
+.upload-dropzone-border {
+  stroke: var(--color-primary);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  transition: stroke-opacity 200ms ease, stroke-dasharray 300ms ease;
+}
+
+.upload-dropzone:hover .upload-dropzone-border,
+.upload-dropzone[data-dragging="true"] .upload-dropzone-border {
+  stroke-opacity: 0.8;
+}
+
+.upload-dropzone[data-dragging="true"] .upload-dropzone-border {
+  stroke-dasharray: 9 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .upload-dialog[data-state="open"] {
+    animation-duration: 260ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .upload-dropzone-icon {
+    transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .upload-dropzone:hover .upload-dropzone-icon,
+  .upload-dropzone[data-dragging="true"] .upload-dropzone-icon {
+    transform: translateY(-3px);
+  }
+
+  .upload-file-row {
+    animation: upload-row-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes upload-row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

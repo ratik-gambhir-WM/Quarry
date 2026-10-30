@@ -1,8 +1,10 @@
+import { CheckboxField } from "../ui/checkbox-field";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import type { ProcessFileJobEvent } from "../../contracts/quarryApi";
 import { formatFileSize } from "../../lib/formatters";
 import { Icon } from "../ui/Icon";
+import "./upload-files-modal.css";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +54,8 @@ export function UploadFilesModal({
 }: UploadFilesModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chooseFilesButtonRef = useRef<HTMLButtonElement>(null);
+  const dragDepthRef = useRef(0);
+  const [isDragging, setIsDragging] = useState(false);
   const processingStartedAtRef = useRef<number | null>(null);
   const subscriptionsRef = useRef(new Map<string, () => void>());
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -144,6 +148,8 @@ export function UploadFilesModal({
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
     addFiles(event.dataTransfer.files);
   }
 
@@ -297,7 +303,7 @@ export function UploadFilesModal({
       open
     >
       <DialogContent
-        className="max-h-[calc(100vh-3rem)] gap-0 overflow-hidden rounded-[20px] border-outline-variant p-0 sm:max-w-[680px]"
+        className="upload-dialog flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest p-0 shadow-xl sm:max-w-[560px]"
         onEscapeKeyDown={(event) => {
           if (activeCount > 0) event.preventDefault();
         }}
@@ -310,16 +316,15 @@ export function UploadFilesModal({
         }}
         showCloseButton={false}
       >
-        <DialogHeader className="relative gap-1 border-b border-outline-variant px-6 py-5 pr-14">
+        <DialogHeader className="relative gap-1 px-5 pb-1 pt-5 pr-14 sm:px-6 sm:pt-6">
           <p className="order-first text-xs font-medium uppercase tracking-[0.12em] text-muted">
             Data Room
           </p>
-          <DialogTitle className="text-2xl font-semibold text-text-main">
+          <DialogTitle className="text-lg font-semibold tracking-tight text-text-main">
             Upload files
           </DialogTitle>
           <DialogDescription className="text-[13px] leading-5 text-muted">
-            Choose PDF, DOCX, Excel, PowerPoint, PNG, JPEG, WebP, or GIF files,
-            then select which ones to process.
+            Add documents or images to your data room.
           </DialogDescription>
           <button
             aria-label="Close upload files dialog"
@@ -332,7 +337,7 @@ export function UploadFilesModal({
           </button>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
           <input
             accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
@@ -343,24 +348,46 @@ export function UploadFilesModal({
           />
 
           <div
-            className="flex min-h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-primary/40 bg-surface-container-low px-6 py-5 text-center transition hover:border-primary/70 hover:bg-surface-container-high"
+            className="upload-dropzone group relative isolate flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl bg-surface-container-low/60 px-5 py-6 text-center transition-colors duration-200 hover:bg-surface-container-high/70 data-[dragging=true]:bg-primary-fixed/30"
+            data-dragging={isDragging}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+              dragDepthRef.current += 1;
+              setIsDragging(true);
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+              if (dragDepthRef.current === 0) setIsDragging(false);
+            }}
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleDrop}
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <Icon className="h-5 w-5" name="upload" />
-            </div>
-            <p className="mt-3 text-[13px] font-semibold text-text-main">
-              Drop documents or images here
-            </p>
+            <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+              <rect className="upload-dropzone-border" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="12" fill="none" />
+            </svg>
             <button
-              className="mt-2 text-[12px] font-semibold text-primary underline decoration-primary/30 underline-offset-4 transition hover:decoration-primary"
+              aria-describedby="upload-dropzone-hint"
+              id="upload-dropzone-trigger"
+              className="absolute inset-0 z-10 cursor-pointer rounded-xl border-0 bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               onClick={() => fileInputRef.current?.click()}
               ref={chooseFilesButtonRef}
               type="button"
             >
-              Browse files on your Mac
+              <span className="sr-only">Browse files to upload</span>
             </button>
+            <div aria-hidden="true" className="upload-dropzone-icon flex h-10 w-10 items-center justify-center rounded-xl border border-outline-variant bg-surface-container-lowest text-primary shadow-sm">
+              <Icon className="h-5 w-5" name="upload" />
+            </div>
+            <div className="pointer-events-none space-y-1">
+              <p className="text-[13px] font-semibold text-text-main">
+                {isDragging ? "Drop files to add them" : <>Drop files here or <span className="text-primary underline decoration-primary/30 underline-offset-4">browse</span></>}
+              </p>
+              <p id="upload-dropzone-hint" className="text-[12px] leading-5 text-muted">
+                PDF, DOCX, Excel, PowerPoint, PNG, JPEG, WebP, or GIF · Up to 50 MB each
+              </p>
+            </div>
           </div>
 
           {selectionError ? (
@@ -373,9 +400,9 @@ export function UploadFilesModal({
           ) : null}
 
           {entries.length > 0 ? (
-            <div className="mt-5 overflow-hidden rounded-2xl border border-outline-variant">
-              <div className="flex items-center justify-between border-b border-outline-variant bg-surface-container-low px-4 py-3">
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+            <div className="mt-4 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+              <div className="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-3">
+                <p className="text-[13px] font-semibold text-text-main">
                   Selected files
                 </p>
                 <span className="text-[11px] font-semibold text-muted">
@@ -399,7 +426,7 @@ export function UploadFilesModal({
           ) : null}
         </div>
 
-        <DialogFooter className="m-0 flex-row flex-wrap items-center justify-between gap-3 rounded-none border-outline-variant bg-surface-container-low/70 px-6 py-4 sm:justify-between">
+        <DialogFooter className="m-0 flex-row flex-wrap items-center justify-between gap-3 rounded-none border-outline-variant bg-surface-container-low/60 px-5 py-4 sm:justify-between sm:px-6">
           <div className="flex items-center gap-2 text-[12px] text-muted">
             {isProcessing ? (
               <>
@@ -418,9 +445,9 @@ export function UploadFilesModal({
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-3">
             <button
-              className="rounded-full px-5 py-3 text-[13px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:opacity-50"
+              className="rounded-lg px-4 py-2.5 text-[13px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:opacity-50"
               disabled={activeCount > 0}
               onClick={onClose}
               type="button"
@@ -433,7 +460,7 @@ export function UploadFilesModal({
                 : "Cancel"}
             </button>
             <button
-              className="inline-flex min-w-[150px] items-center justify-center gap-2 rounded-full bg-action px-6 py-3 text-[13px] font-semibold text-on-action shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-w-[110px] items-center justify-center gap-2 rounded-lg bg-action px-4 py-2.5 text-[13px] font-semibold text-on-action shadow-[0_10px_30px_rgba(7,1,84,0.18)] transition enabled:hover:bg-action-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-50"
               disabled={uploadableEntries.length === 0}
               onClick={handleUpload}
               type="button"
@@ -466,16 +493,15 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
   const failed = entry.status === "failed";
 
   return (
-    <li className="flex items-start gap-3 bg-surface-container-lowest px-4 py-3.5">
-      <input
+    <li className="upload-file-row flex items-start gap-3 bg-surface-container-lowest px-4 py-3">
+      <CheckboxField
         aria-label={`Select ${entry.file.name}`}
         checked={entry.selected}
-        className="mt-1 h-4 w-4 shrink-0 accent-[#0c006b]"
+        className="mt-1 h-4 w-4"
         disabled={active || completed || skipped}
         onChange={() => onToggle(entry.id)}
-        type="checkbox"
       />
-      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
+      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-low text-primary">
         <Icon
           className="h-5 w-5"
           name={getFileExtension(entry.file.name) === "pdf" ? "pdf" : "doc"}

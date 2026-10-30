@@ -1,3 +1,4 @@
+import { SearchField } from "../components/ui/search-field";
 import { useDeferredValue, useMemo, useState } from "react";
 import { runtime } from "@quarry/runtime";
 import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
@@ -170,20 +171,17 @@ export function LogsPage() {
 
         <section className="overflow-hidden rounded-[22px] border border-outline-variant bg-surface shadow-[0_12px_34px_rgba(7,1,84,0.06)]">
           <div className="flex flex-col gap-3 border-b border-outline-variant bg-surface-container-low/60 p-4 lg:flex-row lg:items-center">
-            <label className="relative min-w-0 flex-1">
-              <span className="sr-only">Search logs</span>
-              <Icon
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
-                name="search"
-              />
-              <input
-                className="h-11 w-full rounded-xl border border-outline-variant bg-surface pl-10 pr-4 text-[13px] text-text-main outline-none transition placeholder:text-muted/75 focus:border-primary"
-                onChange={(event) => setSearch(event.target.value)}
+            <div className="min-w-0 flex-1">
+              <label className="sr-only" htmlFor="logs-search">Search logs</label>
+              <SearchField
+                id="logs-search"
+                className="h-11 rounded-xl bg-surface text-[13px] text-text-main placeholder:text-muted/75"
+                clearLabel="Clear log search"
+                onValueChange={setSearch}
                 placeholder="Search endpoint, event, status, or payload…"
-                type="search"
                 value={search}
               />
-            </label>
+            </div>
 
             <div className="grid grid-cols-2 gap-2 lg:flex">
               <FilterSelect
