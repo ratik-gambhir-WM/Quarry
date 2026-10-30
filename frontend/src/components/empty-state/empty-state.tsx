@@ -67,9 +67,12 @@ const SIZE_DESCRIPTION_CLASS: Record<EmptyStateSize, string> = {
 };
 
 /** 60ms-stagger entrance reveal (tw-animate-css). Never the app-level `reveal-up` keyframe — P-F5. */
-const REVEAL = "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2";
+const REVEAL =
+  "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2";
 
-function isActionConfig(action: EmptyStateAction): action is EmptyStateActionConfig {
+function isActionConfig(
+  action: EmptyStateAction,
+): action is EmptyStateActionConfig {
   return (
     typeof action === "object" &&
     action !== null &&
@@ -78,10 +81,14 @@ function isActionConfig(action: EmptyStateAction): action is EmptyStateActionCon
   );
 }
 
-function renderAction(action: EmptyStateAction | undefined, kind: "primary" | "secondary") {
+function renderAction(
+  action: EmptyStateAction | undefined,
+  kind: "primary" | "secondary",
+) {
   // Also swallow `false`/`true`/`""` so the conditional-render idiom
   // `action={isAdmin && {…}}` doesn't mount an empty actions row (C5 F2).
-  if (action == null || typeof action === "boolean" || action === "") return null;
+  if (action == null || typeof action === "boolean" || action === "")
+    return null;
 
   if (!isActionConfig(action)) {
     return action as ReactNode;
@@ -98,7 +105,10 @@ function renderAction(action: EmptyStateAction | undefined, kind: "primary" | "s
         onClick={disabled ? (event) => event.preventDefault() : onClick}
         aria-disabled={disabled || undefined}
         tabIndex={disabled ? -1 : undefined}
-        className={cn(buttonVariants({ variant }), disabled && "pointer-events-none opacity-50")}
+        className={cn(
+          buttonVariants({ variant }),
+          disabled && "pointer-events-none opacity-50",
+        )}
       >
         {label}
       </a>
@@ -106,7 +116,12 @@ function renderAction(action: EmptyStateAction | undefined, kind: "primary" | "s
   }
 
   return (
-    <Button type="button" variant={variant} onClick={onClick} disabled={disabled}>
+    <Button
+      type="button"
+      variant={variant}
+      onClick={onClick}
+      disabled={disabled}
+    >
       {label}
     </Button>
   );
@@ -140,7 +155,8 @@ export function EmptyState(props: EmptyStateProps) {
     className,
   } = props;
 
-  const HeadingTag = `h${headingLevel}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+  const HeadingTag = `h${headingLevel}` as
+    "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
   const isTransient = TRANSIENT_VARIANTS.has(variant);
   const isFirstUse = variant === "first-use";
   const isError = variant === "error";
@@ -149,7 +165,9 @@ export function EmptyState(props: EmptyStateProps) {
   // animation-fill-mode to none, so a delay-staggered element would render
   // visible during its delay, snap to opacity 0, then animate back in (flash).
   const delayStyle = (ms: number) =>
-    animated ? { animationDelay: `${ms}ms`, animationFillMode: "both" as const } : undefined;
+    animated
+      ? { animationDelay: `${ms}ms`, animationFillMode: "both" as const }
+      : undefined;
 
   const Icon = VARIANT_ICON[variant];
   const primaryAction = renderAction(action, "primary");
@@ -164,7 +182,8 @@ export function EmptyState(props: EmptyStateProps) {
         "mx-auto flex flex-col items-center px-4 text-center",
         SIZE_ROOT_CLASS[size],
         frame === "dashed" && "rounded-2xl border border-dashed border-border",
-        frame === "card" && "rounded-2xl border border-border bg-card text-card-foreground shadow-sm",
+        frame === "card" &&
+          "rounded-2xl border border-border bg-card text-card-foreground shadow-sm",
         className,
       )}
     >
@@ -176,7 +195,10 @@ export function EmptyState(props: EmptyStateProps) {
         </div>
       ) : (
         <div
-          className={cn("relative mb-4 flex items-center justify-center", reveal)}
+          className={cn(
+            "relative mb-4 flex items-center justify-center",
+            reveal,
+          )}
           style={delayStyle(0)}
           aria-hidden="true"
         >
@@ -233,7 +255,10 @@ export function EmptyState(props: EmptyStateProps) {
 
       {hasActions ? (
         <div
-          className={cn("mt-5 flex flex-wrap items-center justify-center gap-2", reveal)}
+          className={cn(
+            "mt-5 flex flex-wrap items-center justify-center gap-2",
+            reveal,
+          )}
           style={delayStyle(180)}
         >
           {primaryAction}

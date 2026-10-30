@@ -9,7 +9,11 @@ type DataTableHeadingProps = ComponentPropsWithoutRef<"th"> & {
   density?: "compact" | "default";
 };
 
-export function DataTableHeaderRow({ className, surface = false, ...props }: DataTableHeaderRowProps) {
+export function DataTableHeaderRow({
+  className,
+  surface = false,
+  ...props
+}: DataTableHeaderRowProps) {
   return (
     <tr
       className={cn(

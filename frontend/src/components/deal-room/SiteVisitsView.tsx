@@ -23,7 +23,12 @@ export function SiteVisitsView({ deal }: SiteVisitsViewProps) {
             </button>
           }
           className="flex-col gap-5 md:flex-row"
-          description={<>Coordinate in-person reviews, owners, and open prep work for {deal.name}.</>}
+          description={
+            <>
+              Coordinate in-person reviews, owners, and open prep work for{" "}
+              {deal.name}.
+            </>
+          }
           eyebrow="Site Visits"
           title="Field Diligence Plan"
         />
@@ -38,10 +43,18 @@ export function SiteVisitsView({ deal }: SiteVisitsViewProps) {
                 <Icon className="h-7 w-7" name="person" />
               </div>
               <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">{visit.date}</p>
-                <h2 className="mt-1 type-h3 text-text-main">{visit.location}</h2>
-                <p className="mt-2 text-[14px] leading-6 text-text-main/78">{visit.summary}</p>
-                <p className="mt-3 text-[12px] font-semibold text-muted">Owner: {visit.owner}</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                  {visit.date}
+                </p>
+                <h2 className="mt-1 type-h3 text-text-main">
+                  {visit.location}
+                </h2>
+                <p className="mt-2 text-[14px] leading-6 text-text-main/78">
+                  {visit.summary}
+                </p>
+                <p className="mt-3 text-[12px] font-semibold text-muted">
+                  Owner: {visit.owner}
+                </p>
               </div>
               <div className="flex items-start md:justify-end">
                 <span className="rounded-full border border-outline-variant bg-white/72 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-primary">

@@ -8,7 +8,9 @@ type ConnectSharePointModalProps = {
   onClose: () => void;
 };
 
-export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps) {
+export function ConnectSharePointModal({
+  onClose,
+}: ConnectSharePointModalProps) {
   const teamsChannelInputRef = useRef<HTMLInputElement>(null);
   const [sharePointLink, setSharePointLink] = useState("");
   const [teamsChannelLink, setTeamsChannelLink] = useState("");
@@ -27,7 +29,10 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
   }, [onClose]);
 
   return (
-    <DialogBackdrop closeLabel="Close connect to SharePoint dialog" onClose={onClose}>
+    <DialogBackdrop
+      closeLabel="Close connect to SharePoint dialog"
+      onClose={onClose}
+    >
       <section
         aria-describedby="connect-sharepoint-description"
         aria-labelledby="connect-sharepoint-title"
@@ -40,7 +45,8 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
           closeLabel="Close connect to SharePoint dialog"
           description={
             <span id="connect-sharepoint-description">
-              Add the Teams channel and SharePoint locations associated with this data room.
+              Add the Teams channel and SharePoint locations associated with
+              this data room.
             </span>
           }
           eyebrow="Data Room"
@@ -72,7 +78,9 @@ export function ConnectSharePointModal({ onClose }: ConnectSharePointModalProps)
         </div>
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant bg-surface-container-low/70 px-6 py-4">
-          <p className="text-[12px] text-muted">Connection submission is coming soon.</p>
+          <p className="text-[12px] text-muted">
+            Connection submission is coming soon.
+          </p>
           <div className="flex items-center gap-3">
             <button
               className="rounded-full px-5 py-3 text-[13px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"

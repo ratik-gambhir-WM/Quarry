@@ -1,8 +1,19 @@
-//! Planned owner of source-linked notes and notebook organization.
-//!
-//! This comment-only module is a contribution marker. It is not registered with the application
-//! and the current client Notes experience has no persisted backend workspace.
+//! Authenticated personal notebooks and durable, revision-scoped save jobs.
+mod content;
+mod graph;
+mod handler;
+mod job_repository;
+mod markdown;
+mod model;
+mod repository;
+pub(crate) mod route;
+mod save_jobs;
+mod service;
 
-// TODO: Define notebook, note, ordering, and source-citation models with stable identifiers.
-// TODO: Add tenant-scoped persistence and services for create, edit, move, and archive behavior.
-// TODO: Add authorized routes, conflict handling, and contract tests before application registration.
+pub(crate) use graph::NotebookPipeline;
+pub(crate) use repository::NotebookRepository;
+pub(crate) use service::NotebookService;
+
+#[cfg(test)]
+#[path = "../../../tests/integration/notebook_support.rs"]
+pub(crate) mod test_support;

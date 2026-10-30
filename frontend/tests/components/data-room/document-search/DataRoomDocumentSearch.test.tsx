@@ -21,7 +21,10 @@ describe("DataRoomDocumentSearch", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Search document" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search document" }), "Synthetic");
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search document" }),
+      "Synthetic",
+    );
     await user.click(
       screen.getByRole("option", { name: /Synthetic Terms\.pdf.*Open page 1/ }),
     );
@@ -46,8 +49,13 @@ describe("DataRoomDocumentSearch", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Search document" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search document" }), "Global Risk");
-    await user.click(screen.getByRole("option", { name: /Global Risk Assurance/ }));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search document" }),
+      "Global Risk",
+    );
+    await user.click(
+      screen.getByRole("option", { name: /Global Risk Assurance/ }),
+    );
 
     expect(onActivateResult).not.toHaveBeenCalled();
   });

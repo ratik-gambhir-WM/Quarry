@@ -24,8 +24,14 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": new URL("./src", import.meta.url).pathname,
-        "@quarry/router": new URL(`./src/platform/Router.${target}.tsx`, import.meta.url).pathname,
-        "@quarry/runtime": new URL(`./src/platform/runtime.${target}.ts`, import.meta.url).pathname,
+        "@quarry/router": new URL(
+          `./src/platform/Router.${target}.tsx`,
+          import.meta.url,
+        ).pathname,
+        "@quarry/runtime": new URL(
+          `./src/platform/runtime.${target}.ts`,
+          import.meta.url,
+        ).pathname,
       },
     },
     clearScreen: false,
@@ -43,7 +49,9 @@ export default defineConfig(({ mode }) => {
             if (embedPdfIndex === -1) {
               return undefined;
             }
-            const packageName = id.slice(embedPdfIndex + embedPdfMarker.length).split("/")[0];
+            const packageName = id
+              .slice(embedPdfIndex + embedPdfMarker.length)
+              .split("/")[0];
             return packageName ? `embedpdf-${packageName}` : undefined;
           },
         },

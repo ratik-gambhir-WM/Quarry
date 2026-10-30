@@ -58,3 +58,7 @@ mod slide_templates_headless_preview_tests;
 #[cfg(test)]
 #[path = "../tests/integration/authentication_tests.rs"]
 mod authentication_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/notebook_http_tests.rs"]
+mod notebook_http_tests;

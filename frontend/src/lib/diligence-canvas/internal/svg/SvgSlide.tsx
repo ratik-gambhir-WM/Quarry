@@ -1,12 +1,12 @@
-import { memo, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, type PointerEvent as ReactPointerEvent } from "react";
 
-import type { NormalizedSlide } from '../shared/PowerpointTypes'
-import type { SlideElementRef } from '../canvas'
-import { SvgBrandFrame } from './SvgBrandFrame'
-import { SvgElement } from './SvgElement'
-import { sanitizeSvgId, toSvgColor } from './svgUtils'
+import type { NormalizedSlide } from "../shared/PowerpointTypes";
+import type { SlideElementRef } from "../canvas";
+import { SvgBrandFrame } from "./SvgBrandFrame";
+import { SvgElement } from "./SvgElement";
+import { sanitizeSvgId, toSvgColor } from "./svgUtils";
 
-const EMPTY_TEXT_FONT_SCALES = new Map<string, number>()
+const EMPTY_TEXT_FONT_SCALES = new Map<string, number>();
 
 export const SvgSlide = memo(function SvgSlide({
   canvasId,
@@ -21,17 +21,20 @@ export const SvgSlide = memo(function SvgSlide({
   slide,
   textFontScales = EMPTY_TEXT_FONT_SCALES,
 }: {
-  canvasId: string
-  editingKey?: string
-  elementRefs: SlideElementRef[]
-  onElementFocus: (ref: SlideElementRef) => void
-  onElementDoubleClick: (ref: SlideElementRef) => void
-  onElementPointerDown: (ref: SlideElementRef, event: ReactPointerEvent<SVGElement>) => void
-  onSlidePointerDown: (event: ReactPointerEvent<SVGRectElement>) => void
-  selectedKeys: ReadonlySet<string>
-  showBranding: boolean
-  slide: NormalizedSlide
-  textFontScales?: ReadonlyMap<string, number>
+  canvasId: string;
+  editingKey?: string;
+  elementRefs: SlideElementRef[];
+  onElementFocus: (ref: SlideElementRef) => void;
+  onElementDoubleClick: (ref: SlideElementRef) => void;
+  onElementPointerDown: (
+    ref: SlideElementRef,
+    event: ReactPointerEvent<SVGElement>,
+  ) => void;
+  onSlidePointerDown: (event: ReactPointerEvent<SVGRectElement>) => void;
+  selectedKeys: ReadonlySet<string>;
+  showBranding: boolean;
+  slide: NormalizedSlide;
+  textFontScales?: ReadonlyMap<string, number>;
 }) {
   return (
     <>
@@ -61,5 +64,5 @@ export const SvgSlide = memo(function SvgSlide({
         />
       ))}
     </>
-  )
-})
+  );
+});

@@ -12,10 +12,19 @@ import {
   updateItem,
 } from "./data";
 
-export function kanbanReducer(state: KanbanData, action: KanbanAction): KanbanData {
+export function kanbanReducer(
+  state: KanbanData,
+  action: KanbanAction,
+): KanbanData {
   switch (action.type) {
     case "move-item":
-      return moveItem(state, action.itemId, action.toColumnId, action.toIndex, action.toSwimlaneId);
+      return moveItem(
+        state,
+        action.itemId,
+        action.toColumnId,
+        action.toIndex,
+        action.toSwimlaneId,
+      );
     case "reorder-column":
       return reorderColumn(state, action.columnId, action.toIndex);
     case "create-item":

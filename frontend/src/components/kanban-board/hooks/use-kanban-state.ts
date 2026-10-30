@@ -15,7 +15,10 @@ export function useKanbanState({
   defaultData?: KanbanData;
   onChange?: (next: KanbanData) => void;
 }): [KanbanData, (action: KanbanAction) => void] {
-  const [internal, internalDispatch] = useReducer(kanbanReducer, defaultData ?? EMPTY);
+  const [internal, internalDispatch] = useReducer(
+    kanbanReducer,
+    defaultData ?? EMPTY,
+  );
 
   const isControlled = data !== undefined;
   const state = isControlled ? data : internal;

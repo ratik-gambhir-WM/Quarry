@@ -32,7 +32,8 @@ beforeEach(() => {
 describe("DataRoomQuickActions", () => {
   it("renders evenly distributed Upload, Synthesis Canvas, Notes, and Search actions", () => {
     render(
-      <DataRoomQuickActions dealId="DEAL-000184"
+      <DataRoomQuickActions
+        dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -45,13 +46,26 @@ describe("DataRoomQuickActions", () => {
     const tools = screen.getByRole("toolbar", { name: "Data room tools" });
     expect(tools.querySelectorAll("button")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Upload files" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Open Synthesis Canvas" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open Synthesis Canvas" }),
+    ).not.toBeNull();
     expect(screen.getByRole("button", { name: "Notes" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Search document" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Upload files" }).dataset.variant).toBe("ghost");
-    expect(screen.getByRole("button", { name: "Open Synthesis Canvas" }).dataset.variant).toBe("ghost");
-    expect(screen.getByRole("button", { name: "Notes" }).dataset.variant).toBe("ghost");
-    expect(screen.getByRole("button", { name: "Search document" }).dataset.variant).toBe("ghost");
+    expect(
+      screen.getByRole("button", { name: "Search document" }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Upload files" }).dataset.variant,
+    ).toBe("ghost");
+    expect(
+      screen.getByRole("button", { name: "Open Synthesis Canvas" }).dataset
+        .variant,
+    ).toBe("ghost");
+    expect(screen.getByRole("button", { name: "Notes" }).dataset.variant).toBe(
+      "ghost",
+    );
+    expect(
+      screen.getByRole("button", { name: "Search document" }).dataset.variant,
+    ).toBe("ghost");
     expect(screen.queryByRole("menu", { name: "Data room views" })).toBeNull();
   });
 
@@ -60,7 +74,8 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions dealId="DEAL-000184"
+      <DataRoomQuickActions
+        dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -78,7 +93,8 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions dealId="DEAL-000184"
+      <DataRoomQuickActions
+        dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -88,10 +104,14 @@ describe("DataRoomQuickActions", () => {
       />,
     );
 
-    const searchTrigger = screen.getByRole("button", { name: "Search document" });
+    const searchTrigger = screen.getByRole("button", {
+      name: "Search document",
+    });
     await user.click(searchTrigger);
 
-    expect(await screen.findByRole("dialog", { name: "Search Synthetic_Terms.pdf" })).not.toBeNull();
+    expect(
+      await screen.findByRole("dialog", { name: "Search Synthetic_Terms.pdf" }),
+    ).not.toBeNull();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(searchTrigger).toBe(document.activeElement));
   });
@@ -100,7 +120,8 @@ describe("DataRoomQuickActions", () => {
     const user = userEvent.setup();
 
     render(
-      <DataRoomQuickActions dealId="DEAL-000184"
+      <DataRoomQuickActions
+        dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -110,13 +131,23 @@ describe("DataRoomQuickActions", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Open Synthesis Canvas" });
+    const trigger = screen.getByRole("button", {
+      name: "Open Synthesis Canvas",
+    });
     await user.click(trigger);
 
-    expect(await screen.findByRole("heading", { name: "How can I help you today?" })).not.toBeNull();
-    expect(screen.getByRole("textbox", { name: "Message input" })).toBe(document.activeElement);
-    expect(screen.queryByRole("button", { name: /Summarize deal risks/ })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Close Synthesis Canvas" }));
+    expect(
+      await screen.findByRole("heading", { name: "How can I help you today?" }),
+    ).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBe(
+      document.activeElement,
+    );
+    expect(
+      screen.queryByRole("button", { name: /Summarize deal risks/ }),
+    ).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Close Synthesis Canvas" }),
+    );
     await waitFor(() => expect(trigger).toBe(document.activeElement));
   });
 
@@ -130,7 +161,10 @@ describe("DataRoomQuickActions", () => {
       title: "Customer concentration review",
       updatedAt: "2026-10-12 10:01:00",
     };
-    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [thread] });
+    api.listAssistantThreads.mockResolvedValue({
+      nextCursor: null,
+      threads: [thread],
+    });
     api.getAssistantThread.mockResolvedValue({
       ...thread,
       messages: [
@@ -162,7 +196,8 @@ describe("DataRoomQuickActions", () => {
     });
 
     render(
-      <DataRoomQuickActions dealId="DEAL-000184"
+      <DataRoomQuickActions
+        dealId="DEAL-000184"
         documentSearch={{
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
@@ -173,11 +208,21 @@ describe("DataRoomQuickActions", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Open Synthesis Canvas" }));
-    await user.click(await screen.findByRole("button", { name: "Select previous chat" }));
-    await user.click(await screen.findByRole("menuitem", { name: thread.title }));
+    await user.click(
+      screen.getByRole("button", { name: "Open Synthesis Canvas" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Select previous chat" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: thread.title }),
+    );
 
-    expect(await screen.findByText("The largest customer is the primary concentration risk.")).not.toBeNull();
+    expect(
+      await screen.findByText(
+        "The largest customer is the primary concentration risk.",
+      ),
+    ).not.toBeNull();
     expect(api.getAssistantThread).toHaveBeenCalledWith(thread.threadId);
 
     const composer = screen.getByRole("textbox", { name: "Message input" });
@@ -185,6 +230,8 @@ describe("DataRoomQuickActions", () => {
     const composerDock = composerRoot?.parentElement?.parentElement;
     expect(composerRoot?.className).toContain("min-h-[2.625rem]");
     expect(composer.className).toContain("min-h-[1.875rem]");
-    expect(composerDock?.className).not.toContain("bg-[var(--theme-workspace-surface-bottom)]");
+    expect(composerDock?.className).not.toContain(
+      "bg-[var(--theme-workspace-surface-bottom)]",
+    );
   });
 });

@@ -37,7 +37,8 @@ export function moveItem(
 
   const movingItem: KanbanItem = {
     ...found.item,
-    swimlaneId: toSwimlaneId !== undefined ? toSwimlaneId : found.item.swimlaneId,
+    swimlaneId:
+      toSwimlaneId !== undefined ? toSwimlaneId : found.item.swimlaneId,
   };
 
   // Remove from source column.
@@ -85,7 +86,10 @@ export function addItem(
     columns: data.columns.map((c) => {
       if (c.id !== columnId) return c;
       const next = c.items.slice();
-      const at = index === undefined ? next.length : Math.max(0, Math.min(index, next.length));
+      const at =
+        index === undefined
+          ? next.length
+          : Math.max(0, Math.min(index, next.length));
       next.splice(at, 0, item);
       return { ...c, items: next };
     }),
@@ -118,12 +122,18 @@ export function addColumn(
   index?: number,
 ): KanbanData {
   const next = data.columns.slice();
-  const at = index === undefined ? next.length : Math.max(0, Math.min(index, next.length));
+  const at =
+    index === undefined
+      ? next.length
+      : Math.max(0, Math.min(index, next.length));
   next.splice(at, 0, column);
   return { ...data, columns: next };
 }
 
-export function updateColumn(data: KanbanData, column: KanbanColumn): KanbanData {
+export function updateColumn(
+  data: KanbanData,
+  column: KanbanColumn,
+): KanbanData {
   return {
     ...data,
     columns: data.columns.map((c) => (c.id === column.id ? column : c)),
@@ -173,10 +183,18 @@ export function validateData(
       if (itemIds.has(item.id)) errors.push(`Duplicate item id: ${item.id}`);
       itemIds.add(item.id);
       if (!rendererIds.has(item.rendererId)) {
-        errors.push(`Item ${item.id} references unknown renderer: ${item.rendererId}`);
+        errors.push(
+          `Item ${item.id} references unknown renderer: ${item.rendererId}`,
+        );
       }
-      if (item.swimlaneId && data.swimlanes && !swimlaneIds.has(item.swimlaneId)) {
-        errors.push(`Item ${item.id} references unknown swimlane: ${item.swimlaneId}`);
+      if (
+        item.swimlaneId &&
+        data.swimlanes &&
+        !swimlaneIds.has(item.swimlaneId)
+      ) {
+        errors.push(
+          `Item ${item.id} references unknown swimlane: ${item.swimlaneId}`,
+        );
       }
     }
   }

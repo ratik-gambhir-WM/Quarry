@@ -1,20 +1,20 @@
-import { memo, useMemo } from 'react'
+import { memo, useMemo } from "react";
 
-import { DEFAULT_FONT_FACE } from '../shared/PowerpointConstants'
+import { DEFAULT_FONT_FACE } from "../shared/PowerpointConstants";
 import type {
   NormalizedShapeElement,
   NormalizedTextElement,
-} from '../shared/PowerpointTypes'
-import { getSvgTextContent } from './svgTextLayout'
-import { toSvgColor } from './svgUtils'
+} from "../shared/PowerpointTypes";
+import { getSvgTextContent } from "./svgTextLayout";
+import { toSvgColor } from "./svgUtils";
 
 type SvgTextBlockProps = {
-  clipId: string
-  element: NormalizedShapeElement | NormalizedTextElement
-  fontScale?: number
-  hideText?: boolean
-  paintBox?: boolean
-}
+  clipId: string;
+  element: NormalizedShapeElement | NormalizedTextElement;
+  fontScale?: number;
+  hideText?: boolean;
+  paintBox?: boolean;
+};
 
 export const SvgTextBlock = memo(function SvgTextBlock({
   clipId,
@@ -23,10 +23,14 @@ export const SvgTextBlock = memo(function SvgTextBlock({
   hideText = false,
   paintBox = false,
 }: SvgTextBlockProps) {
-  const { layout, runs: displayRuns, text } = useMemo(
+  const {
+    layout,
+    runs: displayRuns,
+    text,
+  } = useMemo(
     () => getSvgTextContent(element, fontScale),
     [element, fontScale],
-  )
+  );
 
   return (
     <>
@@ -63,10 +67,10 @@ export const SvgTextBlock = memo(function SvgTextBlock({
                 fill={toSvgColor(segment.run.color)}
                 fontFamily={segment.run.fontFace || DEFAULT_FONT_FACE}
                 fontSize={Math.max(segment.run.fontSize * layout.fontScale, 5)}
-                fontStyle={segment.run.italic ? 'italic' : 'normal'}
+                fontStyle={segment.run.italic ? "italic" : "normal"}
                 fontWeight={segment.run.bold ? 700 : 400}
                 key={`${lineIndex}-${segmentIndex}`}
-                textDecoration={segment.run.underline ? 'underline' : undefined}
+                textDecoration={segment.run.underline ? "underline" : undefined}
                 x={segment.x}
                 xmlSpace="preserve"
                 y={line.baseline}
@@ -78,5 +82,5 @@ export const SvgTextBlock = memo(function SvgTextBlock({
         </text>
       ) : null}
     </>
-  )
-})
+  );
+});

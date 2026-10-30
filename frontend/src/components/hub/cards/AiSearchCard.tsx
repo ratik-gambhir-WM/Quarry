@@ -14,7 +14,9 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
           </div>
           <h2 className="type-h3 text-text-main">Synthesis AI</h2>
         </div>
-        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">Unified Search</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
+          Unified Search
+        </span>
       </div>
 
       <div className="relative">
@@ -33,9 +35,14 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-4">
-        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">Suggested:</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+          Suggested:
+        </span>
         {suggestions.map((suggestion) => (
-          <button className="text-[11px] font-bold text-primary transition hover:underline" key={suggestion}>
+          <button
+            className="text-[11px] font-bold text-primary transition hover:underline"
+            key={suggestion}
+          >
             {suggestion}
           </button>
         ))}

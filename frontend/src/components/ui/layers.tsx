@@ -29,22 +29,18 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
     const shouldReduceMotion = useReducedMotion() ?? false;
     const isControlledRef = useRef(false);
 
-    useImperativeHandle(
-      ref,
-      () => {
-        isControlledRef.current = true;
+    useImperativeHandle(ref, () => {
+      isControlledRef.current = true;
 
-        return {
-          startAnimation: async () => {
-            if (shouldReduceMotion) return;
-            await controls.start("firstState");
-            await controls.start("secondState");
-          },
-          stopAnimation: () => controls.start("normal"),
-        };
-      },
-      [controls, shouldReduceMotion],
-    );
+      return {
+        startAnimation: async () => {
+          if (shouldReduceMotion) return;
+          await controls.start("firstState");
+          await controls.start("secondState");
+        },
+        stopAnimation: () => controls.start("normal"),
+      };
+    }, [controls, shouldReduceMotion]);
 
     const handleMouseEnter = useCallback(
       async (e: React.MouseEvent<HTMLDivElement>) => {
@@ -113,7 +109,7 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 LayersIcon.displayName = "LayersIcon";

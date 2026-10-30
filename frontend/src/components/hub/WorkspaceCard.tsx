@@ -10,12 +10,13 @@ type WorkspaceCardProps = Omit<HTMLAttributes<HTMLElement>, "children"> & {
   surface?: "chrome" | "default";
 };
 
-const radiusValues: Record<WorkspaceCardRadius, CSSProperties["borderRadius"]> = {
-  compact: "19px",
-  default: "21px",
-  none: 0,
-  small: "16px",
-};
+const radiusValues: Record<WorkspaceCardRadius, CSSProperties["borderRadius"]> =
+  {
+    compact: "19px",
+    default: "21px",
+    none: 0,
+    small: "16px",
+  };
 
 export function WorkspaceCard({
   children,

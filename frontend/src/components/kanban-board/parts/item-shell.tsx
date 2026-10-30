@@ -1,6 +1,11 @@
 "use client";
 
-import { type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Lock, X } from "lucide-react";
@@ -37,7 +42,14 @@ export function ItemShell({
   /** Persist an in-place data edit from a self-editing renderer back to the board. */
   onItemDataChange?: (item: KanbanItem) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: item.id,
     data: { kind: "item", columnId, swimlaneId, rendererId: item.rendererId },
     disabled: readOnly || item.locked === true,
@@ -94,8 +106,10 @@ export function ItemShell({
 
   // In "shell" mode the whole card is the drag activator (existing behavior).
   // In "header" mode only the top grip strip activates drag; body is fully interactive.
-  const shellListeners = handleMode === "shell" && !dragDisabled ? listeners : undefined;
-  const headerListeners = handleMode === "header" && !dragDisabled ? listeners : undefined;
+  const shellListeners =
+    handleMode === "shell" && !dragDisabled ? listeners : undefined;
+  const headerListeners =
+    handleMode === "header" && !dragDisabled ? listeners : undefined;
 
   return (
     <div
@@ -108,16 +122,24 @@ export function ItemShell({
       {...attributes}
       {...shellListeners}
       role={readOnly && onClick ? "link" : "article"}
-      aria-describedby={readOnly && onClick ? undefined : attributes["aria-describedby"]}
-      aria-disabled={readOnly && onClick ? undefined : attributes["aria-disabled"]}
-      aria-pressed={readOnly && onClick ? undefined : attributes["aria-pressed"]}
+      aria-describedby={
+        readOnly && onClick ? undefined : attributes["aria-describedby"]
+      }
+      aria-disabled={
+        readOnly && onClick ? undefined : attributes["aria-disabled"]
+      }
+      aria-pressed={
+        readOnly && onClick ? undefined : attributes["aria-pressed"]
+      }
       aria-roledescription={ariaLabel}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={cn(
         "group relative outline-none",
         "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-        handleMode === "shell" && !dragDisabled && "cursor-grab active:cursor-grabbing",
+        handleMode === "shell" &&
+          !dragDisabled &&
+          "cursor-grab active:cursor-grabbing",
         dragDisabled && "cursor-default",
         isDragging && "opacity-40",
       )}
@@ -190,7 +212,12 @@ export function ItemShell({
 
       {/* In header mode, overlap the strip's bottom extension so the card body
           (with its own rounded top + surface) masks the strip's square corners. */}
-      <div className={cn("relative", handleMode === "header" && !dragDisabled && "z-10 -mt-2")}>
+      <div
+        className={cn(
+          "relative",
+          handleMode === "header" && !dragDisabled && "z-10 -mt-2",
+        )}
+      >
         <ItemRenderer item={item} rendererMap={rendererMap} ctx={ctx} />
       </div>
 

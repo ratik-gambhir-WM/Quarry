@@ -1,4 +1,8 @@
-import { DEFAULT_FONT_FACE, DEFAULT_HEIGHT_PX, DEFAULT_WIDTH_PX } from './PowerpointConstants'
+import {
+  DEFAULT_FONT_FACE,
+  DEFAULT_HEIGHT_PX,
+  DEFAULT_WIDTH_PX,
+} from "./PowerpointConstants";
 import type {
   NormalizationOptions,
   JsonObject,
@@ -11,8 +15,8 @@ import type {
   NormalizedSlide,
   NormalizedTextElement,
   ValidationIssue,
-} from './PowerpointTypes'
-import { addConnectorOcclusionRects } from './PowerpointLayering'
+} from "./PowerpointTypes";
+import { addConnectorOcclusionRects } from "./PowerpointLayering";
 import {
   asString,
   cleanHex,
@@ -31,32 +35,35 @@ import {
   normalizeShapeName,
   normalizeValign,
   resolveImageSource,
-} from './PowerpointUtils'
+} from "./PowerpointUtils";
 
 export function normalizeNativePresentation(
   input: JsonObject,
   issues: ValidationIssue[],
   options: NormalizationOptions,
 ): NormalizedPresentation | undefined {
-  const presentationNode = isRecord(input.presentation) ? input.presentation : input
+  const presentationNode = isRecord(input.presentation)
+    ? input.presentation
+    : input;
   const slidesSource = Array.isArray(presentationNode.slides)
     ? presentationNode.slides
-    : isRecord(presentationNode.slide) && Array.isArray(presentationNode.slide.elements)
+    : isRecord(presentationNode.slide) &&
+        Array.isArray(presentationNode.slide.elements)
       ? [presentationNode.slide]
       : Array.isArray(input.slides)
         ? input.slides
         : Array.isArray(input.elements)
           ? [input]
-          : undefined
+          : undefined;
 
   if (!slidesSource?.length) {
     issues.push({
-      level: 'error',
-      path: 'slides',
+      level: "error",
+      path: "slides",
       message:
-        'Expected either an extracted PowerPoint slide payload (`shapeTree`) or a slide/deck object with `slides` or `elements`.',
-    })
-    return undefined
+        "Expected either an extracted PowerPoint slide payload (`shapeTree`) or a slide/deck object with `slides` or `elements`.",
+    });
+    return undefined;
   }
 
   const width = resolveNativeDimension(
@@ -64,20 +71,20 @@ export function normalizeNativePresentation(
     presentationNode.canvas,
     presentationNode.size,
     presentationNode.layout,
-    'width',
+    "width",
     DEFAULT_WIDTH_PX,
-  )
+  );
   const height = resolveNativeDimension(
     presentationNode,
     presentationNode.canvas,
     presentationNode.size,
     presentationNode.layout,
-    'height',
+    "height",
     DEFAULT_HEIGHT_PX,
-  )
+  );
 
-  const mappedSlides: Array<NormalizedSlide | undefined> = slidesSource
-    .map((slideSource, index) =>
+  const mappedSlides: Array<NormalizedSlide | undefined> = slidesSource.map(
+    (slideSource, index) =>
       normalizeNativeSlide(
         slideSource,
         index,
@@ -87,29 +94,29 @@ export function normalizeNativePresentation(
         options,
         presentationNode.preserveElementOrder === true,
       ),
-    )
-  const slides = mappedSlides.filter(isDefined)
+  );
+  const slides = mappedSlides.filter(isDefined);
 
   if (!slides.length) {
     issues.push({
-      level: 'error',
-      path: 'slides',
-      message: 'The deck did not contain any valid slides after normalization.',
-    })
-    return undefined
+      level: "error",
+      path: "slides",
+      message: "The deck did not contain any valid slides after normalization.",
+    });
+    return undefined;
   }
 
   return {
     meta: {
-      title: asString(presentationNode.title) || 'Generated Presentation',
+      title: asString(presentationNode.title) || "Generated Presentation",
       width: slides[0].width,
       height: slides[0].height,
       preserveElementOrder: presentationNode.preserveElementOrder === true,
       showBranding: presentationNode.showBranding !== false,
-      sourceType: 'native-presentation',
+      sourceType: "native-presentation",
     },
     slides,
-  }
+  };
 }
 
 export function normalizeNativeSlide(
@@ -123,11 +130,11 @@ export function normalizeNativeSlide(
 ): NormalizedSlide | undefined {
   if (!isRecord(slideSource)) {
     issues.push({
-      level: 'warning',
+      level: "warning",
       path: `slides[${index}]`,
-      message: 'Skipped a slide because it was not an object.',
-    })
-    return undefined
+      message: "Skipped a slide because it was not an object.",
+    });
+    return undefined;
   }
 
   const width = resolveNativeDimension(
@@ -135,36 +142,48 @@ export function normalizeNativeSlide(
     slideSource.canvas,
     slideSource.size,
     slideSource.layout,
-    'width',
+    "width",
     defaultWidth,
-  )
+  );
   const height = resolveNativeDimension(
     slideSource,
     slideSource.canvas,
     slideSource.size,
     slideSource.layout,
-    'height',
+    "height",
     defaultHeight,
-  )
-  const elementsSource = Array.isArray(slideSource.elements) ? slideSource.elements : []
-  const mappedElements: Array<NormalizedElement | undefined> = elementsSource
-    .map((item, elementIndex) =>
-      normalizeNativeElement(item, width, height, issues, `slides[${index}].elements[${elementIndex}]`, options),
-    )
-  const normalizedElements = mappedElements.filter(isDefined)
+  );
+  const elementsSource = Array.isArray(slideSource.elements)
+    ? slideSource.elements
+    : [];
+  const mappedElements: Array<NormalizedElement | undefined> =
+    elementsSource.map((item, elementIndex) =>
+      normalizeNativeElement(
+        item,
+        width,
+        height,
+        issues,
+        `slides[${index}].elements[${elementIndex}]`,
+        options,
+      ),
+    );
+  const normalizedElements = mappedElements.filter(isDefined);
   const elements = preserveElementOrder
     ? normalizedElements
-    : addConnectorOcclusionRects(normalizedElements, { height, width })
+    : addConnectorOcclusionRects(normalizedElements, { height, width });
 
   return {
     id: asString(slideSource.id) || `slide-${index + 1}`,
-    name: asString(slideSource.name) || asString(slideSource.title) || `Slide ${index + 1}`,
+    name:
+      asString(slideSource.name) ||
+      asString(slideSource.title) ||
+      `Slide ${index + 1}`,
     width,
     height,
-    backgroundColor: cleanHex(asString(slideSource.backgroundColor), 'FFFFFF'),
+    backgroundColor: cleanHex(asString(slideSource.backgroundColor), "FFFFFF"),
     preserveElementOrder,
     elements,
-  }
+  };
 }
 
 function normalizeNativeElement(
@@ -177,84 +196,98 @@ function normalizeNativeElement(
 ): NormalizedElement | undefined {
   if (!isRecord(input)) {
     issues.push({
-      level: 'warning',
+      level: "warning",
       path: pathLabel,
-      message: 'Skipped a non-object element.',
-    })
-    return undefined
+      message: "Skipped a non-object element.",
+    });
+    return undefined;
   }
 
   const rawKind =
-    asString(input.kind) || asString(input.type) || asString(input.elementType) || asString(input.shape)
-  const kind = normalizeNativeKind(rawKind)
+    asString(input.kind) ||
+    asString(input.type) ||
+    asString(input.elementType) ||
+    asString(input.shape);
+  const kind = normalizeNativeKind(rawKind);
 
   if (!kind) {
     issues.push({
-      level: 'warning',
+      level: "warning",
       path: pathLabel,
-      message: `Unsupported element type "${rawKind ?? 'unknown'}".`,
-    })
-    return undefined
+      message: `Unsupported element type "${rawKind ?? "unknown"}".`,
+    });
+    return undefined;
   }
 
-  if (kind === 'line') {
-    const x1 = resolvePosition(input.x1 ?? input.x ?? input.left, width)
-    const y1 = resolvePosition(input.y1 ?? input.y ?? input.top, height)
+  if (kind === "line") {
+    const x1 = resolvePosition(input.x1 ?? input.x ?? input.left, width);
+    const y1 = resolvePosition(input.y1 ?? input.y ?? input.top, height);
     const x2 =
       input.x2 !== undefined
         ? resolvePosition(input.x2, width)
-        : x1 + resolvePosition(input.w ?? input.width ?? 0, width)
+        : x1 + resolvePosition(input.w ?? input.width ?? 0, width);
     const y2 =
       input.y2 !== undefined
         ? resolvePosition(input.y2, height)
-        : y1 + resolvePosition(input.h ?? input.height ?? 0, height)
+        : y1 + resolvePosition(input.h ?? input.height ?? 0, height);
 
     const element: NormalizedLineElement = {
-      kind: 'line',
+      kind: "line",
       id: asString(input.id) || pathLabel,
       sourcePath: pathLabel,
       opacity: clamp01(coerceNumber(input.opacity, 1)),
       rotate: coerceNumber(input.rotate, 0),
       flipH: coerceBoolean(input.flipH) || undefined,
       flipV: coerceBoolean(input.flipV) || undefined,
-      valign: 'middle',
+      valign: "middle",
       lineType: normalizeLineType(asString(input.lineType)),
       bendPosition: clamp01(coerceNumber(input.bendPosition, 0.5)),
       x1,
       y1,
       x2,
       y2,
-      stroke: cleanHex(asString(input.stroke) || asString(input.color), '334155'),
+      stroke: cleanHex(
+        asString(input.stroke) || asString(input.color),
+        "334155",
+      ),
       strokeOpacity: clamp01(coerceNumber(input.strokeOpacity, 1)),
       strokeWidth: coerceNumber(input.strokeWidth, 1.5),
       dash: normalizeDash(asString(input.dash)),
-      beginArrow: normalizeArrow(asString(input.beginArrow) || asString(input.startArrow)),
-      endArrow: normalizeArrow(asString(input.endArrow) || asString(input.arrow)),
+      beginArrow: normalizeArrow(
+        asString(input.beginArrow) || asString(input.startArrow),
+      ),
+      endArrow: normalizeArrow(
+        asString(input.endArrow) || asString(input.arrow),
+      ),
       occlusionRects: [],
-    }
-    return element
+    };
+    return element;
   }
 
-  if (kind === 'image') {
-    const src = resolveImageSource(asString(input.src) || asString(input.path) || asString(input.data), options)
+  if (kind === "image") {
+    const src = resolveImageSource(
+      asString(input.src) || asString(input.path) || asString(input.data),
+      options,
+    );
     if (!src) {
       issues.push({
-        level: 'warning',
+        level: "warning",
         path: `${pathLabel}.src`,
-        message: 'Skipped an image element because it did not include a usable image source.',
-      })
-      return undefined
+        message:
+          "Skipped an image element because it did not include a usable image source.",
+      });
+      return undefined;
     }
 
     const element: NormalizedImageElement = {
-      kind: 'image',
+      kind: "image",
       id: asString(input.id) || pathLabel,
       sourcePath: pathLabel,
       opacity: clamp01(coerceNumber(input.opacity, 1)),
       rotate: coerceNumber(input.rotate, 0),
       flipH: coerceBoolean(input.flipH) || undefined,
       flipV: coerceBoolean(input.flipV) || undefined,
-      valign: 'middle',
+      valign: "middle",
       x: resolvePosition(input.x ?? input.left, width),
       y: resolvePosition(input.y ?? input.top, height),
       w: resolvePosition(input.w ?? input.width, width),
@@ -263,23 +296,31 @@ function normalizeNativeElement(
       fit: normalizeImageFit(asString(input.fit)),
       crop: normalizeImageCrop(input.crop),
       borderRadius: coerceNumber(input.borderRadius, 0),
-      altText: asString(input.altText) || '',
-    }
-    return element
+      altText: asString(input.altText) || "",
+    };
+    return element;
   }
 
-  const x = resolvePosition(input.x ?? input.left, width)
-  const y = resolvePosition(input.y ?? input.top, height)
-  const w = resolvePosition(input.w ?? input.width, width)
-  const h = resolvePosition(input.h ?? input.height, height)
-  const padding = coerceNumber(input.padding, 8)
-  const align = normalizeAlign(asString(input.align))
-  const valign = normalizeValign(asString(input.valign))
-  const fontSize = coerceNumber(input.fontSize, 18)
-  const fontFace = asString(input.fontFace) || DEFAULT_FONT_FACE
-  const textColor = cleanHex(asString(input.color) || asString(input.textColor), '111827')
-  const textContent = asString(input.text) || asString(input.label) || ''
-  const nativeRuns = normalizeNativeTextRuns(input.runs, fontFace, fontSize, textColor)
+  const x = resolvePosition(input.x ?? input.left, width);
+  const y = resolvePosition(input.y ?? input.top, height);
+  const w = resolvePosition(input.w ?? input.width, width);
+  const h = resolvePosition(input.h ?? input.height, height);
+  const padding = coerceNumber(input.padding, 8);
+  const align = normalizeAlign(asString(input.align));
+  const valign = normalizeValign(asString(input.valign));
+  const fontSize = coerceNumber(input.fontSize, 18);
+  const fontFace = asString(input.fontFace) || DEFAULT_FONT_FACE;
+  const textColor = cleanHex(
+    asString(input.color) || asString(input.textColor),
+    "111827",
+  );
+  const textContent = asString(input.text) || asString(input.label) || "";
+  const nativeRuns = normalizeNativeTextRuns(
+    input.runs,
+    fontFace,
+    fontSize,
+    textColor,
+  );
   const runs =
     nativeRuns.length > 0
       ? nativeRuns
@@ -295,11 +336,11 @@ function normalizeNativeElement(
               color: textColor,
             },
           ]
-        : []
+        : [];
 
-  if (kind === 'text') {
+  if (kind === "text") {
     const element: NormalizedTextElement = {
-      kind: 'text',
+      kind: "text",
       id: asString(input.id) || pathLabel,
       sourcePath: pathLabel,
       opacity: clamp01(coerceNumber(input.opacity, 1)),
@@ -312,9 +353,9 @@ function normalizeNativeElement(
       w,
       h,
       text: textContent,
-      fill: cleanHex(asString(input.fill), 'FFFFFF'),
+      fill: cleanHex(asString(input.fill), "FFFFFF"),
       fillOpacity: clamp01(coerceNumber(input.fillOpacity, 1)),
-      stroke: cleanHex(asString(input.stroke), 'FFFFFF'),
+      stroke: cleanHex(asString(input.stroke), "FFFFFF"),
       strokeOpacity: clamp01(coerceNumber(input.strokeOpacity, 1)),
       strokeWidth: coerceNumber(input.strokeWidth, 0),
       borderRadius: coerceNumber(input.borderRadius, 0),
@@ -326,12 +367,12 @@ function normalizeNativeElement(
       bold: coerceBoolean(input.bold),
       italic: coerceBoolean(input.italic),
       runs,
-    }
-    return element
+    };
+    return element;
   }
 
   const element: NormalizedShapeElement = {
-    kind: 'shape',
+    kind: "shape",
     id: asString(input.id) || pathLabel,
     sourcePath: pathLabel,
     opacity: clamp01(coerceNumber(input.opacity, 1)),
@@ -345,9 +386,9 @@ function normalizeNativeElement(
     h,
     shape: normalizeShapeName(asString(input.shape) || rawKind),
     label: textContent,
-    fill: cleanHex(asString(input.fill), 'E5EEF8'),
+    fill: cleanHex(asString(input.fill), "E5EEF8"),
     fillOpacity: clamp01(coerceNumber(input.fillOpacity, 1)),
-    stroke: cleanHex(asString(input.stroke), '334155'),
+    stroke: cleanHex(asString(input.stroke), "334155"),
     strokeOpacity: clamp01(coerceNumber(input.strokeOpacity, 1)),
     strokeWidth: coerceNumber(input.strokeWidth, 1),
     borderRadius: coerceNumber(input.borderRadius, 0),
@@ -358,13 +399,15 @@ function normalizeNativeElement(
     fontFace,
     bold: coerceBoolean(input.bold),
     textRuns: runs,
-  }
-  return element
+  };
+  return element;
 }
 
-function normalizeImageCrop(input: JsonValue | undefined): NormalizedImageElement['crop'] {
+function normalizeImageCrop(
+  input: JsonValue | undefined,
+): NormalizedImageElement["crop"] {
   if (!isRecord(input)) {
-    return undefined
+    return undefined;
   }
 
   const crop = {
@@ -372,9 +415,9 @@ function normalizeImageCrop(input: JsonValue | undefined): NormalizedImageElemen
     right: clamp01(coerceNumber(input.right, 0)),
     bottom: clamp01(coerceNumber(input.bottom, 0)),
     left: clamp01(coerceNumber(input.left, 0)),
-  }
+  };
 
-  return crop.top || crop.right || crop.bottom || crop.left ? crop : undefined
+  return crop.top || crop.right || crop.bottom || crop.left ? crop : undefined;
 }
 
 function normalizeNativeTextRuns(
@@ -384,13 +427,13 @@ function normalizeNativeTextRuns(
   fallbackColor: string,
 ) {
   if (!Array.isArray(input)) {
-    return []
+    return [];
   }
 
   return input
     .filter((run): run is JsonObject => isRecord(run))
     .map((run) => ({
-      text: asString(run.text) || '',
+      text: asString(run.text) || "",
       bold: coerceBoolean(run.bold),
       italic: coerceBoolean(run.italic),
       underline: coerceBoolean(run.underline),
@@ -398,7 +441,7 @@ function normalizeNativeTextRuns(
       fontFace: asString(run.fontFace) || fallbackFontFace,
       fontSize: coerceNumber(run.fontSize, fallbackFontSize),
       breakLine: coerceBoolean(run.breakLine) || undefined,
-    }))
+    }));
 }
 
 function resolveNativeDimension(
@@ -406,58 +449,58 @@ function resolveNativeDimension(
   canvas: JsonValue | undefined,
   size: JsonValue | undefined,
   layout: JsonValue | undefined,
-  axis: 'width' | 'height',
+  axis: "width" | "height",
   fallback: number,
 ) {
-  const sourceNode = isRecord(source) ? source : undefined
-  const canvasNode = isRecord(canvas) ? canvas : undefined
-  const sizeNode = isRecord(size) ? size : undefined
-  const layoutNode = isRecord(layout) ? layout : undefined
-  const key = axis === 'width' ? 'width' : 'height'
-  const inchesKey = axis === 'width' ? 'widthInches' : 'heightInches'
+  const sourceNode = isRecord(source) ? source : undefined;
+  const canvasNode = isRecord(canvas) ? canvas : undefined;
+  const sizeNode = isRecord(size) ? size : undefined;
+  const layoutNode = isRecord(layout) ? layout : undefined;
+  const key = axis === "width" ? "width" : "height";
+  const inchesKey = axis === "width" ? "widthInches" : "heightInches";
 
   const pixelValue =
     sourceNode?.[key] ??
     canvasNode?.[key] ??
     sizeNode?.[key] ??
     layoutNode?.[key] ??
-    layoutNode?.[axis === 'width' ? 'w' : 'h']
+    layoutNode?.[axis === "width" ? "w" : "h"];
 
-  if (typeof pixelValue === 'number') {
-    return pixelValue
+  if (typeof pixelValue === "number") {
+    return pixelValue;
   }
 
   const inchesValue =
     sourceNode?.[inchesKey] ??
     canvasNode?.[inchesKey] ??
     sizeNode?.[inchesKey] ??
-    layoutNode?.[inchesKey]
+    layoutNode?.[inchesKey];
 
-  if (typeof inchesValue === 'number') {
-    return inchesToPx(inchesValue)
+  if (typeof inchesValue === "number") {
+    return inchesToPx(inchesValue);
   }
 
-  return fallback
+  return fallback;
 }
 
 function resolvePosition(value: JsonValue | undefined, canvasSize: number) {
-  if (typeof value === 'number') {
-    return value
+  if (typeof value === "number") {
+    return value;
   }
 
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (trimmed.endsWith('%')) {
-      const percent = Number(trimmed.slice(0, -1))
-      return Number.isFinite(percent) ? (canvasSize * percent) / 100 : 0
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.endsWith("%")) {
+      const percent = Number(trimmed.slice(0, -1));
+      return Number.isFinite(percent) ? (canvasSize * percent) / 100 : 0;
     }
-    if (trimmed.endsWith('in')) {
-      const inches = Number(trimmed.slice(0, -2))
-      return Number.isFinite(inches) ? inchesToPx(inches) : 0
+    if (trimmed.endsWith("in")) {
+      const inches = Number(trimmed.slice(0, -2));
+      return Number.isFinite(inches) ? inchesToPx(inches) : 0;
     }
-    const numeric = Number(trimmed)
-    return Number.isFinite(numeric) ? numeric : 0
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric : 0;
   }
 
-  return 0
+  return 0;
 }

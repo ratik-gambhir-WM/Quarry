@@ -1,7 +1,11 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { getTeamLabel, WorkspaceDeal, WorkspaceLocationState } from "../../../data/workspace";
+import {
+  getTeamLabel,
+  WorkspaceDeal,
+  WorkspaceLocationState,
+} from "../../../data/workspace";
 import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/navigation";
 import { WestMonroeMark } from "../../brand/WestMonroeMark";
 import { Icon } from "../../ui/Icon";
@@ -40,7 +44,9 @@ export function SidebarFrame({
   const [collapsed, setCollapsed] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const teamLabel = getTeamLabel(email);
-  const subtitle = profileDeal ? profileDeal.room.name : profileSubtitle ?? defaultWorkspaceProfileSubtitle;
+  const subtitle = profileDeal
+    ? profileDeal.room.name
+    : (profileSubtitle ?? defaultWorkspaceProfileSubtitle);
 
   return (
     <aside
@@ -59,7 +65,9 @@ export function SidebarFrame({
           }
         >
           {headerContent ? (
-            collapsed ? null : <div className="min-w-0 flex-1">{headerContent}</div>
+            collapsed ? null : (
+              <div className="min-w-0 flex-1">{headerContent}</div>
+            )
           ) : (
             <>
               {showHeaderBackButton ? (
@@ -102,11 +110,16 @@ export function SidebarFrame({
             }}
             type="button"
           >
-            <Icon className={`h-3.5 w-3.5 transition-transform ${collapsed ? "rotate-180" : ""}`} name="sidebar" />
+            <Icon
+              className={`h-3.5 w-3.5 transition-transform ${collapsed ? "rotate-180" : ""}`}
+              name="sidebar"
+            />
           </button>
         </div>
 
-        <div className={`flex min-h-0 flex-1 flex-col ${collapsed ? "p-2" : "p-4"}`}>
+        <div
+          className={`flex min-h-0 flex-1 flex-col ${collapsed ? "p-2" : "p-4"}`}
+        >
           <div
             id="workspace-sidebar-navigation"
             className={`min-h-0 flex-1 overflow-y-auto pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
@@ -117,17 +130,28 @@ export function SidebarFrame({
                 : ""
             }`}
           >
-            {typeof children === "function" ? children({ collapsed }) : children}
+            {typeof children === "function"
+              ? children({ collapsed })
+              : children}
           </div>
 
           <div className="shrink-0 border-t border-outline-variant/70 pt-2">
             <div className="relative">
-              {!collapsed && profileMenuOpen ? <ProfilePreferences email={email} navigationState={navigationState} /> : null}
+              {!collapsed && profileMenuOpen ? (
+                <ProfilePreferences
+                  email={email}
+                  navigationState={navigationState}
+                />
+              ) : null}
               <div className="flex items-center gap-2">
                 <button
                   aria-expanded={!collapsed && profileMenuOpen}
                   aria-haspopup={collapsed ? undefined : "menu"}
-                  aria-label={collapsed ? `Expand sidebar for ${teamLabel} profile` : undefined}
+                  aria-label={
+                    collapsed
+                      ? `Expand sidebar for ${teamLabel} profile`
+                      : undefined
+                  }
                   className={`flex min-w-0 flex-1 items-center rounded-lg py-2 text-left transition hover:bg-sidebar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
                     collapsed ? "justify-center px-0" : "gap-3 px-3"
                   }`}
@@ -140,9 +164,7 @@ export function SidebarFrame({
                   }}
                   type="button"
                 >
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary-fixed-dim text-white"
-                  >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary-fixed-dim text-white">
                     <span className="text-[12px] font-semibold">
                       {teamLabel.slice(0, 1)}
                     </span>
@@ -152,7 +174,9 @@ export function SidebarFrame({
                       <p className="truncate text-[13px] font-medium leading-5 text-sidebar-active">
                         {teamLabel}
                       </p>
-                      <p className="truncate text-[11px] font-normal leading-4 text-sidebar-muted">{subtitle}</p>
+                      <p className="truncate text-[11px] font-normal leading-4 text-sidebar-muted">
+                        {subtitle}
+                      </p>
                     </div>
                   )}
                 </button>

@@ -14,7 +14,10 @@ type RecentOpenedCardProps = {
   layout?: "rail" | "wide";
 };
 
-export function RecentOpenedCard({ items, layout = "rail" }: RecentOpenedCardProps) {
+export function RecentOpenedCard({
+  items,
+  layout = "rail",
+}: RecentOpenedCardProps) {
   if (layout === "wide") {
     return (
       <WorkspaceCard className="relative col-span-12 flex min-h-[430px] flex-col overflow-hidden p-8 lg:col-span-8">
@@ -34,7 +37,10 @@ export function RecentOpenedCard({ items, layout = "rail" }: RecentOpenedCardPro
               </div>
             </div>
 
-            <button className="text-muted transition hover:text-text-main" type="button">
+            <button
+              className="text-muted transition hover:text-text-main"
+              type="button"
+            >
               <Icon className="h-5 w-5" name="filter" />
             </button>
           </div>
@@ -60,7 +66,10 @@ export function RecentOpenedCard({ items, layout = "rail" }: RecentOpenedCardPro
     <WorkspaceCard className="col-span-12 flex min-h-[640px] flex-col p-6 lg:col-span-4 lg:row-span-2">
       <div className="mb-6 flex items-center justify-between">
         <h2 className="type-h3 text-text-main">Recently Opened</h2>
-        <button className="text-muted transition hover:text-text-main" type="button">
+        <button
+          className="text-muted transition hover:text-text-main"
+          type="button"
+        >
           <Icon className="h-5 w-5" name="filter" />
         </button>
       </div>
@@ -89,7 +98,9 @@ function RecentFileIcon({ item }: { item: RecentFile }) {
         : "bg-primary/10 text-primary";
 
   return (
-    <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl ${toneClassName}`}>
+    <div
+      className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl ${toneClassName}`}
+    >
       <Icon className="h-8 w-8" name={item.icon} />
     </div>
   );
@@ -100,7 +111,9 @@ function RecentFileRow({ item }: { item: RecentFile }) {
     <div className="group flex cursor-pointer items-center gap-4 rounded-xl p-2 transition hover:bg-white/40">
       <RecentFileIcon item={item} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[17px] font-semibold text-text-main">{item.title}</p>
+        <p className="truncate text-[17px] font-semibold text-text-main">
+          {item.title}
+        </p>
         <p className="truncate text-[12px] font-medium uppercase tracking-[0.1em] text-muted">
           {item.deal} • {item.time}
         </p>
@@ -114,12 +127,17 @@ function RecentFileTile({ item }: { item: RecentFile }) {
     <article className="group flex min-h-[118px] cursor-pointer items-center gap-4 rounded-[1.35rem] border border-white/60 bg-white/40 p-5 transition hover:bg-white/60">
       <RecentFileIcon item={item} />
       <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 text-[17px] font-semibold leading-snug text-text-main">{item.title}</p>
+        <p className="line-clamp-2 text-[17px] font-semibold leading-snug text-text-main">
+          {item.title}
+        </p>
         <p className="mt-2 truncate text-[12px] font-medium uppercase tracking-[0.1em] text-muted">
           {item.deal} • {item.time}
         </p>
       </div>
-      <Icon className="h-4 w-4 shrink-0 text-muted opacity-0 transition group-hover:opacity-100" name="openInNew" />
+      <Icon
+        className="h-4 w-4 shrink-0 text-muted opacity-0 transition group-hover:opacity-100"
+        name="openInNew"
+      />
     </article>
   );
 }

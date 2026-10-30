@@ -21,30 +21,70 @@ export function createNotebookSession() {
     getSnapshot: () => notes,
     subscribe(listener: () => void) {
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     create() {
       const now = new Date().toISOString();
       const note: NotebookDraft = {
-        id: crypto.randomUUID(), title: "", blocks: [], contentSchemaVersion: 1,
-        createdAt: now, updatedAt: now,
+        id: crypto.randomUUID(),
+        title: "",
+        blocks: [],
+        contentSchemaVersion: 1,
+        createdAt: now,
+        updatedAt: now,
       };
       publish([note, ...notes]);
       return note;
     },
-    update(id: string, patch: Partial<Pick<NotebookDraft, "title" | "blocks">>) {
-      publish(notes.map((note) => note.id === id
-        ? { ...note, ...patch, updatedAt: new Date().toISOString() }
-        : note));
+    importMany(incoming: NotebookDraft[]) {
+      const ids = new Set(notes.map((note) => note.id));
+      const additions = incoming.filter((note) => !ids.has(note.id));
+      if (additions.length) publish([...notes, ...additions]);
+    },
+    replace(
+      id: string,
+      note: Pick<
+        NotebookDraft,
+        "title" | "blocks" | "contentSchemaVersion" | "createdAt" | "updatedAt"
+      >,
+    ) {
+      publish(
+        notes.map((existing) =>
+          existing.id === id ? { ...existing, ...note } : existing,
+        ),
+      );
+    },
+    update(
+      id: string,
+      patch: Partial<Pick<NotebookDraft, "title" | "blocks">>,
+    ) {
+      publish(
+        notes.map((note) =>
+          note.id === id
+            ? { ...note, ...patch, updatedAt: new Date().toISOString() }
+            : note,
+        ),
+      );
     },
     sortByRecent() {
-      const sorted = [...notes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+      const sorted = [...notes].sort(
+        (a, b) =>
+          b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
+      );
       if (sorted.some((note, index) => note !== notes[index])) publish(sorted);
     },
-    remove(id: string) { publish(notes.filter((note) => note.id !== id)); },
-    clear() { publish([]); },
+    remove(id: string) {
+      publish(notes.filter((note) => note.id !== id));
+    },
+    clear() {
+      publish([]);
+    },
   };
 }
+
+export type NotebookSession = ReturnType<typeof createNotebookSession>;
 
 // Drafts survive workspace navigation, but never reload or an authentication change.
 let current = createNotebookSession();
@@ -52,7 +92,9 @@ sessionStore.subscribe(() => {
   current.clear();
   current = createNotebookSession();
 });
-export function getNotebookSession() { return current; }
+export function getNotebookSession() {
+  return current;
+}
 export function notebookTitle(note: Pick<NotebookDraft, "title">) {
   return note.title.trim() || "Untitled note";
 }

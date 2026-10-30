@@ -17,7 +17,11 @@ const vaultSections = [
 
 export function VaultPage() {
   return (
-    <WorkspaceHomeShell activeHomeSection="vault" contentClassName="py-8" header={<WorkspaceHeader title="Vault" />}>
+    <WorkspaceHomeShell
+      activeHomeSection="vault"
+      contentClassName="py-8"
+      header={<WorkspaceHeader title="Vault" />}
+    >
       <div className="w-full pb-10">
         <div className="border-b border-outline-variant/70 px-8 pb-5">
           <p aria-hidden="true" className="type-h1 text-text-main">
@@ -30,7 +34,9 @@ export function VaultPage() {
                 <li
                   className={
                     "flex items-center gap-2 rounded-lg px-4 py-3 text-[14px] font-medium " +
-                    (index === 0 ? "bg-surface-container text-text-main" : "text-muted")
+                    (index === 0
+                      ? "bg-surface-container text-text-main"
+                      : "text-muted")
                   }
                   data-active={index === 0 ? "true" : undefined}
                   key={label}

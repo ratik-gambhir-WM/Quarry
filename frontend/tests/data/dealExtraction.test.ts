@@ -9,7 +9,19 @@ import {
   type SavedDealMetadata,
 } from "@/data/dealExtraction";
 
-const savedDeal: SavedDeal = testDeal({ dealId: "DEAL-123", dealName: "Acme", startDate: "2026-08-03", expectedCloseDate: "2026-09-12", status: "prepare", transactionType: "strategic_acquisition", parties: [testParty("Target", "target"), testParty("Cvs", "buyer"), testParty("Thoma Bravo", "pe_sponsor")] });
+const savedDeal: SavedDeal = testDeal({
+  dealId: "DEAL-123",
+  dealName: "Acme",
+  startDate: "2026-08-03",
+  expectedCloseDate: "2026-09-12",
+  status: "prepare",
+  transactionType: "strategic_acquisition",
+  parties: [
+    testParty("Target", "target"),
+    testParty("Cvs", "buyer"),
+    testParty("Thoma Bravo", "pe_sponsor"),
+  ],
+});
 
 const savedMetadata: SavedDealMetadata = {
   dealId: savedDeal.dealId,
@@ -29,14 +41,28 @@ describe("buildWorkspaceDealFromPersisted", () => {
     expect(workspaceDeal.room.summary).toContain("Buyer: Cvs");
     expect(workspaceDeal.room.summary).toContain("PE sponsor: Thoma Bravo");
     expect(workspaceDeal.portfolio.parties).toEqual(savedDeal.parties);
-    expect(workspaceDeal.room.metrics).toContainEqual({ label: "Actual close", value: "Unavailable" });
+    expect(workspaceDeal.room.metrics).toContainEqual({
+      label: "Actual close",
+      value: "Unavailable",
+    });
   });
 
-  it.each(["closed", "pencils_down"] as const)("marks %s as historic", (status) => {
-    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null).terminal).toBe(true);
-  });
+  it.each(["closed", "pencils_down"] as const)(
+    "marks %s as historic",
+    (status) => {
+      expect(
+        buildWorkspaceDealFromPersisted({ ...savedDeal, status }, null)
+          .terminal,
+      ).toBe(true);
+    },
+  );
   it("does not infer engagement completion from a transaction close", () => {
-    expect(buildWorkspaceDealFromPersisted({ ...savedDeal, actualCloseDate: "2026-09-01", status: "prepare" }, null).terminal).toBe(false);
+    expect(
+      buildWorkspaceDealFromPersisted(
+        { ...savedDeal, actualCloseDate: "2026-09-01", status: "prepare" },
+        null,
+      ).terminal,
+    ).toBe(false);
   });
   it("describes an unknown pipeline without placeholder companies", () => {
     const workspace = buildWorkspaceDealFromPersisted(testDeal(), null);
@@ -47,7 +73,13 @@ describe("buildWorkspaceDealFromPersisted", () => {
   it("preserves extracted question order and fresh SOW metadata", () => {
     const result: SaveDealMetadataResponse = {
       deal: savedDeal,
-      extraction: { keyQuestions: ["First question?", "Second question?", "Second question?"] },
+      extraction: {
+        keyQuestions: [
+          "First question?",
+          "Second question?",
+          "Second question?",
+        ],
+      },
       files: [
         {
           filename: "Acme SOW.pdf",
@@ -59,7 +91,10 @@ describe("buildWorkspaceDealFromPersisted", () => {
       metadata: savedMetadata,
     };
 
-    const workspaceDeal = buildWorkspaceDealFromExtractionResult(result, "Acme SOW.pdf");
+    const workspaceDeal = buildWorkspaceDealFromExtractionResult(
+      result,
+      "Acme SOW.pdf",
+    );
 
     expect(workspaceDeal.room.keyQuestions).toEqual([
       "First question?",
@@ -96,7 +131,10 @@ describe("buildWorkspaceDealFromPersisted", () => {
   });
 
   it("maps persisted questions and saved resource links after reload", () => {
-    const workspaceDeal = buildWorkspaceDealFromPersisted(savedDeal, savedMetadata);
+    const workspaceDeal = buildWorkspaceDealFromPersisted(
+      savedDeal,
+      savedMetadata,
+    );
 
     expect(workspaceDeal.room.keyQuestions).toEqual([
       "First question?",
@@ -118,19 +156,19 @@ describe("buildWorkspaceDealFromPersisted", () => {
   });
 
   it("keeps missing or unsafe optional resource values inactive", () => {
-    expect(buildDealResources(null).map((resource) => resource.availability)).toEqual([
-      "unavailable",
-      "unavailable",
-      "unavailable",
-      "unavailable",
-    ]);
+    expect(
+      buildDealResources(null).map((resource) => resource.availability),
+    ).toEqual(["unavailable", "unavailable", "unavailable", "unavailable"]);
 
     for (const sharepointLink of [
       "http://northwind.sharepoint.com/sites/acme",
       "https://example.com/?next=.sharepoint.com/",
       "not a URL",
     ]) {
-      const resources = buildDealResources({ ...savedMetadata, sharepointLink });
+      const resources = buildDealResources({
+        ...savedMetadata,
+        sharepointLink,
+      });
       expect(resources[2]).toEqual({
         availability: "unavailable",
         href: undefined,

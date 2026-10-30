@@ -8,7 +8,9 @@ const shortUtcDateFormatter = new Intl.DateTimeFormat(undefined, {
 export function formatShortUtcDate(value?: string): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : shortUtcDateFormatter.format(date);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : shortUtcDateFormatter.format(date);
 }
 
 export function formatFileSize(sizeBytes: number): string {

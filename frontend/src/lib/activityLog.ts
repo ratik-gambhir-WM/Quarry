@@ -54,9 +54,11 @@ const MAX_ARRAY_ITEMS = 30;
 const MAX_OBJECT_KEYS = 50;
 const MAX_STRING_LENGTH = 2_000;
 const REDACTED = "[REDACTED]";
-const sensitiveKeyPattern = /api[-_]?key|authorization|base64|content|context|cookie|delta|email|file(name)?|folder|instruction|password|path|payload|prompt|question|secret|suggestedName|summary|text|token/i;
+const sensitiveKeyPattern =
+  /api[-_]?key|authorization|base64|content|context|cookie|delta|email|file(name)?|folder|instruction|password|path|payload|prompt|question|secret|suggestedName|summary|text|token/i;
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const absolutePathPattern = /(?:\/Users\/|\/home\/|\/var\/|[A-Za-z]:[\\/]|\\\\)[^\s]*/g;
+const absolutePathPattern =
+  /(?:\/Users\/|\/home\/|\/var\/|[A-Za-z]:[\\/]|\\\\)[^\s]*/g;
 
 let entries = readStoredEntries();
 const listeners = new Set<() => void>();
@@ -155,9 +157,12 @@ export function finishApiRequest(id: string, result: ApiRequestFinish) {
 
     return {
       ...entry,
-      details: result.details === undefined
-        ? entry.details
-        : [entry.details, serializeForLog({ response: result.details })].filter(Boolean).join("\n\n"),
+      details:
+        result.details === undefined
+          ? entry.details
+          : [entry.details, serializeForLog({ response: result.details })]
+              .filter(Boolean)
+              .join("\n\n"),
       durationMs: Math.round(result.durationMs),
       httpStatus: result.httpStatus,
       status: result.status,
@@ -195,10 +200,13 @@ export function finishIpcRequest(id: string, result: IpcRequestFinish) {
       }
 
       const response =
-        result.details === undefined ? undefined : serializeForLog({ response: result.details });
+        result.details === undefined
+          ? undefined
+          : serializeForLog({ response: result.details });
       return {
         ...entry,
-        details: [entry.details, response].filter(Boolean).join("\n\n") || undefined,
+        details:
+          [entry.details, response].filter(Boolean).join("\n\n") || undefined,
         durationMs: Math.round(result.durationMs),
         status: result.status,
         title: result.message
@@ -209,7 +217,13 @@ export function finishIpcRequest(id: string, result: IpcRequestFinish) {
   );
 }
 
-export function logSseEvent({ data, eventName, status, title, url }: SseLogInput) {
+export function logSseEvent({
+  data,
+  eventName,
+  status,
+  title,
+  url,
+}: SseLogInput) {
   const entry: ActivityLogEntry = {
     details: data === undefined ? undefined : serializeForLog(data),
     eventName,
@@ -276,20 +290,22 @@ export function summarizeFormData(formData: FormData) {
   const summary: Record<string, unknown> = {};
 
   for (const [key, value] of formData.entries()) {
-    const summarizedValue = value instanceof File
-      ? {
-          lastModified: value.lastModified,
-          name: value.name,
-          sizeBytes: value.size,
-          type: value.type || "unknown",
-        }
-      : value;
+    const summarizedValue =
+      value instanceof File
+        ? {
+            lastModified: value.lastModified,
+            name: value.name,
+            sizeBytes: value.size,
+            type: value.type || "unknown",
+          }
+        : value;
     const existing = summary[key];
-    summary[key] = existing === undefined
-      ? summarizedValue
-      : Array.isArray(existing)
-        ? [...existing, summarizedValue]
-        : [existing, summarizedValue];
+    summary[key] =
+      existing === undefined
+        ? summarizedValue
+        : Array.isArray(existing)
+          ? [...existing, summarizedValue]
+          : [existing, summarizedValue];
   }
 
   return summary;
@@ -304,7 +320,11 @@ function serializeForLog(value: unknown) {
 }
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
-  if (value === null || typeof value === "number" || typeof value === "boolean") {
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return value;
   }
 
@@ -321,7 +341,9 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
       return `[Array with ${value.length} items]`;
     }
 
-    const sanitized = value.slice(0, MAX_ARRAY_ITEMS).map((item) => sanitizeValue(item, depth + 1));
+    const sanitized = value
+      .slice(0, MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeValue(item, depth + 1));
     if (value.length > MAX_ARRAY_ITEMS) {
       sanitized.push(`[${value.length - MAX_ARRAY_ITEMS} more items]`);
     }
@@ -336,7 +358,9 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
     const result: Record<string, unknown> = {};
     const objectEntries = Object.entries(value as Record<string, unknown>);
     for (const [key, nestedValue] of objectEntries.slice(0, MAX_OBJECT_KEYS)) {
-      result[key] = sensitiveKeyPattern.test(key) ? REDACTED : sanitizeValue(nestedValue, depth + 1);
+      result[key] = sensitiveKeyPattern.test(key)
+        ? REDACTED
+        : sanitizeValue(nestedValue, depth + 1);
     }
     if (objectEntries.length > MAX_OBJECT_KEYS) {
       result.__truncated = `${objectEntries.length - MAX_OBJECT_KEYS} more keys`;
@@ -349,7 +373,12 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
 
 function sanitizeUrl(url: string) {
   try {
-    const parsed = new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.origin);
+    const parsed = new URL(
+      url,
+      typeof window === "undefined"
+        ? "http://localhost"
+        : window.location.origin,
+    );
     parsed.searchParams.forEach((_, key) => {
       if (sensitiveKeyPattern.test(key)) {
         parsed.searchParams.set(key, REDACTED);

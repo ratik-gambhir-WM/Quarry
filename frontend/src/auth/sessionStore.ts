@@ -16,7 +16,9 @@ export const sessionStore = {
   getSnapshot: () => state,
   subscribe(listener: () => void) {
     listeners.add(listener);
-    return () => { listeners.delete(listener); };
+    return () => {
+      listeners.delete(listener);
+    };
   },
   set(session: SessionResponse | null, notice?: string) {
     if (expiry) clearTimeout(expiry);
@@ -32,7 +34,11 @@ export const sessionStore = {
     const generation = state.generation;
     if (session) {
       expiry = setTimeout(
-        () => sessionStore.clearIfCurrent(generation, "Your session expired. Sign in again."),
+        () =>
+          sessionStore.clearIfCurrent(
+            generation,
+            "Your session expired. Sign in again.",
+          ),
         Math.max(0, Date.parse(session.expiresAt) - Date.now()),
       );
     }
@@ -43,14 +49,18 @@ export const sessionStore = {
   },
   track(controller: AbortController) {
     requests.add(controller);
-    return () => { requests.delete(controller); };
+    return () => {
+      requests.delete(controller);
+    };
   },
 };
 
 export function credentials() {
   const { session, generation } = state;
   return {
-    auth: session ? { token: session.accessToken, userId: session.user.id } : null,
+    auth: session
+      ? { token: session.accessToken, userId: session.user.id }
+      : null,
     generation,
   };
 }

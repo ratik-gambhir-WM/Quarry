@@ -1,29 +1,29 @@
 import {
   DEFAULT_FONT_FACE,
   POINTS_TO_SLIDE_UNITS,
-} from '../shared/PowerpointConstants'
+} from "../shared/PowerpointConstants";
 import type {
   NormalizedShapeElement,
   NormalizedTextElement,
   NormalizedTextRun,
-} from '../shared/PowerpointTypes'
-import type { SlideElementRef } from '../canvas/model'
-import { createCanvasTextMeasurer, layoutSvgText } from './textLayout'
+} from "../shared/PowerpointTypes";
+import type { SlideElementRef } from "../canvas/model";
+import { createCanvasTextMeasurer, layoutSvgText } from "./textLayout";
 
-const measureText = createCanvasTextMeasurer()
+const measureText = createCanvasTextMeasurer();
 
 export function getSvgTextContent(
   element: NormalizedShapeElement | NormalizedTextElement,
   fixedFontScale?: number,
 ) {
-  const text = element.kind === 'shape' ? element.label : element.text
-  const sourceRuns = element.kind === 'shape' ? element.textRuns : element.runs
+  const text = element.kind === "shape" ? element.label : element.text;
+  const sourceRuns = element.kind === "shape" ? element.textRuns : element.runs;
   const runs = sourceRuns.map((run) => ({
     ...run,
     fontFace: run.fontFace || DEFAULT_FONT_FACE,
     fontSize: run.fontSize * POINTS_TO_SLIDE_UNITS,
-  }))
-  const fallbackRun = createFallbackRun(element, text)
+  }));
+  const fallbackRun = createFallbackRun(element, text);
   const layout = layoutSvgText({
     align: element.align,
     fallbackRun,
@@ -35,29 +35,26 @@ export function getSvgTextContent(
     runs,
     valign: element.valign,
     width: element.w,
-  })
+  });
 
-  return { fallbackRun, layout, runs, text }
+  return { fallbackRun, layout, runs, text };
 }
 
 export function getConsistentSvgTextFontScales(elementRefs: SlideElementRef[]) {
-  const groups = new Map<
-    string,
-    Array<{ fontScale: number; key: string }>
-  >()
+  const groups = new Map<string, Array<{ fontScale: number; key: string }>>();
 
   elementRefs.forEach((elementRef) => {
-    const element = elementRef.element
-    if (element.kind !== 'shape' && element.kind !== 'text') {
-      return
+    const element = elementRef.element;
+    if (element.kind !== "shape" && element.kind !== "text") {
+      return;
     }
 
-    const textContent = getSvgTextContent(element)
+    const textContent = getSvgTextContent(element);
     if (!textContent.text || textContent.runs.length < 2) {
-      return
+      return;
     }
 
-    const styleProfile = getTextStyleProfile(textContent.runs)
+    const styleProfile = getTextStyleProfile(textContent.runs);
     const groupKey = [
       element.kind,
       element.x.toFixed(2),
@@ -66,40 +63,40 @@ export function getConsistentSvgTextFontScales(elementRefs: SlideElementRef[]) {
       element.align,
       element.valign,
       styleProfile,
-    ].join(':')
-    const group = groups.get(groupKey) ?? []
+    ].join(":");
+    const group = groups.get(groupKey) ?? [];
     group.push({
       fontScale: textContent.layout.fontScale,
       key: elementRef.key,
-    })
-    groups.set(groupKey, group)
-  })
+    });
+    groups.set(groupKey, group);
+  });
 
-  const fontScales = new Map<string, number>()
+  const fontScales = new Map<string, number>();
   groups.forEach((group) => {
     if (group.length < 2) {
-      return
+      return;
     }
 
-    const sharedScale = Math.min(...group.map(({ fontScale }) => fontScale))
-    group.forEach(({ key }) => fontScales.set(key, sharedScale))
-  })
-  return fontScales
+    const sharedScale = Math.min(...group.map(({ fontScale }) => fontScale));
+    group.forEach(({ key }) => fontScales.set(key, sharedScale));
+  });
+  return fontScales;
 }
 
 export function getSvgTextScaleTemplateKey(elementRefs: SlideElementRef[]) {
   return elementRefs
     .flatMap((elementRef) => {
-      const element = elementRef.element
-      if (element.kind !== 'shape' && element.kind !== 'text') {
-        return []
+      const element = elementRef.element;
+      if (element.kind !== "shape" && element.kind !== "text") {
+        return [];
       }
 
-      const textContent = getSvgTextContent(element)
+      const textContent = getSvgTextContent(element);
       const styleRuns =
         textContent.runs.length > 0
           ? textContent.runs
-          : [textContent.fallbackRun]
+          : [textContent.fallbackRun];
       return [
         [
           elementRef.key,
@@ -112,10 +109,10 @@ export function getSvgTextScaleTemplateKey(elementRefs: SlideElementRef[]) {
           element.align,
           element.valign,
           getTextStyleProfile(styleRuns),
-        ].join(':'),
-      ]
+        ].join(":"),
+      ];
     })
-    .join('||')
+    .join("||");
 }
 
 function getTextStyleProfile(runs: NormalizedTextRun[]) {
@@ -129,10 +126,10 @@ function getTextStyleProfile(runs: NormalizedTextRun[]) {
           run.italic,
           run.underline,
           run.color,
-        ].join('|'),
+        ].join("|"),
       ),
     ),
-  ).join(';')
+  ).join(";");
 }
 
 function createFallbackRun(
@@ -141,11 +138,11 @@ function createFallbackRun(
 ): NormalizedTextRun {
   return {
     bold: element.bold,
-    color: element.kind === 'shape' ? element.textColor : element.color,
+    color: element.kind === "shape" ? element.textColor : element.color,
     fontFace: element.fontFace || DEFAULT_FONT_FACE,
     fontSize: element.fontSize * POINTS_TO_SLIDE_UNITS,
-    italic: element.kind === 'text' ? element.italic : false,
+    italic: element.kind === "text" ? element.italic : false,
     text,
     underline: false,
-  }
+  };
 }

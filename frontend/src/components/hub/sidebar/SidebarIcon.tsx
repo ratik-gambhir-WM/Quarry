@@ -32,10 +32,18 @@ const animatedIconNames = new Set<SidebarIconName>([
   "twitch",
 ]);
 
-export function SidebarIcon({ className, name }: { className: string; name: SidebarIconName }) {
-  return isAnimatedIconName(name)
-    ? <AnimatedIcon className={className} name={name} />
-    : <Icon className={className} name={name} />;
+export function SidebarIcon({
+  className,
+  name,
+}: {
+  className: string;
+  name: SidebarIconName;
+}) {
+  return isAnimatedIconName(name) ? (
+    <AnimatedIcon className={className} name={name} />
+  ) : (
+    <Icon className={className} name={name} />
+  );
 }
 
 function isAnimatedIconName(name: SidebarIconName): name is AnimatedIconName {

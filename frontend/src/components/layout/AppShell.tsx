@@ -7,7 +7,11 @@ type AppShellProps = {
   showFooter?: boolean;
 };
 
-export function AppShell({ centered = false, children, showFooter = true }: AppShellProps) {
+export function AppShell({
+  centered = false,
+  children,
+  showFooter = true,
+}: AppShellProps) {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       <main

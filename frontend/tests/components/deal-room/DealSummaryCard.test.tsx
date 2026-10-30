@@ -49,27 +49,48 @@ afterEach(cleanup);
 
 describe("DealSummaryCard", () => {
   it("omits the date section from the overview", () => {
-    render(<DealSummaryCard deal={{ ...deal, metrics: [
-      { label: "Start date", value: "Unavailable" },
-      { label: "Expected close", value: "2026-12-31" },
-      { label: "Actual close", value: "Unavailable" },
-      { label: "Engagement completed", value: "2026-10-15" },
-    ] }} />);
+    render(
+      <DealSummaryCard
+        deal={{
+          ...deal,
+          metrics: [
+            { label: "Start date", value: "Unavailable" },
+            { label: "Expected close", value: "2026-12-31" },
+            { label: "Actual close", value: "Unavailable" },
+            { label: "Engagement completed", value: "2026-10-15" },
+          ],
+        }}
+      />,
+    );
     expect(screen.queryByLabelText("Deal details")).toBeNull();
-    for (const label of ["Start date", "Expected close", "Actual close", "Engagement completed"]) {
+    for (const label of [
+      "Start date",
+      "Expected close",
+      "Actual close",
+      "Engagement completed",
+    ]) {
       expect(screen.queryByText(label)).toBeNull();
     }
   });
   it("renders the overview, resources, and extracted questions in response order", () => {
     const { container } = render(<DealSummaryCard deal={deal} />);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Acme Acquisition" })).not.toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Acme Acquisition" }),
+    ).not.toBeNull();
     expect(screen.getByText("A focused diligence summary.")).not.toBeNull();
     expect(screen.getByText("SOW")).not.toBeNull();
     expect(screen.getByText("Fact Sheet")).not.toBeNull();
-    expect(screen.getByText("Questions extracted from submitted SOW")).not.toBeNull();
-    const keyQuestionsHeading = screen.getByRole("heading", { level: 2, name: "Key Questions" });
-    expect(keyQuestionsHeading.parentElement?.parentElement?.querySelector("svg")).toBeNull();
+    expect(
+      screen.getByText("Questions extracted from submitted SOW"),
+    ).not.toBeNull();
+    const keyQuestionsHeading = screen.getByRole("heading", {
+      level: 2,
+      name: "Key Questions",
+    });
+    expect(
+      keyQuestionsHeading.parentElement?.parentElement?.querySelector("svg"),
+    ).toBeNull();
     expect(screen.queryByText("No source is currently available")).toBeNull();
     expect(screen.queryByText("Source support coming soon")).toBeNull();
     for (const [label, href] of [
@@ -78,14 +99,18 @@ describe("DealSummaryCard", () => {
       ["SharePoint VDR", "https://northwind.sharepoint.com/sites/acme"],
       ["Request List", "https://example.com/request-list"],
     ]) {
-      const resourceLink = screen.getByRole("link", { name: `Open ${label} in a new tab` });
+      const resourceLink = screen.getByRole("link", {
+        name: `Open ${label} in a new tab`,
+      });
       expect(resourceLink.getAttribute("href")).toBe(href);
       expect(resourceLink.getAttribute("rel")).toBe("noopener noreferrer");
       expect(within(resourceLink).getByText("Available")).not.toBeNull();
     }
 
     const markup = container.textContent ?? "";
-    expect(markup.indexOf("What drives growth?")).toBeLessThan(markup.indexOf("Which contracts can terminate?"));
+    expect(markup.indexOf("What drives growth?")).toBeLessThan(
+      markup.indexOf("Which contracts can terminate?"),
+    );
     expect(container.querySelector('[data-slot="data-grid"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Question" })).toBeNull();
   });
@@ -96,17 +121,32 @@ describe("DealSummaryCard", () => {
         deal={{
           ...deal,
           keyQuestions: [],
-          resources: deal.resources.map((resource) => ({ ...resource, availability: "unavailable", href: undefined })),
+          resources: deal.resources.map((resource) => ({
+            ...resource,
+            availability: "unavailable",
+            href: undefined,
+          })),
         }}
       />,
     );
 
-    expect(screen.getByText("No key questions were extracted from the submitted source files.")).not.toBeNull();
-    expect(screen.queryByRole("link", { name: /SOW|Fact Sheet|SharePoint VDR|Request List/ })).toBeNull();
+    expect(
+      screen.getByText(
+        "No key questions were extracted from the submitted source files.",
+      ),
+    ).not.toBeNull();
+    expect(
+      screen.queryByRole("link", {
+        name: /SOW|Fact Sheet|SharePoint VDR|Request List/,
+      }),
+    ).toBeNull();
   });
 
   it("renders every extracted question without hidden grid pagination", () => {
-    const questions = Array.from({ length: 12 }, (_, index) => `Question ${index + 1}?`);
+    const questions = Array.from(
+      { length: 12 },
+      (_, index) => `Question ${index + 1}?`,
+    );
 
     render(<DealSummaryCard deal={{ ...deal, keyQuestions: questions }} />);
 

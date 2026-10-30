@@ -17,10 +17,16 @@ describe("PdfViewer pending source", () => {
       />,
     );
 
-    expect(screen.getByRole("region", { name: "Pending document" })).toBeTruthy();
-    expect(screen.getByRole("toolbar", { name: "PDF viewer controls" })).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Pending document" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("toolbar", { name: "PDF viewer controls" }),
+    ).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Loading PDF");
-    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+    expect(
+      document.querySelectorAll('[data-slot="skeleton"]').length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText("No document loaded")).toBeNull();
   });
 });

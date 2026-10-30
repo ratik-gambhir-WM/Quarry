@@ -21,18 +21,30 @@ export type AnimatedIconName =
   | "telescope"
   | "twitch";
 
-export function AnimatedIcon({ className, name }: { className: string; name: AnimatedIconName }) {
+export function AnimatedIcon({
+  className,
+  name,
+}: {
+  className: string;
+  name: AnimatedIconName;
+}) {
   switch (name) {
     case "bookOpen":
       return <BookOpenIcon className={className} size={20} />;
     case "calendarDays":
-      return <CalendarDaysIcon aria-hidden="true" className={className} size={20} />;
+      return (
+        <CalendarDaysIcon aria-hidden="true" className={className} size={20} />
+      );
     case "ship":
       return <ShipIcon aria-hidden="true" className={className} size={20} />;
     case "fileStack":
-      return <FileStackIcon aria-hidden="true" className={className} size={20} />;
+      return (
+        <FileStackIcon aria-hidden="true" className={className} size={20} />
+      );
     case "folderTree":
-      return <FolderTreeIcon aria-hidden="true" className={className} size={20} />;
+      return (
+        <FolderTreeIcon aria-hidden="true" className={className} size={20} />
+      );
     case "boxes":
       return <BoxesIcon className={className} size={20} />;
     case "telescope":

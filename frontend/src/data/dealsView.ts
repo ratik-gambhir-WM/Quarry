@@ -1,4 +1,11 @@
-import { codeLabel, dealStatusOptions, dealStatusLabels, isTerminalDealStatus, partyNames, type DealStatus } from "./dealModel";
+import {
+  codeLabel,
+  dealStatusOptions,
+  dealStatusLabels,
+  isTerminalDealStatus,
+  partyNames,
+  type DealStatus,
+} from "./dealModel";
 import type { WorkspaceDeal } from "./workspace";
 
 export type DealLifecycle = "Current" | "Historic";
@@ -48,7 +55,8 @@ export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
 
   return {
     buyer: partyNames(deal.portfolio.parties, "buyer"),
-    closeDate: deal.portfolio.actualCloseDate ?? deal.portfolio.expectedCloseDate,
+    closeDate:
+      deal.portfolio.actualCloseDate ?? deal.portfolio.expectedCloseDate,
     colorClassName: deal.colorClassName,
     id: deal.room.id,
     lifecycle: getDealLifecycle(deal),
@@ -58,13 +66,22 @@ export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
     status: codeLabel(status),
     statusCode: deal.portfolio.status,
     engagement: codeLabel(deal.portfolio.engagementType),
-    partySearchText: deal.portfolio.parties.map((p) => `${codeLabel(p.role)} ${p.company.name}`).join(" "),
-    closeDateLabel: deal.portfolio.actualCloseDate ? "Actual close" : "Expected close",
+    partySearchText: deal.portfolio.parties
+      .map((p) => `${codeLabel(p.role)} ${p.company.name}`)
+      .join(" "),
+    closeDateLabel: deal.portfolio.actualCloseDate
+      ? "Actual close"
+      : "Expected close",
     targetCompany: partyNames(deal.portfolio.parties, "target"),
     portfolioCompany: partyNames(deal.portfolio.parties, "portfolio_company"),
-    sowHref: deal.room.resources.find((resource) => resource.id === "sow")?.href,
-    factSheetHref: deal.room.resources.find((resource) => resource.id === "fact-sheet")?.href,
-    sharepointHref: deal.room.resources.find((resource) => resource.id === "sharepoint")?.href,
+    sowHref: deal.room.resources.find((resource) => resource.id === "sow")
+      ?.href,
+    factSheetHref: deal.room.resources.find(
+      (resource) => resource.id === "fact-sheet",
+    )?.href,
+    sharepointHref: deal.room.resources.find(
+      (resource) => resource.id === "sharepoint",
+    )?.href,
     transitionName: getDealTransitionName(deal.room.id),
     type: codeLabel(deal.portfolio.transactionType),
   };
@@ -90,15 +107,16 @@ export function filterDealPortfolioViews(
 ): DealPortfolioView[] {
   const normalizedQuery = normalizeSearchText(query);
 
-  return deals
-    .map(buildDealPortfolioView)
-    .filter((deal) => {
-      const inScope =
-        scope === "all" ||
-        (scope === "current" && deal.lifecycle === "Current") ||
-        (scope === "historic" && deal.lifecycle === "Historic");
-      return inScope && (!normalizedQuery || buildDealSearchText(deal).includes(normalizedQuery));
-    });
+  return deals.map(buildDealPortfolioView).filter((deal) => {
+    const inScope =
+      scope === "all" ||
+      (scope === "current" && deal.lifecycle === "Current") ||
+      (scope === "historic" && deal.lifecycle === "Historic");
+    return (
+      inScope &&
+      (!normalizedQuery || buildDealSearchText(deal).includes(normalizedQuery))
+    );
+  });
 }
 
 export function buildDealSearchText(deal: DealPortfolioView): string {
@@ -119,7 +137,9 @@ export function buildDealSearchText(deal: DealPortfolioView): string {
   );
 }
 
-export function buildDealKanbanLanes(deals: readonly DealPortfolioView[]): DealKanbanLane[] {
+export function buildDealKanbanLanes(
+  deals: readonly DealPortfolioView[],
+): DealKanbanLane[] {
   if (!deals.length) return [];
   return dealStatusOptions.map((status) => ({
     id: status,
@@ -129,7 +149,10 @@ export function buildDealKanbanLanes(deals: readonly DealPortfolioView[]): DealK
 }
 
 export function getDealTransitionName(id: string): string {
-  const encoded = Array.from(id, (character) => character.codePointAt(0)?.toString(36) ?? "0").join("-");
+  const encoded = Array.from(
+    id,
+    (character) => character.codePointAt(0)?.toString(36) ?? "0",
+  ).join("-");
   return `deal-surface-${encoded || "empty"}`;
 }
 

@@ -46,27 +46,23 @@ const TwitchIcon = forwardRef<TwitchIconHandle, TwitchIconProps>(
     const shouldReduceMotion = useReducedMotion() ?? false;
     const isControlledRef = useRef(false);
 
-    useImperativeHandle(
-      ref,
-      () => {
-        isControlledRef.current = true;
+    useImperativeHandle(ref, () => {
+      isControlledRef.current = true;
 
-        return {
-          startAnimation: () => {
-            if (shouldReduceMotion) return;
-            pathControls.start("animate");
-            line1Controls.start("animate");
-            line2Controls.start("animate");
-          },
-          stopAnimation: () => {
-            pathControls.start("normal");
-            line1Controls.start("normal");
-            line2Controls.start("normal");
-          },
-        };
-      },
-      [line1Controls, line2Controls, pathControls, shouldReduceMotion],
-    );
+      return {
+        startAnimation: () => {
+          if (shouldReduceMotion) return;
+          pathControls.start("animate");
+          line1Controls.start("animate");
+          line2Controls.start("animate");
+        },
+        stopAnimation: () => {
+          pathControls.start("normal");
+          line1Controls.start("normal");
+          line2Controls.start("normal");
+        },
+      };
+    }, [line1Controls, line2Controls, pathControls, shouldReduceMotion]);
 
     const handleMouseEnter = useCallback(
       (event: MouseEvent<HTMLDivElement>) => {
@@ -78,7 +74,13 @@ const TwitchIcon = forwardRef<TwitchIconHandle, TwitchIconProps>(
           line2Controls.start("animate");
         }
       },
-      [line1Controls, line2Controls, onMouseEnter, pathControls, shouldReduceMotion],
+      [
+        line1Controls,
+        line2Controls,
+        onMouseEnter,
+        pathControls,
+        shouldReduceMotion,
+      ],
     );
 
     const handleMouseLeave = useCallback(

@@ -161,8 +161,3 @@ fn map_write_error(error: SqliteClientError) -> RepositoryError {
         RepositoryError::storage("identity storage operation failed")
     }
 }
-impl From<SqliteClientError> for RepositoryError {
-    fn from(error: SqliteClientError) -> Self {
-        Self::storage(error.to_string())
-    }
-}

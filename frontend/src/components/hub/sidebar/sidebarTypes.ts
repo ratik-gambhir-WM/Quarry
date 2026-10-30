@@ -1,12 +1,21 @@
-import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../../../data/workspace";
+import type {
+  WorkspaceDeal,
+  WorkspaceLocationState,
+  WorkspaceSidebarTool,
+} from "../../../data/workspace";
 
-export type ActiveHomeSection = "account" | "assistant" | "deals" | "hub" | "logs" | "notebook" | "tauri-playground" | "vault";
+export type ActiveHomeSection =
+  | "account"
+  | "assistant"
+  | "deals"
+  | "hub"
+  | "logs"
+  | "notebook"
+  | "tauri-playground"
+  | "vault";
 
 export type ActiveDealSection =
-  | "analysis"
-  | "data-room"
-  | "deal-room"
-  | "deliverables";
+  "analysis" | "data-room" | "deal-room" | "deliverables";
 
 export type SidebarMode = "assistant" | "deal-room" | "home" | "notebook";
 

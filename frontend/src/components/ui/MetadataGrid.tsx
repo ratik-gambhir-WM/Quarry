@@ -32,7 +32,9 @@ export function MetadataItem({
 }: MetadataItemProps) {
   return (
     <div className={cn("min-w-0", className)}>
-      <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">{label}</dt>
+      <dt className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted">
+        {label}
+      </dt>
       <dd
         className={cn(
           "mt-1 text-[11px] font-normal text-on-surface",

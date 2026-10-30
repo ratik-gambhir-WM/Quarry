@@ -1,9 +1,9 @@
-import { PlateElement, type PlateElementProps } from 'platejs/react'
+import { PlateElement, type PlateElementProps } from "platejs/react";
 
-import { SLIDE_TEXT_LINE_HEIGHT } from '../shared/PowerpointConstants'
+import { SLIDE_TEXT_LINE_HEIGHT } from "../shared/PowerpointConstants";
 
 export function SlideTextParagraph(props: PlateElementProps) {
-  const fontSize = getParagraphFontSize(props.element.children)
+  const fontSize = getParagraphFontSize(props.element.children);
 
   return (
     <PlateElement
@@ -16,19 +16,19 @@ export function SlideTextParagraph(props: PlateElementProps) {
         padding: 0,
       }}
     />
-  )
+  );
 }
 
 function getParagraphFontSize(children: unknown) {
-  if (!Array.isArray(children)) return undefined
+  if (!Array.isArray(children)) return undefined;
 
   const fontSizes = children.flatMap((child) => {
-    if (typeof child !== 'object' || child === null || !('fontSize' in child)) {
-      return []
+    if (typeof child !== "object" || child === null || !("fontSize" in child)) {
+      return [];
     }
-    const fontSize = Number.parseFloat(String(child.fontSize))
-    return Number.isFinite(fontSize) ? [fontSize] : []
-  })
+    const fontSize = Number.parseFloat(String(child.fontSize));
+    return Number.isFinite(fontSize) ? [fontSize] : [];
+  });
 
-  return fontSizes.length ? `${Math.max(...fontSizes)}px` : undefined
+  return fontSizes.length ? `${Math.max(...fontSizes)}px` : undefined;
 }

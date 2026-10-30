@@ -9,7 +9,10 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
-import { templateDisplayName, type DeliverableSlide } from "@/data/deliverables";
+import {
+  templateDisplayName,
+  type DeliverableSlide,
+} from "@/data/deliverables";
 
 type DeliverablesCarouselProps = {
   actionsDisabled?: boolean;
@@ -43,7 +46,9 @@ export function DeliverablesCarousel({
           >
             <Card
               className="relative w-full overflow-hidden bg-surface-container-low p-0 shadow-sm"
-              style={{ aspectRatio: `${slide.thumbnailWidth} / ${slide.thumbnailHeight}` }}
+              style={{
+                aspectRatio: `${slide.thumbnailWidth} / ${slide.thumbnailHeight}`,
+              }}
             >
               <button
                 aria-label={`Open ${templateDisplayName(slide.id)} template`}

@@ -14,6 +14,10 @@ struct ErrorBody {
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("note content exceeds size limit")]
+    PayloadTooLarge,
+    #[error("content-type must be application/json")]
+    UnsupportedMediaType,
     #[error("invalid credentials or expired session")]
     Unauthorized,
     #[error("user ID does not match session")]
@@ -64,8 +68,17 @@ impl From<crate::shared::error::ServiceError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let unauthorized = matches!(self, Self::Unauthorized);
+        let unavailable = matches!(&self, Self::Unavailable(message) if message == "save queue capacity exhausted");
         let limited = matches!(self, Self::RateLimited);
         let (status, message) = match self {
+            Self::PayloadTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "note content exceeds size limit".into(),
+            ),
+            Self::UnsupportedMediaType => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "content-type must be application/json".into(),
+            ),
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "invalid credentials or expired session".into(),
@@ -96,6 +109,11 @@ impl IntoResponse for AppError {
             response
                 .headers_mut()
                 .insert("www-authenticate", "Bearer".parse().unwrap());
+        }
+        if unavailable {
+            response
+                .headers_mut()
+                .insert("retry-after", axum::http::HeaderValue::from_static("1"));
         }
         if limited {
             response

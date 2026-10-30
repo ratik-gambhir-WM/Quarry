@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {
+    #[error("save queue capacity exhausted")]
+    Capacity,
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
@@ -65,6 +67,7 @@ impl ServiceError {
 impl From<RepositoryError> for ServiceError {
     fn from(error: RepositoryError) -> Self {
         match error {
+            RepositoryError::Capacity => Self::Unavailable("save queue capacity exhausted".into()),
             RepositoryError::NotFound(message) => Self::NotFound(message),
             RepositoryError::Conflict(message) => Self::Conflict(message),
             RepositoryError::InvalidData(message) => Self::Validation(message),
@@ -78,5 +81,11 @@ pub type ServiceResult<T> = Result<T, ServiceError>;
 impl From<anyhow::Error> for RepositoryError {
     fn from(source: anyhow::Error) -> Self {
         Self::StorageCause(source)
+    }
+}
+
+impl From<crate::adapters::sqlite::client::SqliteClientError> for RepositoryError {
+    fn from(source: crate::adapters::sqlite::client::SqliteClientError) -> Self {
+        Self::StorageCause(source.into())
     }
 }

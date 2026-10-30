@@ -1,5 +1,16 @@
-import { FormEvent, PointerEvent, type ReactNode, useMemo, useState } from "react";
-import { DealRoomData, DealTask, DealTimelineItem, DealTimelineTone } from "../../data/workspace";
+import {
+  FormEvent,
+  PointerEvent,
+  type ReactNode,
+  useMemo,
+  useState,
+} from "react";
+import {
+  DealRoomData,
+  DealTask,
+  DealTimelineItem,
+  DealTimelineTone,
+} from "../../data/workspace";
 import {
   moveReminder,
   ReminderStatus,
@@ -31,7 +42,11 @@ type CalendarDay = {
   dayLabel: string;
 };
 
-const categoryOptions: TimelineCategory[] = ["Key Meeting / Call", "Key Activity", "Deliverable"];
+const categoryOptions: TimelineCategory[] = [
+  "Key Meeting / Call",
+  "Key Activity",
+  "Deliverable",
+];
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const activityControlClassName =
   "h-11 w-full rounded-xl border border-outline-variant bg-white/55 px-4 text-[15px] text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16";
@@ -50,7 +65,10 @@ const toneByCategory: Record<TimelineCategory, DealTimelineTone> = {
   "Key Meeting / Call": "primary",
 };
 
-const categoryStyles: Record<TimelineCategory, { bar: string; legend: string }> = {
+const categoryStyles: Record<
+  TimelineCategory,
+  { bar: string; legend: string }
+> = {
   Deliverable: {
     bar: "bg-[#0055ff] text-white",
     legend: "bg-[#0055ff]",
@@ -67,18 +85,26 @@ const categoryStyles: Record<TimelineCategory, { bar: string; legend: string }> 
 
 const calendarWeeks = createCalendarWeeks("2026-09-28", 5);
 
-export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineViewProps) {
-  const [formState, setFormState] = useState<TimelineFormState>(initialFormState);
+export function DealTimelineView({
+  deal,
+  events,
+  onEventsChange,
+}: DealTimelineViewProps) {
+  const [formState, setFormState] =
+    useState<TimelineFormState>(initialFormState);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
   const eventsByDate = useMemo(() => {
-    return events.reduce<Record<string, DealTimelineItem[]>>((groupedEvents, item) => {
-      const dateKey = getCalendarDateKey(item.date);
-      groupedEvents[dateKey] = [...(groupedEvents[dateKey] ?? []), item];
-      return groupedEvents;
-    }, {});
+    return events.reduce<Record<string, DealTimelineItem[]>>(
+      (groupedEvents, item) => {
+        const dateKey = getCalendarDateKey(item.date);
+        groupedEvents[dateKey] = [...(groupedEvents[dateKey] ?? []), item];
+        return groupedEvents;
+      },
+      {},
+    );
   }, [events]);
 
   function openNewActivity(date = "") {
@@ -126,11 +152,17 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
 
     onEventsChange(
       editingEventId
-        ? events.map((item) => (item.id === editingEventId ? timelineItem : item))
+        ? events.map((item) =>
+            item.id === editingEventId ? timelineItem : item,
+          )
         : [...events, timelineItem],
     );
     setIsModalOpen(false);
-    setToastMessage(editingEventId ? "Activity updated and moved successfully" : "Deal activity added successfully");
+    setToastMessage(
+      editingEventId
+        ? "Activity updated and moved successfully"
+        : "Deal activity added successfully",
+    );
     setEditingEventId(null);
     window.setTimeout(() => setToastMessage(""), 3200);
   }
@@ -141,7 +173,9 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
         <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="space-y-1">
             <h1 className="type-display text-text-main">Deal Activity</h1>
-            <p className="text-[13px] text-text-main/78">{deal.overviewSubtitle}</p>
+            <p className="text-[13px] text-text-main/78">
+              {deal.overviewSubtitle}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-6">
@@ -173,7 +207,9 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
             <div className="overflow-x-auto">
               <div
                 className="grid min-w-[740px] border-l border-t border-outline-variant bg-white/20"
-                style={{ gridTemplateColumns: "40px repeat(5, minmax(0, 1fr))" }}
+                style={{
+                  gridTemplateColumns: "40px repeat(5, minmax(0, 1fr))",
+                }}
               >
                 <div className="border-b border-r border-outline-variant bg-white/35" />
                 {weekdays.map((weekday) => (
@@ -200,19 +236,31 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
 
             <div className="mt-8 flex flex-col gap-4 rounded-xl border border-primary/10 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
-                <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" name="alert" />
+                <Icon
+                  className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                  name="alert"
+                />
                 <p className="text-[12px] leading-5 text-text-main/78">
-                  Viewing 5-week overview for <span className="font-bold text-text-main">Phase 1: Discovery</span>. Events are placed by
-                  date.
+                  Viewing 5-week overview for{" "}
+                  <span className="font-bold text-text-main">
+                    Phase 1: Discovery
+                  </span>
+                  . Events are placed by date.
                 </p>
               </div>
-              <button className="text-left text-[12px] font-bold text-primary transition hover:text-primary-container" type="button">
+              <button
+                className="text-left text-[12px] font-bold text-primary transition hover:text-primary-container"
+                type="button"
+              >
                 Download PDF
               </button>
             </div>
           </section>
 
-          <ActivityTimelineCard className="flex min-h-[480px] flex-col py-10" items={events} />
+          <ActivityTimelineCard
+            className="flex min-h-[480px] flex-col py-10"
+            items={events}
+          />
 
           <TaskKanbanBoard tasks={deal.pendingTasks} />
         </div>
@@ -231,7 +279,9 @@ export function DealTimelineView({ deal, events, onEventsChange }: DealTimelineV
       <div
         aria-live="polite"
         className={`fixed bottom-8 right-8 z-50 flex items-center gap-3 rounded-[16px] border border-white/80 bg-white/76 px-5 py-4 text-sm font-semibold text-text-main shadow-[0_18px_50px_rgba(7,1,84,0.16)] backdrop-blur-md transition ${
-          toastMessage ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-8 opacity-0"
+          toastMessage
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-8 opacity-0"
         }`}
       >
         <Icon className="h-5 w-5 text-primary" name="checkCircle" />
@@ -246,7 +296,9 @@ function TimelineLegend() {
     <div className="flex flex-wrap items-center gap-4 text-[10px] font-bold uppercase tracking-[0.08em] text-text-main">
       {categoryOptions.map((category) => (
         <div className="flex items-center gap-1.5" key={category}>
-          <span className={`h-3 w-3 rounded-sm ${categoryStyles[category].legend}`} />
+          <span
+            className={`h-3 w-3 rounded-sm ${categoryStyles[category].legend}`}
+          />
           {category === "Key Meeting / Call" ? "Key Meeting" : category}
         </div>
       ))}
@@ -262,7 +314,13 @@ type CalendarWeekRowProps = {
   weekIndex: number;
 };
 
-function CalendarWeekRow({ eventsByDate, onCreateEvent, onEditEvent, week, weekIndex }: CalendarWeekRowProps) {
+function CalendarWeekRow({
+  eventsByDate,
+  onCreateEvent,
+  onEditEvent,
+  week,
+  weekIndex,
+}: CalendarWeekRowProps) {
   return (
     <>
       <div className="flex min-h-[100px] items-center justify-center border-b border-r border-outline-variant px-1 text-center text-[11px] leading-4 text-text-main/78">
@@ -290,7 +348,12 @@ type CalendarCellProps = {
   onEditEvent: (event: DealTimelineItem) => void;
 };
 
-function CalendarCell({ day, events, onCreateEvent, onEditEvent }: CalendarCellProps) {
+function CalendarCell({
+  day,
+  events,
+  onCreateEvent,
+  onEditEvent,
+}: CalendarCellProps) {
   return (
     <div className="group relative min-h-[100px] border-b border-r border-outline-variant p-2 text-[10px] font-medium text-text-main/78 transition hover:bg-primary/5">
       <button
@@ -303,9 +366,15 @@ function CalendarCell({ day, events, onCreateEvent, onEditEvent }: CalendarCellP
       <div className="relative z-20 mt-2 space-y-1">
         {events
           .slice()
-          .sort((first, second) => getEventTime(first).localeCompare(getEventTime(second)))
+          .sort((first, second) =>
+            getEventTime(first).localeCompare(getEventTime(second)),
+          )
           .map((event) => (
-            <CalendarEventBar event={event} key={event.id} onEdit={onEditEvent} />
+            <CalendarEventBar
+              event={event}
+              key={event.id}
+              onEdit={onEditEvent}
+            />
           ))}
       </div>
       <span className="pointer-events-none absolute bottom-2 right-2 z-10 flex items-center gap-1 text-[10px] font-bold text-primary opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
@@ -360,19 +429,25 @@ const reminderStatusLabels: Record<ReminderStatus, string> = {
 
 const reminderStatuses: ReminderStatus[] = ["to-do", "in-progress", "done"];
 
-function getReminderStatusAtPoint(clientX: number, clientY: number): ReminderStatus | null {
+function getReminderStatusAtPoint(
+  clientX: number,
+  clientY: number,
+): ReminderStatus | null {
   const status = document
     .elementFromPoint(clientX, clientY)
-    ?.closest<HTMLElement>("[data-reminder-status]")
-    ?.dataset.reminderStatus;
-  return reminderStatuses.includes(status as ReminderStatus) ? (status as ReminderStatus) : null;
+    ?.closest<HTMLElement>("[data-reminder-status]")?.dataset.reminderStatus;
+  return reminderStatuses.includes(status as ReminderStatus)
+    ? (status as ReminderStatus)
+    : null;
 }
 
 function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
   const [reminders, setReminders] = useState<WorkflowReminder[]>(() =>
     tasks.map(toWorkflowReminder),
   );
-  const [draggedReminderId, setDraggedReminderId] = useState<string | null>(null);
+  const [draggedReminderId, setDraggedReminderId] = useState<string | null>(
+    null,
+  );
   const [dropTarget, setDropTarget] = useState<ReminderStatus | null>(null);
   const [newReminderLabel, setNewReminderLabel] = useState("");
   const [showNewReminderForm, setShowNewReminderForm] = useState(false);
@@ -421,7 +496,10 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
     setReminders((current) => moveReminder(current, reminderId, status));
   }
 
-  function handlePointerStart(event: PointerEvent<HTMLElement>, reminderId: string) {
+  function handlePointerStart(
+    event: PointerEvent<HTMLElement>,
+    reminderId: string,
+  ) {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -433,7 +511,10 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
     setDropTarget(status);
   }
 
-  function handlePointerEnd(event: PointerEvent<HTMLElement>, reminderId: string) {
+  function handlePointerEnd(
+    event: PointerEvent<HTMLElement>,
+    reminderId: string,
+  ) {
     const status = getReminderStatusAtPoint(event.clientX, event.clientY);
     if (status) updateReminderStatus(reminderId, status);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -453,7 +534,9 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
       <div className="mb-7 flex items-center justify-between gap-4">
         <div>
           <h2 className="type-h1 text-text-main">Pending Tasks</h2>
-          <p className="mt-1 text-[13px] text-text-main/70">Track diligence reminders by workflow status.</p>
+          <p className="mt-1 text-[13px] text-text-main/70">
+            Track diligence reminders by workflow status.
+          </p>
         </div>
         <button
           aria-expanded={showNewReminderForm}
@@ -478,7 +561,9 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <h3 className="type-h3 text-text-main">{column.title}</h3>
-                <p className="mt-1 text-[12px] text-text-main/62">{column.description}</p>
+                <p className="mt-1 text-[12px] text-text-main/62">
+                  {column.description}
+                </p>
               </div>
               <span className="rounded-full border border-outline-variant bg-white/70 px-3 py-1 text-[11px] font-bold text-muted">
                 {column.tasks.length}
@@ -492,11 +577,15 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
                   onSubmit={handleAddReminder}
                 >
                   <label className="block">
-                    <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-muted">New reminder</span>
+                    <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-muted">
+                      New reminder
+                    </span>
                     <input
                       autoFocus
                       className="h-11 w-full rounded-[16px] border border-outline-variant bg-white/75 px-4 text-[14px] font-semibold text-text-main outline-none transition placeholder:text-muted/60 focus:border-primary focus:ring-2 focus:ring-primary/16"
-                      onChange={(event) => setNewReminderLabel(event.currentTarget.value)}
+                      onChange={(event) =>
+                        setNewReminderLabel(event.currentTarget.value)
+                      }
                       placeholder="Add diligence reminder..."
                       value={newReminderLabel}
                     />
@@ -540,7 +629,9 @@ function TaskKanbanBoard({ tasks }: TaskKanbanBoardProps) {
                 </div>
               ) : (
                 <div className="flex min-h-28 items-center justify-center border-y border-dashed border-outline-variant px-4 text-center text-[13px] font-medium text-muted">
-                  {draggedReminderId ? `Drop in ${column.title}` : "No reminders here yet."}
+                  {draggedReminderId
+                    ? `Drop in ${column.title}`
+                    : "No reminders here yet."}
                 </div>
               )}
             </div>
@@ -557,7 +648,10 @@ type ReminderRowProps = {
   onPointerCancel: () => void;
   onPointerEnd: (event: PointerEvent<HTMLElement>, reminderId: string) => void;
   onPointerMove: (event: PointerEvent<HTMLElement>) => void;
-  onPointerStart: (event: PointerEvent<HTMLElement>, reminderId: string) => void;
+  onPointerStart: (
+    event: PointerEvent<HTMLElement>,
+    reminderId: string,
+  ) => void;
   task: WorkflowReminder;
 };
 
@@ -589,13 +683,19 @@ function ReminderRow({
         <Icon className="h-4 w-4 rotate-90" name="more" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${task.priority ? "text-error/70" : "text-muted/80"}`}>
+        <p
+          className={`text-[10px] font-bold uppercase tracking-[0.16em] ${task.priority ? "text-error/70" : "text-muted/80"}`}
+        >
           {task.priority ? "High Priority" : reminderStatusLabels[task.status]}
         </p>
-        <h4 className={`mt-1 text-[15px] font-bold leading-6 text-text-main ${task.done ? "line-through opacity-60" : ""}`}>
+        <h4
+          className={`mt-1 text-[15px] font-bold leading-6 text-text-main ${task.done ? "line-through opacity-60" : ""}`}
+        >
           {task.label}
         </h4>
-        <p className={`mt-1 text-[12px] leading-5 ${task.priority ? "text-error" : "text-text-main/68"}`}>
+        <p
+          className={`mt-1 text-[12px] leading-5 ${task.priority ? "text-error" : "text-text-main/68"}`}
+        >
           {task.done
             ? "Task completed."
             : task.priority
@@ -608,7 +708,9 @@ function ReminderRow({
         <select
           aria-label={`Move ${task.label}`}
           className="h-9 rounded-lg border border-outline-variant bg-surface-container-lowest px-2 text-[11px] font-semibold text-text-main outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/16"
-          onChange={(event) => onMove(task.id, event.currentTarget.value as ReminderStatus)}
+          onChange={(event) =>
+            onMove(task.id, event.currentTarget.value as ReminderStatus)
+          }
           value={task.status}
         >
           {reminderStatuses.map((status) => (
@@ -630,11 +732,20 @@ type NewActivityModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
-function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: NewActivityModalProps) {
+function NewActivityModal({
+  editing,
+  formState,
+  onChange,
+  onClose,
+  onSubmit,
+}: NewActivityModalProps) {
   const canSubmit = Boolean(formState.title.trim() && formState.date);
 
   return (
-    <div className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
+    <div
+      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4"
+      role="presentation"
+    >
       <form
         aria-labelledby="activity-dialog-title"
         aria-modal="true"
@@ -668,7 +779,9 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
             <input
               autoFocus
               className={activityControlClassName}
-              onChange={(event) => onChange({ ...formState, title: event.target.value })}
+              onChange={(event) =>
+                onChange({ ...formState, title: event.target.value })
+              }
               placeholder="e.g. Stakeholder Interview"
               required
               type="text"
@@ -680,7 +793,12 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
             <ActivityFormField label="Category">
               <select
                 className={activityControlClassName}
-                onChange={(event) => onChange({ ...formState, category: event.target.value as TimelineCategory })}
+                onChange={(event) =>
+                  onChange({
+                    ...formState,
+                    category: event.target.value as TimelineCategory,
+                  })
+                }
                 value={formState.category}
               >
                 {categoryOptions.map((category) => (
@@ -692,7 +810,9 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
             <ActivityFormField label="Date">
               <input
                 className={activityControlClassName}
-                onChange={(event) => onChange({ ...formState, date: event.target.value })}
+                onChange={(event) =>
+                  onChange({ ...formState, date: event.target.value })
+                }
                 required
                 type="date"
                 value={formState.date}
@@ -703,7 +823,9 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
           <ActivityFormField label="Time">
             <input
               className={activityControlClassName}
-              onChange={(event) => onChange({ ...formState, time: event.target.value })}
+              onChange={(event) =>
+                onChange({ ...formState, time: event.target.value })
+              }
               required
               type="time"
               value={formState.time}
@@ -713,7 +835,9 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
           <ActivityFormField label="Notes">
             <textarea
               className="min-h-24 w-full resize-y rounded-xl border border-outline-variant bg-white/55 px-4 py-3 text-[15px] leading-6 text-text-main outline-none transition placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/16"
-              onChange={(event) => onChange({ ...formState, detail: event.target.value })}
+              onChange={(event) =>
+                onChange({ ...formState, detail: event.target.value })
+              }
               placeholder="Describe the activity details..."
               rows={3}
               value={formState.detail}
@@ -733,7 +857,13 @@ function NewActivityModal({ editing, formState, onChange, onClose, onSubmit }: N
   );
 }
 
-function ActivityFormField({ children, label }: { children: ReactNode; label: string }) {
+function ActivityFormField({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
   return (
     <label className="block min-w-0">
       <span className="mb-2 block text-[12px] font-bold uppercase tracking-[0.12em] text-text-main/75">
@@ -811,7 +941,10 @@ function formatCalendarDayLabel(date: Date) {
 function formatTimelineDate(date: string) {
   const parsedDate = parseLocalDate(date);
 
-  return new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short" }).format(parsedDate);
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+  }).format(parsedDate);
 }
 
 function formatTimelineTimestamp(date: string, time: string) {
@@ -843,7 +976,10 @@ function formatTimeLabel(time: string) {
   const [hour, minute] = time.split(":").map(Number);
   const timeValue = new Date(2000, 0, 1, hour, minute);
 
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(timeValue);
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(timeValue);
 }
 
 function formatAccessibleDate(date: Date) {

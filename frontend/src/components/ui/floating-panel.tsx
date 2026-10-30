@@ -17,7 +17,7 @@ type ButtonProps = React.ComponentProps<typeof Button>;
 export const useFloatingPanel = useFloatingPanelContext;
 
 export const FloatingPanel = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.Root>
+  props: React.ComponentProps<typeof ArkFloatingPanel.Root>,
 ) => {
   const { lazyMount = true, unmountOnExit = true, ...rest } = props;
 
@@ -32,11 +32,12 @@ export const FloatingPanel = (
 };
 
 export const FloatingPanelTrigger = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.Trigger>
+  props: React.ComponentProps<typeof ArkFloatingPanel.Trigger>,
 ) => <ArkFloatingPanel.Trigger data-slot="floating-panel-trigger" {...props} />;
 
-interface FloatingPanelContentProps
-  extends React.ComponentProps<typeof ArkFloatingPanel.Content> {
+interface FloatingPanelContentProps extends React.ComponentProps<
+  typeof ArkFloatingPanel.Content
+> {
   /**
    * Enable resizable panel
    *
@@ -67,7 +68,7 @@ export const FloatingPanelContent = (props: FloatingPanelContentProps) => {
             "transition-[scale,opacity,translate] duration-200 ease-in-out will-change-transform",
             "data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[98%] data-[state=open]:animate-in",
             "motion-reduce:animate-none! motion-reduce:transition-none!",
-            className
+            className,
           )}
           data-slot="floating-panel-content"
           {...rest}
@@ -93,7 +94,7 @@ export const FloatingPanelContent = (props: FloatingPanelContentProps) => {
 };
 
 export const FloatingPanelDragTrigger = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.DragTrigger>
+  props: React.ComponentProps<typeof ArkFloatingPanel.DragTrigger>,
 ) => (
   <ArkFloatingPanel.DragTrigger
     data-slot="floating-panel-drag-trigger"
@@ -102,7 +103,7 @@ export const FloatingPanelDragTrigger = (
 );
 
 export const FloatingPanelHeader = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.Header>
+  props: React.ComponentProps<typeof ArkFloatingPanel.Header>,
 ) => {
   const { className, ...rest } = props;
 
@@ -118,7 +119,7 @@ export const FloatingPanelHeader = (
           "rounded-t-2xl border-b border-outline-variant/70",
           "overflow-hidden",
           "[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-          className
+          className,
         )}
         data-slot="floating-panel-header"
         {...rest}
@@ -128,7 +129,7 @@ export const FloatingPanelHeader = (
 };
 
 export const FloatingPanelControl = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.Control>
+  props: React.ComponentProps<typeof ArkFloatingPanel.Control>,
 ) => {
   const { className, ...rest } = props;
 
@@ -147,7 +148,7 @@ type FloatingPanelStageTriggerProps = Omit<
   ButtonProps;
 
 export const FloatingPanelMinimize = (
-  props: FloatingPanelStageTriggerProps
+  props: FloatingPanelStageTriggerProps,
 ) => {
   const { size = "icon-xs", variant = "ghost", ...rest } = props;
 
@@ -161,7 +162,7 @@ export const FloatingPanelMinimize = (
 };
 
 export const FloatingPanelMaximize = (
-  props: FloatingPanelStageTriggerProps
+  props: FloatingPanelStageTriggerProps,
 ) => {
   const { size = "icon-xs", variant = "ghost", ...rest } = props;
 
@@ -188,7 +189,7 @@ export const FloatingPanelRestore = (props: FloatingPanelStageTriggerProps) => {
 };
 
 export const FloatingPanelTitle = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.Title>
+  props: React.ComponentProps<typeof ArkFloatingPanel.Title>,
 ) => {
   const { className, ...rest } = props;
 
@@ -198,7 +199,7 @@ export const FloatingPanelTitle = (
         "min-w-0 flex-1",
         "flex items-center gap-2",
         "truncate whitespace-nowrap font-medium text-sm leading-none",
-        className
+        className,
       )}
       data-slot="floating-panel-title"
       {...rest}
@@ -207,7 +208,7 @@ export const FloatingPanelTitle = (
 };
 
 export const FloatingPanelResizeTrigger = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.ResizeTrigger>
+  props: React.ComponentProps<typeof ArkFloatingPanel.ResizeTrigger>,
 ) => {
   const { axis, className, ...rest } = props;
   const axisClassName = {
@@ -236,7 +237,7 @@ export const FloatingPanelResizeTrigger = (
 };
 
 export const FloatingPanelStageTrigger = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.StageTrigger>
+  props: React.ComponentProps<typeof ArkFloatingPanel.StageTrigger>,
 ) => (
   <ArkFloatingPanel.StageTrigger
     data-slot="floating-panel-stage-trigger"
@@ -245,7 +246,7 @@ export const FloatingPanelStageTrigger = (
 );
 
 export const FloatingPanelCloseTrigger = (
-  props: React.ComponentProps<typeof ArkFloatingPanel.CloseTrigger>
+  props: React.ComponentProps<typeof ArkFloatingPanel.CloseTrigger>,
 ) => (
   <ArkFloatingPanel.CloseTrigger
     data-slot="floating-panel-close-trigger"
@@ -253,8 +254,9 @@ export const FloatingPanelCloseTrigger = (
   />
 );
 
-interface FloatingPanelBodyProps
-  extends React.ComponentProps<typeof ArkFloatingPanel.Body> {
+interface FloatingPanelBodyProps extends React.ComponentProps<
+  typeof ArkFloatingPanel.Body
+> {
   /**
    * Add a fade effect to the scroll area
    *
@@ -274,7 +276,7 @@ export const FloatingPanelBody = (props: FloatingPanelBodyProps) => {
           "p-(--space)",
           "overflow-auto",
           "in-[[data-slot=floating-panel-content]:has([data-slot=floating-panel-footer]:not(.border-t))]:pb-1",
-          className
+          className,
         )}
         data-slot="floating-panel-body"
         {...rest}
@@ -286,7 +288,7 @@ export const FloatingPanelBody = (props: FloatingPanelBodyProps) => {
 };
 
 export const FloatingPanelFooter = (
-  props: React.ComponentProps<typeof ark.div>
+  props: React.ComponentProps<typeof ark.div>,
 ) => {
   const { className, ...rest } = props;
 
@@ -298,7 +300,7 @@ export const FloatingPanelFooter = (
         "px-(--space) py-4",
         "bg-surface-container-low/70",
         "border-t border-outline-variant/70",
-        className
+        className,
       )}
       data-slot="floating-panel-footer"
       {...rest}

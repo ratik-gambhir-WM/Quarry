@@ -3,7 +3,13 @@ import remarkGfm from "remark-gfm";
 import { runtime } from "@quarry/runtime";
 import { Icon } from "../ui/Icon";
 
-export function SummaryPanel({ onError, summary }: { onError: (message: string) => void; summary: string }) {
+export function SummaryPanel({
+  onError,
+  summary,
+}: {
+  onError: (message: string) => void;
+  summary: string;
+}) {
   async function handleSaveSummary() {
     onError("");
     try {

@@ -8,7 +8,9 @@ import {
 import type { ReadDealSourceFilesInput } from "../data/dealExtraction";
 
 function readDealSourceFiles(_input: ReadDealSourceFilesInput): Promise<never> {
-  return Promise.reject(new Error("Local data-room access is only available in the desktop app."));
+  return Promise.reject(
+    new Error("Local data-room access is only available in the desktop app."),
+  );
 }
 
 function selectDealDataRoom() {
@@ -44,6 +46,11 @@ function savePowerPoint({ dataBase64, suggestedName }: SavePowerPointInput) {
 
 export const runtime: QuarryRuntime = {
   api: httpQuarryApi,
-  platform: { readDealSourceFiles, saveFile, savePowerPoint, selectDealDataRoom },
+  platform: {
+    readDealSourceFiles,
+    saveFile,
+    savePowerPoint,
+    selectDealDataRoom,
+  },
   target: "web",
 };

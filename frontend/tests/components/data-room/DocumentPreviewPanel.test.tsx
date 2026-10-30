@@ -66,10 +66,14 @@ vi.mock("@/components/extend/pdf-editor", async () => {
 
     return (
       <div data-slot="pdf-editor" data-testid="pdf-editor">
-        <div ref={viewportRef} tabIndex={0}>PDF canvas</div>
+        <div ref={viewportRef} tabIndex={0}>
+          PDF canvas
+        </div>
         {props.toolbarActions}
         <button
-          onClick={() => props.onAnnotationsChange?.([{ id: "annotation-1" }] as never)}
+          onClick={() =>
+            props.onAnnotationsChange?.([{ id: "annotation-1" }] as never)
+          }
           type="button"
         >
           Add annotation
@@ -108,7 +112,10 @@ function renderPreview(
   const onRequestedPageHandled = vi.fn();
   const previewRef = createRef<DocumentPreviewPanelHandle>();
   let activePreview = previewState;
-  const renderPanel = (requestedPage: number | null, nextPreview = activePreview) => {
+  const renderPanel = (
+    requestedPage: number | null,
+    nextPreview = activePreview,
+  ) => {
     activePreview = nextPreview;
     return (
       <DocumentPreviewPanel
@@ -157,9 +164,14 @@ describe("DocumentPreviewPanel navigation contract", () => {
     );
 
     expect(screen.getByText(document.name)).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Loading document preview");
-    expect(screen.getByRole("button", { name: "Close document preview" }).hasAttribute("disabled"))
-      .toBe(false);
+    expect(screen.getByRole("status").textContent).toContain(
+      "Loading document preview",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Close document preview" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
     expect(container.querySelector("section > header")).toBeTruthy();
     expect(screen.queryByTestId("pdf-editor")).toBeNull();
     expect(onPageCountChange).toHaveBeenCalledWith(0);
@@ -179,7 +191,8 @@ describe("DocumentPreviewPanel navigation contract", () => {
   });
 
   it("applies an externally requested page exactly once without remounting", async () => {
-    const { container, onRequestRawText, onRequestedPageHandled, requestPage } = renderPreview();
+    const { container, onRequestRawText, onRequestedPageHandled, requestPage } =
+      renderPreview();
     const viewer = container.querySelector("[data-testid='pdf-editor']");
 
     requestPage(1);
@@ -231,8 +244,12 @@ describe("DocumentPreviewPanel navigation contract", () => {
     firstView.unmount();
     renderPreview();
 
-    await waitFor(() => expect(pdfMock.importAnnotations).toHaveBeenCalledTimes(1));
-    expect(pdfMock.importAnnotations.mock.calls[0]?.[0]).toEqual([{ id: "annotation-1" }]);
+    await waitFor(() =>
+      expect(pdfMock.importAnnotations).toHaveBeenCalledTimes(1),
+    );
+    expect(pdfMock.importAnnotations.mock.calls[0]?.[0]).toEqual([
+      { id: "annotation-1" },
+    ]);
   });
 
   it("exposes viewer focus without exposing the PDF viewer implementation", async () => {
@@ -241,6 +258,8 @@ describe("DocumentPreviewPanel navigation contract", () => {
     act(() => previewRef.current?.focusViewer());
 
     const canvas = screen.getByText("PDF canvas");
-    await waitFor(() => expect(canvas).toBe(canvas.ownerDocument.activeElement));
+    await waitFor(() =>
+      expect(canvas).toBe(canvas.ownerDocument.activeElement),
+    );
   });
 });

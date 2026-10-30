@@ -5,11 +5,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { PdfSource } from "../types";
 
 export type PdfDocumentStatus =
-  | "idle"
-  | "loading"
-  | "password"
-  | "ready"
-  | "error";
+  "idle" | "loading" | "password" | "ready" | "error";
 
 export interface UsePdfDocumentArgs {
   source: PdfSource | null;

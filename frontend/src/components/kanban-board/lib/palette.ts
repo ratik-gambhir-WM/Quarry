@@ -17,7 +17,9 @@ export function findSwatch(
   return palette.find((s) => s.id === id);
 }
 
-export function swatchCssColor(swatch: KanbanPaletteSwatch | undefined): string | undefined {
+export function swatchCssColor(
+  swatch: KanbanPaletteSwatch | undefined,
+): string | undefined {
   if (!swatch) return undefined;
   return `var(${swatch.cssVar})`;
 }

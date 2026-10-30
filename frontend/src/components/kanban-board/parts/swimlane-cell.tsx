@@ -1,16 +1,18 @@
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { cn } from "@/lib/utils";
-import type {
-  AnyKanbanCardRenderer,
-  KanbanColumn,
-  KanbanItem,
-} from "../types";
+import type { AnyKanbanCardRenderer, KanbanColumn, KanbanItem } from "../types";
 import { ItemShell } from "./item-shell";
 
-export function makeCellId(columnId: string, swimlaneId: string | undefined): string {
+export function makeCellId(
+  columnId: string,
+  swimlaneId: string | undefined,
+): string {
   return `${columnId}::${swimlaneId ?? "_"}`;
 }
 
@@ -47,7 +49,11 @@ export function SwimlaneCell({
   });
 
   return (
-    <SortableContext id={cellId} items={items.map((it) => it.id)} strategy={verticalListSortingStrategy}>
+    <SortableContext
+      id={cellId}
+      items={items.map((it) => it.id)}
+      strategy={verticalListSortingStrategy}
+    >
       <div
         ref={setNodeRef}
         data-cell-id={cellId}
@@ -55,7 +61,9 @@ export function SwimlaneCell({
           "flex min-h-12 flex-col gap-2 rounded-sm p-1.5 transition-colors",
           grow && "flex-1",
           isOver && !rejectDrop && "bg-accent/40 ring-1 ring-ring/30",
-          isOver && rejectDrop && "bg-destructive/10 ring-1 ring-destructive/40",
+          isOver &&
+            rejectDrop &&
+            "bg-destructive/10 ring-1 ring-destructive/40",
         )}
       >
         {items.map((item) => {

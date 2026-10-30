@@ -18,9 +18,19 @@ describe("HomeWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const labels = ["Home", "Vault", "Assistant", "Workspace", "Deals", "Notebook", "Logs"];
+    const labels = [
+      "Home",
+      "Vault",
+      "Assistant",
+      "Workspace",
+      "Deals",
+      "Notebook",
+      "Logs",
+    ];
     for (let index = 1; index < labels.length; index += 1) {
-      expect(markup.indexOf(`>${labels[index - 1]}<`)).toBeLessThan(markup.indexOf(`>${labels[index]}<`));
+      expect(markup.indexOf(`>${labels[index - 1]}<`)).toBeLessThan(
+        markup.indexOf(`>${labels[index]}<`),
+      );
     }
 
     expect(markup).toContain('href="/hub"');
@@ -54,7 +64,9 @@ describe("HomeWorkspaceSidebar", () => {
       </MemoryRouter>,
     );
 
-    const homeLink = markup.match(/<a\b[^>]*href="\/hub"[^>]*>[\s\S]*?<\/a>/)?.[0];
+    const homeLink = markup.match(
+      /<a\b[^>]*href="\/hub"[^>]*>[\s\S]*?<\/a>/,
+    )?.[0];
 
     expect(homeLink).toContain('aria-current="page"');
     expect(homeLink).toContain(">Home<");

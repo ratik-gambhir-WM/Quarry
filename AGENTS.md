@@ -71,7 +71,7 @@ not exist.
   Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
   projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
   in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
-- `app/migrations.rs` owns all SQLite schema (marker 11), including templates, assets, previews,
+- `app/migrations.rs` owns all SQLite schema (marker 13), including templates, assets, previews,
   metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
   `SqliteClient` to product and template repositories. Old schemas require an explicit offline development reset;
   no standalone template database setting, initializer, or memory-store default exists. Previously
@@ -151,8 +151,10 @@ request -> router -> handler -> service -> repository/client
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current shared schema marker is 11. Startup creates an empty database or validates/reuses
-  schema 11. Old profile schemas require the explicit offline development reset.
+- The current shared schema marker is 13. Startup creates an empty database, additively upgrades
+  a validated marker-12 layout, or validates/reuses schema 13. Older profile schemas require the
+  explicit offline development reset. The notebook upgrade preserves existing data; rollback
+  requires a matching pre-upgrade backup and binary during a drained window.
   Incompatible schemas fail without deleting records. The explicit offline
   `reset_development --discard <absolute-database-path>` utility is destructive and must never
   run automatically at startup. Run it only for a deliberately selected, drained disposable

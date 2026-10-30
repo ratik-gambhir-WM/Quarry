@@ -13,14 +13,12 @@ const {
   listDealDocuments,
   previewDealDocument,
   previewModule,
-} = vi.hoisted(
-  () => ({
-    listDealDataRoom: vi.fn(),
-    listDealDocuments: vi.fn(),
-    previewDealDocument: vi.fn(),
-    previewModule: { loaded: false },
-  }),
-);
+} = vi.hoisted(() => ({
+  listDealDataRoom: vi.fn(),
+  listDealDocuments: vi.fn(),
+  previewDealDocument: vi.fn(),
+  previewModule: { loaded: false },
+}));
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
@@ -46,19 +44,24 @@ vi.mock("@/components/data-room/DataRoomExplorer", () => ({
     onUploadNewFile,
   }: {
     dealRoomPath: string;
-    documentSearch: { boundaryElement: HTMLElement | null; currentFileName: string };
+    documentSearch: {
+      boundaryElement: HTMLElement | null;
+      currentFileName: string;
+    };
     onUploadNewFile: () => void;
   }) => (
     <aside>
       Data room explorer
       <a href={dealRoomPath}>Back to Deal Room</a>
       <nav aria-label="Data room tools">
-        <button onClick={onUploadNewFile} type="button">Upload files</button>
+        <button onClick={onUploadNewFile} type="button">
+          Upload files
+        </button>
         <button type="button">Search document</button>
-      <span>{documentSearch.currentFileName}</span>
-      <span data-testid="search-boundary-class">
-        {documentSearch.boundaryElement?.className}
-      </span>
+        <span>{documentSearch.currentFileName}</span>
+        <span data-testid="search-boundary-class">
+          {documentSearch.boundaryElement?.className}
+        </span>
       </nav>
     </aside>
   ),
@@ -91,7 +94,9 @@ vi.mock("@/components/data-room/DocumentPreviewPanel", () => ({
     previewModule.loaded = true;
     return ({ onClose }: { onClose: () => void }) => (
       <section aria-label="Selected document preview">
-        <button onClick={onClose} type="button">Close preview</button>
+        <button onClick={onClose} type="button">
+          Close preview
+        </button>
       </section>
     );
   },
@@ -132,38 +137,63 @@ describe("DataRoomPage", () => {
     render(
       <MemoryRouter initialEntries={["/hub/deals/project-alpha/data-room"]}>
         <Routes>
-          <Route element={<DataRoomPage />} path="/hub/deals/:dealId/data-room" />
+          <Route
+            element={<DataRoomPage />}
+            path="/hub/deals/:dealId/data-room"
+          />
         </Routes>
       </MemoryRouter>,
     );
 
-    expect(document.querySelectorAll(".workspace-main-surface")).toHaveLength(1);
+    expect(document.querySelectorAll(".workspace-main-surface")).toHaveLength(
+      1,
+    );
     expect(screen.queryByText("Data room explorer")).toBeNull();
-    expect(document.querySelector("[data-workspace-sidebar-replacement]")).toBeNull();
+    expect(
+      document.querySelector("[data-workspace-sidebar-replacement]"),
+    ).toBeNull();
     expect(previewModule.loaded).toBe(false);
-    await user.click(await screen.findByRole("button", { name: "Open test document" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Open test document" }),
+    );
 
-    expect(await screen.findByRole("region", { name: "Selected document preview" })).not.toBeNull();
+    expect(
+      await screen.findByRole("region", { name: "Selected document preview" }),
+    ).not.toBeNull();
     expect(previewModule.loaded).toBe(true);
     expect(screen.getByText("Data room explorer")).not.toBeNull();
-    expect(document.querySelector("[data-workspace-sidebar-replacement]")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Back to Deal Room" }).getAttribute("href"))
-      .toBe("/hub/deals/project-alpha");
-    expect(screen.getByRole("navigation", { name: "Data room tools" })).not.toBeNull();
-    expect(screen.getByTestId("search-boundary-class").textContent).toContain("z-50");
+    expect(
+      document.querySelector("[data-workspace-sidebar-replacement]"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Back to Deal Room" })
+        .getAttribute("href"),
+    ).toBe("/hub/deals/project-alpha");
+    expect(
+      screen.getByRole("navigation", { name: "Data room tools" }),
+    ).not.toBeNull();
+    expect(screen.getByTestId("search-boundary-class").textContent).toContain(
+      "z-50",
+    );
     expect(screen.getByText("test.pdf")).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Upload files" }));
-    expect((await screen.findByRole("dialog", { name: "Upload files" })).dataset.slot)
-      .toBe("dialog-content");
-    expect(screen.getByRole("button", { name: "Browse files on your Mac" }))
-      .toBe(document.activeElement);
+    expect(
+      (await screen.findByRole("dialog", { name: "Upload files" })).dataset
+        .slot,
+    ).toBe("dialog-content");
+    expect(
+      screen.getByRole("button", { name: "Browse files on your Mac" }),
+    ).toBe(document.activeElement);
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     await user.click(screen.getByRole("button", { name: "Close preview" }));
     expect(screen.queryByText("Data room explorer")).toBeNull();
-    expect(document.querySelector("[data-workspace-sidebar-replacement]")).toBeNull();
+    expect(
+      document.querySelector("[data-workspace-sidebar-replacement]"),
+    ).toBeNull();
   });
 });

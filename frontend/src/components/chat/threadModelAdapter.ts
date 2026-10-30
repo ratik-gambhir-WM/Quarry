@@ -9,8 +9,10 @@ const MAX_CONTEXT_MESSAGES = 64;
 const MAX_CONTEXT_CHARS = 400_000;
 const MAX_MESSAGE_CHARS = 100_000;
 
-const SERVER_ERROR_MESSAGE = "The assistant could not complete the response. Please try again.";
-const CONNECTION_ERROR_MESSAGE = "The assistant connection was interrupted. Please try again.";
+const SERVER_ERROR_MESSAGE =
+  "The assistant could not complete the response. Please try again.";
+const CONNECTION_ERROR_MESSAGE =
+  "The assistant connection was interrupted. Please try again.";
 
 type QueryModelAdapterOptions = {
   onContextTruncated?: (truncated: boolean) => void;
@@ -25,7 +27,8 @@ type QueueItem =
 type CompletedPair = readonly [ChatContextMessage, ChatContextMessage];
 
 export function createModelAdapter(
-  api: Pick<QuarryApi, "queryModel"> & Partial<Pick<QuarryApi, "runAssistantThread">>,
+  api: Pick<QuarryApi, "queryModel"> &
+    Partial<Pick<QuarryApi, "runAssistantThread">>,
   options: QueryModelAdapterOptions = {},
 ): ModelAdapter {
   return {
@@ -36,7 +39,9 @@ export function createModelAdapter(
       console.info("[chat] adapter.prepared", {
         contextMessageCount: context.length,
         truncated,
-        persisted: Boolean(options.userEmail && runOptions.threadId && api.runAssistantThread),
+        persisted: Boolean(
+          options.userEmail && runOptions.threadId && api.runAssistantThread,
+        ),
         promptChars: [...prompt].length,
       });
 
@@ -71,64 +76,87 @@ export function createModelAdapter(
           const currentUser = findCurrentUserMessage(runOptions.messages);
           const currentUserIndex = findCurrentUserIndex(runOptions.messages);
           const previousMessage = runOptions.messages[currentUserIndex - 1];
-          const parentMessageId = previousMessage?.role === "assistant"
-            ? previousMessage.id
-            : undefined;
+          const parentMessageId =
+            previousMessage?.role === "assistant"
+              ? previousMessage.id
+              : undefined;
           const usePersistedRun = Boolean(
-            options.userEmail
-              && runOptions.threadId
-              && runOptions.assistantMessageId
-              && api.runAssistantThread,
+            options.userEmail &&
+            runOptions.threadId &&
+            runOptions.assistantMessageId &&
+            api.runAssistantThread,
           );
           const handlers: SendQueryEventHandlers = {
-              onConnectionError: (message) => {
-                console.error("[chat] stream.connection_error", { message });
-                queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
-                dispose();
-              },
-              onEvent: (event) => {
-                if (!queue.accepting()) return;
-                switch (event.type) {
-                  case "started":
-                    console.info("[chat] stream.started", { model: event.model });
-                    return;
-                  case "delta":
-                    console.debug("[chat] stream.delta", { characterCount: [...event.delta].length });
-                    buffer += event.delta;
-                    if (buffer.length > 0) queue.push({ kind: "snapshot", text: buffer });
-                    return;
-                  case "completed":
-                    console.info("[chat] stream.completed", { characterCount: [...event.response].length });
-                    if (event.response !== buffer) {
-                      buffer = event.response;
-                      queue.push({ kind: "snapshot", text: buffer });
-                    }
-                    queue.finish({ kind: "done" });
-                    dispose();
-                    return;
-                  case "failed":
-                    console.error("[chat] stream.failed", { error: event.error });
-                  queue.finish({ error: new Error(SERVER_ERROR_MESSAGE), kind: "error" });
+            onConnectionError: (message) => {
+              console.error("[chat] stream.connection_error", { message });
+              queue.finish({
+                error: new Error(CONNECTION_ERROR_MESSAGE),
+                kind: "error",
+              });
+              dispose();
+            },
+            onEvent: (event) => {
+              if (!queue.accepting()) return;
+              switch (event.type) {
+                case "started":
+                  console.info("[chat] stream.started", { model: event.model });
+                  return;
+                case "delta":
+                  console.debug("[chat] stream.delta", {
+                    characterCount: [...event.delta].length,
+                  });
+                  buffer += event.delta;
+                  if (buffer.length > 0)
+                    queue.push({ kind: "snapshot", text: buffer });
+                  return;
+                case "completed":
+                  console.info("[chat] stream.completed", {
+                    characterCount: [...event.response].length,
+                  });
+                  if (event.response !== buffer) {
+                    buffer = event.response;
+                    queue.push({ kind: "snapshot", text: buffer });
+                  }
+                  queue.finish({ kind: "done" });
                   dispose();
-                }
-              },
-            };
+                  return;
+                case "failed":
+                  console.error("[chat] stream.failed", { error: event.error });
+                  queue.finish({
+                    error: new Error(SERVER_ERROR_MESSAGE),
+                    kind: "error",
+                  });
+                  dispose();
+              }
+            },
+          };
           cleanup = usePersistedRun
-            ? api.runAssistantThread!({
-                assistantMessageId: runOptions.assistantMessageId!,
-                files: [],
-                parentMessageId,
-                prompt,
-                requestId: runOptions.assistantMessageId!,
-                threadId: runOptions.threadId!,
-                userMessageId: currentUser.id,
-              }, handlers)
+            ? api.runAssistantThread!(
+                {
+                  assistantMessageId: runOptions.assistantMessageId!,
+                  files: [],
+                  parentMessageId,
+                  prompt,
+                  requestId: runOptions.assistantMessageId!,
+                  threadId: runOptions.threadId!,
+                  userMessageId: currentUser.id,
+                },
+                handlers,
+              )
             : api.queryModel({ context, files: [], prompt }, handlers);
         } catch (error) {
           console.error("[chat] adapter.transport_error", error);
-          queue.finish({ error: new Error(CONNECTION_ERROR_MESSAGE), kind: "error" });
+          queue.finish({
+            error: new Error(CONNECTION_ERROR_MESSAGE),
+            kind: "error",
+          });
         }
-        if (cleanupPending || !queue.accepting() || runOptions.abortSignal.aborted) dispose();
+        if (
+          cleanupPending ||
+          !queue.accepting() ||
+          runOptions.abortSignal.aborted
+        )
+          dispose();
 
         while (true) {
           const item = await queue.next();
@@ -148,7 +176,11 @@ export function createModelAdapter(
 function readCurrentPrompt(messages: readonly Message[]) {
   const current = findCurrentUserMessage(messages);
   const text = textOnlyContent(current);
-  if (text === null || text.trim().length === 0 || current.attachments.length > 0) {
+  if (
+    text === null ||
+    text.trim().length === 0 ||
+    current.attachments.length > 0
+  ) {
     throw new Error("Messages must contain non-empty text only.");
   }
   return text;
@@ -166,12 +198,12 @@ function buildContext(messages: readonly Message[]) {
     const userText = textOnlyContent(user);
     const assistantText = textOnlyContent(assistant);
     if (
-      assistant.status.type === "complete"
-      && user.attachments.length === 0
-      && userText !== null
-      && assistantText !== null
-      && userText.trim().length > 0
-      && assistantText.trim().length > 0
+      assistant.status.type === "complete" &&
+      user.attachments.length === 0 &&
+      userText !== null &&
+      assistantText !== null &&
+      userText.trim().length > 0 &&
+      assistantText.trim().length > 0
     ) {
       pairs.push([
         { content: userText, role: "user" },
@@ -192,9 +224,9 @@ function buildContext(messages: readonly Message[]) {
     const pairCounts = pair.map((message) => countCharacters(message.content));
     const pairCharacterCount = pairCounts[0] + pairCounts[1];
     if (
-      selected.length >= maxPairs
-      || pairCounts.some((count) => count > MAX_MESSAGE_CHARS)
-      || characterCount + pairCharacterCount > MAX_CONTEXT_CHARS
+      selected.length >= maxPairs ||
+      pairCounts.some((count) => count > MAX_MESSAGE_CHARS) ||
+      characterCount + pairCharacterCount > MAX_CONTEXT_CHARS
     ) {
       truncated = true;
       break;
@@ -228,10 +260,15 @@ function findCurrentUserMessage(messages: readonly Message[]) {
 }
 
 function textOnlyContent(message: Message) {
-  if (message.content.length === 0 || message.content.some((part) => part.type !== "text")) {
+  if (
+    message.content.length === 0 ||
+    message.content.some((part) => part.type !== "text")
+  ) {
     return null;
   }
-  return message.content.map((part) => part.type === "text" ? part.text : "").join("");
+  return message.content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .join("");
 }
 
 function countCharacters(value: string) {

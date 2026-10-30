@@ -15,7 +15,11 @@ export function SuggestedContentCard() {
   return (
     <section className="relative px-1 pb-4 pt-1 sm:px-3 sm:pb-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div aria-label="Content views" className="flex items-center gap-1" role="tablist">
+        <div
+          aria-label="Content views"
+          className="flex items-center gap-1"
+          role="tablist"
+        >
           {tabs.map((tab) => (
             <button
               aria-selected={activeTab === tab}
@@ -50,7 +54,9 @@ export function SuggestedContentCard() {
       <div className="mt-2" role="tabpanel">
         {groups.map((group) => (
           <div className="mt-4" key={group.label}>
-            <h3 className="text-[15px] font-semibold text-text-main">{group.label}</h3>
+            <h3 className="text-[15px] font-semibold text-text-main">
+              {group.label}
+            </h3>
             <div className="mt-1.5 flex flex-col">
               {group.items.map((item) => (
                 <button
@@ -69,7 +75,9 @@ export function SuggestedContentCard() {
                     }
                     name={item.icon}
                   />
-                  <span className="min-w-0 truncate group-hover:text-text-main">{item.label}</span>
+                  <span className="min-w-0 truncate group-hover:text-text-main">
+                    {item.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -124,7 +132,10 @@ function DealFilterMenu() {
       >
         <Icon className="h-4 w-4" name="check" />
         <span>{selectedLabel}</span>
-        <Icon className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`} name="chevronDown" />
+        <Icon
+          className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`}
+          name="chevronDown"
+        />
       </button>
 
       {open ? (
@@ -164,19 +175,27 @@ type DealFilterOptionProps = {
   selected: boolean;
 };
 
-function DealFilterOption({ label, onSelect, selected }: DealFilterOptionProps) {
+function DealFilterOption({
+  label,
+  onSelect,
+  selected,
+}: DealFilterOptionProps) {
   return (
     <button
       aria-selected={selected}
       className={`flex w-full items-center justify-between gap-4 rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition ${
-        selected ? "bg-primary/10 text-text-main" : "text-text-main/82 hover:bg-surface-container-high"
+        selected
+          ? "bg-primary/10 text-text-main"
+          : "text-text-main/82 hover:bg-surface-container-high"
       }`}
       onClick={onSelect}
       role="option"
       type="button"
     >
       <span className="whitespace-nowrap">{label}</span>
-      {selected ? <Icon className="h-4 w-4 shrink-0 text-primary" name="check" /> : null}
+      {selected ? (
+        <Icon className="h-4 w-4 shrink-0 text-primary" name="check" />
+      ) : null}
     </button>
   );
 }

@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeliverableTemplatesView } from "@/components/deal-room/DeliverableTemplatesView";
@@ -30,10 +36,19 @@ describe("DeliverablesHeader", () => {
   it("renders the navy templates action and forwards navigation", async () => {
     const user = userEvent.setup();
     const onViewTemplates = vi.fn();
-    render(<DeliverablesHeader mode="deliverables" onViewTemplates={onViewTemplates} />);
+    render(
+      <DeliverablesHeader
+        mode="deliverables"
+        onViewTemplates={onViewTemplates}
+      />,
+    );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Deliverables" })).not.toBeNull();
-    const viewTemplatesButton = screen.getByRole("button", { name: "View Templates" });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Deliverables" }),
+    ).not.toBeNull();
+    const viewTemplatesButton = screen.getByRole("button", {
+      name: "View Templates",
+    });
     expect(viewTemplatesButton.className).toContain("bg-primary-container");
     expect(viewTemplatesButton.className).toContain("text-white");
     expect(viewTemplatesButton.dataset.size).toBe("sm");
@@ -45,48 +60,65 @@ describe("DeliverablesHeader", () => {
   it.each([
     ["Import Slide Template", "single", 0],
     ["Import Deck Template", "batch", 1],
-  ] as const)("imports from the %s header action", async (label, mode, inputIndex) => {
-    listTemplatePreviews.mockResolvedValue(templatePage(["template-1"]));
-    importPptxTemplate.mockResolvedValue({ importMode: mode, importedCount: 1, warningCount: 0 });
-    const user = userEvent.setup();
-    const onBack = vi.fn();
-    const inputClick = vi.spyOn(HTMLInputElement.prototype, "click");
-    const view = render(
-      <TemplatePreviewProvider requestKey="request-1">
-        <DeliverablesHeader mode="templates" onBack={onBack} />
-      </TemplatePreviewProvider>,
-    );
+  ] as const)(
+    "imports from the %s header action",
+    async (label, mode, inputIndex) => {
+      listTemplatePreviews.mockResolvedValue(templatePage(["template-1"]));
+      importPptxTemplate.mockResolvedValue({
+        importMode: mode,
+        importedCount: 1,
+        warningCount: 0,
+      });
+      const user = userEvent.setup();
+      const onBack = vi.fn();
+      const inputClick = vi.spyOn(HTMLInputElement.prototype, "click");
+      const view = render(
+        <TemplatePreviewProvider requestKey="request-1">
+          <DeliverablesHeader mode="templates" onBack={onBack} />
+        </TemplatePreviewProvider>,
+      );
 
-    expect(await screen.findByRole("button", { name: label })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Import Slide Template" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Import Deck Template" })).not.toBeNull();
+      expect(await screen.findByRole("button", { name: label })).not.toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Import Slide Template" }),
+      ).not.toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Import Deck Template" }),
+      ).not.toBeNull();
 
-    const input = view.container.querySelectorAll<HTMLInputElement>('input[type="file"]')[inputIndex];
-    expect(input).not.toBeNull();
-    if (!input) throw new Error("Expected the template file input to render.");
-    expect(input.accept).toBe(".pptx");
-    expect(input.multiple).toBe(false);
+      const input =
+        view.container.querySelectorAll<HTMLInputElement>('input[type="file"]')[
+          inputIndex
+        ];
+      expect(input).not.toBeNull();
+      if (!input)
+        throw new Error("Expected the template file input to render.");
+      expect(input.accept).toBe(".pptx");
+      expect(input.multiple).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: label }));
-    expect(inputClick).toHaveBeenCalledOnce();
+      await user.click(screen.getByRole("button", { name: label }));
+      expect(inputClick).toHaveBeenCalledOnce();
 
-    fireEvent.change(input, {
-      target: {
-        files: [
-          new File(
-            ["presentation"],
-            "template.pptx",
-            { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
-          ),
-        ],
-      },
-    });
+      fireEvent.change(input, {
+        target: {
+          files: [
+            new File(["presentation"], "template.pptx", {
+              type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            }),
+          ],
+        },
+      });
 
-    await waitFor(() => expect(importPptxTemplate).toHaveBeenCalledWith(expect.any(File), mode));
-    expect(listTemplatePreviews).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole("button", { name: "Back to Deliverables" }));
-    expect(onBack).toHaveBeenCalledOnce();
-  });
+      await waitFor(() =>
+        expect(importPptxTemplate).toHaveBeenCalledWith(expect.any(File), mode),
+      );
+      expect(listTemplatePreviews).toHaveBeenCalledTimes(2);
+      await user.click(
+        screen.getByRole("button", { name: "Back to Deliverables" }),
+      );
+      expect(onBack).toHaveBeenCalledOnce();
+    },
+  );
 
   it("keeps the import action only in the gallery for an empty catalog", async () => {
     listTemplatePreviews.mockResolvedValue(templatePage([]));
@@ -97,9 +129,18 @@ describe("DeliverablesHeader", () => {
       </TemplatePreviewProvider>,
     );
 
-    expect(await screen.findByRole("heading", { level: 3, name: "No slide templates yet" })).not.toBeNull();
-    expect(screen.getAllByRole("button", { name: "Import Slide Template" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Import Deck Template" })).toHaveLength(1);
+    expect(
+      await screen.findByRole("heading", {
+        level: 3,
+        name: "No slide templates yet",
+      }),
+    ).not.toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: "Import Slide Template" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole("button", { name: "Import Deck Template" }),
+    ).toHaveLength(1);
     expect(listTemplatePreviews).toHaveBeenCalledOnce();
   });
 
@@ -123,8 +164,12 @@ describe("DeliverablesHeader", () => {
       />,
     );
 
-    expect(screen.queryByRole("textbox", { name: "Deliverable name" })).toBeNull();
-    const nameText = screen.getByRole("button", { name: "Edit deliverable name: Unnamed" });
+    expect(
+      screen.queryByRole("textbox", { name: "Deliverable name" }),
+    ).toBeNull();
+    const nameText = screen.getByRole("button", {
+      name: "Edit deliverable name: Unnamed",
+    });
     expect(nameText.textContent).toBe("Unnamed");
     await user.dblClick(nameText);
 
@@ -133,9 +178,15 @@ describe("DeliverablesHeader", () => {
     expect(document.activeElement).toBe(nameInput);
     await user.clear(nameInput);
     await user.type(nameInput, "Technology diligence{Enter}");
-    expect(onDeliverableNameChange).toHaveBeenCalledWith("Technology diligence");
-    expect(screen.queryByRole("textbox", { name: "Deliverable name" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit deliverable name: Unnamed" })).not.toBeNull();
+    expect(onDeliverableNameChange).toHaveBeenCalledWith(
+      "Technology diligence",
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Deliverable name" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Edit deliverable name: Unnamed" }),
+    ).not.toBeNull();
 
     const button = screen.getByRole("button", { name: "Show JSON" });
     expect(button.dataset.variant).toBe("default");
@@ -171,7 +222,9 @@ describe("DeliverablesHeader", () => {
       />,
     );
 
-    const nameText = screen.getByRole("button", { name: "Edit deliverable name: Original name" });
+    const nameText = screen.getByRole("button", {
+      name: "Edit deliverable name: Original name",
+    });
     nameText.focus();
     await user.keyboard("{F2}");
     const nameInput = screen.getByRole("textbox", { name: "Deliverable name" });
@@ -179,8 +232,11 @@ describe("DeliverablesHeader", () => {
     await user.type(nameInput, "Discard me{Escape}");
 
     expect(onDeliverableNameChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Edit deliverable name: Original name" }).textContent)
-      .toBe("Original name");
+    expect(
+      screen.getByRole("button", {
+        name: "Edit deliverable name: Original name",
+      }).textContent,
+    ).toBe("Original name");
   });
 });
 

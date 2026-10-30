@@ -28,7 +28,10 @@ export function buildFileReviewRows(
   summaries: readonly FileReviewSummary[],
 ): FileReviewRow[] {
   return entries.map((entry, index) => {
-    const summary = summaries.length > 0 ? summaries[index % summaries.length] : pendingSummary;
+    const summary =
+      summaries.length > 0
+        ? summaries[index % summaries.length]
+        : pendingSummary;
     return {
       ...summary,
       fileName: entry.node.name,
@@ -41,7 +44,9 @@ export function buildFileReviewRows(
   });
 }
 
-function getFileType(kind: DataRoomTreeNode["kind"]): FileReviewRow["fileType"] {
+function getFileType(
+  kind: DataRoomTreeNode["kind"],
+): FileReviewRow["fileType"] {
   if (kind === "pdf") return "PDF";
   if (kind === "sheet") return "Spreadsheet";
   return "Document";

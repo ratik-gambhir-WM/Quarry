@@ -6,9 +6,15 @@ type BrandLockupProps = {
   compact?: boolean;
 };
 
-export function BrandLockup({ subtitle, title, compact = false }: BrandLockupProps) {
+export function BrandLockup({
+  subtitle,
+  title,
+  compact = false,
+}: BrandLockupProps) {
   return (
-    <header className={`flex items-center gap-md text-center ${compact ? "flex-col sm:flex-row sm:justify-between sm:text-left" : "flex-col"}`}>
+    <header
+      className={`flex items-center gap-md text-center ${compact ? "flex-col sm:flex-row sm:justify-between sm:text-left" : "flex-col"}`}
+    >
       <img
         alt="West Monroe"
         className={`${compact ? "h-8" : "h-10"} w-auto object-contain`}
@@ -17,7 +23,9 @@ export function BrandLockup({ subtitle, title, compact = false }: BrandLockupPro
       />
       <div className="space-y-xs">
         <h1 className="type-h3 text-on-surface">{title}</h1>
-        <p className="type-body-sm max-w-[28rem] text-on-surface-variant">{subtitle}</p>
+        <p className="type-body-sm max-w-[28rem] text-on-surface-variant">
+          {subtitle}
+        </p>
       </div>
     </header>
   );

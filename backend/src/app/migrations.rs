@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 12;
+const LATEST_SCHEMA_VERSION: i64 = 13;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -28,18 +28,25 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
     if version == 0 && tables == 0 {
         transaction.execute_batch(SCHEMA)?;
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
+        transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if version != LATEST_SCHEMA_VERSION {
+        if version != LATEST_SCHEMA_VERSION && version != 12 {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
             });
         }
         validate_product_schema(&transaction)?;
+        validate_template_schema(&transaction)?;
+        validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA])?;
         check_foreign_keys(&transaction)?;
+        if version == 12 {
+            transaction.execute_batch(NOTEBOOK_SCHEMA)?;
+        }
     }
     validate_product_schema(&transaction)?;
     validate_template_schema(&transaction)?;
+    validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA, NOTEBOOK_SCHEMA])?;
     check_foreign_keys(&transaction)?;
     transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
     transaction.commit()?;
@@ -118,7 +125,12 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
     let result = (|| -> Result<(), MigrationError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
-            "DROP TABLE IF EXISTS slide_classifications_fts;
+            "DROP TABLE IF EXISTS notebook_cleanup;
+             DROP TABLE IF EXISTS notebook_save_jobs;
+             DROP TABLE IF EXISTS notebook_notes;
+             DROP TABLE IF EXISTS notebook_folders;
+             DROP TABLE IF EXISTS notebooks;
+             DROP TABLE IF EXISTS slide_classifications_fts;
              DROP TABLE IF EXISTS slide_classifications;
              DROP TABLE IF EXISTS app_templates;
              DROP TABLE IF EXISTS apps;
@@ -143,6 +155,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         )?;
         transaction.execute_batch(SCHEMA)?;
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
+        transaction.execute_batch(NOTEBOOK_SCHEMA)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -445,3 +458,114 @@ CREATE TABLE slide_classifications (
 #[cfg(test)]
 #[path = "../../tests/integration/app/migrations_tests.rs"]
 mod tests;
+
+const NOTEBOOK_SCHEMA: &str = r#"
+CREATE TABLE notebooks (
+    notebook_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(notebook_id)) > 0),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    deal_id TEXT REFERENCES deals(deal_id) ON DELETE RESTRICT,
+    title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 300),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE notebook_folders (
+    folder_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(folder_id)) > 0),
+    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 200),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (notebook_id, folder_id)
+);
+
+CREATE TABLE notebook_notes (
+    note_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(note_id)) > 0),
+    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
+    folder_id TEXT,
+    title TEXT NOT NULL DEFAULT '' CHECK (length(title) <= 300),
+    blocks_json TEXT NOT NULL DEFAULT '[]'
+        CHECK (json_valid(blocks_json) AND json_type(blocks_json) = 'array'),
+    content_schema_version INTEGER NOT NULL DEFAULT 1
+        CHECK (content_schema_version = 1),
+    revision INTEGER NOT NULL DEFAULT 1
+        CHECK (revision BETWEEN 1 AND 9007199254740991),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (notebook_id, folder_id)
+        REFERENCES notebook_folders(notebook_id, folder_id)
+        ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX idx_notebooks_owner_recent
+    ON notebooks(user_id, updated_at DESC, notebook_id);
+CREATE INDEX idx_notebooks_owner_deal_recent
+    ON notebooks(user_id, deal_id, updated_at DESC, notebook_id);
+CREATE INDEX idx_notebooks_deal ON notebooks(deal_id);
+CREATE INDEX idx_notebook_folders_notebook
+    ON notebook_folders(notebook_id, folder_id);
+CREATE INDEX idx_notebook_notes_notebook_recent
+    ON notebook_notes(notebook_id, updated_at DESC, note_id);
+CREATE INDEX idx_notebook_notes_folder_recent
+    ON notebook_notes(notebook_id, folder_id, updated_at DESC, note_id);
+
+CREATE TABLE notebook_save_jobs (
+    job_id TEXT PRIMARY KEY NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
+    note_id TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL CHECK(length(request_hash) = 64),
+    input_json TEXT NOT NULL CHECK(json_valid(input_json)),
+    status TEXT NOT NULL CHECK(status IN ('queued','processing','completed','failed')),
+    stage TEXT NOT NULL CHECK(stage IN ('persisting','exporting','chunking','embedding','indexing')),
+    committed_revision INTEGER CHECK(committed_revision BETWEEN 1 AND 9007199254740991),
+    attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt BETWEEN 1 AND 5),
+    sequence INTEGER NOT NULL DEFAULT 1 CHECK(sequence > 0),
+    error_code TEXT,
+    lease_token TEXT,
+    lease_until INTEGER,
+    pipeline_version TEXT NOT NULL DEFAULT 'notebook-markdown-v1/chunks-v1',
+    content_hash TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id, operation_id)
+);
+CREATE UNIQUE INDEX idx_notebook_one_active_save ON notebook_save_jobs(note_id)
+    WHERE status IN ('queued','processing');
+CREATE INDEX idx_notebook_jobs_queue ON notebook_save_jobs(status, lease_until, created_at);
+CREATE INDEX idx_notebook_jobs_actor ON notebook_save_jobs(user_id, status);
+CREATE INDEX idx_notebook_jobs_parent ON notebook_save_jobs(notebook_id, note_id);
+-- Independent tombstones survive cascades until Helix acknowledges physical removal.
+CREATE TABLE notebook_cleanup (
+    note_id TEXT PRIMARY KEY NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    confirmed INTEGER NOT NULL DEFAULT 0 CHECK(confirmed IN (0,1))
+);
+"#;
+
+fn validate_owned_schema(connection: &Connection, schemas: &[&str]) -> rusqlite::Result<()> {
+    // Compare owned DDL, including constraints and indexes, rather than accepting a forged marker.
+    let reference = Connection::open_in_memory()?;
+    for schema in schemas {
+        reference.execute_batch(schema)?;
+    }
+    let mut statement = reference.prepare(
+        "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
+    )?;
+    for entry in
+        statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (name, expected) = entry?;
+        let actual: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE name = ?1",
+            [&name],
+            |r| r.get(0),
+        )?;
+        if actual != expected {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+    }
+    Ok(())
+}

@@ -12,7 +12,10 @@ type ActivityTimelineCardProps = {
   items: DealTimelineItem[];
 };
 
-const toneMap: Record<DealTimelineItem["tone"], { detailClassName: string; dotClassName: string }> = {
+const toneMap: Record<
+  DealTimelineItem["tone"],
+  { detailClassName: string; dotClassName: string }
+> = {
   accent: {
     detailClassName: "border-white/70 bg-white/62 text-text-main/80",
     dotClassName: "bg-accent",
@@ -31,7 +34,10 @@ const toneMap: Record<DealTimelineItem["tone"], { detailClassName: string; dotCl
   },
 };
 
-export function ActivityTimelineCard({ className = "flex min-h-[540px] flex-col py-10", items }: ActivityTimelineCardProps) {
+export function ActivityTimelineCard({
+  className = "flex min-h-[540px] flex-col py-10",
+  items,
+}: ActivityTimelineCardProps) {
   return (
     <section className={className}>
       <TimelinePanelHeader title="Deal Activity" />
@@ -45,13 +51,21 @@ export function ActivityTimelineCard({ className = "flex min-h-[540px] flex-col 
               key={item.id}
               marker={
                 <TimelineMarker>
-                  <span className={`h-3.5 w-3.5 rounded-full ${tone.dotClassName}`} />
+                  <span
+                    className={`h-3.5 w-3.5 rounded-full ${tone.dotClassName}`}
+                  />
                 </TimelineMarker>
               }
             >
-              <p className="text-[12px] font-medium text-muted">{item.timestamp}</p>
-              <h3 className="text-[1.02rem] font-semibold text-text-main">{item.title}</h3>
-              <div className={`rounded-[11px] border px-4 py-3 text-[1rem] leading-7 ${tone.detailClassName}`}>
+              <p className="text-[12px] font-medium text-muted">
+                {item.timestamp}
+              </p>
+              <h3 className="text-[1.02rem] font-semibold text-text-main">
+                {item.title}
+              </h3>
+              <div
+                className={`rounded-[11px] border px-4 py-3 text-[1rem] leading-7 ${tone.detailClassName}`}
+              >
                 {item.detail}
               </div>
             </TimelineEntry>

@@ -2,7 +2,11 @@
 
 import { Check, Palette } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { findSwatch, swatchCssColor } from "../lib/palette";
 import type { KanbanPaletteSwatch } from "../types";
@@ -28,7 +32,10 @@ export function ColumnColorPicker({
           ghost/icon look. (v0.4.3) */}
       <PopoverTrigger
         type="button"
-        className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "size-6")}
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "icon" }),
+          "size-6",
+        )}
         disabled={disabled}
         aria-label="Pick column color"
         data-stop-click
@@ -42,7 +49,10 @@ export function ColumnColorPicker({
             aria-hidden="true"
           />
         ) : (
-          <Palette className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          <Palette
+            className="size-3.5 text-muted-foreground"
+            aria-hidden="true"
+          />
         )}
       </PopoverTrigger>
       <PopoverContent
@@ -69,7 +79,10 @@ export function ColumnColorPicker({
                   onClick={() => onChange(s.id)}
                 >
                   {active ? (
-                    <Check className="size-3 text-background drop-shadow" aria-hidden="true" />
+                    <Check
+                      className="size-3 text-background drop-shadow"
+                      aria-hidden="true"
+                    />
                   ) : null}
                 </button>
               );

@@ -2,12 +2,7 @@ import type { ReactNode } from "react";
 
 /** Semantic tone. Drives default icon + `role="status"` gating (I4). */
 export type EmptyStateVariant =
-  | "default"
-  | "search"
-  | "error"
-  | "offline"
-  | "permission"
-  | "first-use";
+  "default" | "search" | "error" | "offline" | "permission" | "first-use";
 
 /** Controls type scale, icon-tile scale, and vertical padding. */
 export type EmptyStateSize = "sm" | "md" | "lg";

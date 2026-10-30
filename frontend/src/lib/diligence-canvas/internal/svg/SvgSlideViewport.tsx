@@ -5,9 +5,9 @@ import type {
   RefObject,
   CSSProperties,
   WheelEvent as ReactWheelEvent,
-} from 'react'
+} from "react";
 
-import type { NormalizedSlide } from '../shared/PowerpointTypes'
+import type { NormalizedSlide } from "../shared/PowerpointTypes";
 
 export function SvgSlideViewport({
   children,
@@ -26,21 +26,21 @@ export function SvgSlideViewport({
   svgRef,
   viewportSize,
 }: {
-  children: ReactNode
-  clipId: string
-  contentRef: RefObject<SVGGElement | null>
-  contentTransform: string
-  descriptionId: string
-  id: string
-  onKeyDown: (event: ReactKeyboardEvent<SVGSVGElement>) => void
-  onPointerCancel: (event: ReactPointerEvent<SVGSVGElement>) => void
-  onPointerDownCapture: (event: ReactPointerEvent<SVGSVGElement>) => void
-  onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void
-  onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void
-  onWheel: (event: ReactWheelEvent<SVGSVGElement>) => void
-  slide: NormalizedSlide
-  svgRef: RefObject<SVGSVGElement | null>
-  viewportSize?: { height: number; width: number }
+  children: ReactNode;
+  clipId: string;
+  contentRef: RefObject<SVGGElement | null>;
+  contentTransform: string;
+  descriptionId: string;
+  id: string;
+  onKeyDown: (event: ReactKeyboardEvent<SVGSVGElement>) => void;
+  onPointerCancel: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onPointerDownCapture: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onWheel: (event: ReactWheelEvent<SVGSVGElement>) => void;
+  slide: NormalizedSlide;
+  svgRef: RefObject<SVGSVGElement | null>;
+  viewportSize?: { height: number; width: number };
 }) {
   return (
     <svg
@@ -59,7 +59,10 @@ export function SvgSlideViewport({
       role="application"
       style={
         viewportSize
-          ? ({ height: viewportSize.height, width: viewportSize.width } as CSSProperties)
+          ? ({
+              height: viewportSize.height,
+              width: viewportSize.width,
+            } as CSSProperties)
           : undefined
       }
       tabIndex={0}
@@ -71,10 +74,14 @@ export function SvgSlideViewport({
         </clipPath>
       </defs>
       <g clipPath={`url(#${clipId})`}>
-        <g data-slide-viewport-content="" ref={contentRef} transform={contentTransform}>
+        <g
+          data-slide-viewport-content=""
+          ref={contentRef}
+          transform={contentTransform}
+        >
           {children}
         </g>
       </g>
     </svg>
-  )
+  );
 }

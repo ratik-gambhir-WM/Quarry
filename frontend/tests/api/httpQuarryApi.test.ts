@@ -8,31 +8,48 @@ describe("httpQuarryApi", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(dealStatusOptions)("preserves %s through create, update and read", async (status) => {
-    const input = { ...testDealInput(), status };
-    const response = { deal: testDeal({ status }), metadata: testMetadata() };
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json(response)));
-    vi.stubGlobal("fetch", fetchMock);
-    const api = httpQuarryApi;
-    expect((await api.createDeal(input)).deal.status).toBe(status);
-    expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(status);
-    fetchMock.mockResolvedValue(Response.json({ ...response.deal, metadata: response.metadata }));
-    expect((await api.getDeal(input.dealId)).status).toBe(status);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).status).toBe(status);
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body).status).toBe(status);
-  });
+  it.each(dealStatusOptions)(
+    "preserves %s through create, update and read",
+    async (status) => {
+      const input = { ...testDealInput(), status };
+      const response = { deal: testDeal({ status }), metadata: testMetadata() };
+      const fetchMock = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(Response.json(response)));
+      vi.stubGlobal("fetch", fetchMock);
+      const api = httpQuarryApi;
+      expect((await api.createDeal(input)).deal.status).toBe(status);
+      expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(
+        status,
+      );
+      fetchMock.mockResolvedValue(
+        Response.json({ ...response.deal, metadata: response.metadata }),
+      );
+      expect((await api.getDeal(input.dealId)).status).toBe(status);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).status).toBe(status);
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).status).toBe(status);
+    },
+  );
 
   it("keeps summaries upload-only through the versioned multipart route", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ summary: "Summary" }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ summary: "Summary" }));
     vi.stubGlobal("fetch", fetchMock);
     const file = new File(["Report"], "report.txt", { type: "text/plain" });
 
-    await expect(httpQuarryApi.summarizeUpload([file])).resolves.toBe("Summary");
+    await expect(httpQuarryApi.summarizeUpload([file])).resolves.toBe(
+      "Summary",
+    );
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/v1/summarize/upload");
     expect(init.method).toBe("POST");
     expect(init.body.getAll("files")).toEqual([file]);
-    for (const method of ["listSummaryFiles", "summarizePath", "summarizeSelected"]) {
+    for (const method of [
+      "listSummaryFiles",
+      "summarizePath",
+      "summarizeSelected",
+    ]) {
       expect(httpQuarryApi).not.toHaveProperty(method);
     }
   });
@@ -48,7 +65,10 @@ describe("httpQuarryApi", () => {
 
     await httpQuarryApi.listDeals();
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals", expect.objectContaining({ redirect: "error" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/deals",
+      expect.objectContaining({ redirect: "error" }),
+    );
   });
 
   it("encodes and preserves template preview pages", async () => {
@@ -61,39 +81,55 @@ describe("httpQuarryApi", () => {
         totalItems: 1,
         totalPages: 1,
       },
-      previews: [{
-        contentType: "image/png",
-        dataUrl: "data:image/png;base64,dGVtcGxhdGU=",
-        height: 900,
-        previewUrl: "/templates/example/preview",
-        templateId: "example",
-        width: 1600,
-      }],
+      previews: [
+        {
+          contentType: "image/png",
+          dataUrl: "data:image/png;base64,dGVtcGxhdGU=",
+          height: 900,
+          previewUrl: "/templates/example/preview",
+          templateId: "example",
+          width: 1600,
+        },
+      ],
     };
     const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(httpQuarryApi.listTemplatePreviews(1)).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/previews?page=1", expect.objectContaining({ redirect: "error" }));
+    await expect(httpQuarryApi.listTemplatePreviews(1)).resolves.toEqual(
+      payload,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/templates/previews?page=1",
+      expect.objectContaining({ redirect: "error" }),
+    );
   });
 
   it("deletes an encoded template through the versioned API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(httpQuarryApi.deleteTemplate("template/one")).resolves.toBeUndefined();
+    await expect(
+      httpQuarryApi.deleteTemplate("template/one"),
+    ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", {
       method: "DELETE",
-      headers: expect.any(Headers), redirect: "error", signal: expect.any(AbortSignal),
+      headers: expect.any(Headers),
+      redirect: "error",
+      signal: expect.any(AbortSignal),
     });
   });
 
   it("deletes an encoded assistant thread through the versioned API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(httpQuarryApi.deleteAssistantThread("thread/one"))
-      .resolves.toBeUndefined();
+    await expect(
+      httpQuarryApi.deleteAssistantThread("thread/one"),
+    ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/assistant/threads/thread%2Fone",
       expect.objectContaining({ method: "DELETE" }),
@@ -105,27 +141,36 @@ describe("httpQuarryApi", () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(httpQuarryApi.getTemplate("template/one")).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", expect.objectContaining({ redirect: "error" }));
+    await expect(httpQuarryApi.getTemplate("template/one")).resolves.toEqual(
+      payload,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/templates/template%2Fone",
+      expect.objectContaining({ redirect: "error" }),
+    );
   });
 
   it("exports the current presentation as a validated PowerPoint download", async () => {
     const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
-    const fetchMock = vi.fn().mockResolvedValue(new Response(bytes, {
-      headers: {
-        "content-disposition": "attachment; filename=\"Example.pptx\"",
-        "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "x-powerpoint-warning-count": "1",
-      },
-      status: 200,
-    }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(bytes, {
+        headers: {
+          "content-disposition": 'attachment; filename="Example.pptx"',
+          "content-type":
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "x-powerpoint-warning-count": "1",
+        },
+        status: 200,
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const document = templateDocument();
 
     await expect(httpQuarryApi.exportPowerPoint(document)).resolves.toEqual({
       dataBase64: "UEsDBA==",
       fileName: "Example.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       warningCount: 1,
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/export", {
@@ -138,24 +183,30 @@ describe("httpQuarryApi", () => {
   });
 
   it("rejects an export response with an unsafe filename", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      new Uint8Array([0x50, 0x4b]),
-      {
-        headers: {
-          "content-disposition": "attachment; filename=\"../escape.pptx\"",
-          "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          "x-powerpoint-warning-count": "0",
-        },
-      },
-    )));
-
-    await expect(httpQuarryApi.exportPowerPoint(templateDocument())).rejects.toThrow(
-      "invalid PowerPoint filename",
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(new Uint8Array([0x50, 0x4b]), {
+          headers: {
+            "content-disposition": 'attachment; filename="../escape.pptx"',
+            "content-type":
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "x-powerpoint-warning-count": "0",
+          },
+        }),
+      ),
     );
+
+    await expect(
+      httpQuarryApi.exportPowerPoint(templateDocument()),
+    ).rejects.toThrow("invalid PowerPoint filename");
   });
 
   it("rejects malformed template documents at the browser adapter boundary", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ presentation: {} })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(Response.json({ presentation: {} })),
+    );
 
     await expect(httpQuarryApi.getTemplate("example")).rejects.toThrow(
       "presentation.title must be a string",
@@ -165,14 +216,22 @@ describe("httpQuarryApi", () => {
   it.each(["single", "batch"] as const)(
     "imports one PPTX through the explicit %s template mode",
     async (importMode) => {
-      const result = { importMode, importedCount: importMode === "single" ? 1 : 3, warningCount: 0 };
-      const fetchMock = vi.fn().mockResolvedValue(Response.json(result, { status: 201 }));
+      const result = {
+        importMode,
+        importedCount: importMode === "single" ? 1 : 3,
+        warningCount: 0,
+      };
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(Response.json(result, { status: 201 }));
       vi.stubGlobal("fetch", fetchMock);
       const file = new File(["presentation"], "template.pptx", {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       });
 
-      await expect(httpQuarryApi.importPptxTemplate(file, importMode)).resolves.toEqual(result);
+      await expect(
+        httpQuarryApi.importPptxTemplate(file, importMode),
+      ).resolves.toEqual(result);
 
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/v1/templates/import?mode=${importMode}`,
@@ -193,7 +252,12 @@ describe("httpQuarryApi", () => {
       .fn()
       .mockResolvedValueOnce(Response.json({ deal, metadata }, { status: 201 }))
       .mockResolvedValueOnce(
-        Response.json({ deal, extraction: { keyQuestions: [] }, files: [], metadata }),
+        Response.json({
+          deal,
+          extraction: { keyQuestions: [] },
+          files: [],
+          metadata,
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -227,7 +291,13 @@ describe("httpQuarryApi", () => {
 
   it("uses the authoritative deal path for document uploads", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({ documents: [], failed: 0, skipped: 0, succeeded: 0, total: 0 }),
+      Response.json({
+        documents: [],
+        failed: 0,
+        skipped: 0,
+        succeeded: 0,
+        total: 0,
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -242,9 +312,16 @@ describe("httpQuarryApi", () => {
   });
 
   it("preserves XLSX and PPTX names and bytes through the process-file form", async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(Response.json({ filename: "model.xlsx", jobId: "job-1" }, { status: 202 })),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          Response.json(
+            { filename: "model.xlsx", jobId: "job-1" },
+            { status: 202 },
+          ),
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const files = [
       new File([new Uint8Array([1, 2, 3])], "model.XLSX", { type: "" }),
@@ -257,14 +334,16 @@ describe("httpQuarryApi", () => {
 
     for (const [index, file] of files.entries()) {
       const request = fetchMock.mock.calls[index][1] as RequestInit;
-      expect(fetchMock.mock.calls[index][0]).toBe("/api/v1/deals/DEAL%20%2F%201/documents/process_file");
+      expect(fetchMock.mock.calls[index][0]).toBe(
+        "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
+      );
       const uploaded = (request.body as FormData).get("files");
       expect(uploaded).toBeInstanceOf(File);
       const uploadedFile = uploaded as File;
       expect(uploadedFile.name).toBe(file.name);
-      expect(Array.from(new Uint8Array(await uploadedFile.arrayBuffer()))).toEqual(
-        Array.from(new Uint8Array(await file.arrayBuffer())),
-      );
+      expect(
+        Array.from(new Uint8Array(await uploadedFile.arrayBuffer())),
+      ).toEqual(Array.from(new Uint8Array(await file.arrayBuffer())));
     }
   });
 
@@ -291,8 +370,14 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const documents = await httpQuarryApi.listDealDocuments("DEAL / 1");
-    const pdf = await httpQuarryApi.getDealDocumentPdf("DEAL / 1", documents[0].fileId);
-    const rawText = await httpQuarryApi.getDealDocumentText("DEAL / 1", documents[0].fileId);
+    const pdf = await httpQuarryApi.getDealDocumentPdf(
+      "DEAL / 1",
+      documents[0].fileId,
+    );
+    const rawText = await httpQuarryApi.getDealDocumentText(
+      "DEAL / 1",
+      documents[0].fileId,
+    );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -318,31 +403,48 @@ describe("httpQuarryApi", () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode("event: started\ndata: {\"type\":\"started\",\"model\":\"gpt-5.5\"}\n\nevent: delta\ndata: {\"type\":\"delta\",\"delta\":\"hi\"}\n\n"));
-        controller.enqueue(encoder.encode("event: completed\ndata: {\"type\":\"completed\",\"response\":\"hi\"}\n\n"));
+        controller.enqueue(
+          encoder.encode(
+            'event: started\ndata: {"type":"started","model":"gpt-5.5"}\n\nevent: delta\ndata: {"type":"delta","delta":"hi"}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'event: completed\ndata: {"type":"completed","response":"hi"}\n\n',
+          ),
+        );
         controller.close();
       },
     });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, {
-      headers: { "content-type": "text/event-stream; charset=utf-8" },
-    }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        headers: { "content-type": "text/event-stream; charset=utf-8" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const events: string[] = [];
 
-    httpQuarryApi.queryModel({
-      context: [
-        { content: "  question  ", role: "user" },
-        { content: "answer", role: "assistant" },
-      ],
-      files: [],
-      prompt: "  next  ",
-    }, { onEvent: (event) => events.push(event.type) });
-    await vi.waitFor(() => expect(events).toEqual(["started", "delta", "completed"]));
+    httpQuarryApi.queryModel(
+      {
+        context: [
+          { content: "  question  ", role: "user" },
+          { content: "answer", role: "assistant" },
+        ],
+        files: [],
+        prompt: "  next  ",
+      },
+      { onEvent: (event) => events.push(event.type) },
+    );
+    await vi.waitFor(() =>
+      expect(events).toEqual(["started", "delta", "completed"]),
+    );
 
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     const form = request.body as FormData;
     expect(form.get("prompt")).toBe("  next  ");
-    expect(form.get("context")).toBe('[{"content":"  question  ","role":"user"},{"content":"answer","role":"assistant"}]');
+    expect(form.get("context")).toBe(
+      '[{"content":"  question  ","role":"user"},{"content":"answer","role":"assistant"}]',
+    );
   });
 
   it("closes the response stream as soon as a terminal query event arrives", async () => {
@@ -350,18 +452,25 @@ describe("httpQuarryApi", () => {
     let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode(
-          "event: started\ndata: {\"type\":\"started\",\"model\":\"gpt-5.5\"}\n\n"
-          + "event: completed\ndata: {\"type\":\"completed\",\"response\":\"done\"}\n\n",
-        ));
+        controller.enqueue(
+          encoder.encode(
+            'event: started\ndata: {"type":"started","model":"gpt-5.5"}\n\n' +
+              'event: completed\ndata: {"type":"completed","response":"done"}\n\n',
+          ),
+        );
       },
       cancel() {
         cancelled = true;
       },
     });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream, {
-      headers: { "content-type": "text/event-stream" },
-    })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(stream, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ),
+    );
 
     httpQuarryApi.queryModel(
       { context: [], files: [], prompt: "hello" },
@@ -377,14 +486,16 @@ function templateDocument() {
     presentation: {
       preserveElementOrder: true,
       showBranding: false,
-      slides: [{
-        backgroundColor: "FFFFFF",
-        elements: [],
-        height: 720,
-        id: "slide-1",
-        name: "Slide 1",
-        width: 1280,
-      }],
+      slides: [
+        {
+          backgroundColor: "FFFFFF",
+          elements: [],
+          height: 720,
+          id: "slide-1",
+          name: "Slide 1",
+          width: 1280,
+        },
+      ],
       title: "Example",
     },
   };
@@ -392,20 +503,58 @@ function templateDocument() {
 
 it("maps company lookup, complete deal replacement, and nullable chat scopes through HTTP", async () => {
   const company = { companyId: "company/id" };
-  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json(company)));
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(Response.json(company)));
   vi.stubGlobal("fetch", fetchMock);
   try {
     const input = testDealInput();
-    await httpQuarryApi.createCompany({ name: "Same Name", website: null, industry: null, description: null });
-    await httpQuarryApi.listCompanies({ query: "A & B", limit: 30, offset: 30 });
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/companies?query=A+%26+B&limit=30&offset=30", expect.objectContaining({ redirect: "error" }));
-    await httpQuarryApi.updateDeal("DEAL/A", { ...input, parties: [], scopes: [] });
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    await httpQuarryApi.createCompany({
+      name: "Same Name",
+      website: null,
+      industry: null,
+      description: null,
+    });
+    await httpQuarryApi.listCompanies({
+      query: "A & B",
+      limit: 30,
+      offset: 30,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/companies?query=A+%26+B&limit=30&offset=30",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    await httpQuarryApi.updateDeal("DEAL/A", {
+      ...input,
+      parties: [],
+      scopes: [],
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/deals/DEAL%2FA/update",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(input) }),
+    );
     await httpQuarryApi.createAssistantThread("linked", "DEAL/A");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ threadId: "linked", dealId: "DEAL/A" }) }));
-    await httpQuarryApi.listAssistantThreads({ scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA", expect.objectContaining({ redirect: "error" }));
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/assistant/threads",
+      expect.objectContaining({
+        body: JSON.stringify({ threadId: "linked", dealId: "DEAL/A" }),
+      }),
+    );
+    await httpQuarryApi.listAssistantThreads({
+      scope: "deal",
+      dealId: "DEAL/A",
+      after: "cursor|1",
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA",
+      expect.objectContaining({ redirect: "error" }),
+    );
     await httpQuarryApi.createAssistantThread(undefined, null);
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/assistant/threads", expect.objectContaining({ body: JSON.stringify({ dealId: null }) }));
-  } finally { vi.unstubAllGlobals(); }
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/assistant/threads",
+      expect.objectContaining({ body: JSON.stringify({ dealId: null }) }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

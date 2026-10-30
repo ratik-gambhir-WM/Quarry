@@ -31,7 +31,10 @@ export function canDrop(args: CanDropArgs): boolean {
     if (toCol.allowIncoming === false) return false;
   }
 
-  if (toCol.acceptsRendererIds && !toCol.acceptsRendererIds.includes(found.item.rendererId)) {
+  if (
+    toCol.acceptsRendererIds &&
+    !toCol.acceptsRendererIds.includes(found.item.rendererId)
+  ) {
     return false;
   }
 

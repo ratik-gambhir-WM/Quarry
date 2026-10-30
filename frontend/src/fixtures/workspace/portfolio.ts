@@ -41,7 +41,11 @@ export const workspaceDeals: WorkspaceDeal[] = [
       pendingTasks: [
         { id: "alpha-turnover", label: "Review Q3 Employee Turnover Data" },
         { id: "alpha-cfo", label: "Schedule Follow-up with CFO" },
-        { id: "alpha-litigation", label: "Draft initial memo on EPA litigation", priority: true },
+        {
+          id: "alpha-litigation",
+          label: "Draft initial memo on EPA litigation",
+          priority: true,
+        },
       ],
       phaseLabel: "Phase 1",
       resources: unavailableDealResources(),
@@ -53,7 +57,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Key Meeting / Call",
           date: "2026-10-01",
-          detail: "Internal team alignment on scope, risk assessment criteria, and data room structure established.",
+          detail:
+            "Internal team alignment on scope, risk assessment criteria, and data room structure established.",
           id: "alpha-kickoff",
           timestamp: "Oct 1",
           title: "Kickoff Meeting",
@@ -62,7 +67,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Key Meeting / Call",
           date: "2026-10-12",
-          detail: "Strategic review with target CEO regarding 5-year growth plan and international operational footprint.",
+          detail:
+            "Strategic review with target CEO regarding 5-year growth plan and international operational footprint.",
           id: "alpha-management",
           timestamp: "Oct 12",
           title: "Mgmt Meeting",
@@ -71,7 +77,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Key Activity",
           date: "2026-10-27",
-          detail: "On-site technical evaluation of the primary distribution center.",
+          detail:
+            "On-site technical evaluation of the primary distribution center.",
           id: "alpha-site-visit",
           timestamp: "Oct 27",
           title: "Site Visit: NE Facility",
@@ -112,9 +119,17 @@ export const workspaceDeals: WorkspaceDeal[] = [
       name: "Project Beta",
       overviewSubtitle: "Project Beta Commercial Review",
       pendingTasks: [
-        { done: true, id: "beta-pricing", label: "Validate pricing bridge with finance team" },
+        {
+          done: true,
+          id: "beta-pricing",
+          label: "Validate pricing bridge with finance team",
+        },
         { id: "beta-contracts", label: "Review distributor penalty clauses" },
-        { id: "beta-erp", label: "Confirm ERP cutover contingency plan", priority: true },
+        {
+          id: "beta-erp",
+          label: "Confirm ERP cutover contingency plan",
+          priority: true,
+        },
       ],
       phaseLabel: "Phase 2",
       resources: unavailableDealResources(),
@@ -126,7 +141,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Legal Review",
           date: "2026-10-26",
-          detail: "Contract renewal draft shows tighter minimum-volume thresholds for the largest distributor.",
+          detail:
+            "Contract renewal draft shows tighter minimum-volume thresholds for the largest distributor.",
           id: "beta-legal",
           timestamp: "Today, 9:10 AM",
           title: "Legal Review Updated",
@@ -144,7 +160,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Memo",
           date: "2026-10-25",
-          detail: "Commercial diligence memo uploaded with notes from the revenue operations lead.",
+          detail:
+            "Commercial diligence memo uploaded with notes from the revenue operations lead.",
           id: "beta-memo",
           timestamp: "Oct 25, 1:15 PM",
           title: "Memo Added",
@@ -185,9 +202,19 @@ export const workspaceDeals: WorkspaceDeal[] = [
       name: "Logistics Merger",
       overviewSubtitle: "Logistics Merger Integration Hub",
       pendingTasks: [
-        { id: "logistics-union", label: "Summarize union negotiations by depot" },
-        { id: "logistics-fleet", label: "Reconcile fleet maintenance assumptions" },
-        { id: "logistics-routing", label: "Draft day-one routing risk memo", priority: true },
+        {
+          id: "logistics-union",
+          label: "Summarize union negotiations by depot",
+        },
+        {
+          id: "logistics-fleet",
+          label: "Reconcile fleet maintenance assumptions",
+        },
+        {
+          id: "logistics-routing",
+          label: "Draft day-one routing risk memo",
+          priority: true,
+        },
       ],
       phaseLabel: "Integration Planning",
       resources: unavailableDealResources(),
@@ -199,7 +226,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Model",
           date: "2026-10-26",
-          detail: "Network model now identifies 12 overlapping lanes with same-day consolidation potential.",
+          detail:
+            "Network model now identifies 12 overlapping lanes with same-day consolidation potential.",
           id: "logistics-network",
           timestamp: "Today, 8:25 AM",
           title: "Synergy Model Refreshed",
@@ -208,7 +236,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Risk",
           date: "2026-10-25",
-          detail: "Two depots require separate labor consultations before schedule redesign.",
+          detail:
+            "Two depots require separate labor consultations before schedule redesign.",
           id: "logistics-labor",
           timestamp: "Yesterday, 5:05 PM",
           title: "Labor Constraint Flagged",
@@ -217,7 +246,8 @@ export const workspaceDeals: WorkspaceDeal[] = [
         {
           category: "Operations",
           date: "2026-10-24",
-          detail: "Operations leads added comments on cross-dock throughput assumptions.",
+          detail:
+            "Operations leads added comments on cross-dock throughput assumptions.",
           id: "logistics-ops",
           timestamp: "Oct 24, 3:40 PM",
           title: "Operations Notes Added",
@@ -237,13 +267,17 @@ export const workspaceDeals: WorkspaceDeal[] = [
   },
 ];
 
-const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confidenceLabel">[] = [
+const workspaceInsightRecords: Omit<
+  WorkspaceInsight,
+  "analyzedAtLabel" | "confidenceLabel"
+>[] = [
   {
     category: "Financials",
     deal: "Project Alpha",
     fileIcon: "doc",
     fileName: "Transcript: CEO Site Visit",
-    quote: "CapEx will decrease by 15% next year due to completion of the automated packing line.",
+    quote:
+      "CapEx will decrease by 15% next year due to completion of the automated packing line.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -253,7 +287,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     fileIcon: "image",
     fileName: "Q3_Deck_Slide14.png",
     image: true,
-    quote: "Distribution expansion is strongest across the Southeast region, with demand pockets clustering around new warehouse nodes.",
+    quote:
+      "Distribution expansion is strongest across the Southeast region, with demand pockets clustering around new warehouse nodes.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -262,7 +297,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Alpha",
     fileIcon: "sheet",
     fileName: "Packaging_Line_CapEx_Model.xlsx",
-    quote: "The automated packaging line is forecast to reduce annual maintenance and labor expense by $4.8 million.",
+    quote:
+      "The automated packaging line is forecast to reduce annual maintenance and labor expense by $4.8 million.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -271,7 +307,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Alpha",
     fileIcon: "pdf",
     fileName: "Phase_I_Environmental_Assessment.pdf",
-    quote: "Historical solvent storage near the east loading bay requires targeted soil sampling before close.",
+    quote:
+      "Historical solvent storage near the east loading bay requires targeted soil sampling before close.",
     toneClassName: "bg-error",
     toneTextClassName: "text-error",
   },
@@ -280,7 +317,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Alpha",
     fileIcon: "sheet",
     fileName: "Employee_Retention_Analysis.xlsx",
-    quote: "Retention among critical engineering roles remained above 91% over the last twelve months.",
+    quote:
+      "Retention among critical engineering roles remained above 91% over the last twelve months.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -289,7 +327,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Alpha",
     fileIcon: "doc",
     fileName: "Customer_Concentration_Report.docx",
-    quote: "The five largest customers represent 38% of revenue, with no individual customer exceeding 11%.",
+    quote:
+      "The five largest customers represent 38% of revenue, with no individual customer exceeding 11%.",
     toneClassName: "bg-accent",
     toneTextClassName: "text-accent",
   },
@@ -298,7 +337,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Beta",
     fileIcon: "pdf",
     fileName: "Contract_Dist_v2.pdf",
-    quote: "Clause 4.2 indicates severe penalties if delivery quotas to main distributor fall below 95%.",
+    quote:
+      "Clause 4.2 indicates severe penalties if delivery quotas to main distributor fall below 95%.",
     toneClassName: "bg-accent",
     toneTextClassName: "text-accent",
   },
@@ -307,7 +347,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Beta",
     fileIcon: "doc",
     fileName: "ERP_Cutover_Notes.docx",
-    quote: "The testing backlog is concentrated in billing workflows, increasing cutover risk if revenue operations remains understaffed.",
+    quote:
+      "The testing backlog is concentrated in billing workflows, increasing cutover risk if revenue operations remains understaffed.",
     toneClassName: "bg-[#6b87c8]",
     toneTextClassName: "text-accent",
   },
@@ -316,7 +357,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Beta",
     fileIcon: "pdf",
     fileName: "Top_10_Customer_Contracts.pdf",
-    quote: "Three strategic customer agreements permit termination for convenience with less than ninety days of notice.",
+    quote:
+      "Three strategic customer agreements permit termination for convenience with less than ninety days of notice.",
     toneClassName: "bg-error",
     toneTextClassName: "text-error",
   },
@@ -325,7 +367,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Beta",
     fileIcon: "sheet",
     fileName: "Margin_Bridge_FY26.xlsx",
-    quote: "Approximately two-thirds of projected margin expansion depends on pricing actions already implemented.",
+    quote:
+      "Approximately two-thirds of projected margin expansion depends on pricing actions already implemented.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -334,7 +377,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Project Beta",
     fileIcon: "doc",
     fileName: "ERP_Cutover_Plan.docx",
-    quote: "The revised cutover plan adds a parallel billing run but leaves only ten business days for reconciliation.",
+    quote:
+      "The revised cutover plan adds a parallel billing run but leaves only ten business days for reconciliation.",
     toneClassName: "bg-accent",
     toneTextClassName: "text-accent",
   },
@@ -344,7 +388,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     fileIcon: "image",
     fileName: "Distribution_Network_Map.png",
     image: true,
-    quote: "Two regional distribution centers account for 57% of outbound volume and have limited overflow capacity.",
+    quote:
+      "Two regional distribution centers account for 57% of outbound volume and have limited overflow capacity.",
     toneClassName: "bg-muted",
     toneTextClassName: "text-muted",
   },
@@ -353,7 +398,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "pdf",
     fileName: "Lane_Overlap_Model.pdf",
-    quote: "Twelve overlapping lanes can be consolidated without changing promised delivery windows.",
+    quote:
+      "Twelve overlapping lanes can be consolidated without changing promised delivery windows.",
     toneClassName: "bg-muted",
     toneTextClassName: "text-muted",
   },
@@ -362,7 +408,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "doc",
     fileName: "Depot_Labor_Summary.docx",
-    quote: "Two unionized depots require separate consultation periods before schedule redesign can begin.",
+    quote:
+      "Two unionized depots require separate consultation periods before schedule redesign can begin.",
     toneClassName: "bg-error",
     toneTextClassName: "text-error",
   },
@@ -371,7 +418,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "sheet",
     fileName: "Fleet_Maintenance_Benchmark.xlsx",
-    quote: "Consolidated procurement could lower parts and maintenance expense by 8% across the combined fleet.",
+    quote:
+      "Consolidated procurement could lower parts and maintenance expense by 8% across the combined fleet.",
     toneClassName: "bg-primary",
     toneTextClassName: "text-primary",
   },
@@ -380,7 +428,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "sheet",
     fileName: "Cross_Dock_Utilization_Model.xlsx",
-    quote: "Night-shift utilization can increase by 14 percentage points without additional dock expansion.",
+    quote:
+      "Night-shift utilization can increase by 14 percentage points without additional dock expansion.",
     toneClassName: "bg-accent",
     toneTextClassName: "text-accent",
   },
@@ -389,7 +438,8 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "pdf",
     fileName: "Transportation_Compliance_Audit.pdf",
-    quote: "Four open driver-hours exceptions require remediation, but none are expected to delay integration.",
+    quote:
+      "Four open driver-hours exceptions require remediation, but none are expected to delay integration.",
     toneClassName: "bg-error",
     toneTextClassName: "text-error",
   },
@@ -398,19 +448,35 @@ const workspaceInsightRecords: Omit<WorkspaceInsight, "analyzedAtLabel" | "confi
     deal: "Logistics Merger",
     fileIcon: "doc",
     fileName: "Service_Level_Review.docx",
-    quote: "On-time delivery performance remained above 96% in every region except the Midwest corridor.",
+    quote:
+      "On-time delivery performance remained above 96% in every region except the Midwest corridor.",
     toneClassName: "bg-muted",
     toneTextClassName: "text-muted",
   },
 ];
 
-export const workspaceInsights: WorkspaceInsight[] = workspaceInsightRecords.map((insight, index) => ({
-  ...insight,
-  analyzedAtLabel: "Analyzed today",
-  confidenceLabel: insight.image ? "92%" : index % 2 === 0 ? "96%" : "94%",
-}));
+export const workspaceInsights: WorkspaceInsight[] =
+  workspaceInsightRecords.map((insight, index) => ({
+    ...insight,
+    analyzedAtLabel: "Analyzed today",
+    confidenceLabel: insight.image ? "92%" : index % 2 === 0 ? "96%" : "94%",
+  }));
 
 function fixtureParty(name: string): DealParty {
-  return { companyId: `demo-${name}`, dealPartyId: `demo-party-${name}`, role: "target", notes: null,
-    company: { companyId: `demo-${name}`, userId: 0, name, website: null, industry: null, description: null, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" } };
+  return {
+    companyId: `demo-${name}`,
+    dealPartyId: `demo-party-${name}`,
+    role: "target",
+    notes: null,
+    company: {
+      companyId: `demo-${name}`,
+      userId: 0,
+      name,
+      website: null,
+      industry: null,
+      description: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    },
+  };
 }

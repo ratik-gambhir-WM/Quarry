@@ -43,7 +43,9 @@ export function DataRoomDocumentSearch({
         });
 
         return {
-          disabledReason: available ? undefined : "Preview navigation unavailable",
+          disabledReason: available
+            ? undefined
+            : "Preview navigation unavailable",
           id: result.id,
           primaryText: formatDocumentSearchFileName(result.fileName),
           searchText: `${result.fileName} ${result.location} ${result.excerpt}`,

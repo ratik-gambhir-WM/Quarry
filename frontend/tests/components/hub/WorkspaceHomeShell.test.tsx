@@ -10,7 +10,9 @@ const { retryDeals, useWorkspaceMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/WorkspaceProvider", () => ({ useWorkspace: useWorkspaceMock }));
-vi.mock("@/components/hub/WorkspaceSidebar", () => ({ WorkspaceSidebar: () => <aside /> }));
+vi.mock("@/components/hub/WorkspaceSidebar", () => ({
+  WorkspaceSidebar: () => <aside />,
+}));
 
 afterEach(cleanup);
 
@@ -27,7 +29,9 @@ describe("WorkspaceHomeShell", () => {
   });
 
   it("labels explicitly selected demo data", () => {
-    render(<WorkspaceHomeShell header={null}>Workspace content</WorkspaceHomeShell>);
+    render(
+      <WorkspaceHomeShell header={null}>Workspace content</WorkspaceHomeShell>,
+    );
 
     expect(screen.getByRole("status").textContent).toContain("Demo data");
     expect(screen.getByText("Workspace content")).toBeTruthy();
@@ -41,9 +45,13 @@ describe("WorkspaceHomeShell", () => {
       retryDeals,
       tools: [],
     });
-    render(<WorkspaceHomeShell header={null}>Account content</WorkspaceHomeShell>);
+    render(
+      <WorkspaceHomeShell header={null}>Account content</WorkspaceHomeShell>,
+    );
 
-    expect(screen.getByRole("alert").textContent).toContain("Service unavailable");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Service unavailable",
+    );
     expect(screen.getByText("Account content")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retryDeals).toHaveBeenCalledTimes(1);
@@ -57,7 +65,9 @@ describe("WorkspaceHomeShell", () => {
     );
 
     expect(screen.getByRole("status").textContent).toContain("Demo data");
-    expect(screen.getByText("Assistant thread").parentElement?.className).toContain("min-h-0 flex-1");
+    expect(
+      screen.getByText("Assistant thread").parentElement?.className,
+    ).toContain("min-h-0 flex-1");
     expect(container.querySelector(".overflow-hidden.p-0")).toBeTruthy();
   });
 });

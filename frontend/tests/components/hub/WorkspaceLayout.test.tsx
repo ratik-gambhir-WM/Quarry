@@ -5,7 +5,10 @@ import { WorkspaceLayout } from "@/components/hub/WorkspaceLayout";
 describe("WorkspaceLayout", () => {
   it("renders the workspace content as an inset surface inside the shared shell", () => {
     const markup = renderToStaticMarkup(
-      <WorkspaceLayout header={<span>Header</span>} sidebar={<aside>Sidebar</aside>}>
+      <WorkspaceLayout
+        header={<span>Header</span>}
+        sidebar={<aside>Sidebar</aside>}
+      >
         <p>Content</p>
       </WorkspaceLayout>,
     );
@@ -15,7 +18,9 @@ describe("WorkspaceLayout", () => {
     expect(markup).toContain("workspace-main-surface");
     expect(markup).toContain("data-workspace-primary-sidebar");
     expect(markup).toContain("workspace-main-rail flex h-10");
-    expect(markup.indexOf("Sidebar")).toBeLessThan(markup.indexOf("workspace-main-surface"));
+    expect(markup.indexOf("Sidebar")).toBeLessThan(
+      markup.indexOf("workspace-main-surface"),
+    );
     expect(markup.indexOf("Header")).toBeLessThan(markup.indexOf("Content"));
   });
 
@@ -26,7 +31,11 @@ describe("WorkspaceLayout", () => {
       </WorkspaceLayout>,
     );
     const fill = renderToStaticMarkup(
-      <WorkspaceLayout contentMode="fill" header={null} sidebar={<aside>Sidebar</aside>}>
+      <WorkspaceLayout
+        contentMode="fill"
+        header={null}
+        sidebar={<aside>Sidebar</aside>}
+      >
         Content
       </WorkspaceLayout>,
     );

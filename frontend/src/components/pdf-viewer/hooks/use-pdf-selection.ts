@@ -31,7 +31,8 @@ export function usePdfSelection(args: UsePdfSelectionArgs): string {
     const onSelectionChange = () => {
       if (timeout != null) clearTimeout(timeout);
       timeout = setTimeout(() => {
-        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        const sel =
+          typeof window !== "undefined" ? window.getSelection() : null;
         if (!sel || sel.rangeCount === 0) {
           updateSelectedText("");
           return;

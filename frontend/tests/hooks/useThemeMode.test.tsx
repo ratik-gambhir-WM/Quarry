@@ -31,7 +31,9 @@ describe("ThemeModeProvider", () => {
 
     expect(screen.getByRole("button", { name: "slate-frost" })).toBeTruthy();
     expect(document.documentElement.dataset.theme).toBe("slate-frost");
-    expect(window.localStorage.getItem("quarry-theme-mode")).toBe("slate-frost");
+    expect(window.localStorage.getItem("quarry-theme-mode")).toBe(
+      "slate-frost",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "slate-frost" }));
 

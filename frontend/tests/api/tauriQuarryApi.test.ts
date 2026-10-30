@@ -7,19 +7,36 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
-  it.each(dealStatusOptions)("preserves %s through create, update and read", async (status) => {
-    const input = { ...testDealInput(), status };
-    const response = { deal: testDeal({ status }), metadata: testMetadata() };
-    const post = vi.fn().mockResolvedValue(response);
-    const get = vi.fn().mockResolvedValue(response);
-    const api = createTauriQuarryApi({ delete: vi.fn(), get, getPdf: vi.fn(), post, postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
-    expect((await api.createDeal(input)).deal.status).toBe(status);
-    expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(status);
-    get.mockResolvedValue({ ...response.deal, metadata: response.metadata });
-    expect((await api.getDeal(input.dealId)).status).toBe(status);
-    expect(post).toHaveBeenNthCalledWith(1, "/api/v1/deals", input);
-    expect(post).toHaveBeenNthCalledWith(2, `/api/v1/deals/${input.dealId}/update`, input);
-  });
+  it.each(dealStatusOptions)(
+    "preserves %s through create, update and read",
+    async (status) => {
+      const input = { ...testDealInput(), status };
+      const response = { deal: testDeal({ status }), metadata: testMetadata() };
+      const post = vi.fn().mockResolvedValue(response);
+      const get = vi.fn().mockResolvedValue(response);
+      const api = createTauriQuarryApi({
+        delete: vi.fn(),
+        get,
+        getPdf: vi.fn(),
+        post,
+        postPowerPoint: vi.fn(),
+        postMultipart: vi.fn(),
+        subscribeJob: vi.fn(),
+      });
+      expect((await api.createDeal(input)).deal.status).toBe(status);
+      expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(
+        status,
+      );
+      get.mockResolvedValue({ ...response.deal, metadata: response.metadata });
+      expect((await api.getDeal(input.dealId)).status).toBe(status);
+      expect(post).toHaveBeenNthCalledWith(1, "/api/v1/deals", input);
+      expect(post).toHaveBeenNthCalledWith(
+        2,
+        `/api/v1/deals/${input.dealId}/update`,
+        input,
+      );
+    },
+  );
 
   it("keeps summaries upload-only through the desktop multipart relay", async () => {
     const postMultipart = vi.fn().mockResolvedValue({ summary: "Summary" });
@@ -35,12 +52,25 @@ describe("createTauriQuarryApi", () => {
     const file = new File(["Report"], "report.txt", { type: "text/plain" });
 
     await expect(api.summarizeUpload([file])).resolves.toBe("Summary");
-    expect(postMultipart).toHaveBeenCalledWith(expect.objectContaining({
-      path: "/api/v1/summarize/upload",
-      fields: [],
-      files: [{ dataBase64: "UmVwb3J0", fieldName: "files", filename: "report.txt", mimeType: "text/plain" }],
-    }));
-    for (const method of ["listSummaryFiles", "summarizePath", "summarizeSelected"]) {
+    expect(postMultipart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/summarize/upload",
+        fields: [],
+        files: [
+          {
+            dataBase64: "UmVwb3J0",
+            fieldName: "files",
+            filename: "report.txt",
+            mimeType: "text/plain",
+          },
+        ],
+      }),
+    );
+    for (const method of [
+      "listSummaryFiles",
+      "summarizePath",
+      "summarizeSelected",
+    ]) {
       expect(api).not.toHaveProperty(method);
     }
   });
@@ -85,7 +115,9 @@ describe("createTauriQuarryApi", () => {
     });
 
     await expect(api.deleteTemplate("template/one")).resolves.toBeUndefined();
-    expect(deleteRequest).toHaveBeenCalledWith("/api/v1/templates/template%2Fone");
+    expect(deleteRequest).toHaveBeenCalledWith(
+      "/api/v1/templates/template%2Fone",
+    );
   });
 
   it("deletes an encoded assistant thread through the desktop relay", async () => {
@@ -100,8 +132,9 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    await expect(api.deleteAssistantThread("thread/one"))
-      .resolves.toBeUndefined();
+    await expect(
+      api.deleteAssistantThread("thread/one"),
+    ).resolves.toBeUndefined();
     expect(deleteRequest).toHaveBeenCalledWith(
       "/api/v1/assistant/threads/thread%2Fone",
     );
@@ -128,7 +161,8 @@ describe("createTauriQuarryApi", () => {
     const result = {
       dataBase64: "UEsDBA==",
       fileName: "Example.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
       warningCount: 0,
     };
     const postPowerPoint = vi.fn().mockResolvedValue(result);
@@ -144,7 +178,10 @@ describe("createTauriQuarryApi", () => {
     const document = templateDocument();
 
     await expect(api.exportPowerPoint(document)).resolves.toEqual(result);
-    expect(postPowerPoint).toHaveBeenCalledWith("/api/v1/templates/export", document);
+    expect(postPowerPoint).toHaveBeenCalledWith(
+      "/api/v1/templates/export",
+      document,
+    );
   });
 
   it("rejects malformed template documents returned by the desktop relay", async () => {
@@ -166,7 +203,11 @@ describe("createTauriQuarryApi", () => {
   it.each(["single", "batch"] as const)(
     "imports one PPTX through the desktop %s route and normalizes an empty MIME type",
     async (importMode) => {
-      const result = { importMode, importedCount: importMode === "single" ? 1 : 2, warningCount: 0 };
+      const result = {
+        importMode,
+        importedCount: importMode === "single" ? 1 : 2,
+        warningCount: 0,
+      };
       const postMultipart = vi.fn().mockResolvedValue(result);
       const api = createTauriQuarryApi({
         delete: vi.fn(),
@@ -177,19 +218,26 @@ describe("createTauriQuarryApi", () => {
         postMultipart,
         subscribeJob: vi.fn(),
       });
-      const file = new File([new Uint8Array([1, 2, 3])], "Template.PPTX", { type: "" });
+      const file = new File([new Uint8Array([1, 2, 3])], "Template.PPTX", {
+        type: "",
+      });
 
-      await expect(api.importPptxTemplate(file, importMode)).resolves.toEqual(result);
+      await expect(api.importPptxTemplate(file, importMode)).resolves.toEqual(
+        result,
+      );
 
       expect(postMultipart).toHaveBeenCalledWith({
-      sessionGeneration: expect.any(Number),
+        sessionGeneration: expect.any(Number),
         fields: [],
-        files: [{
-          dataBase64: "AQID",
-          fieldName: "files",
-          filename: "Template.PPTX",
-          mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        }],
+        files: [
+          {
+            dataBase64: "AQID",
+            fieldName: "files",
+            filename: "Template.PPTX",
+            mimeType:
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          },
+        ],
         path: `/api/v1/templates/import?mode=${importMode}`,
       });
     },
@@ -224,7 +272,9 @@ describe("createTauriQuarryApi", () => {
   });
 
   it("relays XLSX and PPTX process-file bytes without requiring a browser MIME type", async () => {
-    const postMultipart = vi.fn().mockResolvedValue({ filename: "model.xlsx", jobId: "job-1" });
+    const postMultipart = vi
+      .fn()
+      .mockResolvedValue({ filename: "model.xlsx", jobId: "job-1" });
     const api = createTauriQuarryApi({
       delete: vi.fn(),
       get: vi.fn(),
@@ -247,23 +297,27 @@ describe("createTauriQuarryApi", () => {
     expect(postMultipart).toHaveBeenNthCalledWith(1, {
       sessionGeneration: expect.any(Number),
       fields: [],
-      files: [{
-        dataBase64: "AQID",
-        fieldName: "files",
-        filename: "model.XLSX",
-        mimeType: "application/octet-stream",
-      }],
+      files: [
+        {
+          dataBase64: "AQID",
+          fieldName: "files",
+          filename: "model.XLSX",
+          mimeType: "application/octet-stream",
+        },
+      ],
       path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
     });
     expect(postMultipart).toHaveBeenNthCalledWith(2, {
       sessionGeneration: expect.any(Number),
       fields: [],
-      files: [{
-        dataBase64: "BAUG",
-        fieldName: "files",
-        filename: "board.pptx",
-        mimeType: "application/octet-stream",
-      }],
+      files: [
+        {
+          dataBase64: "BAUG",
+          fieldName: "files",
+          filename: "board.pptx",
+          mimeType: "application/octet-stream",
+        },
+      ],
       path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
     });
   });
@@ -304,13 +358,17 @@ describe("createTauriQuarryApi", () => {
   it("uses the deal-scoped document routes for lists, PDF bytes, and raw text", async () => {
     const get = vi
       .fn()
-      .mockResolvedValueOnce([{ displayName: "Report.pdf", fileId: "file / 1" }])
+      .mockResolvedValueOnce([
+        { displayName: "Report.pdf", fileId: "file / 1" },
+      ])
       .mockResolvedValueOnce({
         fileName: "Report.pdf",
         sourceKind: "pdf",
         text: "Raw report text",
       });
-    const getPdf = vi.fn().mockResolvedValue(new Uint8Array([37, 80, 68, 70, 45]).buffer);
+    const getPdf = vi
+      .fn()
+      .mockResolvedValue(new Uint8Array([37, 80, 68, 70, 45]).buffer);
     const api = createTauriQuarryApi({
       delete: vi.fn(),
       get,
@@ -323,7 +381,10 @@ describe("createTauriQuarryApi", () => {
 
     const documents = await api.listDealDocuments("DEAL / 1");
     const pdf = await api.getDealDocumentPdf("DEAL / 1", documents[0].fileId);
-    const rawText = await api.getDealDocumentText("DEAL / 1", documents[0].fileId);
+    const rawText = await api.getDealDocumentText(
+      "DEAL / 1",
+      documents[0].fileId,
+    );
 
     expect(get).toHaveBeenCalledWith("/api/v1/deals/DEAL%20%2F%201/documents");
     expect(getPdf).toHaveBeenCalledWith(
@@ -338,61 +399,89 @@ describe("createTauriQuarryApi", () => {
   });
 
   it("maps query files and isolates server events behind the desktop transport", async () => {
-    const startQuery = vi.fn(async (
-      _request: unknown,
-      onPayload: (payload: TauriQueryPayload) => void,
-    ) => {
-      onPayload({
-        event: { model: "gpt-5.5", type: "started" },
-        kind: "serverEvent",
-        subscriptionId: "subscription",
-      });
-      return vi.fn();
-    });
+    const startQuery = vi.fn(
+      async (
+        _request: unknown,
+        onPayload: (payload: TauriQueryPayload) => void,
+      ) => {
+        onPayload({
+          event: { model: "gpt-5.5", type: "started" },
+          kind: "serverEvent",
+          subscriptionId: "subscription",
+        });
+        return vi.fn();
+      },
+    );
     const api = createTauriQuarryApi({
-      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
-      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      postPowerPoint: vi.fn(),
+      startQuery,
+      subscribeJob: vi.fn(),
     });
     const events: string[] = [];
-    api.queryModel({
-      context: [],
-      files: [new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" })],
-      prompt: "hello",
-    }, { onEvent: (event) => events.push(event.type) });
+    api.queryModel(
+      {
+        context: [],
+        files: [
+          new File([new Uint8Array([1, 2, 3])], "image.png", {
+            type: "image/png",
+          }),
+        ],
+        prompt: "hello",
+      },
+      { onEvent: (event) => events.push(event.type) },
+    );
     await vi.waitFor(() => expect(events).toEqual(["started"]));
     expect(startQuery.mock.calls[0][0]).toMatchObject({
       context: [],
-      files: [{ dataBase64: "AQID", filename: "image.png", mimeType: "image/png" }],
+      files: [
+        { dataBase64: "AQID", filename: "image.png", mimeType: "image/png" },
+      ],
       path: "/api/v1/query_model",
       prompt: "hello",
     });
   });
 
   it("maps persisted assistant identifiers to the thread-scoped desktop stream", async () => {
-    const startQuery = vi.fn(async (
-      _request: unknown,
-      onPayload: (payload: TauriQueryPayload) => void,
-    ) => {
-      onPayload({
-        event: { response: "done", type: "completed" },
-        kind: "serverEvent",
-        subscriptionId: "subscription",
-      });
-      return vi.fn();
-    });
+    const startQuery = vi.fn(
+      async (
+        _request: unknown,
+        onPayload: (payload: TauriQueryPayload) => void,
+      ) => {
+        onPayload({
+          event: { response: "done", type: "completed" },
+          kind: "serverEvent",
+          subscriptionId: "subscription",
+        });
+        return vi.fn();
+      },
+    );
     const api = createTauriQuarryApi({
-      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
-      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      postPowerPoint: vi.fn(),
+      startQuery,
+      subscribeJob: vi.fn(),
     });
 
-    api.runAssistantThread({
-      assistantMessageId: "assistant-1",
-      files: [],
-      prompt: "hello",
-      requestId: "assistant-1",
-      threadId: "thread-1",
-      userMessageId: "user-1",
-    }, { onEvent: vi.fn() });
+    api.runAssistantThread(
+      {
+        assistantMessageId: "assistant-1",
+        files: [],
+        prompt: "hello",
+        requestId: "assistant-1",
+        threadId: "thread-1",
+        userMessageId: "user-1",
+      },
+      { onEvent: vi.fn() },
+    );
 
     await vi.waitFor(() => expect(startQuery).toHaveBeenCalledOnce());
     expect(startQuery.mock.calls[0][0]).toMatchObject({
@@ -407,25 +496,33 @@ describe("createTauriQuarryApi", () => {
 
   it("disposes a desktop query whose terminal callback fires before startup resolves", async () => {
     const cleanup = vi.fn();
-    const startQuery = vi.fn(async (
-      _request: unknown,
-      onPayload: (payload: TauriQueryPayload) => void,
-    ) => {
-      onPayload({
-        event: { model: "gpt-5.5", type: "started" },
-        kind: "serverEvent",
-        subscriptionId: "subscription",
-      });
-      onPayload({
-        event: { response: "done", type: "completed" },
-        kind: "serverEvent",
-        subscriptionId: "subscription",
-      });
-      return cleanup;
-    });
+    const startQuery = vi.fn(
+      async (
+        _request: unknown,
+        onPayload: (payload: TauriQueryPayload) => void,
+      ) => {
+        onPayload({
+          event: { model: "gpt-5.5", type: "started" },
+          kind: "serverEvent",
+          subscriptionId: "subscription",
+        });
+        onPayload({
+          event: { response: "done", type: "completed" },
+          kind: "serverEvent",
+          subscriptionId: "subscription",
+        });
+        return cleanup;
+      },
+    );
     const api = createTauriQuarryApi({
-      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
-      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      postPowerPoint: vi.fn(),
+      startQuery,
+      subscribeJob: vi.fn(),
     });
 
     const cancel = api.queryModel(
@@ -440,16 +537,24 @@ describe("createTauriQuarryApi", () => {
   it("disposes an active desktop query after a connection error", async () => {
     const cleanup = vi.fn();
     let deliver: ((payload: TauriQueryPayload) => void) | undefined;
-    const startQuery = vi.fn(async (
-      _request: unknown,
-      onPayload: (payload: TauriQueryPayload) => void,
-    ) => {
-      deliver = onPayload;
-      return cleanup;
-    });
+    const startQuery = vi.fn(
+      async (
+        _request: unknown,
+        onPayload: (payload: TauriQueryPayload) => void,
+      ) => {
+        deliver = onPayload;
+        return cleanup;
+      },
+    );
     const api = createTauriQuarryApi({
-      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post: vi.fn(),
-      postMultipart: vi.fn(), postPowerPoint: vi.fn(), startQuery, subscribeJob: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(),
+      getPdf: vi.fn(),
+      post: vi.fn(),
+      postMultipart: vi.fn(),
+      postPowerPoint: vi.fn(),
+      startQuery,
+      subscribeJob: vi.fn(),
     });
     const onConnectionError = vi.fn();
 
@@ -474,14 +579,16 @@ function templateDocument() {
     presentation: {
       preserveElementOrder: true,
       showBranding: false,
-      slides: [{
-        backgroundColor: "FFFFFF",
-        elements: [],
-        height: 720,
-        id: "slide-1",
-        name: "Slide 1",
-        width: 1280,
-      }],
+      slides: [
+        {
+          backgroundColor: "FFFFFF",
+          elements: [],
+          height: 720,
+          id: "slide-1",
+          name: "Slide 1",
+          width: 1280,
+        },
+      ],
       title: "Example",
     },
   };
@@ -490,16 +597,52 @@ function templateDocument() {
 it("relays company, aggregate updates and nullable/scoped chats with encoded paths", async () => {
   const get = vi.fn().mockResolvedValue({ companies: [], hasMore: false });
   const post = vi.fn().mockResolvedValue({});
-  const api = createTauriQuarryApi({ get, post, delete: vi.fn(), getPdf: vi.fn(), postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
-  const fields = { dealName: "Draft", dealCode: null, engagementType: "sell_side" as const, transactionType: "unknown" as const, status: "pipeline" as const, startDate: null, expectedCloseDate: null, actualCloseDate: null, engagementCompletedDate: null, parties: [], scopes: [] };
+  const api = createTauriQuarryApi({
+    get,
+    post,
+    delete: vi.fn(),
+    getPdf: vi.fn(),
+    postPowerPoint: vi.fn(),
+    postMultipart: vi.fn(),
+    subscribeJob: vi.fn(),
+  });
+  const fields = {
+    dealName: "Draft",
+    dealCode: null,
+    engagementType: "sell_side" as const,
+    transactionType: "unknown" as const,
+    status: "pipeline" as const,
+    startDate: null,
+    expectedCloseDate: null,
+    actualCloseDate: null,
+    engagementCompletedDate: null,
+    parties: [],
+    scopes: [],
+  };
   await api.updateDeal("DEAL/A", fields);
-  expect(post).toHaveBeenLastCalledWith("/api/v1/deals/DEAL%2FA/update", fields);
+  expect(post).toHaveBeenLastCalledWith(
+    "/api/v1/deals/DEAL%2FA/update",
+    fields,
+  );
   await api.listCompanies({ query: "A & B", limit: 30, offset: 30 });
-  expect(get).toHaveBeenLastCalledWith("/api/v1/companies?query=A+%26+B&limit=30&offset=30");
+  expect(get).toHaveBeenLastCalledWith(
+    "/api/v1/companies?query=A+%26+B&limit=30&offset=30",
+  );
   await api.createAssistantThread(undefined, null);
-  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { dealId: null });
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", {
+    dealId: null,
+  });
   await api.createAssistantThread("linked", "DEAL/A");
-  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", { threadId: "linked", dealId: "DEAL/A" });
-  await api.listAssistantThreads({ scope: "deal", dealId: "DEAL/A", after: "cursor|1" });
-  expect(get).toHaveBeenLastCalledWith("/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA");
+  expect(post).toHaveBeenLastCalledWith("/api/v1/assistant/threads", {
+    threadId: "linked",
+    dealId: "DEAL/A",
+  });
+  await api.listAssistantThreads({
+    scope: "deal",
+    dealId: "DEAL/A",
+    after: "cursor|1",
+  });
+  expect(get).toHaveBeenLastCalledWith(
+    "/api/v1/assistant/threads?before=cursor%7C1&scope=deal&dealId=DEAL%2FA",
+  );
 });

@@ -12,7 +12,10 @@ type TimelineEntryProps = {
   marker: ReactNode;
 };
 
-export function TimelinePanelHeader({ className, title }: TimelinePanelHeaderProps) {
+export function TimelinePanelHeader({
+  className,
+  title,
+}: TimelinePanelHeaderProps) {
   return (
     <div className={cn("mb-7 flex items-center justify-between", className)}>
       <h2 className="type-h2 text-text-main">{title}</h2>

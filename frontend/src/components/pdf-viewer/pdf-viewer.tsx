@@ -70,8 +70,7 @@ function buildPageLayout(
   let offset = 0;
   for (let index = 0; index < numPages; index += 1) {
     const size = pageSizes[index] ?? fallback;
-    const height =
-      (rotation % 180 === 0 ? size.height : size.width) * scale;
+    const height = (rotation % 180 === 0 ? size.height : size.width) * scale;
     offsets[index] = offset;
     heights[index] = height;
     offset += height + (index + 1 < numPages ? PDF_PAGE_GAP_PX : 0);
@@ -145,10 +144,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     }, [source, onSourceChange]);
 
     // Notify on dropped-source change (when user drops a file)
-    const replaceSource = (
-      next: PdfSource | null,
-      reason: "prop" | "drop",
-    ) => {
+    const replaceSource = (next: PdfSource | null, reason: "prop" | "drop") => {
       setInternalSource(next);
       onSourceChange?.({ source: next, reason });
     };
@@ -335,7 +331,8 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
 
     // Status (drives UI surface)
     const status: PdfStatus = useMemo(() => {
-      if (pendingSource || (source != null && internalSource !== source)) return "loading";
+      if (pendingSource || (source != null && internalSource !== source))
+        return "loading";
       if (documentState.status === "idle") return "empty";
       if (documentState.status === "loading") return "loading";
       if (documentState.status === "password") return "password";
@@ -545,9 +542,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
           style={style}
           data-pdf-viewer-root
         >
-          {toolbar
-            ? (renderToolbar?.(toolbarCtx) ?? <PdfToolbar />)
-            : null}
+          {toolbar ? (renderToolbar?.(toolbarCtx) ?? <PdfToolbar />) : null}
 
           <div
             ref={scrollContainerRef}
@@ -568,10 +563,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
             tabIndex={0}
           >
             {status === "empty" ? (
-              <PdfEmptyState
-                labels={labels}
-                enableDragDrop={enableDragDrop}
-              />
+              <PdfEmptyState labels={labels} enableDragDrop={enableDragDrop} />
             ) : null}
             {status === "loading" ? <PdfLoadingState labels={labels} /> : null}
             {status === "error" && documentState.error ? (
@@ -655,7 +647,10 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
             : null}
 
           {/* Custom context-menu slot (when consumer overrides) */}
-          {status === "ready" && enableContextMenu && renderContextMenu && customMenuPos
+          {status === "ready" &&
+          enableContextMenu &&
+          renderContextMenu &&
+          customMenuPos
             ? renderContextMenu(contextMenuCtx)
             : null}
 

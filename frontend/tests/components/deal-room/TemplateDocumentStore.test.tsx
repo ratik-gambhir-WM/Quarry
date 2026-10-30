@@ -36,7 +36,9 @@ describe("TemplateDocumentStore", () => {
       .mockResolvedValueOnce(makeDocument("Retried"));
     renderStore("example");
 
-    expect(await screen.findByText("This template could not be opened.")).not.toBeNull();
+    expect(
+      await screen.findByText("This template could not be opened."),
+    ).not.toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Retried:clean")).not.toBeNull();
     expect(getTemplate).toHaveBeenCalledTimes(2);
@@ -67,12 +69,21 @@ function Probe() {
   const { retry, updateDocument } = useTemplateDocumentActions();
   if (state.status === "loading") return <p>loading</p>;
   if (state.status === "error") {
-    return <><p>{state.message}</p><button onClick={retry}>Retry</button></>;
+    return (
+      <>
+        <p>{state.message}</p>
+        <button onClick={retry}>Retry</button>
+      </>
+    );
   }
   return (
     <>
-      <p>{state.document.presentation.title}:{state.isDirty ? "dirty" : "clean"}</p>
-      <button onClick={() => updateDocument(makeDocument("Edited"))}>Edit</button>
+      <p>
+        {state.document.presentation.title}:{state.isDirty ? "dirty" : "clean"}
+      </p>
+      <button onClick={() => updateDocument(makeDocument("Edited"))}>
+        Edit
+      </button>
     </>
   );
 }
@@ -82,14 +93,16 @@ function makeDocument(title: string): DiligenceCanvasDocument {
     presentation: {
       preserveElementOrder: true,
       showBranding: false,
-      slides: [{
-        backgroundColor: "FFFFFF",
-        elements: [],
-        height: 720,
-        id: "slide-1",
-        name: "Slide 1",
-        width: 1280,
-      }],
+      slides: [
+        {
+          backgroundColor: "FFFFFF",
+          elements: [],
+          height: 720,
+          id: "slide-1",
+          name: "Slide 1",
+          width: 1280,
+        },
+      ],
       title,
     },
   };
@@ -97,6 +110,8 @@ function makeDocument(title: string): DiligenceCanvasDocument {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((fulfill) => { resolve = fulfill; });
+  const promise = new Promise<T>((fulfill) => {
+    resolve = fulfill;
+  });
   return { promise, resolve };
 }

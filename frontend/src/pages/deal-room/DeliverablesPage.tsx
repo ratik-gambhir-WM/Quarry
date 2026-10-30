@@ -13,11 +13,17 @@ export function DeliverablesPage() {
       header={
         <DeliverablesHeader
           mode="deliverables"
-          onViewTemplates={() => navigate(getDeliverableTemplatesPath(deal.room.id), { state: navigationState })}
+          onViewTemplates={() =>
+            navigate(getDeliverableTemplatesPath(deal.room.id), {
+              state: navigationState,
+            })
+          }
         />
       }
     >
-      <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col"><DeliverablesView /></div>
+      <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col">
+        <DeliverablesView />
+      </div>
     </WorkspaceMain>
   );
 }

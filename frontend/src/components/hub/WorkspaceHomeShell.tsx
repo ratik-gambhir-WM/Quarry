@@ -25,9 +25,18 @@ export function WorkspaceHomeShell({
   header,
   sidebarMode = "home",
 }: WorkspaceHomeShellProps) {
-  const { deals, dealsResource, email, initiatives, navigationState, retryDeals, tools } = useWorkspace();
-  const hasDealsNotice = dealsResource.status === "error"
-    || (dealsResource.status === "success" && dealsResource.source === "demo");
+  const {
+    deals,
+    dealsResource,
+    email,
+    initiatives,
+    navigationState,
+    retryDeals,
+    tools,
+  } = useWorkspace();
+  const hasDealsNotice =
+    dealsResource.status === "error" ||
+    (dealsResource.status === "success" && dealsResource.source === "demo");
 
   return (
     <WorkspaceLayout
@@ -56,11 +65,16 @@ export function WorkspaceHomeShell({
               />
             </div>
           ) : null}
-          <div className={`min-h-0 flex-1 ${hasDealsNotice ? "pt-4" : ""}`}>{children}</div>
+          <div className={`min-h-0 flex-1 ${hasDealsNotice ? "pt-4" : ""}`}>
+            {children}
+          </div>
         </div>
       ) : (
         <>
-          <WorkspaceDealsResourceNotice dealsResource={dealsResource} onRetry={retryDeals} />
+          <WorkspaceDealsResourceNotice
+            dealsResource={dealsResource}
+            onRetry={retryDeals}
+          />
           {hasDealsNotice ? <div className="mt-4">{children}</div> : children}
         </>
       )}
@@ -99,10 +113,17 @@ function WorkspaceDealsNotice({
   role: "alert" | "status";
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[13px] text-text-main" role={role}>
+    <div
+      className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[13px] text-text-main"
+      role={role}
+    >
       <span>{message}</span>
       {actionLabel && onAction ? (
-        <button className="font-semibold text-primary hover:underline" onClick={onAction} type="button">
+        <button
+          className="font-semibold text-primary hover:underline"
+          onClick={onAction}
+          type="button"
+        >
           {actionLabel}
         </button>
       ) : null}

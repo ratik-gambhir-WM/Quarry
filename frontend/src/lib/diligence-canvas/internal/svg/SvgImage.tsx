@@ -1,19 +1,19 @@
-import { memo } from 'react'
+import { memo } from "react";
 
-import type { NormalizedImageElement } from '../shared/PowerpointTypes'
+import type { NormalizedImageElement } from "../shared/PowerpointTypes";
 
 export const SvgImage = memo(function SvgImage({
   clipId,
   element,
 }: {
-  clipId: string
-  element: NormalizedImageElement
+  clipId: string;
+  element: NormalizedImageElement;
 }) {
-  const placement = getImagePlacement(element)
+  const placement = getImagePlacement(element);
 
   return (
     <>
-      <title>{element.altText || 'Slide image'}</title>
+      <title>{element.altText || "Slide image"}</title>
       <defs>
         <clipPath id={clipId}>
           <rect
@@ -35,17 +35,17 @@ export const SvgImage = memo(function SvgImage({
         y={placement.y}
       />
     </>
-  )
-})
+  );
+});
 
-function getPreserveAspectRatio(fit: NormalizedImageElement['fit']) {
-  if (fit === 'stretch') {
-    return 'none'
+function getPreserveAspectRatio(fit: NormalizedImageElement["fit"]) {
+  if (fit === "stretch") {
+    return "none";
   }
-  if (fit === 'cover') {
-    return 'xMidYMid slice'
+  if (fit === "cover") {
+    return "xMidYMid slice";
   }
-  return 'xMidYMid meet'
+  return "xMidYMid meet";
 }
 
 function getImagePlacement(element: NormalizedImageElement) {
@@ -56,19 +56,25 @@ function getImagePlacement(element: NormalizedImageElement) {
       width: element.w,
       x: 0,
       y: 0,
-    }
+    };
   }
 
-  const visibleWidth = Math.max(1 - element.crop.left - element.crop.right, 0.001)
-  const visibleHeight = Math.max(1 - element.crop.top - element.crop.bottom, 0.001)
-  const width = element.w / visibleWidth
-  const height = element.h / visibleHeight
+  const visibleWidth = Math.max(
+    1 - element.crop.left - element.crop.right,
+    0.001,
+  );
+  const visibleHeight = Math.max(
+    1 - element.crop.top - element.crop.bottom,
+    0.001,
+  );
+  const width = element.w / visibleWidth;
+  const height = element.h / visibleHeight;
 
   return {
     height,
-    preserveAspectRatio: 'none',
+    preserveAspectRatio: "none",
     width,
     x: -width * element.crop.left,
     y: -height * element.crop.top,
-  }
+  };
 }

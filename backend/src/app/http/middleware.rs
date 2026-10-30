@@ -16,7 +16,7 @@ pub(super) fn apply(router: Router, config: &HttpConfig) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(config.cors_origins.clone()))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,

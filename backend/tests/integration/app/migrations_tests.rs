@@ -488,7 +488,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 12
+            supported: 13
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -604,4 +604,97 @@ fn forged_current_marker_with_retired_status_constraint_is_rejected() {
         .unwrap();
     assert!(run_migrations(&mut connection).is_err());
     assert_eq!(table_count(&connection, "deals"), 1);
+}
+
+fn notebook_schema_twelve() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection.execute_batch(TEMPLATE_SCHEMA).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .unwrap();
+    connection.pragma_update(None, "user_version", 12).unwrap();
+    seed_deal(&connection, "DEAL-PRESERVED", "prepare");
+    insert_file_aggregate(
+        &connection,
+        "DEAL-PRESERVED",
+        "preserved-file",
+        "preserved-version",
+    );
+    connection
+}
+#[test]
+fn notebook_schema_upgrade_preserves_existing_product_records_and_reopens() {
+    let mut connection = notebook_schema_twelve();
+    let before = table_count(&connection, "quarry_file_blobs");
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(table_count(&connection, "quarry_file_blobs"), before);
+    assert_eq!(table_count(&connection, "users"), 1);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        13
+    );
+    check_foreign_keys(&connection).unwrap();
+}
+#[test]
+fn notebook_schema_upgrade_ddl_and_marker_roll_back_on_failure() {
+    let mut connection = notebook_schema_twelve();
+    connection
+        .execute_batch("CREATE TABLE notebook_notes (wrong TEXT)")
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        12
+    );
+    assert_eq!(table_count(&connection, "users"), 1);
+    assert!(connection.prepare("SELECT * FROM notebooks").is_err());
+}
+#[test]
+fn notebook_schema_rejects_forged_current_constraints_without_repairing() {
+    let mut connection = notebook_schema_twelve();
+    run_migrations(&mut connection).unwrap();
+    connection
+        .execute_batch("DROP INDEX idx_notebook_one_active_save")
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(table_count(&connection, "users"), 1);
+}
+#[test]
+fn notebook_schema_composite_fk_and_deferred_cascade_protect_relationships() {
+    let mut connection = notebook_schema_twelve();
+    run_migrations(&mut connection).unwrap();
+    connection.execute_batch("INSERT INTO notebooks VALUES('b1',1,NULL,'One','now','now'); INSERT INTO notebooks VALUES('b2',1,NULL,'Two','now','now'); INSERT INTO notebook_folders VALUES('f1','b1','Folder','now','now'); INSERT INTO notebook_folders VALUES('f2','b1','Folder','now','now'); INSERT INTO notebook_notes(note_id,notebook_id,folder_id,created_at,updated_at) VALUES('n1','b1','f1','now','now'),('n2','b1','f2','now','now'),('n3','b1',NULL,'now','now');").unwrap();
+    assert!(connection.execute("INSERT INTO notebook_notes(note_id,notebook_id,folder_id,created_at,updated_at) VALUES('bad','b2','f1','now','now')",[]).is_err());
+    assert!(connection
+        .execute("DELETE FROM notebook_folders WHERE folder_id='f1'", [])
+        .is_err());
+    connection
+        .execute("DELETE FROM notebooks WHERE notebook_id='b1'", [])
+        .unwrap();
+    assert_eq!(table_count(&connection, "notebook_notes"), 0);
+    assert_eq!(table_count(&connection, "notebooks"), 1);
+    check_foreign_keys(&connection).unwrap();
+}
+
+#[test]
+fn notebook_upgrade_rejects_forged_marker_twelve_indexes_without_altering_data() {
+    let mut connection = notebook_schema_twelve();
+    connection
+        .execute_batch("DROP INDEX idx_auth_sessions_owner")
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(table_count(&connection, "users"), 1);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        12
+    );
+    assert!(connection.prepare("SELECT * FROM notebooks").is_err());
 }

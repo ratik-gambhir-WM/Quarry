@@ -8,7 +8,9 @@ export function HubPage() {
   return (
     <WorkspaceHomeShell header={<WorkspaceHeader title="Quarry" />}>
       <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pb-10">
-        <p className="type-subtle text-muted">Portfolio Performance &amp; Strategic Initiatives</p>
+        <p className="type-subtle text-muted">
+          Portfolio Performance &amp; Strategic Initiatives
+        </p>
 
         <AiSearchCard suggestions={hubAiSuggestions} />
 

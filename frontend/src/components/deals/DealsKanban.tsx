@@ -1,7 +1,14 @@
 import { useMemo } from "react";
-import { buildDealKanbanLanes, type DealPortfolioView } from "../../data/dealsView";
+import {
+  buildDealKanbanLanes,
+  type DealPortfolioView,
+} from "../../data/dealsView";
 import { KanbanBoard } from "../kanban-board/kanban-board";
-import type { AnyKanbanCardRenderer, KanbanData, KanbanItem } from "../kanban-board/types";
+import type {
+  AnyKanbanCardRenderer,
+  KanbanData,
+  KanbanItem,
+} from "../kanban-board/types";
 import { dealCardRenderer, type DealKanbanCardData } from "./DealKanbanCard";
 import "./deals-kanban.css";
 
@@ -13,29 +20,32 @@ type DealsKanbanProps = {
 const renderers: AnyKanbanCardRenderer[] = [dealCardRenderer];
 
 export function DealsKanban({ deals, onOpenDeal }: DealsKanbanProps) {
-  const data = useMemo<KanbanData>(() => ({
-    columns: buildDealKanbanLanes(deals).map((lane) => ({
-      id: lane.id,
-      items: lane.deals.map((deal) => ({
-        data: {
-          closeDate: deal.closeDate,
-          closeDateLabel: deal.closeDateLabel,
-          engagement: deal.engagement,
-          colorClassName: deal.colorClassName,
-          id: deal.id,
-          lifecycle: deal.lifecycle,
-          name: deal.name,
-          openQuestionCount: deal.openQuestionCount,
-          sponsor: deal.sponsor,
-          targetCompany: deal.targetCompany,
-          type: deal.type,
-        } satisfies DealKanbanCardData,
-        id: `deal-${deal.transitionName}`,
-        rendererId: dealCardRenderer.id,
+  const data = useMemo<KanbanData>(
+    () => ({
+      columns: buildDealKanbanLanes(deals).map((lane) => ({
+        id: lane.id,
+        items: lane.deals.map((deal) => ({
+          data: {
+            closeDate: deal.closeDate,
+            closeDateLabel: deal.closeDateLabel,
+            engagement: deal.engagement,
+            colorClassName: deal.colorClassName,
+            id: deal.id,
+            lifecycle: deal.lifecycle,
+            name: deal.name,
+            openQuestionCount: deal.openQuestionCount,
+            sponsor: deal.sponsor,
+            targetCompany: deal.targetCompany,
+            type: deal.type,
+          } satisfies DealKanbanCardData,
+          id: `deal-${deal.transitionName}`,
+          rendererId: dealCardRenderer.id,
+        })),
+        title: lane.title,
       })),
-      title: lane.title,
-    })),
-  }), [deals]);
+    }),
+    [deals],
+  );
 
   function handleItemClick(item: KanbanItem) {
     if (isDealKanbanCardData(item.data)) onOpenDeal(item.data.id);

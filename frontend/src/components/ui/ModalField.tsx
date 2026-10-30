@@ -1,4 +1,8 @@
-import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import { cn } from "../../lib/utils";
 
 type ModalFieldProps = {
@@ -42,35 +46,60 @@ export function ModalField({
         id={labelId}
       >
         <span>{label}</span>
-        {optional ? <span className="font-semibold normal-case tracking-normal">Optional</span> : null}
+        {optional ? (
+          <span className="font-semibold normal-case tracking-normal">
+            Optional
+          </span>
+        ) : null}
       </label>
       {children}
-      {error ? <p className="px-1 text-[12px] font-medium text-error">{error}</p> : null}
+      {error ? (
+        <p className="px-1 text-[12px] font-medium text-error">{error}</p>
+      ) : null}
     </div>
   );
 }
 
-export const ModalInput = forwardRef<HTMLInputElement, ModalInputProps>(function ModalInput(
-  { className, onValueChange, ...props },
-  ref,
-) {
-  return (
-    <input
-      className={cn(modalControlClassName, className)}
-      onChange={onValueChange ? (event) => onValueChange(event.currentTarget.value) : undefined}
-      ref={ref}
-      {...props}
-    />
-  );
-});
+export const ModalInput = forwardRef<HTMLInputElement, ModalInputProps>(
+  function ModalInput({ className, onValueChange, ...props }, ref) {
+    return (
+      <input
+        className={cn(modalControlClassName, className)}
+        onChange={
+          onValueChange
+            ? (event) => onValueChange(event.currentTarget.value)
+            : undefined
+        }
+        ref={ref}
+        {...props}
+      />
+    );
+  },
+);
 
-export const ModalTextField = forwardRef<HTMLInputElement, ModalTextFieldProps>(function ModalTextField(
-  { className, error, id, label, optional = false, required = !optional, ...props },
-  ref,
-) {
-  return (
-    <ModalField error={error} htmlFor={id} label={label} optional={optional}>
-      <ModalInput className={className} id={id} ref={ref} required={required} {...props} />
-    </ModalField>
-  );
-});
+export const ModalTextField = forwardRef<HTMLInputElement, ModalTextFieldProps>(
+  function ModalTextField(
+    {
+      className,
+      error,
+      id,
+      label,
+      optional = false,
+      required = !optional,
+      ...props
+    },
+    ref,
+  ) {
+    return (
+      <ModalField error={error} htmlFor={id} label={label} optional={optional}>
+        <ModalInput
+          className={className}
+          id={id}
+          ref={ref}
+          required={required}
+          {...props}
+        />
+      </ModalField>
+    );
+  },
+);

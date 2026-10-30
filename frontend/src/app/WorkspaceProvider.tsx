@@ -1,10 +1,20 @@
 import type { Company } from "../data/dealModel";
-import type { SaveDealResponse, SaveDealMetadataResponse } from "../data/dealExtraction";
+import type {
+  SaveDealResponse,
+  SaveDealMetadataResponse,
+} from "../data/dealExtraction";
 import type { PersistedDeal } from "../contracts/quarryApi";
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import type { WorkspaceDeal, WorkspaceLocationState, WorkspaceSidebarTool } from "../data/workspace";
-import { workspaceInitiatives, workspaceTools } from "../fixtures/workspace/navigation";
+import type {
+  WorkspaceDeal,
+  WorkspaceLocationState,
+  WorkspaceSidebarTool,
+} from "../data/workspace";
+import {
+  workspaceInitiatives,
+  workspaceTools,
+} from "../fixtures/workspace/navigation";
 import {
   useWorkspaceDeals,
   type WorkspaceDealsResource,
@@ -20,20 +30,38 @@ type WorkspaceContextValue = {
   retryDeals: () => void;
   cacheDealResult: (aggregate: PersistedDeal) => void;
   saveCompanyResult: (company: Company) => void;
-  saveDealResult: (result: SaveDealResponse | SaveDealMetadataResponse, sowSourceName?: string) => void;
+  saveDealResult: (
+    result: SaveDealResponse | SaveDealMetadataResponse,
+    sowSourceName?: string,
+  ) => void;
   tools: WorkspaceSidebarTool[];
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
-export function WorkspaceProvider({ children, dataSource }: { children: ReactNode; dataSource?: string }) {
+export function WorkspaceProvider({
+  children,
+  dataSource,
+}: {
+  children: ReactNode;
+  dataSource?: string;
+}) {
   const { email, navigationState } = useWorkspaceSession();
-  const { resource, retry, cacheDealResult, saveDealResult, saveCompanyResult } = useWorkspaceDeals(dataSource);
+  const {
+    resource,
+    retry,
+    cacheDealResult,
+    saveDealResult,
+    saveCompanyResult,
+  } = useWorkspaceDeals(dataSource);
 
   return (
     <WorkspaceContext.Provider
       value={{
-        deals: resource.status === "success" ? resource.deals.filter((deal) => !deal.persisted?.archivedAt) : [],
+        deals:
+          resource.status === "success"
+            ? resource.deals.filter((deal) => !deal.persisted?.archivedAt)
+            : [],
         dealsResource: resource,
         email,
         initiatives: workspaceInitiatives,

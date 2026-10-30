@@ -80,7 +80,11 @@ export function Column({
   if (column.collapsed) {
     return (
       <div ref={setNodeRef} style={style}>
-        <ColumnCollapsed column={column} palette={palette} onExpand={onToggleCollapse} />
+        <ColumnCollapsed
+          column={column}
+          palette={palette}
+          onExpand={onToggleCollapse}
+        />
       </div>
     );
   }
@@ -148,7 +152,11 @@ export function Column({
       />
 
       {!readOnly && onItemCreate ? (
-        <ColumnFooter column={column} renderers={renderers} onCreate={onItemCreate} />
+        <ColumnFooter
+          column={column}
+          renderers={renderers}
+          onCreate={onItemCreate}
+        />
       ) : null}
     </div>
   );

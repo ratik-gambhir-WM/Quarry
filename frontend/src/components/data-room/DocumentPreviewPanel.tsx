@@ -84,7 +84,9 @@ export const DocumentPreviewPanel = forwardRef<
     () => ({
       focusViewer() {
         requestAnimationFrame(() => {
-          editorRef.current?.getViewportElement()?.focus({ preventScroll: true });
+          editorRef.current
+            ?.getViewportElement()
+            ?.focus({ preventScroll: true });
         });
       },
     }),
@@ -103,7 +105,9 @@ export const DocumentPreviewPanel = forwardRef<
       {viewMode === "raw-text" || preview.status !== "ready" ? (
         <DocumentPreviewHeader
           document={document}
-          onBackToPreview={viewMode === "raw-text" ? () => setViewMode("preview") : undefined}
+          onBackToPreview={
+            viewMode === "raw-text" ? () => setViewMode("preview") : undefined
+          }
           onClose={onClose}
           subtitle={
             viewMode === "raw-text"
@@ -119,7 +123,9 @@ export const DocumentPreviewPanel = forwardRef<
         {preview.status === "error" ? (
           <PreviewMessage
             detail={preview.message}
-            title={document.error ? "File is inaccessible" : "Preview unavailable"}
+            title={
+              document.error ? "File is inaccessible" : "Preview unavailable"
+            }
             tone="error"
           />
         ) : null}
@@ -205,7 +211,13 @@ function RawTextViewer({ rawText }: { rawText: RawTextState }) {
     return <RawTextLoading />;
   }
   if (rawText.status === "error") {
-    return <PreviewMessage detail={rawText.message} title="Raw text unavailable" tone="error" />;
+    return (
+      <PreviewMessage
+        detail={rawText.message}
+        title="Raw text unavailable"
+        tone="error"
+      />
+    );
   }
 
   return (
@@ -215,7 +227,10 @@ function RawTextViewer({ rawText }: { rawText: RawTextState }) {
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
             Extracted from {rawText.response.sourceKind.toUpperCase()}
           </p>
-          <h2 className="mt-1 truncate text-base font-semibold text-text-main" title={rawText.response.fileName}>
+          <h2
+            className="mt-1 truncate text-base font-semibold text-text-main"
+            title={rawText.response.fileName}
+          >
             {rawText.response.fileName}
           </h2>
         </header>
@@ -241,7 +256,9 @@ function RawTextLoading() {
           className="mx-auto h-14 w-14 animate-spin motion-reduce:animate-none [animation-duration:1.4s] [html[data-theme=dark]_&]:brightness-0 [html[data-theme=dark]_&]:invert"
           src={previewLoadingMark}
         />
-        <p className="mt-5 text-base font-semibold text-text-main">Loading raw text</p>
+        <p className="mt-5 text-base font-semibold text-text-main">
+          Loading raw text
+        </p>
         <p className="mt-1 text-sm leading-6 text-muted">
           Extracting the document’s raw text…
         </p>
@@ -264,8 +281,12 @@ function PdfPreviewLoading() {
           className="mx-auto h-14 w-14 animate-spin motion-reduce:animate-none [animation-duration:1.4s] [html[data-theme=dark]_&]:brightness-0 [html[data-theme=dark]_&]:invert"
           src={previewLoadingMark}
         />
-        <p className="mt-5 text-base font-semibold text-text-main">Loading document preview</p>
-        <p className="mt-1 text-sm leading-6 text-muted">Preparing the PDF editor…</p>
+        <p className="mt-5 text-base font-semibold text-text-main">
+          Loading document preview
+        </p>
+        <p className="mt-1 text-sm leading-6 text-muted">
+          Preparing the PDF editor…
+        </p>
       </div>
     </div>
   );
@@ -304,7 +325,13 @@ function PdfEditorViewer({
   );
 
   if ("message" in decodedPdf) {
-    return <PreviewMessage detail={decodedPdf.message} title="PDF data is invalid" tone="error" />;
+    return (
+      <PreviewMessage
+        detail={decodedPdf.message}
+        title="PDF data is invalid"
+        tone="error"
+      />
+    );
   }
 
   return (
@@ -366,7 +393,9 @@ function PdfEditorViewer({
               onClick={onClose}
               type="button"
             >
-              <span aria-hidden="true" className="text-base leading-none">×</span>
+              <span aria-hidden="true" className="text-base leading-none">
+                ×
+              </span>
               Close
             </button>
           </div>
@@ -382,7 +411,11 @@ type PreviewMessageProps = {
   tone?: "default" | "error";
 };
 
-function PreviewMessage({ detail, title, tone = "default" }: PreviewMessageProps) {
+function PreviewMessage({
+  detail,
+  title,
+  tone = "default",
+}: PreviewMessageProps) {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center bg-surface-container p-8">
       <div
@@ -392,13 +425,17 @@ function PreviewMessage({ detail, title, tone = "default" }: PreviewMessageProps
       >
         <span
           className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full ${
-            tone === "error" ? "bg-error/10 text-error" : "bg-primary/10 text-primary"
+            tone === "error"
+              ? "bg-error/10 text-error"
+              : "bg-primary/10 text-primary"
           }`}
         >
           <Icon className="h-6 w-6" name={tone === "error" ? "alert" : "pdf"} />
         </span>
         <h2 className="text-lg font-semibold text-text-main">{title}</h2>
-        <p className="mt-2 break-words text-sm leading-6 text-muted">{detail}</p>
+        <p className="mt-2 break-words text-sm leading-6 text-muted">
+          {detail}
+        </p>
       </div>
     </div>
   );
@@ -413,17 +450,24 @@ function decodeBase64(value: string) {
   return bytes;
 }
 
-function buildPdfSource(response: DocumentPreviewResponse):
-  | { source: Uint8Array }
-  | { message: string } {
+function buildPdfSource(
+  response: DocumentPreviewResponse,
+): { source: Uint8Array } | { message: string } {
   if (response.mimeType !== "application/pdf") {
-    return { message: `Expected application/pdf data, but received ${response.mimeType || "an unknown type"}.` };
+    return {
+      message: `Expected application/pdf data, but received ${response.mimeType || "an unknown type"}.`,
+    };
   }
 
   try {
     const data = response.pdfBytes ?? decodeBase64(response.pdfBase64);
-    if (data.length < 5 || String.fromCharCode(...data.subarray(0, 5)) !== "%PDF-") {
-      return { message: "The preview payload does not contain a valid PDF header." };
+    if (
+      data.length < 5 ||
+      String.fromCharCode(...data.subarray(0, 5)) !== "%PDF-"
+    ) {
+      return {
+        message: "The preview payload does not contain a valid PDF header.",
+      };
     }
     return { source: data };
   } catch (error) {
@@ -433,7 +477,9 @@ function buildPdfSource(response: DocumentPreviewResponse):
   }
 }
 
-function iconNameForNode(kind: DataRoomTreeNode["kind"]): "doc" | "pdf" | "sheet" {
+function iconNameForNode(
+  kind: DataRoomTreeNode["kind"],
+): "doc" | "pdf" | "sheet" {
   if (kind === "pdf") {
     return "pdf";
   }

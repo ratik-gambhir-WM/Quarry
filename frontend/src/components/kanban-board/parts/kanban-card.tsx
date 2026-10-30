@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { KanbanCardData, KanbanCardRenderer, KanbanRenderContext } from "../types";
+import type {
+  KanbanCardData,
+  KanbanCardRenderer,
+  KanbanRenderContext,
+} from "../types";
 
 function initials(name: string): string {
   return name
@@ -35,7 +39,9 @@ export function KanbanCardView({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-medium leading-tight text-foreground">{data.title}</span>
+        <span className="text-sm font-medium leading-tight text-foreground">
+          {data.title}
+        </span>
       </div>
       {data.description ? (
         <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
@@ -45,7 +51,11 @@ export function KanbanCardView({
       {data.tags && data.tags.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {data.tags.map((tag, i) => (
-            <Badge key={`${tag.label}-${i}`} variant="secondary" className="text-[10px]">
+            <Badge
+              key={`${tag.label}-${i}`}
+              variant="secondary"
+              className="text-[10px]"
+            >
               {tag.label}
             </Badge>
           ))}
@@ -55,7 +65,9 @@ export function KanbanCardView({
         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           {data.meta.map((m) => (
             <li key={m.key} className="flex items-center gap-1">
-              <span className="font-mono text-muted-foreground/70">{m.label}:</span>
+              <span className="font-mono text-muted-foreground/70">
+                {m.label}:
+              </span>
               <span className="text-foreground">{m.value}</span>
             </li>
           ))}
@@ -65,8 +77,12 @@ export function KanbanCardView({
         <div className="flex -space-x-1.5">
           {data.assignees.slice(0, 5).map((a) => (
             <Avatar key={a.id} className="size-5 border border-card">
-              {a.avatarUrl ? <AvatarImage src={a.avatarUrl} alt={a.name} /> : null}
-              <AvatarFallback className="text-[10px]">{initials(a.name)}</AvatarFallback>
+              {a.avatarUrl ? (
+                <AvatarImage src={a.avatarUrl} alt={a.name} />
+              ) : null}
+              <AvatarFallback className="text-[10px]">
+                {initials(a.name)}
+              </AvatarFallback>
             </Avatar>
           ))}
           {data.assignees.length > 5 ? (
@@ -94,7 +110,11 @@ function KanbanCardEditForm({
 
   function handleSave() {
     if (!title.trim()) return;
-    onSave({ ...data, title: title.trim(), description: description.trim() || undefined });
+    onSave({
+      ...data,
+      title: title.trim(),
+      description: description.trim() || undefined,
+    });
   }
 
   return (

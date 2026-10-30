@@ -14,11 +14,18 @@ type SelectionSummary = {
 };
 
 export function GlobalVaultPage() {
-  const [fileSelection, setFileSelection] = useState<SelectionSummary>({ fileNames: [], totalCount: 0 });
-  const [directorySelection, setDirectorySelection] = useState<SelectionSummary>({ fileNames: [], totalCount: 0 });
+  const [fileSelection, setFileSelection] = useState<SelectionSummary>({
+    fileNames: [],
+    totalCount: 0,
+  });
+  const [directorySelection, setDirectorySelection] =
+    useState<SelectionSummary>({ fileNames: [], totalCount: 0 });
 
   return (
-    <WorkspaceHomeShell activeHomeSection="vault" header={<WorkspaceHeader title="Global Vault" />}>
+    <WorkspaceHomeShell
+      activeHomeSection="vault"
+      header={<WorkspaceHeader title="Global Vault" />}
+    >
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 pb-10">
         <header className="space-y-3">
           <div className="inline-flex w-fit items-center gap-3 rounded-full border border-white/80 bg-white/70 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-primary shadow-[0_8px_20px_rgba(7,1,84,0.05)]">
@@ -26,8 +33,8 @@ export function GlobalVaultPage() {
             Global Vault
           </div>
           <p className="type-subtle max-w-3xl text-muted">
-            Upload files or entire folders from your local file system. When markdown summaries become available,
-            they will render below.
+            Upload files or entire folders from your local file system. When
+            markdown summaries become available, they will render below.
           </p>
         </header>
 
@@ -64,7 +71,9 @@ export function GlobalVaultPage() {
         <WorkspaceCard className="p-8">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted">Markdown Preview</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted">
+                Markdown Preview
+              </p>
               <h2 className="type-h2 mt-3 text-text-main">Rendered Summary</h2>
             </div>
             <div className="rounded-full border border-white/80 bg-white/70 px-4 py-2 text-[12px] font-semibold text-muted">
@@ -75,7 +84,9 @@ export function GlobalVaultPage() {
           <div className="mt-6 min-h-[220px] rounded-[19px] border border-dashed border-primary/18 bg-white/65 p-6">
             {emptyMarkdown.trim() ? (
               <div className="vault-markdown text-[16px] leading-7 text-text-main">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{emptyMarkdown}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {emptyMarkdown}
+                </ReactMarkdown>
               </div>
             ) : (
               <div className="flex h-full min-h-[172px] items-center justify-center rounded-[15px] bg-surface-container-low/60 px-6 text-center">
@@ -97,7 +108,13 @@ type UploadFieldProps = {
   onChange: (selection: SelectionSummary) => void;
 };
 
-function UploadField({ accept, directory = false, helperText, label, onChange }: UploadFieldProps) {
+function UploadField({
+  accept,
+  directory = false,
+  helperText,
+  label,
+  onChange,
+}: UploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -112,7 +129,9 @@ function UploadField({ accept, directory = false, helperText, label, onChange }:
 
   return (
     <label className="flex flex-col gap-3">
-      <span className="text-[13px] font-semibold uppercase tracking-[0.14em] text-muted">{label}</span>
+      <span className="text-[13px] font-semibold uppercase tracking-[0.14em] text-muted">
+        {label}
+      </span>
       <input
         accept={accept}
         className="rounded-[22px] border border-primary/16 bg-white px-5 py-4 text-[14px] text-text-main shadow-[0_8px_20px_rgba(7,1,84,0.04)] file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-2 file:text-[13px] file:font-semibold file:text-primary hover:file:bg-primary/14"
@@ -132,7 +151,11 @@ type SelectionDetailsProps = {
   totalCount: number;
 };
 
-function SelectionDetails({ emptyLabel, selectedItems, totalCount }: SelectionDetailsProps) {
+function SelectionDetails({
+  emptyLabel,
+  selectedItems,
+  totalCount,
+}: SelectionDetailsProps) {
   const previewItems = selectedItems.slice(0, 3);
   const remainingCount = Math.max(totalCount - previewItems.length, 0);
 

@@ -4,7 +4,11 @@ import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { DragOverlay } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
-import type { AnyKanbanCardRenderer, KanbanItem, KanbanRenderContext } from "../types";
+import type {
+  AnyKanbanCardRenderer,
+  KanbanItem,
+  KanbanRenderContext,
+} from "../types";
 import { ItemRenderer } from "./item-renderer";
 
 export function KanbanDragOverlay({

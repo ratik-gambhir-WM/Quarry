@@ -15,10 +15,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  PDF_VIEWER_MAX_SCALE,
-  PDF_VIEWER_MIN_SCALE,
-} from "../lib/clamp-scale";
+import { PDF_VIEWER_MAX_SCALE, PDF_VIEWER_MIN_SCALE } from "../lib/clamp-scale";
 import { usePdfViewer } from "../hooks/use-pdf-viewer-context";
 
 const PRESETS: number[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -42,7 +39,9 @@ export function PdfZoomControls({ className }: PdfZoomControlsProps) {
           className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
           onClick={() => actions.zoomOut()}
           disabled={disabled || scale <= PDF_VIEWER_MIN_SCALE + 1e-3}
-          aria-label={typeof labels.zoomOut === "string" ? labels.zoomOut : "Zoom out"}
+          aria-label={
+            typeof labels.zoomOut === "string" ? labels.zoomOut : "Zoom out"
+          }
         >
           <Minus />
         </TooltipTrigger>
@@ -95,7 +94,9 @@ export function PdfZoomControls({ className }: PdfZoomControlsProps) {
           className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
           onClick={() => actions.zoomIn()}
           disabled={disabled || scale >= PDF_VIEWER_MAX_SCALE - 1e-3}
-          aria-label={typeof labels.zoomIn === "string" ? labels.zoomIn : "Zoom in"}
+          aria-label={
+            typeof labels.zoomIn === "string" ? labels.zoomIn : "Zoom in"
+          }
         >
           <Plus />
         </TooltipTrigger>

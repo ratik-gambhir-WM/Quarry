@@ -25,10 +25,15 @@ export const vaultTableRows = [
   taskRow("task-data-room", hubActivityTasks[3]),
 ] satisfies readonly VaultTableRow[];
 
-function taskRow(id: string, task: (typeof hubActivityTasks)[number]): VaultTableRow {
+function taskRow(
+  id: string,
+  task: (typeof hubActivityTasks)[number],
+): VaultTableRow {
   return {
     creator: task.creator,
-    description: task.checked ? `Completed task · Assigned to: ${task.creator}` : `Assigned to: ${task.creator}`,
+    description: task.checked
+      ? `Completed task · Assigned to: ${task.creator}`
+      : `Assigned to: ${task.creator}`,
     id,
     name: task.label,
     practiceArea: task.practiceArea,
@@ -37,7 +42,10 @@ function taskRow(id: string, task: (typeof hubActivityTasks)[number]): VaultTabl
   };
 }
 
-function insightRow(id: string, insight: (typeof workspaceInsights)[number]): VaultTableRow {
+function insightRow(
+  id: string,
+  insight: (typeof workspaceInsights)[number],
+): VaultTableRow {
   return {
     creator: insight.deal,
     description: `Source: ${insight.fileName}`,
@@ -49,7 +57,10 @@ function insightRow(id: string, insight: (typeof workspaceInsights)[number]): Va
   };
 }
 
-function fileRow(id: string, file: (typeof hubRecentFiles)[number]): VaultTableRow {
+function fileRow(
+  id: string,
+  file: (typeof hubRecentFiles)[number],
+): VaultTableRow {
   return {
     creator: file.creator,
     description: `Recently opened · ${file.time}`,

@@ -3,8 +3,11 @@ import { useCallback, useEffect, useState } from "react";
 type SelectionOrigin = "init" | "keyboard" | "pointer";
 
 export function useDocumentSearchKeyboardNavigation(itemIds: string[]) {
-  const [selectedIndex, setSelectedIndex] = useState(itemIds.length > 0 ? 0 : -1);
-  const [selectionOrigin, setSelectionOrigin] = useState<SelectionOrigin>("init");
+  const [selectedIndex, setSelectedIndex] = useState(
+    itemIds.length > 0 ? 0 : -1,
+  );
+  const [selectionOrigin, setSelectionOrigin] =
+    useState<SelectionOrigin>("init");
   const itemKey = itemIds.join("\u0000");
 
   useEffect(() => {

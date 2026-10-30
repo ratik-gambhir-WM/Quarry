@@ -11,12 +11,7 @@ export type PdfFitMode = "fit-width" | "fit-page" | null;
 
 export type PdfVirtualizeMode = "auto" | "always" | "never";
 
-export type PdfStatus =
-  | "empty"
-  | "loading"
-  | "password"
-  | "ready"
-  | "error";
+export type PdfStatus = "empty" | "loading" | "password" | "ready" | "error";
 
 export interface PdfActions {
   goToPage: (page: number) => void;

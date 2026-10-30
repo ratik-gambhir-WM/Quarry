@@ -28,7 +28,10 @@ const SVG_VARIANTS: Variants = {
 };
 
 const HomeIcon = forwardRef<HomeIconHandle, HomeIconProps>(
-  ({ className, onMouseEnter, onMouseLeave, size = 28, style, ...props }, ref) => {
+  (
+    { className, onMouseEnter, onMouseLeave, size = 28, style, ...props },
+    ref,
+  ) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
 
@@ -63,7 +66,9 @@ const HomeIcon = forwardRef<HomeIconHandle, HomeIconProps>(
       [controls, onMouseLeave],
     );
 
-    const iconStyle: CSSProperties | undefined = className ? style : { height: size, width: size, ...style };
+    const iconStyle: CSSProperties | undefined = className
+      ? style
+      : { height: size, width: size, ...style };
 
     return (
       <div

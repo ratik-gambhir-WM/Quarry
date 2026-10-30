@@ -1,12 +1,12 @@
-import type { PdfDocumentObject, PdfEngine } from "@embedpdf/models"
-import PdfiumWasmUrl from "@embedpdf/pdfium/pdfium.wasm?url"
+import type { PdfDocumentObject, PdfEngine } from "@embedpdf/models";
+import PdfiumWasmUrl from "@embedpdf/pdfium/pdfium.wasm?url";
 
-let sharedEnginePromise: Promise<PdfEngine> | null = null
-const pdfDocumentCache = new Map<string, Promise<PdfDocumentObject>>()
-const thumbnailUrlCache = new Map<string, Promise<string | null>>()
+let sharedEnginePromise: Promise<PdfEngine> | null = null;
+const pdfDocumentCache = new Map<string, Promise<PdfDocumentObject>>();
+const thumbnailUrlCache = new Map<string, Promise<string | null>>();
 
 export function resolvePdfAssetUrl(assetUrl: string, baseUrl: string) {
-  return new URL(assetUrl, baseUrl).href
+  return new URL(assetUrl, baseUrl).href;
 }
 
 export function loadSharedPdfEngine() {
@@ -14,33 +14,33 @@ export function loadSharedPdfEngine() {
     ({ createPdfiumEngine }) =>
       createPdfiumEngine(
         resolvePdfAssetUrl(PdfiumWasmUrl, window.location.href),
-        {}
-      )
-  )
+        {},
+      ),
+  );
 
-  return sharedEnginePromise
+  return sharedEnginePromise;
 }
 
 export async function loadPdfDocument(url: string) {
-  let documentPromise = pdfDocumentCache.get(url)
+  let documentPromise = pdfDocumentCache.get(url);
 
   if (!documentPromise) {
     documentPromise = loadSharedPdfEngine().then((engine) =>
       engine
         .openDocumentUrl(
           { id: url, url },
-          { mode: url.startsWith("blob:") ? "full-fetch" : "auto" }
+          { mode: url.startsWith("blob:") ? "full-fetch" : "auto" },
         )
-        .toPromise()
-    )
-    pdfDocumentCache.set(url, documentPromise)
+        .toPromise(),
+    );
+    pdfDocumentCache.set(url, documentPromise);
   }
 
-  return documentPromise
+  return documentPromise;
 }
 
 export async function getPdfPageCount(url: string) {
-  return (await loadPdfDocument(url)).pageCount
+  return (await loadPdfDocument(url)).pageCount;
 }
 
 export function renderPdfThumbnailUrl({
@@ -49,23 +49,23 @@ export function renderPdfThumbnailUrl({
   url,
   width,
 }: {
-  dpr?: number
-  pageIndex: number
-  url: string
-  width: number
+  dpr?: number;
+  pageIndex: number;
+  url: string;
+  width: number;
 }) {
-  const cacheKey = `${url}#${pageIndex}@${width}x${dpr}`
-  let thumbnailPromise = thumbnailUrlCache.get(cacheKey)
+  const cacheKey = `${url}#${pageIndex}@${width}x${dpr}`;
+  let thumbnailPromise = thumbnailUrlCache.get(cacheKey);
 
   if (!thumbnailPromise) {
     thumbnailPromise = (async () => {
       const [engine, document] = await Promise.all([
         loadSharedPdfEngine(),
         loadPdfDocument(url),
-      ])
-      const page = document.pages[pageIndex]
+      ]);
+      const page = document.pages[pageIndex];
 
-      if (!page) return null
+      if (!page) return null;
 
       const blob = await engine
         .renderThumbnail(document, page, {
@@ -74,12 +74,12 @@ export function renderPdfThumbnailUrl({
           scaleFactor: width / page.size.width,
           withAnnotations: true,
         })
-        .toPromise()
+        .toPromise();
 
-      return URL.createObjectURL(blob)
-    })()
-    thumbnailUrlCache.set(cacheKey, thumbnailPromise)
+      return URL.createObjectURL(blob);
+    })();
+    thumbnailUrlCache.set(cacheKey, thumbnailPromise);
   }
 
-  return thumbnailPromise
+  return thumbnailPromise;
 }

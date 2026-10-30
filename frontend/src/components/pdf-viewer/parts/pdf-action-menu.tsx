@@ -1,7 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Download, FileText, MoreVertical, Printer, RotateCw } from "lucide-react";
+import {
+  Download,
+  FileText,
+  MoreVertical,
+  Printer,
+  RotateCw,
+} from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -47,7 +53,9 @@ export function PdfActionMenu({
         <DropdownMenuTrigger
           type="button"
           disabled={disabled}
-          aria-label={typeof labels.more === "string" ? labels.more : "More actions"}
+          aria-label={
+            typeof labels.more === "string" ? labels.more : "More actions"
+          }
           className={cn(
             buttonVariants({ variant: "ghost", size: "icon-sm" }),
             className,
@@ -89,7 +97,9 @@ export function PdfActionMenu({
           className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
           onClick={() => actions.rotate()}
           disabled={disabled}
-          aria-label={typeof labels.rotate === "string" ? labels.rotate : "Rotate"}
+          aria-label={
+            typeof labels.rotate === "string" ? labels.rotate : "Rotate"
+          }
         >
           <RotateCw />
         </TooltipTrigger>
@@ -102,7 +112,9 @@ export function PdfActionMenu({
             className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
             onClick={() => actions.download()}
             disabled={disabled}
-            aria-label={typeof labels.download === "string" ? labels.download : "Download"}
+            aria-label={
+              typeof labels.download === "string" ? labels.download : "Download"
+            }
           >
             <Download />
           </TooltipTrigger>

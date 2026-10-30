@@ -1,4 +1,9 @@
-import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { runtime } from "@quarry/runtime";
 import { sessionStore } from "./sessionStore";
 import type { LoginInput, RegisterInput } from "../contracts/quarryApi";
@@ -18,7 +23,7 @@ function useSession() {
     userId: state.session?.user.id ?? null,
     token: state.session?.accessToken ?? null,
     expiresAt: state.session?.expiresAt ?? null,
-    status: state.session ? "authenticated" as const : "anonymous" as const,
+    status: state.session ? ("authenticated" as const) : ("anonymous" as const),
     async login(input: LoginInput, isActive = () => true) {
       const generation = sessionStore.getSnapshot().generation;
       const session = await runtime.api.login(input);
@@ -39,7 +44,8 @@ function useSession() {
       try {
         await runtime.api.logout();
       } catch {
-        notice = "Signed out on this device. Server sign-out could not be confirmed; the session will expire automatically.";
+        notice =
+          "Signed out on this device. Server sign-out could not be confirmed; the session will expire automatically.";
       }
       sessionStore.clearIfCurrent(generation, notice);
     },

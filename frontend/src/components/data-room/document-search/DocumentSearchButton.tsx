@@ -12,7 +12,13 @@ export const DocumentSearchButton = forwardRef<
   HTMLButtonElement,
   DocumentSearchButtonProps
 >(function DocumentSearchButton(
-  { children, className, iconOnly = false, showShortcut = false, ...buttonProps },
+  {
+    children,
+    className,
+    iconOnly = false,
+    showShortcut = false,
+    ...buttonProps
+  },
   ref,
 ) {
   const baseClassName =
@@ -28,7 +34,11 @@ export const DocumentSearchButton = forwardRef<
       {...buttonProps}
     >
       <span className="flex items-center justify-center gap-2 text-muted-foreground opacity-80">
-        <SearchIcon aria-hidden="true" size={iconOnly ? 20 : 24} strokeWidth={1.5} />
+        <SearchIcon
+          aria-hidden="true"
+          size={iconOnly ? 20 : 24}
+          strokeWidth={1.5}
+        />
         {iconOnly ? null : (
           <span className="hidden sm:inline">{children ?? "Search"}</span>
         )}

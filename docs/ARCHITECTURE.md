@@ -282,7 +282,7 @@ The live frontend is an npm package using:
   and thread primitives
 - Extend UI's EmbedPDF/PDFium editor for Data Room PDF preview and in-memory annotations;
   the earlier reusable react-pdf/pdf.js viewer remains in the frontend tree
-- BlockNote 0.56 with its shadcn integration for the session-only Notebook editor; Plate remains
+- BlockNote 0.56 with its shadcn integration for the Notebook editor; Plate remains
   the Diligence Canvas text editor
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
@@ -381,28 +381,58 @@ global state or query-cache library.
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
   explorer's left-arrow back control returns to Deal Home.
-- Notebook is a UI-only workspace. Its `NotebookProvider` owns list search, selection, and the
-  mobile notes drawer around `WorkspaceHomeShell`; the URL selects the draft in both router
-  targets. The Notebook sidebar reuses `SidebarFrame`, including profile/collapse behavior and
-  Back to Deal Hub. The mobile drawer exposes the same list and a Hub link.
-  `data/notebook/notebookSession.ts` holds user-created drafts in module memory, survives workspace
-  navigation, and clears on authentication changes or reload. The surface explicitly labels these
-  as session drafts; it does not claim server saves. Drafts contain a stable UUID, title, native
-  BlockNote JSON with content schema version 1, and creation/edit timestamps. Title search covers
-  the session's complete list. Recency sorting waits until focus leaves editing/list navigation.
-  The independently lazy editor uses BlockNote's shadcn defaults with Quarry semantic tokens,
-  Inter, and reduced-motion handling. Both Vite targets emit ProseMirror as a separate lazy
-  dependency chunk to keep the Notebook schema below the application chunk-size limit.
+- Notebook uses native BlockNote edit buffers plus explicit server saves. Its `NotebookProvider`
+  owns search, URL selection and the mobile drawer around `WorkspaceHomeShell`. The sidebar reuses
+  `SidebarFrame`, profile/collapse behavior and Back to Deal Hub. The expanded sidebar and mobile
+  drawer show a notebook-selector label (`{Notebook name} notes`) with its scoped count and a
+  create-note plus icon on the right; the collapsed sidebar retains its create icon. The selector
+  lists the authenticated user's notebooks plus a distinct Unsaved notes group. Switching notebooks
+  clears search and note selection while preserving all edit buffers. The selected notebook is
+  session-scoped; direct note URLs select their owning notebook. `notebookSession.ts` retains
+  in-memory edits across workspace routes and clears them on reload/authentication changes;
+  `notebookPersistence.ts` owns the session-scoped external store for saved-note catalog loading,
+  lazy native-document reads, server IDs/revisions, immutable save snapshots and durable job tracking.
+  Saved notes reload from the authenticated API after sign-in; drafts and newer unsaved edits are
+  never promoted automatically. Collections load through bounded 100-row pages; the selector uses
+  this catalog and scopes the visible list, count and title search to one notebook, including its
+  assigned local drafts. Loading/error/retry feedback remains explicit. Lists omit blocks until a
+  note is selected. New drafts in a selected notebook keep that save destination without creating
+  server records until Save. Unassigned drafts remain available under Unsaved notes.
+  The header Save button immediately precedes Export and reuses New note's filled action styling.
+  The selected note's Personal note icon/label sits beside the Notebook heading. Its title begins
+  immediately below the inset header at the existing document-column width, with deletion beside
+  the title. The static save-explanation banner is omitted; live loading, save and error feedback
+  remains in the footer so it does not push the title down.
+  Saving an unassigned draft explicitly chooses/creates a notebook; a draft created in a selected
+  notebook saves directly to that notebook. Saved-note edits PATCH the same note with expectedRevision.
+  Admission retries reuse an immutable operation ID/input; SSE plus status polling reconciles
+  completion across navigation.
+  Only a completed job displays Saved; edits made while pending remain Unsaved changes. Loaded
+  canonical notes display Stored on server because a note GET alone does not confirm indexing.
+  Indexing failures retain content and retry the same job; conflicts offer an explicit confirmed
+  reload. Editor content/undo stays mounted across the first save/server-ID URL change. Saved note
+  deletion calls the API and keeps the local buffer on failure; unresolved saves prevent deletion.
+  The independently lazy editor uses BlockNote's shadcn controls with Quarry semantic tokens,
+  Inter, and reduced-motion handling. Both block controls appear when hovering anywhere across
+  a block's row, including the document's responsive side padding. Its dedicated six-dot handle
+  has no click menu. An adjacent plus button opens the same block options as typing `/`, reusing
+  an empty block or inserting a paragraph after a nonempty block. Both insertion paths remain
+  available. Pointer dragging uses a
+  frame-scheduled, full-width preview, faded source, blue insertion line and edge scrolling.
+  Only a completed drop changes native blocks, grouped as one undoable edit; Escape, pointer
+  cancellation, window blur, editor unmount and drops outside the note viewport cancel the move.
+  The focused handle also supports Arrow Up/Down reordering. Both Vite targets emit ProseMirror
+  as a separate lazy dependency chunk to keep the Notebook schema below the application chunk-size limit.
   Its keyed mount isolates content/undo sessions between notes;
-  acknowledgements and autosave are absent. Paragraphs, headings, lists/checklists, quotes, code,
+  acknowledgements apply only to the submitted snapshot; autosave is absent. Paragraphs, headings, lists/checklists, quotes, code,
   tables, and HTTP(S)/mailto links are supported. Asset blocks, upload and file paste/drop paths
   are disabled. The viewport meta tag requests `interactive-widget=resizes-content` for mobile
   keyboards. Editor loading/failure/retry, missing draft URLs, empty/search-empty states, and
-  confirmed deletion have explicit UI. A browser unload warning is best-effort while Notebook
-  is mounted; native close coordination and durable/offline recovery are not implemented.
-  Note APIs, persistence, server search/pagination, autosave/conflicts, collaboration, sharing,
-  and global search integration remain future work. No SQLite, Axum, API-adapter, or
-  new native commands accompany this UI slice. The header's compact Export menu creates Markdown
+  confirmed deletion have explicit UI. A browser unload warning is best-effort for unsaved changes;
+  native close coordination and offline recovery are not implemented. Folder organization controls,
+  autosave, collaboration, sharing and global search remain deferred. Existing web/desktop notebook
+  APIs and validated native relay handle saves; no new native commands or schema changes accompany
+  this UI integration. The header's compact Export menu creates Markdown
   or standalone HTML from an immutable snapshot of the selected draft (including its title), using
   BlockNote's lossy interoperability converters loaded on demand. Both formats can omit some editor
   structure/formatting; neither is the canonical storage format. Exports use `platform.saveFile`:
@@ -559,6 +589,7 @@ operational failures.
 | Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
+| Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, Tasks, Templates, and Global variables category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
 | Logs | View/export/clear bounded activity log | Session-local only |
@@ -705,6 +736,8 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `quarry_api_get_pdf` | Relay stored document PDF bytes | exact route shape; PDF MIME/signature; 64 MB cap |
 | `quarry_api_delete` | Relay versioned DELETE with a required 204 response | Main window/origin; path policy; safe base URL |
 | `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy |
+| `quarry_api_patch` | Relay notebook resource PATCH | main window/origin; canonical resource paths; 2 MiB JSON; authenticated status errors |
+| `subscribe_notebook_job` | Relay authenticated notebook save-job SSE | canonical notebook/job/subscription IDs; 64 KiB events; cancellation; ten-minute maximum |
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
 | `quarry_api_post_powerpoint` | Relay a presentation export and return bounded base64 PPTX data | exact template-export route; MIME/ZIP signature/filename/warning checks; 64 MB cap |
 | `subscribe_document_job` | Consume Axum SSE and emit Tauri event | validated identifiers; scoped event payload |
@@ -740,7 +773,7 @@ the webview uses a restrictive CSP plus `freezePrototype`.
 
 Axum composes explicit public and authenticated feature routers and mounts the result under both
 `/api` and `/api/v1`. Clients use `/api/v1`; `/api` is transitional compatibility. Only health,
-capabilities, register and login are public; all product routes require a verified session. GET, POST, and DELETE are enabled by the CORS
+capabilities, register and login are public; all product routes require a verified session. GET, POST, PATCH, and DELETE are enabled by the CORS
 method allowlist.
 
 ### 7.1 System and users
@@ -922,8 +955,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 12. Startup creates a fresh schema or validates/reuses marker 12; older
-profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 13. Startup creates a fresh schema, additively upgrades validated marker 12,
+or validates/reuses marker 13; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -952,6 +985,31 @@ renderer provisioning and production identity/tenant authorization remain unreso
 The API contract is not generated. JSON is generally camelCase, but flattened document search
 result properties are currently snake_case because their Rust DTO lacks a rename rule.
 
+### 7.7 Personal notebooks and durable saves
+
+Authenticated CRUD lives under `/notebooks`, `/notebooks/{notebook_id}/folders` and
+`/notebooks/{notebook_id}/notes`, including individual GET/PATCH/DELETE resources. Notebook/folder
+creates return 201; note POST/PATCH durably admit a save job and return 202 with status/events URLs.
+Jobs expose GET status, POST retry and GET events below
+`/notebooks/{notebook_id}/save-jobs/{job_id}`. Every access proves owner and full parent membership.
+Optional deal links require same-owner deals. Folder deletion relocates notes to root and bumps
+revisions atomically; notebook deletion cascades; deletions fence jobs and enqueue durable cleanup.
+
+`notebooks` owns concrete SQLite persistence, native BlockNote validation, deterministic Markdown,
+bounded chunking, durable workers/recovery, and a namespaced Helix revision/chunk projection.
+Bootstrap injects the existing server-side embedding and Helix clients. Completion requires both
+stores to confirm the accepted revision; indexing failure preserves canonical SQLite content and
+reports a failed job with its committed revision. Jobs use leases, pinned pipeline configuration,
+idempotent operation IDs, explicit bounded retries and 30-day retention. SSE sends current durable
+snapshots, monotonic sequences and terminal states with auth revocation/cancellation. Existing
+document jobs remain in memory. No provider calls or SQLite locks are held on the HTTP admission
+path beyond its short persistence transaction.
+
+The shared contract, browser adapter and validated desktop relay expose every operation. The
+Notebook editor supports explicit Save, lazy saved-note loading and job/conflict feedback; folder
+organization controls remain deferred. See [notebook API and recovery](notebook-api.md) for exact
+routes, DTO/null semantics, bounds, queue/lease policy, pipeline, cleanup, errors and schema rollout.
+
 ## 8. Backend architecture
 
 ### 8.1 Startup and composition root
@@ -961,7 +1019,7 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 9 to 10, or validate v10]
+    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12 to 13, or validate v13]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -977,7 +1035,7 @@ flowchart TD
 configuration, bootstrap, bind, serve, and graceful shutdown.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
 and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
-owns all product/auth/template SQLite initialization/validation, schema-12 compatibility, and
+owns all product/auth/template SQLite initialization/validation, schema-13 compatibility, and
 the explicitly invoked offline development reset. Bootstrap opens and migrates SQLite on the
 blocking pool, passes clones of the same client to product and template repositories, seeds
 templates, and reconciles their Helix projection before binding routes. Bootstrap passes each
@@ -1031,7 +1089,8 @@ service, model, table, or product capability.
 | `workspaces`, `memberships` | Organization membership policy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
 | `templates::{slide_templates}` | Five stable facade operations dispatch to legacy or embedded execution; embedded mode adds native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared SQLite canonical store, and Helix template/metadata/dual-vector projection |
-| `vaults`, `notebooks`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
+| `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, Markdown/embedding/Helix projection; web/desktop transports and explicit-save editor implemented; folder UI deferred |
+| `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
 
 ### 8.3 Router and middleware
@@ -1112,9 +1171,9 @@ deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses
 Stop old clients and writers before the explicit schema-12 development reset, pair SQLite with a
 fresh isolated Helix store, rebuild/reload matching clients, sign up again, and recreate data
 manually. No status conversion or automatic downgrade is provided. See
-[development reset and recovery](authentication.md#schema-12-and-development-reset).
+[development reset and recovery](authentication.md#schema-13-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 12
+### 9.1 Shared SQLite schema marker 13
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1126,6 +1185,11 @@ schema currently contains:
 | `auth_sessions` | Token digests, owner, expiry/revocation | Durable eight-hour bearer sessions |
 | `assistant_threads` | User-owned thread metadata, nullable immutable deal association, archive state, and recency | Used by Assistant thread list |
 | `assistant_messages` | Ordered normalized user/assistant messages and terminal run state | Used by Assistant history and canonical context |
+| `notebooks` | Authenticated-owner metadata and optional same-owner deal link | API and explicit-save editor implemented |
+| `notebook_folders` | Single-level notebook folders | API implemented |
+| `notebook_notes` | Native blocks, schema version and optimistic revision | API implemented |
+| `notebook_save_jobs` | Immutable accepted snapshots, idempotency, leases, checkpoints and terminal results | Durable save worker and SSE/status/retry |
+| `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Engagement/transaction/status codes, optional deal code/dates, owner and audit/archive timestamps | Used |
 | `companies` | Reusable owner-scoped company details; names need not be unique | Used |
@@ -1164,11 +1228,14 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 12` is the shared compatibility marker. Empty marker-0 databases receive
-all product/auth/template tables in one immediate transaction. Marker-12 layouts are validated
-and reused; missing tables are not silently recreated. All older/newer layouts fail without
-deletion and require deliberate environment selection and the offline development reset. There
-is no profile/password backfill. Foreign-key checks and marker advancement commit together.
+`PRAGMA user_version = 13` is the shared compatibility marker. Empty marker-0 databases receive
+all product/auth/template/notebook tables in one immediate transaction. Validated marker-12 layouts
+receive the additive notebook tables/indexes without resetting accounts, sessions, documents or
+templates; marker 13 is validated and reused. Missing tables are not silently recreated. Older,
+newer or malformed layouts fail without deletion. There is no profile/password backfill or
+automatic downgrade. DDL, foreign-key checks and marker advancement commit together. Rollback
+requires the drained pre-upgrade backup and matching binary; preserve later writes first. See
+[notebook schema rollout and recovery](notebook-api.md#additive-schema-12--13-and-recovery).
 See [authentication](authentication.md) and [migration recovery](slide-templates-migration.md).
 
 All aggregate reads use one transaction snapshot: deals `LEFT JOIN` their optional metadata, then
@@ -1180,7 +1247,7 @@ The offline `reset_development` binary requires `--discard` and an existing, abs
 SQLite path. It drops dependent tables and recreates the final schema in one controlled transaction,
 checks foreign keys, and restores enforcement even on failure. It is never invoked by startup.
 The deliberate development reset discards all profiles, deals, metadata, chats, documents/versions/
-blobs, reminders, templates, assets, previews, classification/embeddings, and memberships; there is
+blobs, reminders, notebooks/folders/notes/save jobs/cleanup, templates, assets, previews, classification/embeddings, and memberships; there is
 no backfill or conversion. Restarting thereafter preserves new data.
 The operational procedure and model vocabulary are in [Deal/company model](deal-company-model.md).
 
@@ -1265,7 +1332,8 @@ across Helix graph writes so a large XLSX/PPTX file can still be indexed.
 | Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
 | Duplicate-ingestion locks | Weak per-identity async mutexes | Process lifetime |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
-| Notebook drafts | Module memory scoped to the authentication session | Survives route changes; lost on reload or session change; no persistence |
+| Notebook API resources and save jobs | Shared SQLite; Helix projection | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
+| Notebook edit buffers and save tracking | Session-scoped module/external-store memory | Survives routes; clears on reload/auth changes; saved content reloads from SQLite, unsaved edits are lost |
 | Frontend activity log | Module store mirrored to `sessionStorage` | Tab/webview session and reloads within it; max 400 entries |
 
 None of these mechanisms supports multi-instance coordination or durable recovery.
@@ -1816,7 +1884,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer tokens are memory-only; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 12 SQLite with explicit offline development reset | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 13 SQLite, additive 12 → 13 upgrade and explicit offline development reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

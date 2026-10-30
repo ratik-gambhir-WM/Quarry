@@ -9,35 +9,35 @@ import {
   useSyncExternalStore,
   type CSSProperties,
   type RefObject,
-} from 'react'
+} from "react";
 
-import type { PlateTextEditorHandle } from '../editor/PlateTextEditor'
-import type { RichTextEdit } from '../editor/plateValue'
-import type { TextEditorOptions } from '../editor/textEditorConfig'
+import type { PlateTextEditorHandle } from "../editor/PlateTextEditor";
+import type { RichTextEdit } from "../editor/plateValue";
+import type { TextEditorOptions } from "../editor/textEditorConfig";
 import type {
   NormalizedShapeElement,
   NormalizedTextElement,
-} from '../shared/PowerpointTypes'
-import { SvgTextBlock } from './SvgText'
-import { getSvgTextContent } from './svgTextLayout'
-import { getTextEditorContentScale } from './textEditorLayout'
-import { sanitizeSvgId, toSvgColor } from './svgUtils'
+} from "../shared/PowerpointTypes";
+import { SvgTextBlock } from "./SvgText";
+import { getSvgTextContent } from "./svgTextLayout";
+import { getTextEditorContentScale } from "./textEditorLayout";
+import { sanitizeSvgId, toSvgColor } from "./svgUtils";
 
-type EditableTextElement = NormalizedShapeElement | NormalizedTextElement
+type EditableTextElement = NormalizedShapeElement | NormalizedTextElement;
 
 const PlateTextEditor = lazy(() =>
-  import('../editor/PlateTextEditor').then((module) => ({
+  import("../editor/PlateTextEditor").then((module) => ({
     default: module.PlateTextEditor,
   })),
-)
+);
 
 type OverlayPosition = {
-  height: number
-  left: number
-  scale: number
-  top: number
-  width: number
-}
+  height: number;
+  left: number;
+  scale: number;
+  top: number;
+  width: number;
+};
 
 export function SvgTextEditorOverlay({
   containerRef,
@@ -49,33 +49,33 @@ export function SvgTextEditorOverlay({
   textEditorOptions,
   viewportTransform,
 }: {
-  containerRef: RefObject<HTMLDivElement | null>
-  coordinateRootRef: RefObject<SVGGraphicsElement | null>
-  element: EditableTextElement
-  fontScale?: number
-  onCancel: () => void
-  onCommit: (edit: RichTextEdit) => void
-  textEditorOptions?: TextEditorOptions
-  viewportTransform: string
+  containerRef: RefObject<HTMLDivElement | null>;
+  coordinateRootRef: RefObject<SVGGraphicsElement | null>;
+  element: EditableTextElement;
+  fontScale?: number;
+  onCancel: () => void;
+  onCommit: (edit: RichTextEdit) => void;
+  textEditorOptions?: TextEditorOptions;
+  viewportTransform: string;
 }) {
   const textContent = useMemo(
     () => getSvgTextContent(element, fontScale),
     [element, fontScale],
-  )
-  const editorRef = useRef<PlateTextEditorHandle>(null)
-  const completedRef = useRef(false)
-  const snapshotClipId = `text-editor-${sanitizeSvgId(useId())}-snapshot-clip`
-  const [content, setContent] = useState<HTMLDivElement | null>(null)
-  const [hasDraftChange, setHasDraftChange] = useState(false)
+  );
+  const editorRef = useRef<PlateTextEditorHandle>(null);
+  const completedRef = useRef(false);
+  const snapshotClipId = `text-editor-${sanitizeSvgId(useId())}-snapshot-clip`;
+  const [content, setContent] = useState<HTMLDivElement | null>(null);
+  const [hasDraftChange, setHasDraftChange] = useState(false);
   const position = useOverlayPosition({
     containerRef,
     coordinateRootRef,
     element,
     viewportTransform,
-  })
-  const [isOverflowing, refreshOverflow] = useElementOverflow(content)
+  });
+  const [isOverflowing, refreshOverflow] = useElementOverflow(content);
 
-  if (!position) return null
+  if (!position) return null;
 
   const editorStyle: CSSProperties = {
     height: position.height,
@@ -83,13 +83,17 @@ export function SvgTextEditorOverlay({
     top: position.top,
     transform: element.rotate ? `rotate(${element.rotate}deg)` : undefined,
     width: position.width,
-  }
-  const effectiveContentScale = getTextEditorContentScale(textContent.layout.fontScale)
-  const caretColor = toSvgColor(textContent.runs[0]?.color ?? textContent.fallbackRun.color)
-  const firstLine = textContent.layout.lines[0]
+  };
+  const effectiveContentScale = getTextEditorContentScale(
+    textContent.layout.fontScale,
+  );
+  const caretColor = toSvgColor(
+    textContent.runs[0]?.color ?? textContent.fallbackRun.color,
+  );
+  const firstLine = textContent.layout.lines[0];
   const firstRunTop = firstLine
     ? firstLine.baseline - firstLine.height * 0.82
-    : element.padding
+    : element.padding;
   const contentStyle: CSSProperties = {
     height: element.h / effectiveContentScale,
     paddingLeft: element.padding / effectiveContentScale,
@@ -98,39 +102,43 @@ export function SvgTextEditorOverlay({
     textAlign: element.align,
     transform: `scale(${position.scale * effectiveContentScale})`,
     width: element.w / effectiveContentScale,
-  }
+  };
   const commitDraft = () => {
-    if (completedRef.current) return
-    const edit = editorRef.current?.getDraft()
-    if (!edit) return
-    completedRef.current = true
-    onCommit(edit)
-  }
+    if (completedRef.current) return;
+    const edit = editorRef.current?.getDraft();
+    if (!edit) return;
+    completedRef.current = true;
+    onCommit(edit);
+  };
 
   return (
     <div
       className={[
-        'absolute z-[5] box-border h-full w-full min-w-0 origin-center overflow-visible',
-        'm-0 rounded-[2px] border-0 bg-transparent outline-none',
+        "absolute z-[5] box-border h-full w-full min-w-0 origin-center overflow-visible",
+        "m-0 rounded-[2px] border-0 bg-transparent outline-none",
         isOverflowing
-          ? 'shadow-[inset_0_0_0_2px_#dc2626]'
-          : 'shadow-[inset_0_0_0_2px_rgba(20,81,225,0.9)]',
-      ].join(' ')}
+          ? "shadow-[inset_0_0_0_2px_#dc2626]"
+          : "shadow-[inset_0_0_0_2px_rgba(20,81,225,0.9)]",
+      ].join(" ")}
       data-overflow={isOverflowing || undefined}
       onBlur={(event) => {
-        const nextTarget = event.relatedTarget
-        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
-        commitDraft()
+        const nextTarget = event.relatedTarget;
+        if (
+          nextTarget instanceof Node &&
+          event.currentTarget.contains(nextTarget)
+        )
+          return;
+        commitDraft();
       }}
       onKeyDownCapture={(event) => {
-        event.stopPropagation()
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          completedRef.current = true
-          onCancel()
-        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-          event.preventDefault()
-          commitDraft()
+        event.stopPropagation();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          completedRef.current = true;
+          onCancel();
+        } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          commitDraft();
         }
       }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -151,11 +159,11 @@ export function SvgTextEditorOverlay({
         </svg>
       ) : null}
       <Suspense
-        fallback={(
+        fallback={
           <span className="sr-only" role="status">
             Loading text editor
           </span>
-        )}
+        }
       >
         <PlateTextEditor
           caretColor={caretColor}
@@ -164,8 +172,8 @@ export function SvgTextEditorOverlay({
           element={element}
           hideText={!hasDraftChange}
           onDraftChange={() => {
-            setHasDraftChange(true)
-            requestAnimationFrame(refreshOverflow)
+            setHasDraftChange(true);
+            requestAnimationFrame(refreshOverflow);
           }}
           options={textEditorOptions}
           ref={editorRef}
@@ -180,7 +188,7 @@ export function SvgTextEditorOverlay({
         </span>
       ) : null}
     </div>
-  )
+  );
 }
 
 function useOverlayPosition({
@@ -189,75 +197,91 @@ function useOverlayPosition({
   element,
   viewportTransform,
 }: {
-  containerRef: RefObject<HTMLDivElement | null>
-  coordinateRootRef: RefObject<SVGGraphicsElement | null>
-  element: EditableTextElement
-  viewportTransform: string
+  containerRef: RefObject<HTMLDivElement | null>;
+  coordinateRootRef: RefObject<SVGGraphicsElement | null>;
+  element: EditableTextElement;
+  viewportTransform: string;
 }) {
   const getSnapshot = useCallback(() => {
-    const coordinateRoot = coordinateRootRef.current
-    const container = containerRef.current
-    const matrix = coordinateRoot?.getScreenCTM()
-    if (!coordinateRoot || !container || !matrix) return ''
+    const coordinateRoot = coordinateRootRef.current;
+    const container = containerRef.current;
+    const matrix = coordinateRoot?.getScreenCTM();
+    if (!coordinateRoot || !container || !matrix) return "";
 
-    const containerRect = container.getBoundingClientRect()
-    const topLeft = new DOMPoint(element.x, element.y).matrixTransform(matrix)
-    const scale = Math.hypot(matrix.a, matrix.b)
+    const containerRect = container.getBoundingClientRect();
+    const topLeft = new DOMPoint(element.x, element.y).matrixTransform(matrix);
+    const scale = Math.hypot(matrix.a, matrix.b);
     return JSON.stringify({
       height: element.h * scale,
       left: topLeft.x - containerRect.left,
       scale,
       top: topLeft.y - containerRect.top,
       width: element.w * scale,
-    } satisfies OverlayPosition)
-  }, [containerRef, coordinateRootRef, element.h, element.w, element.x, element.y, viewportTransform])
-  const subscribe = useCallback((notify: () => void) => {
-    const coordinateRoot = coordinateRootRef.current
-    const container = containerRef.current
-    if (!coordinateRoot || !container) return () => undefined
+    } satisfies OverlayPosition);
+  }, [
+    containerRef,
+    coordinateRootRef,
+    element.h,
+    element.w,
+    element.x,
+    element.y,
+    viewportTransform,
+  ]);
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const coordinateRoot = coordinateRootRef.current;
+      const container = containerRef.current;
+      if (!coordinateRoot || !container) return () => undefined;
 
-    const observer = new ResizeObserver(notify)
-    observer.observe(container)
-    observer.observe(coordinateRoot)
-    window.addEventListener('resize', notify)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', notify)
-    }
-  }, [containerRef, coordinateRootRef])
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => '')
+      const observer = new ResizeObserver(notify);
+      observer.observe(container);
+      observer.observe(coordinateRoot);
+      window.addEventListener("resize", notify);
+      return () => {
+        observer.disconnect();
+        window.removeEventListener("resize", notify);
+      };
+    },
+    [containerRef, coordinateRootRef],
+  );
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => "");
 
   return useMemo(
-    () => snapshot ? JSON.parse(snapshot) as OverlayPosition : undefined,
+    () => (snapshot ? (JSON.parse(snapshot) as OverlayPosition) : undefined),
     [snapshot],
-  )
+  );
 }
 
-function useElementOverflow(content: HTMLDivElement | null): [boolean, () => void] {
-  const listenersRef = useRef(new Set<() => void>())
+function useElementOverflow(
+  content: HTMLDivElement | null,
+): [boolean, () => void] {
+  const listenersRef = useRef(new Set<() => void>());
   const getSnapshot = useCallback(
-    () => Boolean(
-      content && (
-        content.scrollHeight > content.clientHeight + 1 ||
-        content.scrollWidth > content.clientWidth + 1
-      )
-    ),
+    () =>
+      Boolean(
+        content &&
+        (content.scrollHeight > content.clientHeight + 1 ||
+          content.scrollWidth > content.clientWidth + 1),
+      ),
     [content],
-  )
-  const subscribe = useCallback((notify: () => void) => {
-    if (!content) return () => undefined
+  );
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      if (!content) return () => undefined;
 
-    listenersRef.current.add(notify)
-    const observer = new ResizeObserver(notify)
-    observer.observe(content)
-    return () => {
-      listenersRef.current.delete(notify)
-      observer.disconnect()
-    }
-  }, [content])
+      listenersRef.current.add(notify);
+      const observer = new ResizeObserver(notify);
+      observer.observe(content);
+      return () => {
+        listenersRef.current.delete(notify);
+        observer.disconnect();
+      };
+    },
+    [content],
+  );
   const refresh = useCallback(() => {
-    listenersRef.current.forEach((notify) => notify())
-  }, [])
+    listenersRef.current.forEach((notify) => notify());
+  }, []);
 
-  return [useSyncExternalStore(subscribe, getSnapshot, () => false), refresh]
+  return [useSyncExternalStore(subscribe, getSnapshot, () => false), refresh];
 }

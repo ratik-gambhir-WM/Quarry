@@ -31,7 +31,10 @@ const SUPPORTED_SUMMARY_EXTENSIONS = new Set([
 ]);
 
 export function getBrowserFilePath(file: File) {
-  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+  return (
+    (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+    file.name
+  );
 }
 
 export function toSummarizableFile(file: File): SummarizableFile {
@@ -64,7 +67,10 @@ export function formatBytes(bytes: number) {
   return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
-export function buildFileTree(files: SummarizableFile[], rootPath: string): FileTreeNode {
+export function buildFileTree(
+  files: SummarizableFile[],
+  rootPath: string,
+): FileTreeNode {
   const root: FileTreeNode = {
     fileCount: 0,
     files: [],
@@ -75,7 +81,9 @@ export function buildFileTree(files: SummarizableFile[], rootPath: string): File
   };
 
   for (const file of files) {
-    const parts = (file.relativePath || file.filename).split(/[\\/]/).filter(Boolean);
+    const parts = (file.relativePath || file.filename)
+      .split(/[\\/]/)
+      .filter(Boolean);
     const fileName = parts.pop() || file.filename;
     let current = root;
     const folderPathParts: string[] = [root.id];

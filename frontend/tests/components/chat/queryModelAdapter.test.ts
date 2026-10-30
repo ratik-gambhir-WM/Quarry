@@ -18,11 +18,16 @@ describe("createModelAdapter", () => {
   it("converts ordered deltas to cumulative snapshots and makes completion authoritative", async () => {
     let handlers: SendQueryEventHandlers | undefined;
     const cleanup = vi.fn();
-    const queryModel = vi.fn((_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
-      handlers = nextHandlers;
-      return cleanup;
-    });
-    const iterator = stream(createModelAdapter({ queryModel }), runOptions([user("Draft a brief")]));
+    const queryModel = vi.fn(
+      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+        handlers = nextHandlers;
+        return cleanup;
+      },
+    );
+    const iterator = stream(
+      createModelAdapter({ queryModel }),
+      runOptions([user("Draft a brief")]),
+    );
 
     const first = iterator.next();
     handlers?.onEvent({ model: "server-default", type: "started" });
@@ -46,10 +51,12 @@ describe("createModelAdapter", () => {
 
   it("supports a synchronous no-delta completion and disposes exactly once", async () => {
     const cleanup = vi.fn();
-    const queryModel = vi.fn((_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
-      handlers.onEvent({ response: "Immediate answer", type: "completed" });
-      return cleanup;
-    });
+    const queryModel = vi.fn(
+      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+        handlers.onEvent({ response: "Immediate answer", type: "completed" });
+        return cleanup;
+      },
+    );
 
     const output = await collect(
       createModelAdapter({ queryModel }),
@@ -63,7 +70,10 @@ describe("createModelAdapter", () => {
   it("maps server and connection failures to distinct sanitized errors", async () => {
     const serverAdapter = createModelAdapter({
       queryModel: (_input, handlers) => {
-        handlers.onEvent({ error: "provider body that must not leak", type: "failed" });
+        handlers.onEvent({
+          error: "provider body that must not leak",
+          type: "failed",
+        });
         return () => undefined;
       },
     });
@@ -74,17 +84,26 @@ describe("createModelAdapter", () => {
       },
     });
 
-    await expect(collect(serverAdapter, runOptions([user("Question")]))).rejects.toThrow(
+    await expect(
+      collect(serverAdapter, runOptions([user("Question")])),
+    ).rejects.toThrow(
       "The assistant could not complete the response. Please try again.",
     );
-    await expect(collect(connectionAdapter, runOptions([user("Question")]))).rejects.toThrow(
+    await expect(
+      collect(connectionAdapter, runOptions([user("Question")])),
+    ).rejects.toThrow(
       "The assistant connection was interrupted. Please try again.",
     );
-    await expect(collect(createModelAdapter({
-      queryModel: () => {
-        throw new Error("raw synchronous transport detail");
-      },
-    }), runOptions([user("Question")]))).rejects.toThrow(
+    await expect(
+      collect(
+        createModelAdapter({
+          queryModel: () => {
+            throw new Error("raw synchronous transport detail");
+          },
+        }),
+        runOptions([user("Question")]),
+      ),
+    ).rejects.toThrow(
       "The assistant connection was interrupted. Please try again.",
     );
   });
@@ -99,7 +118,10 @@ describe("createModelAdapter", () => {
         return cleanup;
       },
     });
-    const iterator = stream(adapter, runOptions([user("Stream")], controller.signal));
+    const iterator = stream(
+      adapter,
+      runOptions([user("Stream")], controller.signal),
+    );
 
     const first = iterator.next();
     handlers?.onEvent({ delta: "Keep this", type: "delta" });
@@ -116,11 +138,13 @@ describe("createModelAdapter", () => {
 
   it("replays only completed text pairs and omits optional server-owned defaults", async () => {
     let captured: QueryModelInput | undefined;
-    const queryModel = vi.fn((input: QueryModelInput, handlers: SendQueryEventHandlers) => {
-      captured = input;
-      handlers.onEvent({ response: "Next", type: "completed" });
-      return () => undefined;
-    });
+    const queryModel = vi.fn(
+      (input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+        captured = input;
+        handlers.onEvent({ response: "Next", type: "completed" });
+        return () => undefined;
+      },
+    );
     const messages: Message[] = [
       user("First", "u1"),
       assistant("First answer", { type: "complete", reason: "stop" }, "a1"),
@@ -170,15 +194,18 @@ describe("createModelAdapter", () => {
     );
 
     expect(queryModel).not.toHaveBeenCalled();
-    expect(runAssistantThread).toHaveBeenCalledWith({
-      assistantMessageId: "a2",
-      files: [],
-      parentMessageId: "a1",
-      prompt: "Current",
-      requestId: "a2",
-      threadId: "thread-1",
-      userMessageId: "u2",
-    }, expect.any(Object));
+    expect(runAssistantThread).toHaveBeenCalledWith(
+      {
+        assistantMessageId: "a2",
+        files: [],
+        parentMessageId: "a1",
+        prompt: "Current",
+        requestId: "a2",
+        threadId: "thread-1",
+        userMessageId: "u2",
+      },
+      expect.any(Object),
+    );
   });
 
   it("stores a first user message at the root instead of parenting it to itself", async () => {
@@ -203,7 +230,10 @@ describe("createModelAdapter", () => {
     );
 
     expect(runAssistantThread).toHaveBeenCalledWith(
-      expect.objectContaining({ parentMessageId: undefined, userMessageId: "u1" }),
+      expect.objectContaining({
+        parentMessageId: undefined,
+        userMessageId: "u1",
+      }),
       expect.any(Object),
     );
   });
@@ -215,24 +245,34 @@ describe("createModelAdapter", () => {
     for (let index = 0; index < 33; index += 1) {
       history.push(user(`Question ${index}`, `u${index}`));
       history.push(
-        assistant(`Answer ${index}`, { type: "complete", reason: "stop" }, `a${index}`),
+        assistant(
+          `Answer ${index}`,
+          { type: "complete", reason: "stop" },
+          `a${index}`,
+        ),
       );
     }
     history.push(user("Current", "current"));
 
     await collect(
-      createModelAdapter({
-        queryModel: (input, handlers) => {
-          captured = input;
-          handlers.onEvent({ response: "Done", type: "completed" });
-          return () => undefined;
+      createModelAdapter(
+        {
+          queryModel: (input, handlers) => {
+            captured = input;
+            handlers.onEvent({ response: "Done", type: "completed" });
+            return () => undefined;
+          },
         },
-      }, { onContextTruncated }),
+        { onContextTruncated },
+      ),
       runOptions(history),
     );
 
     expect(captured?.context).toHaveLength(64);
-    expect(captured?.context[0]).toEqual({ content: "Question 1", role: "user" });
+    expect(captured?.context[0]).toEqual({
+      content: "Question 1",
+      role: "user",
+    });
     expect(captured?.context[(captured?.context.length ?? 0) - 1]).toEqual({
       content: "Answer 32",
       role: "assistant",
@@ -248,10 +288,15 @@ describe("createModelAdapter", () => {
       "Messages must contain non-empty text only.",
     );
     await expect(
-      collect(adapter, runOptions([{
-        ...user("ignored"),
-        content: [{ image: "data:image/png;base64,AA==", type: "image" }],
-      }])),
+      collect(
+        adapter,
+        runOptions([
+          {
+            ...user("ignored"),
+            content: [{ image: "data:image/png;base64,AA==", type: "image" }],
+          },
+        ]),
+      ),
     ).rejects.toThrow("Messages must contain non-empty text only.");
     expect(queryModel).not.toHaveBeenCalled();
   });
@@ -260,7 +305,11 @@ describe("createModelAdapter", () => {
 function runOptions(
   messages: readonly Message[],
   abortSignal = new AbortController().signal,
-  ids?: { assistantMessageId: string; parentId: string | null; threadId: string },
+  ids?: {
+    assistantMessageId: string;
+    parentId: string | null;
+    threadId: string;
+  },
 ): ModelRunOptions {
   return {
     abortSignal,
@@ -294,13 +343,15 @@ function assistant(
 
 function stream(adapter: ModelAdapter, options: ModelRunOptions) {
   const result = adapter.run(options);
-  if (!(Symbol.asyncIterator in result)) throw new Error("Expected a streaming adapter.");
+  if (!(Symbol.asyncIterator in result))
+    throw new Error("Expected a streaming adapter.");
   return result;
 }
 
 async function collect(adapter: ModelAdapter, options: ModelRunOptions) {
   const output: ModelRunResult["content"][] = [];
-  for await (const result of stream(adapter, options)) output.push(result.content);
+  for await (const result of stream(adapter, options))
+    output.push(result.content);
   return output;
 }
 

@@ -26,7 +26,10 @@ export function PptxTemplateImportButtons({
 }: PptxTemplateImportButtonsProps) {
   const slideTrigger = useRef<HTMLButtonElement>(null);
   const deckTrigger = useRef<HTMLButtonElement>(null);
-  const handleFiles = (files: FileWithPreview[], mode: PptxTemplateImportMode) => {
+  const handleFiles = (
+    files: FileWithPreview[],
+    mode: PptxTemplateImportMode,
+  ) => {
     const file = files[0]?.file;
     if (!(file instanceof File)) return;
     void onImport(file, mode).finally(() => {
@@ -38,7 +41,8 @@ export function PptxTemplateImportButtons({
     maxFiles: 1,
     maxSize: MAX_PPTX_TEMPLATE_IMPORT_BYTES,
     multiple: false,
-    onError: (errors) => onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
+    onError: (errors) =>
+      onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
     onFilesAdded: (files) => handleFiles(files, "single"),
   });
   const [, deckActions] = useFileUpload({
@@ -46,7 +50,8 @@ export function PptxTemplateImportButtons({
     maxFiles: 1,
     maxSize: MAX_PPTX_TEMPLATE_IMPORT_BYTES,
     multiple: false,
-    onError: (errors) => onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
+    onError: (errors) =>
+      onError(errors[0] ?? "Choose a valid .pptx PowerPoint file."),
     onFilesAdded: (files) => handleFiles(files, "batch"),
   });
 
@@ -78,7 +83,9 @@ export function PptxTemplateImportButtons({
       >
         <Icon className="size-3.5" name="upload" />
         <span className="hidden sm:inline">Import Slide Template</span>
-        <span aria-hidden="true" className="sm:hidden">Slide</span>
+        <span aria-hidden="true" className="sm:hidden">
+          Slide
+        </span>
       </Button>
       <Button
         aria-label="Import Deck Template"
@@ -90,10 +97,14 @@ export function PptxTemplateImportButtons({
       >
         <Icon className="size-3.5" name="upload" />
         <span className="hidden sm:inline">Import Deck Template</span>
-        <span aria-hidden="true" className="sm:hidden">Deck</span>
+        <span aria-hidden="true" className="sm:hidden">
+          Deck
+        </span>
       </Button>
       {activeMode ? (
-        <span className="sr-only">Importing {activeMode === "single" ? "slide" : "deck"}</span>
+        <span className="sr-only">
+          Importing {activeMode === "single" ? "slide" : "deck"}
+        </span>
       ) : null}
     </div>
   );

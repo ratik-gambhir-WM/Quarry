@@ -29,7 +29,9 @@ export function SummarizeFileTree({
     <section className="mt-5 overflow-hidden rounded-[13px] border border-white/85 bg-white/74 shadow-[0_12px_34px_rgba(7,1,84,0.05)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/8 px-5 py-4">
         <div>
-          <h2 className="text-[14px] font-semibold text-text-main">Files in folder</h2>
+          <h2 className="text-[14px] font-semibold text-text-main">
+            Files in folder
+          </h2>
           <p className="mt-1 text-[12px] text-muted">
             {selectedFileCount} of {supportedFileCount} selected
           </p>
@@ -98,10 +100,18 @@ function FolderTreeRows({
               style={{ paddingLeft: `${20 + level * 18}px` }}
               type="button"
             >
-              <Icon className="h-4 w-4 shrink-0 text-muted" name={expanded ? "chevronDown" : "chevronRight"} />
-              <Icon className="h-5 w-5 shrink-0 text-primary/75" name="folderOpen" />
+              <Icon
+                className="h-4 w-4 shrink-0 text-muted"
+                name={expanded ? "chevronDown" : "chevronRight"}
+              />
+              <Icon
+                className="h-5 w-5 shrink-0 text-primary/75"
+                name="folderOpen"
+              />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold text-text-main">{folder.name}</span>
+                <span className="block truncate text-[14px] font-semibold text-text-main">
+                  {folder.name}
+                </span>
                 <span className="mt-0.5 block text-[12px] text-muted">
                   {folder.supportedFileCount} of {folder.fileCount} supported
                 </span>
@@ -128,7 +138,9 @@ function FolderTreeRows({
             aria-disabled={!file.supported}
             aria-pressed={selected}
             className={`flex min-h-12 w-full items-center gap-3 border-b border-primary/6 py-2.5 pr-5 text-left transition last:border-b-0 ${
-              file.supported ? "hover:bg-primary/5" : "cursor-not-allowed opacity-60"
+              file.supported
+                ? "hover:bg-primary/5"
+                : "cursor-not-allowed opacity-60"
             }`}
             key={file.path}
             onClick={() => {
@@ -140,14 +152,18 @@ function FolderTreeRows({
             <span
               aria-hidden="true"
               className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition ${
-                selected ? "border-emerald-500 bg-emerald-500 text-white" : "border-primary/20 bg-white/80 text-transparent"
+                selected
+                  ? "border-emerald-500 bg-emerald-500 text-white"
+                  : "border-primary/20 bg-white/80 text-transparent"
               }`}
             >
               <Icon className="h-3.5 w-3.5" name="check" />
             </span>
             <FileTypeIcon mimeType={file.mimeType} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14px] font-semibold text-text-main">{file.filename}</span>
+              <span className="block truncate text-[14px] font-semibold text-text-main">
+                {file.filename}
+              </span>
               <span className="mt-0.5 block text-[12px] text-muted">
                 {formatBytes(file.sizeBytes)}
                 {file.supported ? "" : " · Unsupported"}
@@ -164,7 +180,9 @@ function FileTypeIcon({ mimeType }: { mimeType: string }) {
   const iconName: "pdf" | "sheet" | "image" | "doc" =
     mimeType === "application/pdf"
       ? "pdf"
-      : mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType === "text/csv"
+      : mimeType.includes("spreadsheet") ||
+          mimeType.includes("excel") ||
+          mimeType === "text/csv"
         ? "sheet"
         : mimeType.includes("image")
           ? "image"

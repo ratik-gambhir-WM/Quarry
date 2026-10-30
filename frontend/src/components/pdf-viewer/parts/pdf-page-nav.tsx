@@ -28,7 +28,11 @@ export function PdfPageNav({ className }: PdfPageNavProps) {
           className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
           onClick={() => actions.goToPrevPage()}
           disabled={disabled || page <= 1}
-          aria-label={typeof labels.prevPage === "string" ? labels.prevPage : "Previous page"}
+          aria-label={
+            typeof labels.prevPage === "string"
+              ? labels.prevPage
+              : "Previous page"
+          }
         >
           <ChevronLeft />
         </TooltipTrigger>
@@ -40,7 +44,9 @@ export function PdfPageNav({ className }: PdfPageNavProps) {
           className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
           onClick={() => actions.goToNextPage()}
           disabled={disabled || page >= numPages}
-          aria-label={typeof labels.nextPage === "string" ? labels.nextPage : "Next page"}
+          aria-label={
+            typeof labels.nextPage === "string" ? labels.nextPage : "Next page"
+          }
         >
           <ChevronRight />
         </TooltipTrigger>

@@ -133,6 +133,10 @@ impl JoinCondition {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Predicate {
+    LiteralSubstring {
+        column: String,
+        text: String,
+    },
     FullTextMatch {
         table: String,
         query: String,
@@ -157,6 +161,14 @@ enum Predicate {
 pub struct Condition(Predicate);
 
 impl Condition {
+    /// ASCII case-insensitive literal substring; wildcards and the escape are always bound.
+    pub fn literal_substring(column: impl Into<String>, text: impl Into<String>) -> Self {
+        Self(Predicate::LiteralSubstring {
+            column: column.into(),
+            text: text.into(),
+        })
+    }
+
     /// Match an FTS table using a bound search expression.
     pub fn full_text_match(table: impl Into<String>, query: impl Into<String>) -> Self {
         Self(Predicate::FullTextMatch {
@@ -658,6 +670,7 @@ impl InsertBuilder {
 pub struct UpdateBuilder {
     table: String,
     assignments: Vec<(String, SqlValue)>,
+    increments: Vec<String>,
     conditions: Vec<ConnectedCondition>,
     allow_all_rows: bool,
 }
@@ -667,6 +680,7 @@ impl UpdateBuilder {
         Self {
             table: table.into(),
             assignments: Vec::new(),
+            increments: Vec::new(),
             conditions: Vec::new(),
             allow_all_rows: false,
         }
@@ -674,6 +688,12 @@ impl UpdateBuilder {
 
     pub fn set(mut self, column: impl Into<String>, value: impl Into<SqlValue>) -> Self {
         self.assignments.push((column.into(), value.into()));
+        self
+    }
+
+    /// Increment an integer column by one. Storage CHECK constraints enforce its domain bound.
+    pub fn increment(mut self, column: impl Into<String>) -> Self {
+        self.increments.push(column.into());
         self
     }
 
@@ -693,21 +713,29 @@ impl UpdateBuilder {
     }
 
     pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
-        if self.assignments.is_empty() {
+        if self.assignments.is_empty() && self.increments.is_empty() {
             return Err(SqlBuilderError::MissingUpdateAssignments.into());
         }
         require_conditions("UPDATE", &self.conditions, self.allow_all_rows)?;
 
         let table = quote_identifier(&self.table)?;
-        let column_names = self
+        let mut column_names = self
             .assignments
             .iter()
             .map(|(column, _)| column.clone())
             .collect::<Vec<_>>();
+        column_names.extend(self.increments.iter().cloned());
         ensure_unique_columns(&column_names)?;
         let assignments = column_names
             .iter()
-            .map(|column| Ok(format!("{} = ?", quote_identifier(column)?)))
+            .map(|column| {
+                let quoted = quote_identifier(column)?;
+                Ok(if self.increments.contains(column) {
+                    format!("{quoted} = {quoted} + 1")
+                } else {
+                    format!("{quoted} = ?")
+                })
+            })
             .collect::<Result<Vec<_>, SqlBuilderError>>()?
             .join(", ");
         let mut parameters = self
@@ -961,6 +989,15 @@ fn append_conditions(
 
         sql.push('(');
         match &connected.condition.0 {
+            Predicate::LiteralSubstring { column, text } => {
+                sql.push_str(&quote_identifier(column)?);
+                sql.push_str(" LIKE ? ESCAPE '\\'");
+                let escaped = text
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
+                parameters.push(format!("%{escaped}%").into());
+            }
             Predicate::FullTextMatch { table, query } => {
                 sql.push_str(&quote_identifier(table)?);
                 sql.push_str(" MATCH ?");

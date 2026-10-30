@@ -14,8 +14,7 @@ import { newItemId } from "../lib/ids";
 import type { AnyKanbanCardRenderer, KanbanItem } from "../types";
 
 type Mode =
-  | { kind: "idle" }
-  | { kind: "editing"; rendererId: string; data: unknown };
+  { kind: "idle" } | { kind: "editing"; rendererId: string; data: unknown };
 
 export function InlineCreateEditor({
   renderers,
@@ -28,7 +27,11 @@ export function InlineCreateEditor({
 
   function startCreate(renderer: AnyKanbanCardRenderer) {
     if (renderer.editForm && renderer.newItem) {
-      setMode({ kind: "editing", rendererId: renderer.id, data: renderer.newItem() });
+      setMode({
+        kind: "editing",
+        rendererId: renderer.id,
+        data: renderer.newItem(),
+      });
     } else {
       // No inline editor; emit stub item and let consumer handle it.
       const stub: KanbanItem = {
@@ -95,10 +98,7 @@ export function InlineCreateEditor({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {renderers.map((r) => (
-          <DropdownMenuItem
-            key={r.id}
-            onClick={() => startCreate(r)}
-          >
+          <DropdownMenuItem key={r.id} onClick={() => startCreate(r)}>
             {r.label}
           </DropdownMenuItem>
         ))}

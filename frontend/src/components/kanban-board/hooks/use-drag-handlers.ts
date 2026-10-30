@@ -32,7 +32,12 @@ export function useDragHandlers({
     (event: DragStartEvent) => {
       if (readOnly) return;
       const activeData = event.active.data.current as
-        | { kind: "item"; columnId: string; swimlaneId?: string; rendererId: string }
+        | {
+            kind: "item";
+            columnId: string;
+            swimlaneId?: string;
+            rendererId: string;
+          }
         | { kind: "column"; columnId: string }
         | undefined;
       if (!activeData) return;
@@ -57,11 +62,21 @@ export function useDragHandlers({
       if (!over || readOnly) return;
 
       const activeData = a.data.current as
-        | { kind: "item"; columnId: string; swimlaneId?: string; rendererId: string }
+        | {
+            kind: "item";
+            columnId: string;
+            swimlaneId?: string;
+            rendererId: string;
+          }
         | { kind: "column"; columnId: string }
         | undefined;
       const overData = over.data.current as
-        | { kind: "item"; columnId: string; swimlaneId?: string; rendererId: string }
+        | {
+            kind: "item";
+            columnId: string;
+            swimlaneId?: string;
+            rendererId: string;
+          }
         | { kind: "cell"; columnId: string; swimlaneId?: string }
         | { kind: "collapsed-column"; columnId: string }
         | { kind: "column"; columnId: string }
@@ -71,9 +86,15 @@ export function useDragHandlers({
       // ─── Column reorder ───
       if (activeData.kind === "column" && overData.kind === "column") {
         if (activeData.columnId === overData.columnId) return;
-        const toIndex = data.columns.findIndex((c) => c.id === overData.columnId);
+        const toIndex = data.columns.findIndex(
+          (c) => c.id === overData.columnId,
+        );
         if (toIndex < 0) return;
-        dispatch({ type: "reorder-column", columnId: activeData.columnId, toIndex });
+        dispatch({
+          type: "reorder-column",
+          columnId: activeData.columnId,
+          toIndex,
+        });
         return;
       }
 
@@ -106,7 +127,8 @@ export function useDragHandlers({
         overData.kind === "column"
       ) {
         toColumnId = overData.columnId;
-        toSwimlaneId = "swimlaneId" in overData ? overData.swimlaneId : undefined;
+        toSwimlaneId =
+          "swimlaneId" in overData ? overData.swimlaneId : undefined;
         const targetCol = data.columns.find((c) => c.id === toColumnId);
         if (!targetCol) return;
         toIndex = targetCol.items.length;
@@ -168,7 +190,15 @@ export function useDragHandlers({
   }, []);
 
   const activeItem = active?.kind === "item" ? active.item : null;
-  const activeRendererId = active?.kind === "item" ? active.item.rendererId : undefined;
+  const activeRendererId =
+    active?.kind === "item" ? active.item.rendererId : undefined;
 
-  return { onDragStart, onDragOver, onDragEnd, onDragCancel, activeItem, activeRendererId };
+  return {
+    onDragStart,
+    onDragOver,
+    onDragEnd,
+    onDragCancel,
+    activeItem,
+    activeRendererId,
+  };
 }

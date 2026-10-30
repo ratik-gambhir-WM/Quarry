@@ -1,7 +1,12 @@
 "use client";
 
 import type { Variants } from "motion/react";
-import { AnimatePresence, motion, useAnimation, useReducedMotion } from "motion/react";
+import {
+  AnimatePresence,
+  motion,
+  useAnimation,
+  useReducedMotion,
+} from "motion/react";
 import type { HTMLAttributes } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 
@@ -50,19 +55,15 @@ const CalendarDaysIcon = forwardRef<
   const shouldReduceMotion = useReducedMotion() ?? false;
   const isControlledRef = useRef(false);
 
-  useImperativeHandle(
-    ref,
-    () => {
-      isControlledRef.current = true;
-      return {
-        startAnimation: () => {
-          if (!shouldReduceMotion) controls.start("animate");
-        },
-        stopAnimation: () => controls.start("normal"),
-      };
-    },
-    [controls, shouldReduceMotion],
-  );
+  useImperativeHandle(ref, () => {
+    isControlledRef.current = true;
+    return {
+      startAnimation: () => {
+        if (!shouldReduceMotion) controls.start("animate");
+      },
+      stopAnimation: () => controls.start("normal"),
+    };
+  }, [controls, shouldReduceMotion]);
 
   const handleMouseEnter = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -72,7 +73,7 @@ const CalendarDaysIcon = forwardRef<
         controls.start("animate");
       }
     },
-    [controls, onMouseEnter, shouldReduceMotion]
+    [controls, onMouseEnter, shouldReduceMotion],
   );
 
   const handleMouseLeave = useCallback(
@@ -83,7 +84,7 @@ const CalendarDaysIcon = forwardRef<
         controls.start("normal");
       }
     },
-    [controls, onMouseLeave]
+    [controls, onMouseLeave],
   );
 
   return (

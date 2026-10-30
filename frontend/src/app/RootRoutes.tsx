@@ -13,11 +13,11 @@ export function RootRoutes() {
   return (
     <Routes>
       <Route
-        element={(
+        element={
           <Suspense fallback={null}>
             <TemplatePreviewRenderPage />
           </Suspense>
-        )}
+        }
         path="/_internal/template-preview"
       />
       <Route element={<App />} path="*" />

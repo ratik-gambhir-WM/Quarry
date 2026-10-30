@@ -43,19 +43,15 @@ const FolderTreeIcon = forwardRef<FolderTreeIconHandle, FolderTreeIconProps>(
     const shouldReduceMotion = useReducedMotion() ?? false;
     const isControlledRef = useRef(false);
 
-    useImperativeHandle(
-      ref,
-      () => {
-        isControlledRef.current = true;
-        return {
-          startAnimation: () => {
-            if (!shouldReduceMotion) controls.start("animate");
-          },
-          stopAnimation: () => controls.start("normal"),
-        };
-      },
-      [controls, shouldReduceMotion],
-    );
+    useImperativeHandle(ref, () => {
+      isControlledRef.current = true;
+      return {
+        startAnimation: () => {
+          if (!shouldReduceMotion) controls.start("animate");
+        },
+        stopAnimation: () => controls.start("normal"),
+      };
+    }, [controls, shouldReduceMotion]);
 
     const handleMouseEnter = useCallback(
       (event: MouseEvent<HTMLDivElement>) => {
@@ -65,7 +61,7 @@ const FolderTreeIcon = forwardRef<FolderTreeIconHandle, FolderTreeIconProps>(
           controls.start("animate");
         }
       },
-      [controls, onMouseEnter, shouldReduceMotion]
+      [controls, onMouseEnter, shouldReduceMotion],
     );
 
     const handleMouseLeave = useCallback(
@@ -76,7 +72,7 @@ const FolderTreeIcon = forwardRef<FolderTreeIconHandle, FolderTreeIconProps>(
           controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave],
     );
 
     return (
@@ -144,7 +140,7 @@ const FolderTreeIcon = forwardRef<FolderTreeIconHandle, FolderTreeIconProps>(
         </svg>
       </div>
     );
-  }
+  },
 );
 
 FolderTreeIcon.displayName = "FolderTreeIcon";

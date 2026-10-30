@@ -33,7 +33,10 @@ describe("activityLog", () => {
 
   it("bounds nested arrays and long strings", () => {
     beginIpcRequest("bounded", {
-      items: Array.from({ length: 40 }, (_, index) => ({ index, value: "x".repeat(2_100) })),
+      items: Array.from({ length: 40 }, (_, index) => ({
+        index,
+        value: "x".repeat(2_100),
+      })),
     });
 
     const [entry] = getActivityLogEntries();

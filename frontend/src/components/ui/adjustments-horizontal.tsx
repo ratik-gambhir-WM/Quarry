@@ -11,8 +11,7 @@ export interface AdjustmentsHorizontalIconHandle {
   stopAnimation: () => void;
 }
 
-interface AdjustmentsHorizontalIconProps
-  extends HTMLAttributes<HTMLDivElement> {
+interface AdjustmentsHorizontalIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
@@ -47,7 +46,7 @@ const AdjustmentsHorizontalIcon = forwardRef<
         controls.start("animate");
       }
     },
-    [controls, onMouseEnter]
+    [controls, onMouseEnter],
   );
 
   const handleMouseLeave = useCallback(
@@ -58,7 +57,7 @@ const AdjustmentsHorizontalIcon = forwardRef<
         controls.start("normal");
       }
     },
-    [controls, onMouseLeave]
+    [controls, onMouseLeave],
   );
 
   return (
