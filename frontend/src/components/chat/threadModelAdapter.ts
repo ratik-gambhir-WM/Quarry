@@ -134,7 +134,8 @@ export function createModelAdapter(
             ? api.runAssistantThread!(
                 {
                   assistantMessageId: runOptions.assistantMessageId!,
-                  files: [],
+                  files: [...currentUser.attachments],
+                  ...(runOptions.model ? { model: runOptions.model } : {}),
                   parentMessageId,
                   prompt,
                   requestId: runOptions.assistantMessageId!,
@@ -143,7 +144,12 @@ export function createModelAdapter(
                 },
                 handlers,
               )
-            : api.queryModel({ context, files: [], prompt }, handlers);
+            : api.queryModel({
+                context,
+                files: [...currentUser.attachments],
+                ...(runOptions.model ? { model: runOptions.model } : {}),
+                prompt,
+              }, handlers);
         } catch (error) {
           console.error("[chat] adapter.transport_error", error);
           queue.finish({
@@ -177,11 +183,9 @@ function readCurrentPrompt(messages: readonly Message[]) {
   const current = findCurrentUserMessage(messages);
   const text = textOnlyContent(current);
   if (
-    text === null ||
-    text.trim().length === 0 ||
-    current.attachments.length > 0
+    text === null || text.trim().length === 0
   ) {
-    throw new Error("Messages must contain non-empty text only.");
+    throw new Error("Messages must contain a non-empty text prompt.");
   }
   return text;
 }
@@ -199,7 +203,6 @@ function buildContext(messages: readonly Message[]) {
     const assistantText = textOnlyContent(assistant);
     if (
       assistant.status.type === "complete" &&
-      user.attachments.length === 0 &&
       userText !== null &&
       assistantText !== null &&
       userText.trim().length > 0 &&

@@ -103,7 +103,7 @@ export function PdfEditorConfirmDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[28rem]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? (
@@ -196,7 +196,7 @@ export function PdfEditorPrintDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[28rem]">
         <DialogHeader>
           <DialogTitle>Print</DialogTitle>
           <DialogDescription>
@@ -607,7 +607,7 @@ export function PdfEditorSecurityDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-[32rem]">
         <DialogHeader>
           <DialogTitle>Security</DialogTitle>
           <DialogDescription>
@@ -932,7 +932,7 @@ export function PdfEditorPropertiesDialog({
   const firstPage = document?.pages[0];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-[32rem]">
         <DialogHeader>
           <DialogTitle>Document properties</DialogTitle>
           <DialogDescription>{fileName}</DialogDescription>
@@ -1641,7 +1641,7 @@ export function PdfEditorLinkDialog({
   const canSubmit = tab === "url" ? url.trim().length > 0 : pageNumber >= 1;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[28rem]">
         <DialogHeader>
           <DialogTitle>Add link</DialogTitle>
           <DialogDescription>
@@ -1773,7 +1773,7 @@ export function PdfEditorShortcutsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[28rem]">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
         </DialogHeader>
@@ -1834,7 +1834,7 @@ export function PdfEditorPasswordPrompt({
   if (!isPasswordError) {
     return (
       <div className="grid h-full place-items-center p-6">
-        <div className="max-w-sm space-y-2 text-center">
+        <div className="max-w-[24rem] space-y-2 text-center">
           <div className="text-sm font-medium text-foreground">
             The document could not be opened
           </div>
@@ -1847,7 +1847,7 @@ export function PdfEditorPasswordPrompt({
   }
   return (
     <div className="grid h-full place-items-center p-6">
-      <div className="w-full max-w-sm space-y-4 rounded-xl border bg-background p-5 shadow-sm">
+      <div className="w-full max-w-[24rem] space-y-4 rounded-xl border bg-background p-5 shadow-sm">
         <div className="flex items-start gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
             <LockGlyph className="size-4" />

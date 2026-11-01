@@ -319,7 +319,8 @@ shared `/hub/*` route tree:
 | `/hub/deals/:dealId/deliverables` | `DeliverablesPage` | lazy nested leaf |
 | `/hub/deals/:dealId/deliverables/templates` | `DeliverableTemplatesPage` | lazy nested leaf |
 | `/hub/deals/:dealId/deliverables/templates/:templateId` | `DeliverableTemplateEditorPage` | lazy nested leaf; canvas and Plate editor load through additional on-demand boundaries |
-| all other paths | Redirect to `/login` | eager |
+| unmatched `/hub/*` paths | Missing-page recovery inside the workspace shell; unauthenticated visitors still go to sign-in | workspace boundary |
+| other unmatched paths | Missing-page recovery with a sign-in link | eager |
 
 Both router targets opt into React transitions. `App.tsx` keeps Login eager and loads one
 `WorkspaceRoutes` boundary for `/hub/*`; the workspace provider remains mounted while nested routes
@@ -328,8 +329,31 @@ routes, so a URL, refresh, Back, or Forward action selects the same view without
 view router. Lazy boundaries commit an accessible workspace or in-content skeleton while their
 module loads. Reduced-motion CSS disables transition animation.
 
-The product tree is wrapped in `UserProvider`, backed by one memory-only session store. Login and
-registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
+The product root supplies route-specific browser titles, including the deal activity query tab,
+without placing deal names or document contents in browser metadata. A keyboard-visible skip link
+focuses the shared main landmark. Workspace scroll bodies expose themed scrollbars, use smaller
+phone gutters, and size the shell to the dynamic viewport. Below desktop width, a safe-area-aware
+bottom navigation keeps Home, Deals, Assistant, Notebook, Vault, and Account reachable while the
+full sidebar is hidden. Shared controls retain visible focus outlines and targeted transitions;
+global reduced-motion styles cover ordinary animations as well as route transitions. The HTML entry uses Quarry icons and excludes the private application from
+search indexing; it includes an explicit JavaScript-required message for script-disabled browsers.
+The Home-to-Assistant draft travels in router state, initializes the scoped runtime once, and never
+starts a model request until the user sends it. Suggestions fill the Home draft and focus it.
+The saved-work samples expose no file-opening or deal-filter actions because they are not backed
+by those integrations. The profile menu uses the shared Radix dropdown primitive for keyboard
+navigation, outside dismissal, Escape, positioning, and trigger focus restoration, including when
+the sidebar is collapsed. Shared auth fields and their email-domain composite use consistent
+48-pixel controls; workspace panels use a flat surface, and cards are static unless explicitly
+marked interactive. Deals keeps portfolio metrics out of the phone header so search and creation
+remain reachable. Search opens a collision-aware popover with a full-width field, and Escape or
+Close clears the filter and restores trigger focus. It distinguishes initial loading, request failure,
+an empty portfolio, and a filtered-to-empty result; table text and headers align left for easier comparison. Dialog, empty,
+and error content widths use explicit rem limits: the custom `--spacing-sm/md/lg/xl` tokens collide
+with Tailwind's named `max-w-*` utilities. The profile subtitle uses the actual deal context when
+provided, otherwise “Your workspace,” rather than a fixture-backed deal name.
+
+The product tree is wrapped in `UserProvider`, backed by one session store with an origin-scoped
+local-storage cache. Login and registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
 workspace state by its generation. Registration uses a responsive two-column card (900px max);
 small screens stack the fields. Login uses a compact card with a username step followed by a
 password step, retaining the entered identity and allowing users to go back. The card and steps
@@ -339,8 +363,8 @@ named inputs and read their current values through `FormData` at submission so b
 autofill does not depend on React change events. Native required-field validation blocks empty
 submissions; submit buttons disable only while a request is pending. Password fields expose an
 inline eye control, report Caps Lock, and preserve entered values across visibility and error
-rerenders; passwords are never trimmed. Reload requires sign-in. Router state and the removed
-`quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
+rerenders; passwords are never trimmed. Reload restores a structurally valid, unexpired cached
+session without extending its server expiry. Router state and the removed `quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
 
 ### 5.3 Layer responsibilities
 
@@ -367,6 +391,12 @@ global state or query-cache library.
   and updates the browser theme color. The dark palette remains defined for restoration, but the
   current feature flag normalizes stored or requested dark mode to `slate-frost` and hides the
   profile theme picker.
+- `UserProvider` restores unexpired cached bearer sessions from `quarry.auth.session.v1` in
+  origin-scoped `localStorage`. Invalid/expired records are removed; blocked storage leaves sign-in
+  usable in memory. Logout, expiry, and protected-request 401s clear the cache. Storage events
+  synchronize tabs and cancel prior-session requests. Cached fields never establish server
+  authorization; the bearer token and ownership checks remain authoritative. The token is readable
+  by origin JavaScript, as detailed in [authentication](authentication.md).
 - `UserProvider` owns verified identity/session state for the product tree; `WorkspaceProvider`
   owns deal-resource state for `/hub/*` and reads the verified profile through its session hook.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
@@ -444,9 +474,9 @@ global state or query-cache library.
   and atomic write remain in force. HTML is the only addition to the native text-export MIME allowlist.
   Pending exports block duplicate submissions; cancellation, errors/retry, and completion are announced.
   Export filenames are redacted in the activity log. PDF/DOCX exporters are not installed.
-- `AccountPage` owns its profile request. Profile-menu navigation commits `/hub/account`
-  immediately with the workspace email, and the destination page renders a skeleton until the
-  request resolves to success, empty, or error content.
+- `AccountPage` reads the verified `UserProvider` profile and owns only its sign-out busy state.
+  Profile-menu navigation commits `/hub/account` immediately; it does not fetch a public profile
+  from a router-supplied email. The account view does not support profile editing.
 - `useWorkspaceDeals` has explicit loading, success, and error states. Its default `api` mode maps
   server records and exposes a retryable error without fixture fallback. Explicit `demo` mode
   dynamically imports `fixtures/workspace/portfolio.ts` and the shell visibly labels the result
@@ -473,8 +503,9 @@ global state or query-cache library.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
-  Annotate modes; forms, signatures, stamps, redaction, capture, print, security, attachments, and
-  fullscreen controls remain disabled. Annotation snapshots are retained only in module memory by
+  Annotate modes. The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
+  creation controls; existing shape annotations remain renderable. Forms, signatures, stamps,
+  redaction, capture, print, security, attachments, and fullscreen controls remain disabled. Annotation snapshots are retained only in module memory by
   selected-document ID, restored when a document is reopened in the same browser session, and
   intentionally disappear on refresh. Signature persistence is disabled so the editor does not
   write signature data to `localStorage`.
@@ -592,12 +623,12 @@ operational failures.
 
 | Feature | Implemented behavior | Current limitations |
 | --- | --- | --- |
-| Login/profile | Username/password registration and login on both targets; revocable eight-hour sessions | Memory-only tokens; reload requires login; no account recovery or email verification |
-| Hub | Portfolio landing presentation and suggested content | Primarily presentational/fixture-backed |
+| Login/profile | Username/password registration and login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
+| Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, File Summary, and Settings tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Site Visits, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | SQLite-backed multi-thread text chat with previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, attachment reuse, voice, model picker, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
+| Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -637,7 +668,9 @@ including focus trapping and a scrollable body.
 Its compact dropzone and selected-file rows use motion-aware transitions; per-file processing
 retains the activity circle, completion check, selection, and retry behavior. The sidebar's West
 Monroe logo opens a motion-aware, keyboard-accessible speed dial with Assistant and Workspace
-Search, using custom SVGs rather than a plus trigger. The search floating panel opens centered
+Search, using custom SVGs rather than a plus trigger. Base UI owns popup mounting and dismissal;
+its transition-state attributes drive short CSS transitions, with no second animation/presence
+controller or invisible per-action initial state. Reduced motion disables those transitions. The search floating panel opens centered
 within the usable Data Room surface without a backdrop. Its title bar supports dragging and stays
 above sticky file-review chrome. Closing either panel restores focus to the originating logo;
 selecting an available search result returns focus to the document viewer. The logo remains static
@@ -657,7 +690,7 @@ The live working tree includes React canary View Transition wrappers and CSS tra
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
 `prefers-reduced-motion` behavior.
 
-The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its current `Summarize` title, but
+The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its `Assistant` title, and
 uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains the
 persisted previous-chat list plus a New chat action backed by the remote thread runtime; selecting
 a previous chat shows a message-history skeleton until its stored messages load. Deal
@@ -666,10 +699,31 @@ or conversation. `WorkspaceLayout` has a default-preserving fill mode for this r
 workspace Demo/error notices remain shrinking-safe siblings above one custom thread
 viewport, and only that viewport scrolls. One mounted composer moves from the centered empty view
 to the measured sticky custom thread footer; Motion interpolates the layout change and
-switches immediately under reduced motion. Custom Thread, Composer, Markdown, and
-typing-indicator components use Quarry's existing primitives and semantic tokens and omit
-unsupported attachment, voice, model, reasoning, tool, editing, branching, and thread-list
-controls.
+switches immediately under reduced motion. Both this route and the Data Room Assistant panel
+use the Stealth UI adaptations in `components/stealth/`: a rounded rectangular, auto-growing
+Prompt Input with a separate toolbar and animated Send/Stop control, Message Actions with
+arrow-key toolbar navigation and copy confirmation, a shimmering pending status, and streaming
+Markdown presentation. Escape in the composer stops an active response before closing the panel;
+sending or stopping restores textarea focus. The renderer retains Quarry's sanitized GFM Markdown
+and authoritative final response. Message entrances, pending shimmer, and streaming cursor honor
+reduced motion. The existing Quarry semantic palette remains the color source. `components.json`
+registers `@stealth` for future source installs; adapted source retains its MIT notice.
+The composer exposes a Stealth Model Picker with Server default (omits the override), GPT-5.5,
+and a custom model ID accepted only when nonempty, free of control characters, and at most 128
+characters. Selection is local to the scoped runtime; availability is checked by the configured
+provider when invoked. The Send/Stop background uses the chat-specific `#1f177c` semantic token,
+matching the supplied New-button reference, including while Send is unavailable; its arrow dims.
+The file picker, drop target, and file paste use the existing web/desktop multipart chat contract.
+Removable file chips show names and sizes; client preflight matches the existing 20-file/50-MiB
+aggregate limit, accepted extensions, and filename rules. Axum still validates MIME and byte
+signatures. Sending requires a text prompt. A new message snapshots its files; retry resends those
+files from memory with the current model selection, preserving any next-message draft. Completed
+prior text pairs remain usable context, but their attachment bytes are never resent automatically.
+Thread-creation failures retain the draft/files and expose retry guidance. New chat, history
+selection, selected-thread deletion, and identity/scope changes clear pending file selections.
+Uploaded bytes and filenames are not restored after reload; callers must reattach files then.
+Voice, reasoning, tool, editing, and branching controls remain omitted. The former bouncing-dot
+typing component has been removed.
 
 ## 6. Web and desktop transports
 
@@ -1488,7 +1542,7 @@ an expanded viewer contract.
 ### 10.5 Assistant chat
 
 ```text
-Custom AgentRuntime remote thread list + current prompt and stable IDs
+Custom AgentRuntime remote thread list + current prompt/files, optional model, and stable IDs
   -> ModelAdapter emits cumulative thread-message snapshots
   -> web fetch parser or allowlisted Tauri thread-run relay
   -> assistant::chat resolves the development user and atomically inserts the pending turn
@@ -1700,7 +1754,7 @@ The following are current facts, not merely future enhancements:
 
 - Username/password authentication and per-user resource checks exist; organization tenancy,
   verification, recovery and MFA do not. Open registration and shared template mutation are
-  development choices. Tokens remain in client memory; a reload requires login.
+  development choices. Unexpired bearer sessions are restored from local storage; server-side validation remains authoritative.
 - User API-key collection/storage and public profile lookup were removed; AI still uses only
   server provider keys. Database diagnostics and arbitrary server-path summary routes are removed.
 - Data-room responses can expose absolute server roots.
@@ -1899,7 +1953,7 @@ configuration. Never use `clear_helix` as verification.
 | --- | --- | --- |
 | Identity | Password authentication, durable revocable sessions, per-user checks | No organization tenancy, recovery, MFA or persistent client login |
 | Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
-| User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer tokens are memory-only; AI uses server credentials |
+| User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
 | Persistence | Shared schema 13 SQLite, additive 12 → 13 upgrade and explicit offline development reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |

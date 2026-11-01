@@ -1,4 +1,5 @@
 import { Input } from "../ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useRef, useState } from "react";
 import { Columns3Icon, ListIcon, XIcon } from "lucide-react";
 import {
@@ -24,67 +25,47 @@ type DealsSearchProps = {
 
 export function DealsSearch({ onQueryChange, query }: DealsSearchProps) {
   const [open, setOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  function openSearch() {
-    setOpen(true);
-    window.requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  function closeSearch() {
-    onQueryChange("");
-    setOpen(false);
-    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  function changeOpen(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) onQueryChange("");
   }
 
   return (
-    <div
-      className={`relative flex h-8 items-center overflow-hidden rounded-full transition-[width,background-color,border-color] duration-300 ease-out motion-reduce:transition-none ${
-        open
-          ? "w-[min(19rem,calc(100vw-15rem))] border border-outline-variant bg-surface-container-lowest"
-          : "w-8 border border-transparent bg-transparent"
-      }`}
-    >
-      <button
-        aria-expanded={open}
-        aria-label="Search deals"
-        className="absolute left-0 z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-        onClick={openSearch}
-        ref={triggerRef}
-        type="button"
+    <Popover open={open} onOpenChange={changeOpen}>
+      <PopoverTrigger asChild>
+        <DealsToolbarButton aria-label="Search deals" title="Search deals">
+          <Icon className="size-4" name="search" />
+        </DealsToolbarButton>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        aria-label="Search portfolio"
+        className="w-[min(20rem,calc(100vw-3rem))] rounded-xl p-2 data-open:animate-none data-closed:animate-none"
       >
-        <Icon className="h-4 w-4" name="search" />
-      </button>
-      <Input
-        aria-hidden={!open}
-        aria-label="Search deals"
-        className={`h-full min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 pl-8 pr-8 text-[12px] text-text-main outline-none transition-opacity duration-200 placeholder:text-muted motion-reduce:transition-none [&::-webkit-search-cancel-button]:hidden ${
-          open ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onChange={(event) => onQueryChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          closeSearch();
-        }}
-        placeholder="Search deals"
-        ref={inputRef}
-        tabIndex={open ? 0 : -1}
-        type="search"
-        value={query}
-      />
-      {open ? (
-        <button
-          aria-label="Close deal search"
-          className="absolute right-0 z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
-          onClick={closeSearch}
-          type="button"
-        >
-          <XIcon aria-hidden="true" className="h-4 w-4" />
-        </button>
-      ) : null}
-    </div>
+        <div className="flex items-center gap-1">
+          <Input
+            aria-label="Search deals"
+            placeholder="Name, company, sponsor…"
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.currentTarget.value)}
+            className="h-10 text-[16px] sm:text-[14px]"
+          />
+          <button
+            type="button"
+            aria-label="Close deal search"
+            title="Close deal search (Esc)"
+            onClick={() => changeOpen(false)}
+            className="grid size-10 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-surface-container-high"
+          >
+            <XIcon aria-hidden="true" className="size-4" />
+          </button>
+        </div>
+        <p className="px-1 text-[12px] text-muted">Filter your portfolio · Esc to close</p>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -110,8 +91,6 @@ export function DealsViewMenu({
       <DropdownMenuTrigger asChild>
         <DealsToolbarButton
           aria-label="Change deals view"
-          onBlur={() => iconRef.current?.stopAnimation()}
-          onFocus={() => iconRef.current?.startAnimation()}
           onMouseEnter={() => iconRef.current?.startAnimation()}
           onMouseLeave={() => iconRef.current?.stopAnimation()}
         >

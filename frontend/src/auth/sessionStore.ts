@@ -1,4 +1,5 @@
 import type { SessionResponse } from "../contracts/quarryApi";
+import { persistSession, readPersistedSession, SESSION_STORAGE_KEY } from "./persistedSession";
 import { clearActivityLog } from "../lib/activityLog";
 
 export type SessionState = {
@@ -26,6 +27,7 @@ export const sessionStore = {
     requests.clear();
     state = { generation: state.generation + 1, session, notice };
     clearActivityLog();
+    persistSession(session);
     try {
       window.sessionStorage.removeItem("quarry.workspace.email");
     } catch {
@@ -47,6 +49,16 @@ export const sessionStore = {
   clearIfCurrent(generation: number, notice?: string) {
     if (state.generation === generation) sessionStore.set(null, notice);
   },
+  listenForStorageChanges() {
+    function sync(event: StorageEvent) {
+      if (event.key !== SESSION_STORAGE_KEY && event.key !== null) return;
+      const session = readPersistedSession();
+      if (state.session?.accessToken === session?.accessToken && state.session?.expiresAt === session?.expiresAt) return;
+      sessionStore.set(session, session ? undefined : "Signed out in another tab.");
+    }
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  },
   track(controller: AbortController) {
     requests.add(controller);
     return () => {
@@ -54,6 +66,9 @@ export const sessionStore = {
     };
   },
 };
+
+const restoredSession = readPersistedSession();
+if (restoredSession) sessionStore.set(restoredSession);
 
 export function credentials() {
   const { session, generation } = state;

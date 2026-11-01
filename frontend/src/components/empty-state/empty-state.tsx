@@ -37,9 +37,9 @@ const TRANSIENT_VARIANTS: ReadonlySet<EmptyStateVariant> = new Set([
 ]);
 
 const SIZE_ROOT_CLASS: Record<EmptyStateSize, string> = {
-  sm: "max-w-sm py-6",
-  md: "max-w-md py-10",
-  lg: "max-w-lg py-16",
+  sm: "max-w-[24rem] py-6",
+  md: "max-w-[28rem] py-10",
+  lg: "max-w-[32rem] py-16",
 };
 
 const SIZE_TILE_CLASS: Record<EmptyStateSize, string> = {

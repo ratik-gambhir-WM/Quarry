@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -11,6 +12,7 @@ import type { LoginInput, RegisterInput } from "../contracts/quarryApi";
 const UserContext = createContext<ReturnType<typeof useSession> | null>(null);
 
 function useSession() {
+  useEffect(() => sessionStore.listenForStorageChanges(), []);
   const state = useSyncExternalStore(
     sessionStore.subscribe,
     sessionStore.getSnapshot,

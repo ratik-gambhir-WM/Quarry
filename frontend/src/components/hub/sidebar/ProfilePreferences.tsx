@@ -2,6 +2,14 @@ import { useNavigate } from "react-router-dom";
 import type { WorkspaceLocationState } from "../../../data/workspace";
 import { DARK_THEME_ENABLED, useThemeMode } from "../../../hooks/useThemeMode";
 import { Icon } from "../../ui/Icon";
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+} from "../../ui/dropdown-menu";
 
 type ProfilePreferencesProps = {
   email?: string;
@@ -29,79 +37,23 @@ export function ProfilePreferences({
   }
 
   return (
-    <div
-      className="absolute bottom-full left-0 z-20 mb-3 w-full rounded-2xl border border-outline-variant bg-white p-3 shadow-[0_18px_44px_rgba(7,1,84,0.12)]"
-      role="menu"
-    >
-      <div className="space-y-3">
-        {DARK_THEME_ENABLED ? (
-          <>
-            <p className="px-2 text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
-              Theme
-            </p>
-            <div className="grid grid-cols-2 gap-1 rounded-full border border-outline-variant bg-surface-container-high p-1">
-              <ThemeModeButton
-                active={themeMode === "slate-frost"}
-                label="Slate"
-                onClick={() => setThemeMode("slate-frost")}
-              />
-              <ThemeModeButton
-                active={themeMode === "dark"}
-                label="Dark"
-                onClick={() => setThemeMode("dark")}
-              />
-            </div>
-          </>
-        ) : null}
-        <div
-          className={
-            DARK_THEME_ENABLED
-              ? "border-t border-outline-variant pt-3"
-              : undefined
-          }
-        >
-          <button
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-text-main transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-wait disabled:opacity-70"
-            onClick={handleAccountInfo}
-            role="menuitem"
-            type="button"
-          >
-            <Icon className="h-4 w-4 text-muted" name="personSearch" />
-            <span>Account info</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ThemeModeButtonProps = {
-  active: boolean;
-  disabled?: boolean;
-  label: string;
-  onClick: () => void;
-};
-
-function ThemeModeButton({
-  active,
-  disabled = false,
-  label,
-  onClick,
-}: ThemeModeButtonProps) {
-  return (
-    <button
-      aria-pressed={active}
-      className={[
-        "h-9 rounded-full text-[12px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed disabled:cursor-not-allowed disabled:opacity-45",
-        active
-          ? "bg-primary-container text-on-primary-container shadow-[0_6px_16px_rgba(7,1,84,0.16)]"
-          : "text-primary hover:bg-white",
-      ].join(" ")}
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      {label}
-    </button>
+    <DropdownMenuContent side="top" align="start" sideOffset={12} className="w-64 rounded-xl p-2">
+      {DARK_THEME_ENABLED ? (
+        <>
+          <DropdownMenuLabel>Theme</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={themeMode} onValueChange={(value) => {
+            if (value === "dark" || value === "slate-frost") setThemeMode(value);
+          }}>
+            <DropdownMenuRadioItem value="slate-frost">Slate</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">Dark</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+        </>
+      ) : null}
+      <DropdownMenuItem onSelect={handleAccountInfo} className="min-h-10 gap-3 px-3 text-[13px]">
+        <Icon className="size-4 text-muted" name="personSearch" />
+        Account info
+      </DropdownMenuItem>
+    </DropdownMenuContent>
   );
 }

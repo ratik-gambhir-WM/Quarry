@@ -1,4 +1,4 @@
 export const hubAiSuggestions = [
-  '"Compare Q3 EBITDA across Alpha and Beta"',
-  '"Summarize recent legal risks"',
+  "Help me plan a technology diligence review",
+  "Create a checklist for reviewing legal risks",
 ];

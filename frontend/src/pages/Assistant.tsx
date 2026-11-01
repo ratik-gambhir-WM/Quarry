@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useWorkspace } from "../app/WorkspaceProvider";
 import { QueryChatThread } from "../components/chat/QueryChat";
 import { QueryChatRuntimeProvider } from "../components/chat/QueryChatRuntimeProvider";
@@ -9,6 +10,10 @@ export function Assistant() {
   const [scope, setScope] = useState<"all" | "freeform">("all");
   const [contextTruncated, setContextTruncated] = useState(false);
   const { email = "" } = useWorkspace();
+  const { state }: { state: unknown } = useLocation();
+  const initialDraft =
+    state && typeof state === "object" && "assistantDraft" in state &&
+    typeof state.assistantDraft === "string" ? state.assistantDraft : "";
 
   return (
     <QueryChatRuntimeProvider
@@ -16,6 +21,7 @@ export function Assistant() {
       scope={scope}
       onContextTruncated={setContextTruncated}
       userEmail={email}
+      initialDraft={initialDraft}
     >
       <WorkspaceHomeShell
         activeHomeSection="assistant"
@@ -23,10 +29,10 @@ export function Assistant() {
         header={
           <>
             <WorkspaceHeader title="Assistant" />
-            <label className="flex items-center gap-2 text-sm">
-              Chat scope
+            <label className="flex shrink-0 items-center gap-2 text-[12px] text-muted">
+              <span className="sr-only sm:not-sr-only">Chat scope</span>
               <select
-                className="rounded-md border border-border bg-background p-2"
+                className="h-8 max-w-40 rounded-lg border border-border bg-surface-container-lowest px-2 text-[16px] text-text-main sm:text-[13px]"
                 value={scope}
                 onChange={(e) =>
                   setScope(

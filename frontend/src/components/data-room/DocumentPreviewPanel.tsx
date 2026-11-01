@@ -419,7 +419,7 @@ function PreviewMessage({
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center bg-surface-container p-8">
       <div
-        className={`max-w-xl rounded-2xl border bg-surface-container-lowest p-7 text-center shadow-sm ${
+        className={`max-w-[36rem] rounded-2xl border bg-surface-container-lowest p-7 text-center shadow-sm ${
           tone === "error" ? "border-error/25" : "border-outline-variant"
         }`}
       >

@@ -38,7 +38,7 @@ export function WorkspacePageSkeleton({
           </div>
         </aside>
 
-        <main className="workspace-main-surface m-2 flex min-w-0 flex-1 flex-col overflow-hidden lg:ml-0">
+        <main id="main-content" tabIndex={-1} className="workspace-main-surface m-2 flex min-w-0 flex-1 flex-col overflow-hidden lg:ml-0">
           <div className="workspace-main-rail flex h-10 shrink-0 items-center border-b px-6 sm:px-8">
             <Skeleton className="h-4 w-32" />
           </div>
@@ -59,7 +59,7 @@ export function WorkspaceContentSkeleton() {
     >
       <div className="space-y-3">
         <Skeleton className="h-7 w-52" />
-        <Skeleton className="h-4 w-full max-w-xl" />
+        <Skeleton className="h-4 w-full max-w-[36rem]" />
       </div>
       <div className="grid gap-5 md:grid-cols-2">
         <Skeleton className="h-44 w-full rounded-2xl" />

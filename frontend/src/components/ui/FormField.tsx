@@ -41,7 +41,7 @@ export function FormField({
 
       <div className="relative">
         {!isPassword && icon && (
-          <div className="pointer-events-none absolute left-md top-1/2 z-10 -translate-y-1/2 text-outline">
+          <div aria-hidden="true" className="pointer-events-none absolute left-md top-1/2 z-10 -translate-y-1/2 text-muted">
             {icon}
           </div>
         )}
@@ -49,9 +49,9 @@ export function FormField({
           {...inputProps}
           autoComplete={autoComplete}
           className={cn(
-            "h-auto w-full rounded-full border border-outline-variant bg-surface-container-lowest py-md pl-[52px] pr-md text-[16px] leading-[1.6] text-on-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] outline-none transition placeholder:text-outline-variant focus:border-primary-container focus:ring-4 focus:ring-primary-fixed/40",
+            "h-12 w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-md text-[16px] leading-6 text-on-surface shadow-none outline-none transition-[border-color,box-shadow] placeholder:text-muted focus:border-primary focus:ring-2 focus:ring-primary/15",
             className,
-            isPassword && "pl-md",
+            !isPassword && icon && "pl-12",
           )}
           id={id}
           onChange={

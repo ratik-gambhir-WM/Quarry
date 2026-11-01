@@ -88,7 +88,7 @@ export function DealRoomPage() {
         className="flex min-h-screen items-center justify-center p-8"
         role="alert"
       >
-        <div className="max-w-lg rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center">
+        <div className="max-w-[32rem] rounded-xl border border-outline-variant bg-surface-container-lowest p-6 text-center">
           <h1 className="text-lg font-semibold text-text-main">
             Deal unavailable
           </h1>

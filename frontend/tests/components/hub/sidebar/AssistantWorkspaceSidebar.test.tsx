@@ -3,10 +3,17 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantWorkspaceSidebar } from "@/components/hub/sidebar/AssistantWorkspaceSidebar";
 import { QueryChatRuntimeProvider } from "@/components/chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "@/components/chat/QueryChat";
+
+// Happy DOM rejects canceled Web Animation promises; exercise Motion’s JS fallback.
+const animationDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+beforeAll(() => { Reflect.deleteProperty(Element.prototype, "animate"); });
+afterAll(() => {
+  if (animationDescriptor) Object.defineProperty(Element.prototype, "animate", animationDescriptor);
+});
 
 afterEach(() => {
   cleanup();

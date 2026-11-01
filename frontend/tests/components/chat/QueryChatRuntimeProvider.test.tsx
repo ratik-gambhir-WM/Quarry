@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { QueryChatRuntimeProvider } from "@/components/chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "@/components/chat/QueryChat";
@@ -20,6 +20,13 @@ const { api } = vi.hoisted(() => ({
 }));
 
 vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
+
+// Happy DOM rejects canceled Web Animation promises; exercise Motion’s JS fallback.
+const animationDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+beforeAll(() => { Reflect.deleteProperty(Element.prototype, "animate"); });
+afterAll(() => {
+  if (animationDescriptor) Object.defineProperty(Element.prototype, "animate", animationDescriptor);
+});
 
 afterEach(() => {
   cleanup();
@@ -75,6 +82,25 @@ describe("QueryChatRuntimeProvider", () => {
     );
   });
 
+  it("retains the prompt and attachments when thread creation fails", async () => {
+    const user = userEvent.setup();
+    api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+    api.createAssistantThread.mockRejectedValueOnce(new Error("unavailable"));
+    render(<QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com">
+      <QueryChatThread contextTruncated={false} />
+    </QueryChatRuntimeProvider>);
+    const file = new File(["Notes"], "retained.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), file);
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    await user.type(input, "Keep my draft");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Your message and files are still here");
+    expect((input as HTMLTextAreaElement).value).toBe("Keep my draft");
+    expect(screen.getByRole("button", { name: "Remove retained.txt" })).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(api.runAssistantThread).not.toHaveBeenCalled();
+  });
+
   it("creates a persistent thread before sending its first run", async () => {
     const user = userEvent.setup();
     api.listAssistantThreads.mockResolvedValue({
@@ -96,6 +122,10 @@ describe("QueryChatRuntimeProvider", () => {
       </QueryChatRuntimeProvider>,
     );
 
+    const attachment = new File(["Persisted file"], "persisted.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), attachment);
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
       "Persist this question",
@@ -109,7 +139,8 @@ describe("QueryChatRuntimeProvider", () => {
     );
     const run = api.runAssistantThread.mock.calls[0]?.[0];
     expect(run).toMatchObject({
-      files: [],
+      files: [attachment],
+      model: "gpt-5.5",
       parentMessageId: undefined,
       prompt: "Persist this question",
       threadId: threadMetadata.threadId,
@@ -145,6 +176,10 @@ describe("QueryChatRuntimeProvider", () => {
       </QueryChatRuntimeProvider>,
     );
 
+    const attachment = new File(["Persisted file"], "persisted.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), attachment);
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
       "Persist this question",
@@ -180,6 +215,10 @@ describe("QueryChatRuntimeProvider", () => {
       </QueryChatRuntimeProvider>,
     );
 
+    const attachment = new File(["Persisted file"], "persisted.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), attachment);
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
       "Persist this question",

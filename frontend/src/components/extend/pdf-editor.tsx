@@ -1751,7 +1751,7 @@ function PdfEditorDocumentStatus({
       {state === "loading" ? (
         <InlineSpinner className="size-4" />
       ) : (
-        <div className="flex max-w-sm flex-col items-center gap-3">
+        <div className="flex max-w-[24rem] flex-col items-center gap-3">
           <div role={state === "error" ? "alert" : undefined}>
             {state === "error"
               ? (errorMessage ?? "The PDF could not be loaded.")
@@ -2823,7 +2823,7 @@ function PdfEditorInner({
     ribbon = (
       <>
         {selectToolButton}
-        {PDF_EDITOR_ANNOTATION_TOOL_GROUPS.map((group) => (
+        {PDF_EDITOR_ANNOTATION_TOOL_GROUPS.filter((group) => group.id !== "shapes").map((group) => (
           <React.Fragment key={group.id}>
             <PdfEditorToolbarSeparator />
             {group.tools.map((tool) => renderToolButton(tool, !canAnnotate))}

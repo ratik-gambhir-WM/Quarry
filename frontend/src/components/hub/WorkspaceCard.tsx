@@ -21,7 +21,7 @@ const radiusValues: Record<WorkspaceCardRadius, CSSProperties["borderRadius"]> =
 export function WorkspaceCard({
   children,
   className = "",
-  interactive = true,
+  interactive = false,
   radius = "default",
   surface = "default",
   style,

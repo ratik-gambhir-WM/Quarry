@@ -1,21 +1,16 @@
-import { Textarea } from "../ui/textarea";
-import {
-  ArrowDown,
-  Check,
-  Copy,
-  RefreshCw,
-  Square,
-  ArrowUp,
-} from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import type { AssistantMessage, Message } from "./chatModel";
-import { MarkdownText } from "./MarkdownText";
+import { PromptInput } from "../stealth/prompt-input";
+import { MessageActions } from "../stealth/message-actions";
+import { ShimmerText } from "../stealth/shimmer-text";
+import { AttachmentList } from "../stealth/attachment-list";
+import { StreamingText } from "../stealth/streaming-text";
 import { useAgentRuntimeContext, useThreadRuntimeState } from "./AgentRuntime";
-import { TypingIndicator } from "./TypingIndicator";
 
 export function QueryChatThread({
   contextTruncated,
@@ -127,9 +122,9 @@ export function QueryChatThread({
 function ThreadWelcome() {
   return (
     <div className="mb-6 text-center">
-      <h1 className="text-xl font-semibold tracking-[-0.02em] text-text-main sm:text-2xl">
+      <h2 className="text-xl font-semibold tracking-[-0.02em] text-text-main sm:text-2xl">
         How can I help you today?
-      </h1>
+      </h2>
     </div>
   );
 }
@@ -176,77 +171,26 @@ function ComposerBar({
   condensed: boolean;
 }) {
   const runtime = useAgentRuntimeContext();
-  const { draft, isPreparingThread, isRunning } = useThreadRuntimeState(
+  const { draft, draftFiles, attachmentError, selectedModel, sendError, isPreparingThread, isRunning, isThreadLoading } = useThreadRuntimeState(
     (state) => state,
   );
   return (
-    <div
-      className={cn(
-        "group/query-composer relative flex w-full flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-2 shadow-[0_12px_34px_rgba(7,1,84,0.07)] transition-[border-color,box-shadow,border-radius] focus-within:border-outline/50 focus-within:shadow-[0_14px_38px_rgba(7,1,84,0.1)]",
-        compact &&
-          (condensed
-            ? "min-h-[2.625rem] flex-row items-end rounded-full p-1"
-            : "min-h-14 flex-row items-end rounded-full p-1.5"),
-      )}
-      data-compact={compact ? "" : undefined}
-      data-slot="query-composer"
-    >
-      <Textarea
-        aria-label="Message input"
-        autoFocus
-        className={cn(
-          "max-h-48 min-h-16 w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 px-2.5 py-2 text-[15px] leading-6 text-on-surface outline-none placeholder:text-muted",
-          compact &&
-            (condensed
-              ? "min-h-[1.875rem] px-3.5 py-[0.1875rem]"
-              : "min-h-11 px-3.5 py-2.5"),
-        )}
-        enterKeyHint="send"
-        onChange={(event) => runtime.setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (
-            event.key === "Enter" &&
-            !event.shiftKey &&
-            !event.nativeEvent.isComposing
-          ) {
-            event.preventDefault();
-            void runtime.send();
-          }
-        }}
-        placeholder="Send a message..."
-        rows={compact ? 1 : 2}
-        value={draft}
-      />
-      <div
-        className={cn("flex justify-end", compact && "shrink-0 self-center")}
-        data-slot="query-composer-actions"
-      >
-        {isRunning ? (
-          <Button
-            aria-label="Stop generating"
-            className="rounded-full"
-            onClick={() => runtime.stop()}
-            size="icon-sm"
-            title="Stop generating"
-            type="button"
-          >
-            <Square className="fill-current" />
-          </Button>
-        ) : (
-          <Button
-            aria-label="Send message"
-            className="rounded-full"
-            disabled={isPreparingThread || !draft.trim()}
-            onClick={() => void runtime.send()}
-            size="icon-sm"
-            title="Send message"
-            type="button"
-          >
-            <ArrowUp />
-          </Button>
-        )}
-      </div>
-    </div>
+    <PromptInput
+      value={draft}
+      onValueChange={runtime.setDraft}
+      onSend={() => runtime.send()}
+      onStop={runtime.stop}
+      generating={isRunning}
+      disabled={isPreparingThread || isThreadLoading}
+      files={draftFiles}
+      onFilesAdd={runtime.addFiles}
+      onFileRemove={runtime.removeFile}
+      model={selectedModel}
+      onModelChange={runtime.setModel}
+      error={attachmentError || sendError}
+      compact={compact}
+      condensed={condensed}
+    />
   );
 }
 
@@ -261,12 +205,13 @@ function ThreadMessage({ message }: { message: Message }) {
 function UserMessageView({ message }: { message: Message & { role: "user" } }) {
   return (
     <div
-      className="flex justify-end px-1"
+      className="stealth-message-enter flex justify-end px-1"
       data-role="user"
       data-slot="query-user-message"
     >
-      <div className="max-w-[min(80%,42rem)] rounded-2xl rounded-br-md bg-surface-container px-4 py-2.5 text-[14px] leading-6 text-on-surface wrap-break-word">
+      <div className="max-w-[min(80%,42rem)] rounded-2xl rounded-br-sm bg-surface-container px-4 py-2.5 text-[14px] leading-6 text-on-surface wrap-break-word">
         {textOf(message)}
+        <AttachmentList files={message.attachments} />
       </div>
     </div>
   );
@@ -274,7 +219,9 @@ function UserMessageView({ message }: { message: Message & { role: "user" } }) {
 
 function AssistantMessageView({ message }: { message: AssistantMessage }) {
   const runtime = useAgentRuntimeContext();
-  const { copiedMessageId } = useThreadRuntimeState((state) => state);
+  const { copiedMessageId, isRunning: threadRunning } = useThreadRuntimeState(
+    (state) => state,
+  );
   const content = textOf(message);
   const isRunning = message.status.type === "running";
   const failed =
@@ -284,20 +231,27 @@ function AssistantMessageView({ message }: { message: AssistantMessage }) {
     message.status.reason === "cancelled";
   return (
     <div
-      className="relative px-1 text-[14px] leading-6 text-on-surface"
+      className="stealth-message-enter relative px-1 text-[14px] leading-6 text-on-surface"
       data-role="assistant"
       data-slot="query-assistant-message"
     >
       {isRunning && !content ? (
-        <TypingIndicator />
+        <div
+          aria-label="Assistant is typing"
+          className="py-2 text-sm text-muted"
+          role="status"
+        >
+          <ShimmerText>Thinking…</ShimmerText>
+        </div>
       ) : (
-        <MarkdownText content={content} />
+        <StreamingText content={content} streaming={isRunning} />
       )}
       {failed ? (
         <div className="mt-3 rounded-xl border border-error/35 bg-error-container/35 p-3 text-sm text-error">
           The assistant could not complete the response. Please try again.
           <div className="mt-2">
             <Button
+              disabled={threadRunning}
               onClick={() => runtime.retry(message.id)}
               size="sm"
               type="button"
@@ -321,28 +275,12 @@ function AssistantMessageView({ message }: { message: AssistantMessage }) {
             : ""}
       </span>
       {message.status.type === "complete" ? (
-        <div className="mt-2 flex gap-1 text-muted">
-          <Button
-            aria-label="Copy response"
-            onClick={() => void runtime.copy(message.id)}
-            size="icon-xs"
-            title="Copy response"
-            type="button"
-            variant="ghost"
-          >
-            {copiedMessageId === message.id ? <Check /> : <Copy />}
-          </Button>
-          <Button
-            aria-label="Retry response"
-            onClick={() => runtime.retry(message.id)}
-            size="icon-xs"
-            title="Retry response"
-            type="button"
-            variant="ghost"
-          >
-            <RefreshCw />
-          </Button>
-        </div>
+        <MessageActions
+          copied={copiedMessageId === message.id}
+          disabled={threadRunning}
+          onCopy={() => void runtime.copy(message.id)}
+          onRetry={() => runtime.retry(message.id)}
+        />
       ) : null}
     </div>
   );

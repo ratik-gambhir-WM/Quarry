@@ -39,6 +39,30 @@ vi.mock("@quarry/runtime", () => ({
 }));
 
 describe("Deals", () => {
+  it("keeps loading distinct from an empty portfolio", () => {
+    listDeals.mockReturnValue(new Promise(() => {}));
+    renderDeals("api");
+    expect(screen.getByRole("status", { name: "Loading deals" })).toBeTruthy();
+    expect(screen.queryByText("No deals yet")).toBeNull();
+    expect(screen.queryByText("No deals match these filters")).toBeNull();
+  });
+
+  it("explains how to start an empty portfolio without offering a filter reset", async () => {
+    renderDeals("api");
+    expect(await screen.findByText("No deals yet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reset filters" })).toBeNull();
+  });
+
+  it("shows a request failure without mislabeling it as an empty search", async () => {
+    listDeals.mockRejectedValue(new Error("Service unavailable"));
+    renderDeals("api");
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByText("No deals yet")).toBeNull();
+    expect(screen.queryByText("No deals match these filters")).toBeNull();
+  });
+
   beforeAll(() => {
     const css = window.CSS ?? {};
     Object.defineProperty(window, "CSS", { configurable: true, value: css });
@@ -171,7 +195,7 @@ describe("Deals", () => {
     expect(
       table.classList.contains("bg-[var(--theme-workspace-surface)]"),
     ).toBe(true);
-    expect(table.classList.contains("text-center")).toBe(true);
+    expect(table.classList.contains("text-left")).toBe(true);
     expect(table.querySelectorAll('tbody tr[aria-hidden="true"]')).toHaveLength(
       0,
     );

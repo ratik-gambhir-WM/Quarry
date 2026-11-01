@@ -162,7 +162,7 @@ function TemplateEditorContent({
   if (state.status === "error") {
     return (
       <div className="flex h-full min-h-[32rem] items-center justify-center p-6">
-        <div className="max-w-md text-center" role="alert">
+        <div className="max-w-[28rem] text-center" role="alert">
           <p className="text-sm text-destructive">{state.message}</p>
           <div className="mt-4 flex justify-center gap-2">
             <Button onClick={retry} size="sm" type="button">

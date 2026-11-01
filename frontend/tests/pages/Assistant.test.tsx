@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { Assistant } from "@/pages/Assistant";
 
 const { shellProps } = vi.hoisted(() => ({ shellProps: vi.fn() }));
@@ -41,7 +42,7 @@ afterEach(cleanup);
 
 describe("Assistant", () => {
   it("uses the Assistant chat sidebar, fill layout, and unchanged header title", () => {
-    render(<Assistant />);
+    render(<MemoryRouter><Assistant /></MemoryRouter>);
 
     expect(screen.getByText("Assistant chat")).toBeTruthy();
     expect(screen.getByText("Assistant")).toBeTruthy();

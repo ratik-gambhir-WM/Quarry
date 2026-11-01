@@ -26,12 +26,16 @@ vi.mock("motion/react", () => ({
   motion: {
     div: ({
       children,
+      initial: _initial,
+      animate: _animate,
       layout: _layout,
       layoutId,
       transition,
       ...props
     }: {
       children: React.ReactNode;
+      initial?: unknown;
+      animate?: unknown;
       layout?: boolean;
       layoutId?: string;
       transition?: { duration?: number };
@@ -131,7 +135,11 @@ describe("QueryChat", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Finding" })).toBeNull();
     expect(document.querySelector("script")).toBeNull();
-    expect(screen.getByRole("button", { name: "Copy response" })).toBeTruthy();
+    const copyButton = screen.getByRole("button", { name: "Copy response" });
+    await user.click(copyButton);
+    expect(await screen.findByText("Response copied.")).toBeTruthy();
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Retry response" }));
     expect(screen.getByRole("button", { name: "Retry response" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
     expect(cleanupStream).toHaveBeenCalledTimes(1);
@@ -185,7 +193,7 @@ describe("QueryChat", () => {
     await act(async () =>
       handlers?.onEvent({ delta: "Partial answer", type: "delta" }),
     );
-    await user.click(screen.getByRole("button", { name: "Stop generating" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message input" }), { key: "Escape" });
 
     expect(screen.getByText("Partial answer")).toBeTruthy();
     expect(await screen.findByText("Response stopped.")).toBeTruthy();
@@ -243,6 +251,55 @@ describe("QueryChat", () => {
       files: [],
       prompt: "Retry this",
     });
+  });
+
+  it("sends picked files and a chosen model, and preserves the files for retry", async () => {
+    const user = userEvent.setup();
+    const handlerRuns: SendQueryEventHandlers[] = [];
+    queryModel.mockImplementation((_input, handlers) => {
+      handlerRuns.push(handlers);
+      return () => undefined;
+    });
+    render(<QueryChat />);
+    const file = new File(["Review notes"], "notes.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), file);
+    expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeTruthy();
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
+    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Review the attached notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(1));
+    expect(queryModel.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+    expect(screen.queryByRole("button", { name: "Remove notes.txt" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
+    await act(async () => handlerRuns[0]?.onEvent({ type: "failed", error: "test failure" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(2));
+    expect(queryModel.mock.calls[1]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+  });
+
+  it("supports custom model IDs, attachment removal, drop and paste validation", async () => {
+    const user = userEvent.setup();
+    queryModel.mockReturnValue(() => undefined);
+    render(<QueryChat />);
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    const composer = input.closest("form");
+    const file = new File(["Content"], "drop.txt", { type: "text/plain" });
+    if (!composer) throw new Error("Composer form is missing");
+    fireEvent.drop(composer, { dataTransfer: { types: ["Files"], files: [file] } });
+    expect(screen.getByRole("button", { name: "Remove drop.txt" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Remove drop.txt" }));
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
+    fireEvent.paste(input, { clipboardData: { files: [new File(["x"], "unsafe.exe")] } });
+    expect(screen.getByRole("alert").textContent).toContain("this file type isn’t supported");
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /Custom model ID/ }));
+    await user.type(input, "Use this model");
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(screen.getByRole("textbox", { name: "Custom model ID" }), "custom-model-id");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(1));
+    expect(queryModel.mock.calls[0]?.[0].model).toBe("custom-model-id");
   });
 
   it("disables composer interpolation when reduced motion is requested", () => {

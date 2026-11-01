@@ -42,7 +42,7 @@ export function PasswordField({ revealed, onRevealedChange, showToggle = true, v
       <div className="relative">
         <Input
           {...props}
-          className={cn(className, showToggle && "pr-10")}
+          className={cn(className, showToggle && "pr-12")}
           ref={(node) => {
             inputRef.current = node;
             if (typeof ref === "function") ref(node);
@@ -60,7 +60,7 @@ export function PasswordField({ revealed, onRevealedChange, showToggle = true, v
             disabled={props.disabled}
             onMouseDown={(event) => event.preventDefault()}
             onClick={toggle}
-            className="absolute right-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted transition-[color,transform] duration-150 hover:text-on-surface active:scale-90 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 motion-reduce:transition-none"
+            className="absolute right-1 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-md text-muted transition-[color,transform] duration-150 hover:text-on-surface active:scale-90 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 motion-reduce:transition-none"
           >
             {visible ? <EyeOff aria-hidden="true" className="size-4" /> : <Eye aria-hidden="true" className="size-4" />}
           </button>

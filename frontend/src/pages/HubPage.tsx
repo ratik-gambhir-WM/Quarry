@@ -6,11 +6,14 @@ import { hubAiSuggestions } from "../fixtures/hub/search";
 
 export function HubPage() {
   return (
-    <WorkspaceHomeShell header={<WorkspaceHeader title="Quarry" />}>
+    <WorkspaceHomeShell header={<WorkspaceHeader title="Home" />}>
       <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pb-10">
-        <p className="type-subtle text-muted">
-          Portfolio Performance &amp; Strategic Initiatives
-        </p>
+        <div className="space-y-2">
+          <h2 className="type-h1 text-on-surface">Your workspace</h2>
+          <p className="type-body-sm text-on-surface-variant">
+            Pick up your work or start a conversation.
+          </p>
+        </div>
 
         <AiSearchCard suggestions={hubAiSuggestions} />
 

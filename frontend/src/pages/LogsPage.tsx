@@ -399,7 +399,7 @@ function EmptyState({ hasEntries }: { hasEntries: boolean }) {
       <h3 className="mt-4 text-[16px] font-semibold text-text-main">
         {hasEntries ? "No matching entries" : "Waiting for activity"}
       </h3>
-      <p className="mt-2 max-w-md text-[13px] leading-5 text-muted">
+      <p className="mt-2 max-w-[28rem] text-[13px] leading-5 text-muted">
         {hasEntries
           ? "Try a different search or filter combination."
           : "API calls, server events, and native operations will appear here automatically as you use Quarry."}

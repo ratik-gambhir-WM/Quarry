@@ -6,11 +6,11 @@ import {
   WorkspaceDeal,
   WorkspaceLocationState,
 } from "../../../data/workspace";
-import { defaultWorkspaceProfileSubtitle } from "../../../fixtures/workspace/navigation";
 import { DataRoomToolsDial } from "../../data-room/DataRoomToolsProvider";
 import { Icon } from "../../ui/Icon";
 import { SidebarIcon } from "./SidebarIcon";
 import { ProfilePreferences } from "./ProfilePreferences";
+import { DropdownMenu, DropdownMenuTrigger } from "../../ui/dropdown-menu";
 
 type SidebarFrameProps = {
   alignedHeader?: boolean;
@@ -46,7 +46,7 @@ export function SidebarFrame({
   const teamLabel = getTeamLabel(email);
   const subtitle = profileDeal
     ? profileDeal.room.name
-    : (profileSubtitle ?? defaultWorkspaceProfileSubtitle);
+    : (profileSubtitle ?? "Your workspace");
 
   return (
     <aside
@@ -103,6 +103,7 @@ export function SidebarFrame({
             aria-controls="workspace-sidebar-navigation"
             aria-expanded={!collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className={`${collapsed && !showHeaderBackButton ? "mx-auto" : "ml-auto"} flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed`}
             onClick={() => {
               setCollapsed((isCollapsed) => !isCollapsed);
@@ -137,49 +138,35 @@ export function SidebarFrame({
 
           <div className="shrink-0 border-t border-outline-variant/70 pt-2">
             <div className="relative">
-              {!collapsed && profileMenuOpen ? (
-                <ProfilePreferences
-                  email={email}
-                  navigationState={navigationState}
-                />
-              ) : null}
               <div className={`flex items-center gap-2 ${collapsed ? "flex-col" : ""}`}>
-                <button
-                  aria-expanded={!collapsed && profileMenuOpen}
-                  aria-haspopup={collapsed ? undefined : "menu"}
-                  aria-label={
-                    collapsed
-                      ? `Expand sidebar for ${teamLabel} profile`
-                      : undefined
-                  }
-                  className={`flex min-w-0 flex-1 items-center rounded-lg py-2 text-left transition hover:bg-sidebar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
-                    collapsed ? "justify-center px-0" : "gap-3 px-3"
-                  }`}
-                  onClick={() => {
-                    if (collapsed) {
-                      setCollapsed(false);
-                      return;
-                    }
-                    setProfileMenuOpen((isOpen) => !isOpen);
-                  }}
-                  type="button"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary-fixed-dim text-white">
-                    <span className="text-[12px] font-semibold">
-                      {teamLabel.slice(0, 1)}
-                    </span>
-                  </div>
-                  {collapsed ? null : (
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-medium leading-5 text-sidebar-active">
-                        {teamLabel}
-                      </p>
-                      <p className="truncate text-[11px] font-normal leading-4 text-sidebar-muted">
-                        {subtitle}
-                      </p>
-                    </div>
-                  )}
-                </button>
+                <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label={`${teamLabel} profile`}
+                      className={`flex min-w-0 flex-1 items-center rounded-lg py-2 text-left transition hover:bg-sidebar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed ${
+                        collapsed ? "justify-center px-0" : "gap-3 px-3"
+                      }`}
+                      type="button"
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary-fixed-dim text-white">
+                        <span className="text-[12px] font-semibold">
+                          {teamLabel.slice(0, 1)}
+                        </span>
+                      </div>
+                      {collapsed ? null : (
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium leading-5 text-sidebar-active">
+                            {teamLabel}
+                          </p>
+                          <p className="truncate text-[11px] font-normal leading-4 text-sidebar-muted">
+                            {subtitle}
+                          </p>
+                        </div>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  {profileMenuOpen ? <ProfilePreferences email={email} navigationState={navigationState} /> : null}
+                </DropdownMenu>
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center">
                   <DataRoomToolsDial />
                 </div>

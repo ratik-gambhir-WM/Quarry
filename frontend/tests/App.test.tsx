@@ -3,9 +3,9 @@ import { testSession } from "@/test/fixtures/auth";
 import { testDeal } from "@/test/fixtures/deals";
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { RootRoutes } from "@/app/RootRoutes";
 import type { PersistedDeal } from "@/contracts/quarryApi";
@@ -27,6 +27,13 @@ vi.mock("@quarry/runtime", () => ({
     target: "web",
   },
 }));
+
+// Happy DOM rejects canceled Web Animation promises; exercise Motion’s JS fallback.
+const animationDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+beforeAll(() => { Reflect.deleteProperty(Element.prototype, "animate"); });
+afterAll(() => {
+  if (animationDescriptor) Object.defineProperty(Element.prototype, "animate", animationDescriptor);
+});
 
 afterEach(() => {
   cleanup();
@@ -144,7 +151,8 @@ describe("App routes", () => {
         <App />
       </MemoryRouter>,
     );
-    const link = await screen.findByRole("link", { name: "Notebook" });
+    const navigation = await screen.findByRole("navigation", { name: "Workspace" });
+    const link = within(navigation).getByRole("link", { name: "Notebook" });
     fireEvent.click(link);
     expect(
       await screen.findByRole("heading", { name: "A little room to think" }),

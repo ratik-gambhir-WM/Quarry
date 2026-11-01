@@ -6,6 +6,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { useWorkspace } from "../app/WorkspaceProvider";
 import { useNavigate } from "react-router-dom";
 import { AddDealMenu } from "../components/deals/AddDealMenu";
 import {
@@ -88,7 +89,7 @@ function DealsHeaderMetrics() {
     <div
       aria-label="Deal portfolio counts"
       aria-live="polite"
-      className="mr-2 flex items-center gap-4 whitespace-nowrap text-[12px] font-normal text-muted"
+      className="mr-2 hidden items-center gap-4 md:flex whitespace-nowrap text-[12px] font-normal text-muted"
     >
       <span>
         <span className="font-medium tabular-nums text-text-main">
@@ -127,6 +128,7 @@ function DealsContent({
 }: DealsContentProps) {
   const deals = useWorkspaceHomeDeals();
   const navigate = useNavigate();
+  const { dealsResource } = useWorkspace();
   const deferredQuery = useDeferredValue(query);
 
   const visibleDeals = useMemo(
@@ -140,8 +142,13 @@ function DealsContent({
 
   return (
     <div className="flex w-full flex-col gap-5 pb-10">
-      {visibleDeals.length === 0 ? (
-        <DealsEmptyState onReset={resetFilters} />
+      {dealsResource.status === "loading" ? (
+        <div role="status" aria-label="Loading deals" className="space-y-3">
+          <span className="sr-only">Loading deals…</span>
+          {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+        </div>
+      ) : dealsResource.status === "error" ? null : visibleDeals.length === 0 ? (
+        <DealsEmptyState onReset={resetFilters} filtered={Boolean(deferredQuery.trim())} />
       ) : view === "table" ? (
         <DealsTable
           deals={visibleDeals}

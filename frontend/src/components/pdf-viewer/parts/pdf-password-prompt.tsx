@@ -51,7 +51,7 @@ export function PdfPasswordPrompt({
         if (!next) onCancel();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-[28rem]">
         <DialogHeader>
           <div className="mb-1 flex size-10 items-center justify-center rounded-full bg-surface-container text-muted-foreground">
             <Lock className="size-5" aria-hidden="true" />

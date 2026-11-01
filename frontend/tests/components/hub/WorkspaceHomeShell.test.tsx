@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceHomeShell } from "@/components/hub/WorkspaceHomeShell";
 
@@ -31,6 +32,7 @@ describe("WorkspaceHomeShell", () => {
   it("labels explicitly selected demo data", () => {
     render(
       <WorkspaceHomeShell header={null}>Workspace content</WorkspaceHomeShell>,
+      { wrapper: MemoryRouter },
     );
 
     expect(screen.getByRole("status").textContent).toContain("Demo data");
@@ -47,6 +49,7 @@ describe("WorkspaceHomeShell", () => {
     });
     render(
       <WorkspaceHomeShell header={null}>Account content</WorkspaceHomeShell>,
+      { wrapper: MemoryRouter },
     );
 
     expect(screen.getByRole("alert").textContent).toContain(
@@ -62,6 +65,7 @@ describe("WorkspaceHomeShell", () => {
       <WorkspaceHomeShell contentMode="fill" header={null}>
         <div>Assistant thread</div>
       </WorkspaceHomeShell>,
+      { wrapper: MemoryRouter },
     );
 
     expect(screen.getByRole("status").textContent).toContain("Demo data");

@@ -1,6 +1,9 @@
 import { lazy } from "react";
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
+import { MissingPageContent } from "../pages/NotFoundPage";
+import { WorkspaceHomeShell } from "../components/hub/WorkspaceHomeShell";
+import { WorkspaceHeader } from "../components/hub/WorkspaceHeader";
 import { LazyContent, LazyPage } from "./LazyPage";
 import { WorkspaceProvider } from "./WorkspaceProvider";
 
@@ -156,7 +159,14 @@ export function WorkspaceRoutes() {
             path="deliverables/templates/:templateId"
           />
         </Route>
-        <Route element={<Navigate replace to="/login" />} path="*" />
+        <Route
+          element={
+            <WorkspaceHomeShell header={<WorkspaceHeader title="Page not found" />}>
+              <MissingPageContent workspace />
+            </WorkspaceHomeShell>
+          }
+          path="*"
+        />
       </Routes>
     </WorkspaceProvider>
   );

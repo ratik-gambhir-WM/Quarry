@@ -447,6 +447,35 @@ describe("httpQuarryApi", () => {
     );
   });
 
+  it.each(["ephemeral", "persisted"])("sends the selected model and files through %s chat multipart", async (mode) => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: started\ndata: {"type":"started","model":"gpt-5.5"}\n\nevent: completed\ndata: {"type":"completed","response":"Done"}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, { headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["Test attachment"], "notes.txt", { type: "text/plain" });
+    const handlers = { onEvent: vi.fn() };
+    if (mode === "persisted") {
+      httpQuarryApi.runAssistantThread({
+        assistantMessageId: "assistant-1", userMessageId: "user-1", requestId: "assistant-1", threadId: "thread-1",
+        files: [file], model: "gpt-5.5", prompt: "Review these notes",
+      }, handlers);
+    } else {
+      httpQuarryApi.queryModel({ context: [], files: [file], model: "gpt-5.5", prompt: "Review these notes" }, handlers);
+    }
+    await vi.waitFor(() => expect(handlers.onEvent).toHaveBeenCalledWith({ type: "completed", response: "Done" }));
+    const form = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(form.get("model")).toBe("gpt-5.5");
+    expect(form.get("prompt")).toBe("Review these notes");
+    const uploaded = form.get("files") as File;
+    expect(uploaded.name).toBe("notes.txt");
+    expect(await uploaded.text()).toBe("Test attachment");
+    expect(form.has("context")).toBe(mode === "ephemeral");
+  });
+
   it("closes the response stream as soon as a terminal query event arrives", async () => {
     const encoder = new TextEncoder();
     let cancelled = false;

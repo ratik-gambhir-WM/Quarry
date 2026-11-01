@@ -17,10 +17,21 @@ use 32 random bytes encoded as base64url; SQLite stores only the SHA-256 token d
 not used for passwords. Each session expires after eight hours, allows explicit revocation, and
 survives a backend restart. Expired records are rejected regardless of bounded cleanup progress.
 
-The global `UserProvider` subscribes to one memory-only session store. It exposes user, ID, token,
-expiry, login/register/logout, and session generation. No token/password is written to browser
-storage, router state, logs, or persistent native storage. Reload or desktop restart requires
-sign-in. This design does not protect against code already executing through XSS.
+The global `UserProvider` subscribes to one session store. It exposes user, ID, token, expiry,
+login/register/logout, and session generation. At the user's request, the session response is cached
+in origin-scoped `localStorage` under `quarry.auth.session.v1` on both web and Tauri. Reloads,
+development rebuilds, and restarts restore an unexpired session without extending its eight-hour
+server expiry. The cache includes only the bearer token, token type, original expiry, and public
+profile fields; passwords are never stored. Malformed or expired records are discarded. Blocked
+storage falls back to memory-only sign-in.
+
+The cache is untrusted UI state, not an authorization authority: every protected server operation
+still verifies the bearer token, expiry, revocation, ownership, and the matching user header.
+Logout, expiry, and protected-request 401s remove the cached session. Storage events propagate
+session changes across tabs and cancel requests from the prior session. JavaScript running in this
+origin can read the bearer token, so this does not provide HttpOnly-cookie or native credential-vault
+protection against XSS. Provider keys and passwords remain absent from browser storage, router
+state, logs, and client bundles.
 
 ## HTTP contract
 
@@ -127,6 +138,6 @@ build; backend fmt/check/Clippy/tests; and Tauri fmt/Clippy/tests. Security cove
 salted hashes, token digests, policy bounds, revocation/expiry, two-user resource access, removed
 bypasses, auth logging exclusions, forms, stale-session 401s and client cancellation.
 
-Open registration, shared catalog mutation, no email verification/recovery/MFA, memory-only
-client sessions, process-local throttling, server TLS provisioning, and organization tenancy
+Open registration, shared catalog mutation, no email verification/recovery/MFA, JavaScript-readable
+client session persistence, process-local throttling, server TLS provisioning, and organization tenancy
 remain explicit limits. Authentication is not a claim of complete production readiness.

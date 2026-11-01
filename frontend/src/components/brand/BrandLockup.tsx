@@ -19,6 +19,8 @@ export function BrandLockup({
         alt="West Monroe"
         className={`${compact ? "h-8" : "h-10"} w-auto object-contain`}
         decoding="async"
+        width={756}
+        height={212}
         src={westMonroeLogo}
       />
       <div className="space-y-xs">

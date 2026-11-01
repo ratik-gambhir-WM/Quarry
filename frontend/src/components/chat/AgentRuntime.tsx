@@ -14,7 +14,8 @@ import type {
   AssistantThreadListOptions,
   QuarryApi,
 } from "../../contracts/quarryApi";
-import type { AssistantMessage, Message, UserMessage } from "./chatModel";
+import { isChatModelValid, type AssistantMessage, type ChatModelSelection, type Message, type UserMessage } from "./chatModel";
+import { addChatFiles } from "./chatAttachments";
 import { createModelAdapter } from "./threadModelAdapter";
 
 export type ThreadRuntimeState = {
@@ -23,6 +24,10 @@ export type ThreadRuntimeState = {
   copiedMessageId: string | null;
   deletingThreadId: string | null;
   draft: string;
+  draftFiles: readonly File[];
+  attachmentError: string | null;
+  selectedModel: ChatModelSelection;
+  sendError: string | null;
   isPreparingThread: boolean;
   isRunning: boolean;
   isThreadListLoading: boolean;
@@ -52,6 +57,7 @@ type AgentRuntimeOptions = {
   userEmail: string;
   scope?: "all" | "freeform" | "deal";
   dealId?: string;
+  initialDraft?: string;
 };
 
 type AgentRuntimeValue = {
@@ -63,6 +69,9 @@ type AgentRuntimeValue = {
   selectThread(threadId: string): Promise<void>;
   send(prompt?: string): void;
   setDraft(draft: string): void;
+  addFiles(files: readonly File[]): void;
+  removeFile(index: number): void;
+  setModel(model: ChatModelSelection): void;
   state: ThreadRuntimeState;
   stop(): void;
 };
@@ -73,6 +82,10 @@ const emptyState: ThreadRuntimeState = {
   copiedMessageId: null,
   deletingThreadId: null,
   draft: "",
+  draftFiles: [],
+  attachmentError: null,
+  selectedModel: { type: "default" },
+  sendError: null,
   isPreparingThread: false,
   isRunning: false,
   isThreadListLoading: false,
@@ -91,12 +104,14 @@ export function useAgentRuntime({
   userEmail,
   scope = "all",
   dealId,
+  initialDraft = "",
 }: AgentRuntimeOptions): AgentRuntimeValue {
   const [state, dispatch] = useReducer(
     (_current: ThreadRuntimeState, next: ThreadRuntimeState) => next,
     userEmail,
     (email) => ({
       ...emptyState,
+      draft: initialDraft,
       isThreadListLoading: Boolean(email),
       scopeDealId: scope === "deal" ? (dealId ?? null) : null,
     }),
@@ -142,6 +157,7 @@ export function useAgentRuntime({
       userMessage: UserMessage,
       threadId: string,
       reusesUserMessage = false,
+      model?: string,
     ) => {
       if (!mountedRef.current) return;
       const assistantMessage = assistantMessageFor();
@@ -159,7 +175,13 @@ export function useAgentRuntime({
         threadId: threadId || undefined,
       });
       onContextTruncated(false);
-      update({ draft: "", isRunning: true, messages, threadLoadError: false });
+      update({
+        ...(!reusesUserMessage ? { draft: "", draftFiles: [], attachmentError: null } : {}),
+        isRunning: true,
+        messages,
+        sendError: null,
+        threadLoadError: false,
+      });
 
       try {
         const adapter = createModelAdapter(api, {
@@ -170,6 +192,7 @@ export function useAgentRuntime({
           abortSignal: controller.signal,
           assistantMessageId: assistantMessage.id,
           messages,
+          model,
           threadId: threadId || undefined,
         })) {
           if (controller.signal.aborted) return;
@@ -214,6 +237,7 @@ export function useAgentRuntime({
       const current = stateRef.current;
       if (
         !text ||
+        !isChatModelValid(current.selectedModel) ||
         current.isPreparingThread ||
         current.isRunning ||
         current.isThreadLoading
@@ -230,12 +254,14 @@ export function useAgentRuntime({
         persisted: Boolean(userEmail),
         promptChars: [...text].length,
       });
+      const message = userMessageFor(text, current.draftFiles);
+      const model = current.selectedModel.type === "model" ? current.selectedModel.id.trim() : undefined;
       if (!userEmail) {
-        void startRun(userMessageFor(text), "");
+        void startRun(message, "", false, model);
         return;
       }
 
-      update({ isPreparingThread: true });
+      update({ isPreparingThread: true, sendError: null });
       const selectedThreadId = stateRef.current.selectedThreadId;
       const createAssistantThread = api.createAssistantThread;
       const threadId = selectedThreadId
@@ -255,10 +281,12 @@ export function useAgentRuntime({
           : Promise.resolve(null);
       void threadId
         .then((id) => {
-          if (id) void startRun(userMessageFor(text), id);
+          if (id) void startRun(message, id, false, model);
+          else update({ sendError: "Couldn’t start this chat. Your message and files are still here. Try sending again." });
         })
         .catch((error) => {
           logChat("thread.create_failed", { error: errorMessage(error) });
+          update({ sendError: "Couldn’t start this chat. Your message and files are still here. Try sending again." });
         })
         .finally(() => update({ isPreparingThread: false }));
     },
@@ -266,6 +294,25 @@ export function useAgentRuntime({
   );
 
   const setDraft = useCallback((draft: string) => update({ draft }), [update]);
+
+  const addFiles = useCallback((incoming: readonly File[]) => {
+    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    const result = addChatFiles(stateRef.current.draftFiles, incoming);
+    update({ draftFiles: result.files, attachmentError: result.error });
+  }, [update]);
+
+  const removeFile = useCallback((index: number) => {
+    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    update({
+      draftFiles: stateRef.current.draftFiles.filter((_, fileIndex) => fileIndex !== index),
+      attachmentError: null,
+    });
+  }, [update]);
+
+  const setModel = useCallback((selectedModel: ChatModelSelection) => {
+    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    update({ selectedModel });
+  }, [update]);
 
   const deleteThread = useCallback(
     async (threadId: string) => {
@@ -291,6 +338,9 @@ export function useAgentRuntime({
             : stateRef.current.copiedMessageId,
           deletingThreadId: null,
           draft: wasSelected ? "" : stateRef.current.draft,
+          draftFiles: wasSelected ? [] : stateRef.current.draftFiles,
+          attachmentError: wasSelected ? null : stateRef.current.attachmentError,
+          sendError: wasSelected ? null : stateRef.current.sendError,
           isThreadLoading: wasSelected
             ? false
             : stateRef.current.isThreadLoading,
@@ -322,6 +372,9 @@ export function useAgentRuntime({
     update({
       copiedMessageId: null,
       draft: "",
+      draftFiles: [],
+      attachmentError: null,
+      sendError: null,
       isThreadLoading: false,
       messages: [],
       selectedThreadId: null,
@@ -348,6 +401,9 @@ export function useAgentRuntime({
       update({
         copiedMessageId: null,
         draft: "",
+        draftFiles: [],
+        attachmentError: null,
+        sendError: null,
         isThreadLoading: true,
         messages: [],
         selectedThreadId: threadId,
@@ -397,14 +453,15 @@ export function useAgentRuntime({
   const retry = useCallback(
     (messageId: string) => {
       const current = stateRef.current;
-      if (current.isRunning) return;
+      if (current.isRunning || current.isPreparingThread || !isChatModelValid(current.selectedModel)) return;
       const failedIndex = current.messages.findIndex(
         (message) => message.id === messageId,
       );
       const previous = current.messages[failedIndex - 1];
       if (failedIndex < 1 || previous?.role !== "user") return;
       update({ messages: current.messages.slice(0, failedIndex) });
-      void startRun(previous, current.selectedThreadId ?? "", true);
+      void startRun(previous, current.selectedThreadId ?? "", true,
+        current.selectedModel.type === "model" ? current.selectedModel.id.trim() : undefined);
     },
     [startRun, update],
   );
@@ -497,6 +554,9 @@ export function useAgentRuntime({
     selectThread,
     send,
     setDraft,
+    addFiles,
+    removeFile,
+    setModel,
     state,
     stop,
   };
@@ -504,13 +564,7 @@ export function useAgentRuntime({
 
 const AgentRuntimeContext = createContext<AgentRuntimeValue | null>(null);
 
-type ProviderProps = {
-  children: ReactNode;
-  onContextTruncated: (truncated: boolean) => void;
-  userEmail: string;
-  scope?: "all" | "freeform" | "deal";
-  dealId?: string;
-};
+type ProviderProps = Omit<AgentRuntimeOptions, "api"> & { children: ReactNode };
 export function QueryChatRuntimeProvider(props: ProviderProps) {
   return (
     <ScopedChatRuntimeProvider
@@ -594,9 +648,9 @@ function fromAssistantMessage(message: PersistedAssistantMessage): Message {
   };
 }
 
-function userMessageFor(text: string): UserMessage {
+function userMessageFor(text: string, files: readonly File[]): UserMessage {
   return {
-    attachments: [],
+    attachments: [...files],
     content: [{ text, type: "text" }],
     id: createId(),
     role: "user",

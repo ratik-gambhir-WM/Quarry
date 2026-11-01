@@ -59,6 +59,22 @@ beforeEach(() => {
 });
 
 describe("DataRoomTools", () => {
+  it("keeps the logo available through repeated dial open and dismiss cycles", async () => {
+    const user = userEvent.setup();
+    render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    const trigger = screen.getByRole("button", { name: "Data Room tools" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await user.click(trigger);
+      expect(await screen.findByRole("menuitem", { name: "Assistant" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Workspace Search" })).toBeTruthy();
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      expect(trigger.querySelectorAll("rect")).toHaveLength(8);
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+    }
+  });
+
   it("leaves the logo non-interactive outside the Data Room", () => {
     render(<MemoryRouter><SidebarFrame>Content</SidebarFrame></MemoryRouter>);
     expect(screen.queryByRole("button", { name: "Data Room tools" })).toBeNull();
@@ -176,6 +192,44 @@ describe("DataRoomTools", () => {
     await waitFor(() => expect(trigger).toBe(document.activeElement));
   });
 
+  it("uses the model picker and file upload inside the Assistant panel", async () => {
+    const user = userEvent.setup();
+    api.queryModel.mockImplementation((_input, handlers) => {
+      handlers.onEvent({ type: "completed", response: "Panel answer" });
+      return () => undefined;
+    });
+    render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    await launch(user, "Assistant");
+    await user.click(await screen.findByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
+    const file = new File(["Notes"], "panel.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), file);
+    await user.type(screen.getByRole("textbox", { name: "Message input" }), "Review the file");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Panel answer")).toBeTruthy();
+    expect(api.queryModel.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+    expect(screen.getByRole("button", { name: "Close Assistant" })).toBeTruthy();
+  });
+
+  it("stops generation with Escape before closing the Assistant panel", async () => {
+    const user = userEvent.setup();
+    const stop = vi.fn();
+    api.queryModel.mockReturnValue(stop);
+    render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    await launch(user, "Assistant");
+    const input = await screen.findByRole("textbox", { name: "Message input" });
+    await user.type(input, "Review this deal");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByRole("button", { name: "Stop generating" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(await screen.findByText("Response stopped.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close Assistant" })).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(stop).toHaveBeenCalledTimes(1);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Data Room tools" })));
+  });
+
   it("selects a previous Assistant chat from the panel header", async () => {
     const user = userEvent.setup();
     const thread = {
@@ -250,8 +304,9 @@ describe("DataRoomTools", () => {
     const composer = screen.getByRole("textbox", { name: "Message input" });
     const composerRoot = composer.closest('[data-slot="query-composer"]');
     const composerDock = composerRoot?.parentElement?.parentElement;
-    expect(composerRoot?.className).toContain("min-h-[2.625rem]");
-    expect(composer.className).toContain("min-h-[1.875rem]");
+    expect(composerRoot?.getAttribute("data-state")).toBe("idle");
+    expect(composerRoot?.tagName).toBe("FORM");
+    expect(composer.getAttribute("rows")).toBe("1");
     expect(composerDock?.className).not.toContain(
       "bg-[var(--theme-workspace-surface-bottom)]",
     );

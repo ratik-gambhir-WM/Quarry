@@ -31,9 +31,9 @@ import { ViewTransition } from "../ui/ViewTransition";
 
 const dealsDataGridTableClassNames = {
   ...quarryDataGridTableClassNames,
-  base: `${quarryDataGridTableClassNames.base} bg-[var(--theme-workspace-surface)] text-center`,
+  base: `${quarryDataGridTableClassNames.base} bg-[var(--theme-workspace-surface)] text-left`,
   edgeCell: `${quarryDataGridTableClassNames.edgeCell} data-pinned:bg-[var(--theme-workspace-surface)]`,
-  header: `${quarryDataGridTableClassNames.header} bg-[var(--theme-workspace-surface)] [&_th>div]:ms-0 [&_th>div]:justify-center`,
+  header: `${quarryDataGridTableClassNames.header} bg-[var(--theme-workspace-surface)] [&_th>div]:ms-0 [&_th>div]:justify-start`,
   headerRow: `${quarryDataGridTableClassNames.headerRow} bg-[var(--theme-workspace-surface)]`,
   headerSticky: `${quarryDataGridTableClassNames.headerSticky} bg-[var(--theme-workspace-surface)]`,
 } as const;
@@ -106,7 +106,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
         size: 220,
         meta: { fillWidth: true, headerTitle: "Project name" },
       },
-      textColumn("status", "Status", 125),
+      textColumn("status", "Status", 180),
       textColumn("targetCompany", "Target", 170),
       textColumn("portfolioCompany", "PortCo", 170),
       textColumn("engagement", "Engagement type", 150),
@@ -218,23 +218,24 @@ function linkColumn(
   };
 }
 
-export function DealsEmptyState({ onReset }: { onReset: () => void }) {
+export function DealsEmptyState({ onReset, filtered = true }: { onReset: () => void; filtered?: boolean }) {
   return (
     <section className="flex min-h-64 w-full flex-col items-center justify-center px-6 py-12 text-center">
       <p className="text-[16px] font-medium text-text-main">
-        No deals match these filters
+        {filtered ? "No deals match these filters" : "No deals yet"}
       </p>
       <p className="mt-2 w-full max-w-[28rem] text-[13px] font-normal leading-5 text-muted">
-        Try a different search or return to the full current and historic
-        portfolio.
+        {filtered
+          ? "Try a different search or return to the full portfolio."
+          : "Create a deal using New in the header to start organizing your diligence work."}
       </p>
-      <button
+      {filtered ? <button
         className="mt-5 rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-2 text-[12px] font-medium text-text-main transition hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
         onClick={onReset}
         type="button"
       >
         Reset filters
-      </button>
+      </button> : null}
     </section>
   );
 }

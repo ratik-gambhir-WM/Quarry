@@ -106,7 +106,7 @@ export function DataRoomWorkspace({
           />
         </div>
       ) : null}
-      <main className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0">
+      <main id="main-content" tabIndex={-1} className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0">
         {contents.isUnavailable ? (
           <UnavailableDataRoomState
             onConnectToSharePoint={onConnectToSharePoint}

@@ -5,9 +5,22 @@ import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
+import { ThemeModeProvider } from "@/hooks/useThemeMode";
 import { SidebarFrame } from "@/components/hub/sidebar/SidebarFrame";
 
 describe("SidebarFrame", () => {
+  it("opens the profile menu from the keyboard and restores focus on Escape", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ThemeModeProvider><SidebarFrame><nav>Navigation</nav></SidebarFrame></ThemeModeProvider></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: /profile$/ });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("menuitem", { name: "Account info" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   afterEach(cleanup);
 
   it("renders the active sidebar identity without a mock switcher", () => {

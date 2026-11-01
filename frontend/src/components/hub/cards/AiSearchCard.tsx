@@ -1,48 +1,58 @@
-import { Input } from "../../ui/input";
-import { Icon } from "../../ui/Icon";
+import { useRef, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowUpRight, Sparkles } from "lucide-react";
+import { Button } from "../../ui/button";
 
 type AiSearchCardProps = {
   suggestions: string[];
 };
 
 export function AiSearchCard({ suggestions }: AiSearchCardProps) {
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const navigate = useNavigate();
+
+  function openAssistant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft.trim()) return;
+    navigate("/hub/assistant", { state: { assistantDraft: draft.trim() } });
+  }
+
   return (
-    <section className="col-span-12 px-1 py-2 sm:px-3 lg:col-span-8">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
-            <Icon className="h-4 w-4" name="sparkles" />
-          </div>
-          <h2 className="type-h3 text-text-main">Synthesis AI</h2>
-        </div>
-        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-          Unified Search
-        </span>
+    <section aria-labelledby="home-assistant-title" className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Sparkles aria-hidden="true" className="size-4 text-muted" />
+        <h2 id="home-assistant-title" className="text-[15px] font-medium text-on-surface">Ask your assistant</h2>
       </div>
-
-      <div className="relative">
-        <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted">
-          <Icon className="h-6 w-6" name="search" />
-        </div>
-        <Input
-          className="h-16 w-full rounded-[1.35rem] border border-white/80 bg-white/55 pl-14 pr-40 text-[15px] font-medium text-text-main shadow-sm outline-none transition placeholder:text-muted/70 focus:border-primary/25 focus:bg-white focus:ring-4 focus:ring-primary/10"
-          placeholder="Search across deals or ask AI a question..."
-          type="text"
+      <form onSubmit={openAssistant} className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm focus-within:border-primary">
+        <label htmlFor="home-assistant-draft" className="sr-only">Your question</label>
+        <textarea
+          id="home-assistant-draft"
+          ref={inputRef}
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          placeholder="What would you like to work on?"
+          className="block min-h-28 w-full resize-y bg-transparent px-4 py-4 text-[16px] leading-6 text-on-surface placeholder:text-muted focus-visible:outline-offset-[-3px]"
+          rows={3}
+          aria-describedby="home-assistant-hint"
         />
-        <button className="absolute right-2 top-1/2 inline-flex h-12 -translate-y-1/2 items-center gap-2 rounded-2xl bg-action px-6 text-sm font-semibold text-on-action transition enabled:hover:bg-action-hover">
-          <Icon className="h-4 w-4" name="send" />
-          Ask AI
-        </button>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-4">
-        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
-          Suggested:
-        </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant/60 px-4 py-3">
+          <p id="home-assistant-hint" className="text-[12px] leading-5 text-muted">Review your draft in Assistant before sending.</p>
+          <Button type="submit" disabled={!draft.trim()} className="h-10 gap-2 px-4">
+            Open Assistant <ArrowUpRight aria-hidden="true" className="size-4" />
+          </Button>
+        </div>
+      </form>
+      <div className="flex flex-wrap gap-2" aria-label="Suggested questions">
         {suggestions.map((suggestion) => (
           <button
-            className="text-[11px] font-bold text-primary transition hover:underline"
+            className="min-h-10 rounded-lg border border-outline-variant px-3 py-2 text-left text-[13px] leading-5 text-on-surface-variant transition-colors hover:bg-surface-container-high"
             key={suggestion}
+            type="button"
+            onClick={() => {
+              setDraft(suggestion);
+              inputRef.current?.focus();
+            }}
           >
             {suggestion}
           </button>

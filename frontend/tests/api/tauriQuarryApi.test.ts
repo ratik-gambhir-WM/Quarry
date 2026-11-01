@@ -474,7 +474,8 @@ describe("createTauriQuarryApi", () => {
     api.runAssistantThread(
       {
         assistantMessageId: "assistant-1",
-        files: [],
+        files: [new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" })],
+        model: "gpt-5.5",
         prompt: "hello",
         requestId: "assistant-1",
         threadId: "thread-1",
@@ -486,7 +487,8 @@ describe("createTauriQuarryApi", () => {
     await vi.waitFor(() => expect(startQuery).toHaveBeenCalledOnce());
     expect(startQuery.mock.calls[0][0]).toMatchObject({
       assistantMessageId: "assistant-1",
-      files: [],
+      files: [{ dataBase64: "AQID", filename: "notes.txt", mimeType: "text/plain" }],
+      model: "gpt-5.5",
       path: "/api/v1/assistant/threads/thread-1/runs",
       requestId: "assistant-1",
       userMessageId: "user-1",

@@ -145,12 +145,14 @@ describe("createModelAdapter", () => {
         return () => undefined;
       },
     );
+    const priorFile = new File(["Prior"], "prior.txt", { type: "text/plain" });
+    const currentFile = new File(["Current"], "current.txt", { type: "text/plain" });
     const messages: Message[] = [
-      user("First", "u1"),
+      { ...user("First", "u1"), attachments: [priorFile] },
       assistant("First answer", { type: "complete", reason: "stop" }, "a1"),
       user("Failed question", "u2"),
       assistant("Partial", { type: "incomplete", reason: "error" }, "a2"),
-      user("Current prompt", "u3"),
+      { ...user("Current prompt", "u3"), attachments: [currentFile] },
     ];
 
     await collect(createModelAdapter({ queryModel }), runOptions(messages));
@@ -160,7 +162,7 @@ describe("createModelAdapter", () => {
         { content: "First", role: "user" },
         { content: "First answer", role: "assistant" },
       ],
-      files: [],
+      files: [currentFile],
       prompt: "Current prompt",
     });
     expect(captured).not.toHaveProperty("model");
@@ -285,7 +287,7 @@ describe("createModelAdapter", () => {
     const adapter = createModelAdapter({ queryModel });
 
     await expect(collect(adapter, runOptions([user("   ")]))).rejects.toThrow(
-      "Messages must contain non-empty text only.",
+      "Messages must contain a non-empty text prompt.",
     );
     await expect(
       collect(
@@ -297,7 +299,7 @@ describe("createModelAdapter", () => {
           },
         ]),
       ),
-    ).rejects.toThrow("Messages must contain non-empty text only.");
+    ).rejects.toThrow("Messages must contain a non-empty text prompt.");
     expect(queryModel).not.toHaveBeenCalled();
   });
 });

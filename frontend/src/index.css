@@ -30,6 +30,8 @@
   --color-error-container: var(--theme-error-surface);
   --color-primary-fixed: var(--theme-focus);
   --color-on-primary-fixed: #070154;
+  --color-chat-action: var(--theme-chat-action);
+  --color-on-chat-action: var(--theme-on-chat-action);
   --color-action: var(--theme-action);
   --color-action-hover: var(--theme-action-hover);
   --color-on-action: var(--theme-on-action);
@@ -133,6 +135,8 @@
     --theme-interactive-soft-hover: #e7e7e7;
     --theme-focus: #e8eef8;
     --theme-action: #0c006b;
+    --theme-chat-action: #1f177c;
+    --theme-on-chat-action: #ffffff;
     --theme-action-hover: #211781;
     --theme-on-action: #ffffff;
     --theme-secondary: #e7e7e7;
@@ -264,11 +268,71 @@
   }
 
   ::selection {
-    background: rgba(206, 215, 230, 0.36);
+    background: var(--theme-interactive);
+    color: var(--theme-on-interactive);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-border-strong) transparent;
+  }
+
+  :where(h1, h2, h3) {
+    text-wrap: balance;
+  }
+
+  :where(td, th, time, kbd, [role="status"]) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where([id], [tabindex]) {
+    scroll-margin-top: var(--spacing-lg);
+  }
+
+  :where(a, button:not(:disabled), summary, [role="button"]:not([aria-disabled="true"])) {
+    cursor: pointer;
+  }
+
+  :where(button:not(:disabled)):active {
+    filter: brightness(0.94);
+  }
+
+  .skip-link {
+    position: fixed;
+    inset: var(--spacing-sm) auto auto var(--spacing-sm);
+    z-index: 10000;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--theme-action);
+    color: var(--theme-on-action);
+    transform: translateY(calc(-100% - var(--spacing-lg)));
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 2px solid Highlight !important;
+    }
   }
 }
 
 @layer components {
+  .mobile-workspace-navigation {
+    padding-bottom: max(var(--spacing-xs), env(safe-area-inset-bottom));
+  }
+
   .modal-backdrop {
     background: rgba(15, 23, 42, 0.08);
     backdrop-filter: blur(10px) saturate(0.85);
@@ -319,8 +383,8 @@
     font-family: var(--font-body);
     font-size: 12px;
     font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0.05em;
+    line-height: 1.4;
+    letter-spacing: 0;
   }
 
   .glass-panel {
@@ -348,11 +412,7 @@
     --background: var(--theme-workspace-surface);
     border: 1px solid var(--theme-workspace-border);
     border-radius: 0.75rem;
-    background: linear-gradient(
-      180deg,
-      var(--theme-workspace-surface) 0%,
-      var(--theme-workspace-surface-bottom) 100%
-    );
+    background: var(--theme-workspace-surface);
     box-shadow: var(--theme-workspace-shadow);
   }
 
@@ -371,9 +431,11 @@
     transition: box-shadow 0.3s ease, background-color 0.3s ease;
   }
 
-  .workspace-card:not(.workspace-card--static):hover {
-    background: var(--theme-panel-hover);
-    box-shadow: var(--theme-panel-shadow-hover);
+  @media (hover: hover) {
+    .workspace-card:not(.workspace-card--static):hover {
+      background: var(--theme-panel-hover);
+      box-shadow: var(--theme-panel-shadow-hover);
+    }
   }
 
   .workspace-card--chrome {
@@ -392,10 +454,12 @@
     transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .chip-card:hover {
-    background: var(--theme-panel-hover);
-    box-shadow: var(--theme-panel-shadow-hover);
-    transform: translateY(-2px);
+  @media (hover: hover) {
+    .chip-card:hover {
+      background: var(--theme-panel-hover);
+      box-shadow: var(--theme-panel-shadow-hover);
+      transform: translateY(-2px);
+    }
   }
 
   .log-list-item {
@@ -1060,4 +1124,64 @@
     from { opacity: 0; transform: translateX(var(--auth-step-offset)); filter: blur(2px); }
     to { opacity: 1; transform: translateX(0); filter: blur(0); }
   }
+}
+
+/* Stealth AI presentation uses the existing Quarry palette in every chat surface. */
+@keyframes stealth-ai-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes stealth-ai-shine {
+  from { background-position: 150% 0; }
+  to { background-position: -150% 0; }
+}
+
+@keyframes stealth-ai-cursor {
+  50% { opacity: 0.3; }
+}
+
+.stealth-message-enter,
+.stealth-action-enter,
+.stealth-streaming-text[data-streaming] .query-chat-markdown > * {
+  animation: stealth-ai-enter 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.stealth-shimmer-text {
+  color: var(--theme-text-muted);
+  background: linear-gradient(90deg, currentColor 0%, currentColor 40%, var(--theme-text-strong) 50%, currentColor 60%, currentColor 100%);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: stealth-ai-shine 2s linear infinite;
+}
+
+.stealth-stream-cursor {
+  animation: stealth-ai-cursor 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stealth-message-enter,
+  .stealth-action-enter,
+  .stealth-streaming-text[data-streaming] .query-chat-markdown > *,
+  .stealth-stream-cursor,
+  .stealth-shimmer-text {
+    animation: none;
+  }
+
+  .stealth-shimmer-text {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* Keep focus visible even on primitives that reset the browser outline. */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--theme-interactive);
+  outline-offset: 3px;
+}
+
+/* The rounded composer owns focus feedback for its inset textarea. */
+[data-slot="query-composer"] textarea:focus-visible {
+  outline: none;
 }

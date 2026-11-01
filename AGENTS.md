@@ -323,11 +323,12 @@ standalone runtime operation.
   contents as sensitive. Do not print them in command output, fixtures, screenshots, or logs.
 - Do not read or modify a real `.env` unless the user explicitly requests configuration work. Use
   the configuration sections of `docs/ARCHITECTURE.md` as the documented environment schema.
-- Do not put secrets in `VITE_*`, browser storage, client bundles, or Tauri command arguments when
-  a server-held secret is appropriate.
+- Do not put provider keys or passwords in `VITE_*`, browser storage, client bundles, or Tauri
+  command arguments. The user-authorized bearer-session cache in `localStorage` is a deliberate
+  exception, documented in `docs/authentication.md`; never expand it to other secrets.
 - Users have salted Argon2id password hashes; only public profile fields are serialized. Sessions
-  store token digests in SQLite. The app holds bearer tokens in memory and sends a matching
-  `X-User-Id` consistency header; the token is the identity authority.
+  store token digests in SQLite. The app restores unexpired bearer sessions from origin-scoped
+  `localStorage` and sends a matching `X-User-Id` consistency header; the token is the identity authority.
 - User-provided API-key collection was removed. AI services use server-side `OPENAI_API_KEY`.
   Job titles grant no privileges. See `docs/authentication.md` for current limits and reset policy.
 - Preserve request limits, filename/path validation, safe URL policy, CORS allowlists, sanitized

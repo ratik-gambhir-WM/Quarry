@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { ThemeModeProvider } from "@/hooks/useThemeMode";
 import { ProfilePreferences } from "@/components/hub/sidebar/ProfilePreferences";
 
@@ -20,10 +21,9 @@ describe("ProfilePreferences", () => {
         ]}
       >
         <ThemeModeProvider>
-          <ProfilePreferences
-            email="analyst@example.com"
-            navigationState={{ email: "analyst@example.com" }}
-          />
+          <DropdownMenu defaultOpen>
+            <ProfilePreferences email="analyst@example.com" navigationState={{ email: "analyst@example.com" }} />
+          </DropdownMenu>
           <LocationProbe />
         </ThemeModeProvider>
       </MemoryRouter>,
@@ -38,7 +38,7 @@ describe("ProfilePreferences", () => {
     render(
       <MemoryRouter>
         <ThemeModeProvider>
-          <ProfilePreferences />
+          <DropdownMenu defaultOpen><ProfilePreferences /></DropdownMenu>
         </ThemeModeProvider>
       </MemoryRouter>,
     );
