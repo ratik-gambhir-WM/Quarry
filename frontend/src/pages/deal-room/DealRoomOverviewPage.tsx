@@ -3,7 +3,6 @@ import { DealMembersPanel } from "../../components/deal-room/DealMembersPanel";
 import { DealActivity } from "../../components/deal-room/DealActivity";
 import { DealDocumentSearch } from "../../components/deal-room/DealDocumentSearch";
 import { DealResourcesDialog } from "../../components/deal-room/DealResourcesDialog";
-import { WorkspaceCard } from "../../components/hub/WorkspaceCard";
 import { useState } from "react";
 import { AddDealModal } from "../../components/hub/sidebar/AddDealModal";
 import { Button } from "../../components/ui/stealth/button";
@@ -72,32 +71,21 @@ export function DealRoomOverviewPage() {
         ) : activeOverviewSection === "search" ? (
           <DealDocumentSearch key={deal.room.id} dealId={deal.room.id} />
         ) : activeOverviewSection === "settings" ? (
-          <WorkspaceCard interactive={false} className="p-6 sm:p-7">
-            <h1 className="type-h3 text-text-main">Deal settings</h1>
-            {deal.persisted ? (
-              <div className="mt-8">
-                <DealMembersPanel deal={deal.persisted} />
+          <section className="deal-settings-page">
+            <header className="deal-settings-page-header">
+              <div>
+                <p className="deal-settings-eyebrow">Deal room</p>
+                <h1>Deal settings</h1>
+                <p className="deal-settings-description">Your team, their access, and the details behind this deal.</p>
               </div>
-            ) : null}
-            <div className="mt-8 border-t border-border pt-6">
-              <p className="mt-2 text-sm text-muted">
-                Manage deal details, companies, roles, and scope.
-              </p>
               {deal.persisted?.capabilities?.edit ? (
-                <Button
-                  className="mt-5"
-                  variant="secondary"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit deal
-                </Button>
-              ) : (
-                <p className="mt-4 text-sm text-muted">
-                  Settings are available for saved deals.
-                </p>
-              )}
-            </div>
-          </WorkspaceCard>
+                <Button variant="secondary" onClick={() => setEditing(true)}>Edit deal</Button>
+              ) : null}
+            </header>
+            {deal.persisted ? <DealMembersPanel key={deal.room.id} deal={deal.persisted} /> : (
+              <p className="deal-roster-card p-6 text-sm text-muted">Settings are available for saved deals.</p>
+            )}
+          </section>
         ) : activeOverviewSection === "file-summary" ? (
           <>
             <h1 className="sr-only">{deal.room.name}</h1>

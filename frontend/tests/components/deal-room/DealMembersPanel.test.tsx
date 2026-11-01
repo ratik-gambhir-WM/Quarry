@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
     changeDealMemberRole: vi.fn(),
     transferDealOwnership: vi.fn(),
     addDealTeamMember: vi.fn(),
+    deleteDealTeam: vi.fn(),
     getDeal: vi.fn(),
   },
   cache: vi.fn(),
@@ -108,6 +109,8 @@ it.each(["manager", "contributor", "viewer"] as const)(
     show(role);
     await screen.findByText("Shared Member");
     expect(screen.queryByLabelText("Registered username")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Permissions for member" })).toBeNull();
+    expect(screen.getByLabelText("Contributor permissions for member")).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: "Transfer ownership" }),
     ).toBeNull();
@@ -137,7 +140,7 @@ it("uses the member revision and refreshes on a conflict", async () => {
   const user = userEvent.setup();
   const deal = show();
   await screen.findByText("Shared Member");
-  await user.click(screen.getByRole("combobox", { name: "Role for member" }));
+  await user.click(screen.getByRole("combobox", { name: "Permissions for member" }));
   await user.click(screen.getByRole("option", { name: "Viewer" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
     "This deal changed",
@@ -153,14 +156,14 @@ it("uses the member revision and refreshes on a conflict", async () => {
 it("requires transfer confirmation, restores focus on cancellation, and sends the access revision", async () => {
   const user = userEvent.setup();
   const deal = show();
-  const transfer = await screen.findByRole("button", {
-    name: "Transfer ownership",
-  });
+  const transfer = await screen.findByRole("button", { name: "Actions for member" });
   await user.click(transfer);
+  await user.click(screen.getByRole("menuitem", { name: "Transfer ownership" }));
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(mocks.api.transferDealOwnership).not.toHaveBeenCalled();
   await waitFor(() => expect(document.activeElement).toBe(transfer));
   await user.click(transfer);
+  await user.click(screen.getByRole("menuitem", { name: "Transfer ownership" }));
   await user.click(screen.getByRole("button", { name: "Confirm change" }));
   await waitFor(() =>
     expect(mocks.api.transferDealOwnership).toHaveBeenCalledWith(deal.dealId, {
@@ -190,10 +193,9 @@ it("keeps a failed confirmation open and prevents dismissal while the request is
   );
   const user = userEvent.setup();
   show();
-  const transfer = await screen.findByRole("button", {
-    name: "Transfer ownership",
-  });
+  const transfer = await screen.findByRole("button", { name: "Actions for member" });
   await user.click(transfer);
+  await user.click(screen.getByRole("menuitem", { name: "Transfer ownership" }));
   const dialog = screen.getByRole("alertdialog");
   await waitFor(() =>
     expect(document.activeElement).toBe(
@@ -212,7 +214,7 @@ it("keeps a failed confirmation open and prevents dismissal while the request is
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   await waitFor(() => expect(document.activeElement).toBe(transfer));
 });
-it("expands teams and offers only unassigned members through the Stealth picker", async () => {
+it("assigns members through row actions and offers removal after the roster refreshes", async () => {
   const team = {
     teamId: "00000000-0000-4000-8000-000000000001",
     name: "Technology",
@@ -221,36 +223,63 @@ it("expands teams and offers only unassigned members through the Stealth picker"
   };
   mocks.api.listDealTeams
     .mockResolvedValueOnce({ items: [team], nextCursor: null })
-    .mockResolvedValue({
-      items: [{ ...team, revision: 2, userIds: [1, 2] }],
-      nextCursor: null,
-    });
+    .mockResolvedValue({ items: [{ ...team, revision: 2, userIds: [1, 2] }], nextCursor: null });
+  const user = userEvent.setup();
+  const deal = show();
+  const teamHeading = await screen.findByRole("heading", { name: "Technology" });
+  expect(screen.queryByRole("button", { name: "Create team" })).toBeNull();
+  const memberHeading = screen.getByRole("heading", { name: "Deal members" });
+  expect(teamHeading.compareDocumentPosition(memberHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Actions for member" }));
+  await user.click(screen.getByRole("menuitem", { name: "Add to Technology" }));
+  await waitFor(() => expect(mocks.api.addDealTeamMember).toHaveBeenCalledWith(deal.dealId, team.teamId, 2));
+  await screen.findByText("2 members assigned");
+  await user.click(screen.getByRole("button", { name: "Actions for member" }));
+  expect(screen.getByRole("menuitem", { name: "Remove from Technology" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "Add to Technology" })).toBeNull();
+});
+
+it("shows owner permissions as read-only and supports keyboard role selection", async () => {
+  const user = userEvent.setup();
+  const deal = show();
+  await screen.findByText("Shared Member");
+  expect(screen.getByLabelText("Owner permissions for owner")).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "Permissions for owner" })).toBeNull();
+  const permissions = screen.getByRole("combobox", { name: "Permissions for member" });
+  permissions.focus();
+  await user.keyboard("{Enter}");
+  await user.keyboard("v{Enter}");
+  await waitFor(() => expect(mocks.api.changeDealMemberRole).toHaveBeenCalledWith(deal.dealId, 2, { role: "viewer", expectedRevision: 7 }));
+});
+
+it("locks role changes while saving and preserves the saved role after a failure", async () => {
+  let rejectSave: (error: Error) => void = () => {};
+  mocks.api.changeDealMemberRole.mockImplementation(() => new Promise<void>((_resolve, reject) => { rejectSave = reject; }));
+  const user = userEvent.setup();
+  show();
+  const permissions = await screen.findByRole("combobox", { name: "Permissions for member" });
+  await user.click(permissions);
+  await user.click(screen.getByRole("option", { name: "Viewer" }));
+  await screen.findByText("Saving changes…");
+  expect(permissions.hasAttribute("data-disabled")).toBe(true);
+  expect(mocks.api.changeDealMemberRole).toHaveBeenCalledTimes(1);
+  rejectSave(new Error("Could not change permissions. Try again."));
+  await screen.findByRole("alert");
+  await user.click(permissions);
+  expect(screen.getByRole("option", { name: "Contributor", selected: true })).toBeTruthy();
+});
+
+it("keeps team management collapsed and confirms team deletion", async () => {
+  const team = { teamId: "00000000-0000-4000-8000-000000000001", name: "Technology", revision: 1, userIds: [1] };
+  mocks.api.listDealTeams.mockResolvedValue({ items: [team], nextCursor: null });
   const user = userEvent.setup();
   const deal = show();
   await screen.findByRole("heading", { name: "Technology" });
-  expect(screen.queryByRole("button", { name: "Create team" })).toBeNull();
-  const teamHeading = screen.getByRole("heading", { name: "Technology" });
-  const memberHeading = screen.getByRole("heading", { name: "Deal members" });
-  expect(teamHeading.compareDocumentPosition(memberHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  await user.click(
-    screen.getByRole("combobox", { name: "Assign member to Technology" }),
-  );
-  expect(screen.queryByRole("option", { name: "Original Owner" })).toBeNull();
-  await user.click(
-    screen.getByRole("option", { name: "Shared Member" }),
-  );
-  await user.click(
-    screen.getByRole("button", { name: "Assign member" }),
-  );
-  await waitFor(() =>
-    expect(mocks.api.addDealTeamMember).toHaveBeenCalledWith(
-      deal.dealId,
-      team.teamId,
-      2,
-    ),
-  );
-  await screen.findByRole("button", { name: "Technology · 2 members" });
-  expect(
-    screen.getByRole("combobox", { name: "Assign member to Technology" }),
-  ).toHaveProperty("disabled", true);
+  expect(screen.queryByRole("button", { name: "Delete team" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Manage team" }));
+  await user.click(screen.getByRole("button", { name: "Delete team" }));
+  await screen.findByRole("alertdialog");
+  expect(mocks.api.deleteDealTeam).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Confirm change" }));
+  await waitFor(() => expect(mocks.api.deleteDealTeam).toHaveBeenCalledWith(deal.dealId, team.teamId));
 });

@@ -1,31 +1,22 @@
 import { useCallback, useId, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { LockKeyhole, UserPlus, UsersRound } from "lucide-react";
 import { runtime } from "@quarry/runtime";
 import { sessionStore } from "../../auth/sessionStore";
 import { useWorkspace } from "../../app/WorkspaceProvider";
-import type {
-  AssignableDealRole,
-  DealMember,
-  DealTeam,
-} from "../../contracts/dealMemberships";
+import type { AssignableDealRole } from "../../contracts/dealMemberships";
 import type { SavedDeal } from "../../data/dealExtraction";
 import { useDealCollaboration } from "../../hooks/useDealCollaboration";
 import { Button } from "../ui/stealth/button";
 import { Field, FieldLabel } from "../ui/stealth/field";
 import { SelectField } from "../ui/stealth/select-field";
 import { EmptyState } from "../ui/stealth/empty-state";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsiblePanel,
-} from "../ui/stealth/collapsible";
 import { Input } from "../ui/input";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogTitle,
-} from "../ui/stealth/alert-dialog";
+import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "../ui/stealth/alert-dialog";
+import { DealMemberRow, type DealConfirmation } from "./DealMemberRow";
+import { DealTeamCard } from "./DealTeamCard";
+import "./deal-settings.css";
+
 const roles: AssignableDealRole[] = ["manager", "contributor", "viewer"];
 function RoleSelect({
   value,
@@ -44,7 +35,7 @@ function RoleSelect({
       value={value}
       disabled={disabled}
       onValueChange={onChange}
-      className="w-full sm:w-44"
+      className="w-full"
       options={roles.map((role) => ({
         value: role,
         label: role[0].toUpperCase() + role.slice(1),
@@ -68,11 +59,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<AssignableDealRole>("contributor");
   const [teamName, setTeamName] = useState("");
-  const [confirm, setConfirm] = useState<{
-    title: string;
-    description: string;
-    action: () => Promise<void>;
-  } | null>(null);
+  const [confirm, setConfirm] = useState<DealConfirmation | null>(null);
   const actorId = sessionStore.getSnapshot().session?.user.id;
   const capabilities = deal.capabilities;
   const mutate = useCallback(
@@ -113,436 +100,108 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
     },
     [cacheDealResult, deal.dealId, forgetDeal, navigate, reload],
   );
-  function askForConfirmation(value: NonNullable<typeof confirm>) {
-    confirmationTrigger.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
+  function askForConfirmation(value: DealConfirmation, trigger: HTMLElement | null) {
+    confirmationTrigger.current = trigger;
     setConfirm(value);
   }
   return (
-    <section aria-labelledby="deal-members-heading" className="space-y-6">
-      <div>
-        <h2
-          ref={heading}
-          tabIndex={-1}
-          id="deal-members-heading"
-          className="type-h3"
-        >
-          Team and members
-        </h2>
-        <p className="mt-2 text-sm text-muted">
-          Members share uploaded documents. Notebooks and chats remain personal.
-          Teams organize members without granting access.
-        </p>
-      </div>
-      <p role="status" aria-live="polite" className="text-sm">
-        {message}
-      </p>
-      {error && !confirm ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {roster.status === "loading" ? (
-        <p role="status">Loading members and teams…</p>
-      ) : roster.status === "error" ? (
-        <div role="alert">
-          <p>{roster.message}</p>
-          <Button onClick={reload}>Retry roster</Button>
+    <section aria-labelledby="deal-members-heading" className="deal-settings-workspace">
+      <div className="deal-settings-main">
+        {roster.status === "ready" ? (
+          roster.teams.length ? roster.teams.map((team) => (
+            <DealTeamCard key={`${team.teamId}:${team.revision}`} team={team}
+              canManage={Boolean(capabilities?.manageTeams)} pending={pending}
+              mutate={mutate} dealId={deal.dealId} onConfirm={askForConfirmation} />
+          )) : (
+            <div className="deal-team-card deal-team-empty">
+              <span className="deal-team-icon" aria-hidden="true"><UsersRound size={21} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="deal-settings-eyebrow">Deal team</p>
+                <h2 className="deal-team-name">Set up your team</h2>
+                <p className="deal-team-count">Give the people working on this deal a shared team name.</p>
+                {capabilities?.manageTeams ? (
+                  <form className="mt-4 flex flex-wrap items-end gap-2" onSubmit={(event) => {
+                    event.preventDefault();
+                    void mutate(() => runtime.api.createDealTeam(deal.dealId, { name: teamName.trim() }), "Team created.");
+                  }}>
+                    <Field className="min-w-0 flex-1" disabled={pending}>
+                      <FieldLabel htmlFor={`${formId}-team`}>Team name</FieldLabel>
+                      <Input id={`${formId}-team`} required maxLength={100} value={teamName} onChange={(event) => setTeamName(event.target.value)} />
+                    </Field>
+                    <Button type="submit" variant="primary" loading={pending} disabled={!teamName.trim()}>Create team</Button>
+                  </form>
+                ) : <p className="mt-3 text-xs text-muted">A manager can create the deal team.</p>}
+              </div>
+            </div>
+          )
+        ) : roster.status === "loading" ? <div className="deal-team-loading" aria-hidden="true"><span /><div><span /><span /></div></div> : null}
+        <div className="deal-roster-card">
+          <header className="deal-roster-header">
+            <div>
+              <h2 ref={heading} tabIndex={-1} id="deal-members-heading">Deal members</h2>
+              <p>Everyone with access to this deal.</p>
+            </div>
+            {roster.status === "ready" ? <span className="deal-roster-count" aria-label={`${roster.members.length} deal members`}>{roster.members.length}</span> : null}
+          </header>
+          <div className="deal-settings-feedback">
+            <p role="status" aria-live="polite">{pending ? "Saving changes…" : message}</p>
+            {error && !confirm ? <p role="alert" className="text-destructive">{error}</p> : null}
+          </div>
+          {roster.status === "loading" ? <div className="deal-roster-loading" role="status">Loading members and teams…</div>
+            : roster.status === "error" ? <div className="deal-roster-loading" role="alert"><p>{roster.message}</p><Button className="mt-3" onClick={reload}>Retry roster</Button></div>
+            : roster.members.length ? (
+              <ul className="deal-members-list" aria-label="Deal members">
+                {roster.members.map((member) => <DealMemberRow key={member.userId} member={member} deal={deal} teams={roster.teams}
+                  actorId={actorId} pending={pending} mutate={mutate} onConfirm={askForConfirmation} />)}
+              </ul>
+            ) : <EmptyState heading="No members to display" description="Refresh the roster to check deal access." icon={null} size="sm" />}
+          <footer className="deal-roster-footer"><LockKeyhole size={13} aria-hidden="true" />Team assignments organize people; deal permissions control access.</footer>
         </div>
-      ) : (
-        <>
-          <h3 className="font-semibold">Deal team</h3>
-          {roster.teams.length === 0 ? (
-            <EmptyState
-              size="sm"
-              variant="first-use"
-              heading="No team yet."
-              description={
-                capabilities?.manageTeams
-                  ? "Create a team to organize deal members."
-                  : "A manager can create the deal team."
-              }
-              icon={null}
-            />
-          ) : null}
-          <ul className="space-y-3" aria-label="Deal team">
-            {roster.teams.map((team) => (
-              <TeamRow
-                key={`${team.teamId}:${team.revision}`}
-                team={team}
-                members={roster.members}
-                canManage={Boolean(capabilities?.manageTeams)}
-                pending={pending}
-                mutate={mutate}
-                dealId={deal.dealId}
-              />
-            ))}
-          </ul>
-          {capabilities?.manageTeams && roster.teams.length === 0 ? (
-            <form
-              className="flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-end"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void mutate(
-                  () =>
-                    runtime.api.createDealTeam(deal.dealId, { name: teamName }),
-                  "Team created.",
-                );
-              }}
-            >
-              <Field className="min-w-0 flex-1" disabled={pending}>
-                <FieldLabel htmlFor={`${formId}-team`}>Team name</FieldLabel>
-                <Input
-                  id={`${formId}-team`}
-                  required
-                  maxLength={100}
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                />
+      </div>
+      <aside className="deal-settings-aside" aria-label="Member management">
+        {capabilities?.manageMembers && roster.status === "ready" ? (
+          <section className="deal-invite-card" aria-labelledby={`${formId}-invite-title`}>
+            <span className="deal-aside-icon" aria-hidden="true"><UserPlus size={18} /></span>
+            <h2 id={`${formId}-invite-title`}>Add a member</h2>
+            <p>Add a registered Quarry user to this deal.</p>
+            <form className="mt-5 space-y-4" onSubmit={(event) => {
+              event.preventDefault();
+              void mutate(() => runtime.api.addDealMember(deal.dealId, { username: username.trim(), role }), "Member added.");
+            }}>
+              <Field disabled={pending}>
+                <FieldLabel htmlFor={`${formId}-username`}>Registered username</FieldLabel>
+                <Input id={`${formId}-username`} required maxLength={64} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" />
               </Field>
-              <Button
-                variant="primary"
-                type="submit"
-                loading={pending}
-                disabled={!teamName.trim()}
-              >
-                Create team
-              </Button>
+              <RoleSelect label="New member role" value={role} onChange={setRole} disabled={pending} />
+              <Button className="w-full" variant="primary" type="submit" loading={pending} disabled={!username.trim()} leadingIcon={<UserPlus size={14} />}>Add member</Button>
             </form>
-          ) : null}
-          <h3 className="font-semibold">Deal members</h3>
-          <ul className="divide-y divide-border" aria-label="Deal members">
-            {roster.members.map((member) => (
-              <li
-                key={member.userId}
-                className="flex flex-wrap items-center justify-between gap-3 py-4"
-              >
-                <div>
-                  <p className="font-medium">
-                    {member.firstName} {member.lastName}
-                  </p>
-                  <p className="text-sm text-muted">
-                    @{member.username} · {member.role}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  {capabilities?.manageMembers && member.role !== "owner" ? (
-                    <RoleSelect
-                      label={`Role for ${member.username}`}
-                      value={member.role}
-                      disabled={pending}
-                      onChange={(role) =>
-                        void mutate(
-                          () =>
-                            runtime.api.changeDealMemberRole(
-                              deal.dealId,
-                              member.userId,
-                              { role, expectedRevision: member.revision },
-                            ),
-                          "Member role updated.",
-                        )
-                      }
-                    />
-                  ) : null}
-                  {capabilities?.transfer && member.role !== "owner" ? (
-                    <Button
-                      variant="secondary"
-                      disabled={pending}
-                      onClick={() =>
-                        askForConfirmation({
-                          title: `Transfer ownership to ${member.firstName}?`,
-                          description:
-                            "You will become a manager. Only the new owner can manage deal access or transfer ownership again.",
-                          action: () =>
-                            runtime.api.transferDealOwnership(deal.dealId, {
-                              userId: member.userId,
-                              expectedAccessRevision: deal.accessRevision ?? 0,
-                            }),
-                        })
-                      }
-                    >
-                      Transfer ownership
-                    </Button>
-                  ) : null}
-                  {member.role !== "owner" &&
-                  (deal.role === "owner" || member.userId === actorId) ? (
-                    <Button
-                      variant="secondary"
-                      disabled={pending}
-                      onClick={() =>
-                        askForConfirmation({
-                          title:
-                            member.userId === actorId
-                              ? "Leave this deal?"
-                              : `Remove ${member.firstName}?`,
-                          description:
-                            "Access and team assignments will be removed. Uploaded documents and activity will remain. Downloaded copies cannot be retracted.",
-                          action: () =>
-                            runtime.api.removeDealMember(
-                              deal.dealId,
-                              member.userId,
-                            ),
-                        })
-                      }
-                    >
-                      {member.userId === actorId
-                        ? "Leave deal"
-                        : "Remove member"}
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-          {capabilities?.manageMembers ? (
-            <form
-              className="flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-end"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void mutate(
-                  () =>
-                    runtime.api.addDealMember(deal.dealId, { username, role }),
-                  "Member added.",
-                );
-              }}
-            >
-              <Field className="min-w-0 flex-1" disabled={pending}>
-                <FieldLabel htmlFor={`${formId}-username`}>
-                  Registered username
-                </FieldLabel>
-                <Input
-                  id={`${formId}-username`}
-                  required
-                  maxLength={64}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="off"
-                />
-              </Field>
-              <RoleSelect
-                label="New member role"
-                value={role}
-                onChange={setRole}
-                disabled={pending}
-              />
-              <Button
-                variant="primary"
-                type="submit"
-                loading={pending}
-                disabled={!username.trim()}
-              >
-                Add member
-              </Button>
-            </form>
-          ) : null}
-
-        </>
-      )}
-      <AlertDialog
-        open={confirm !== null}
-        onOpenChange={(open, details) => {
-          if (!open && pending) details.cancel();
-          else if (!open) setConfirm(null);
-        }}
-      >
-        <AlertDialogContent
-          initialFocus={cancelButton}
-          finalFocus={() =>
-            confirmationTrigger.current?.isConnected
-              ? confirmationTrigger.current
-              : heading.current
-          }
-        >
+          </section>
+        ) : null}
+        <section className="deal-access-guide" aria-labelledby={`${formId}-permissions-title`}>
+          <h2 id={`${formId}-permissions-title`}>About permissions</h2>
+          <dl>
+            <div><dt>Manager</dt><dd>Edits deal details and organizes the team.</dd></div>
+            <div><dt>Contributor</dt><dd>Uploads and works with deal documents.</dd></div>
+            <div><dt>Viewer</dt><dd>Reads shared deal documents.</dd></div>
+          </dl>
+          <p>Only the owner can change deal permissions. Notebooks and chats stay personal.</p>
+        </section>
+      </aside>
+      <AlertDialog open={confirm !== null} onOpenChange={(open, details) => {
+        if (!open && pending) details.cancel();
+        else if (!open) setConfirm(null);
+      }}>
+        <AlertDialogContent initialFocus={cancelButton} finalFocus={() => confirmationTrigger.current?.isConnected ? confirmationTrigger.current : heading.current}>
           <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {confirm?.description}
-          </AlertDialogDescription>
-          {error ? (
-            <p role="alert" className="mt-3 text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
+          <AlertDialogDescription>{confirm?.description}</AlertDialogDescription>
+          {error ? <p role="alert" className="mt-3 text-sm text-destructive">{error}</p> : null}
           <div className="mt-5 flex justify-end gap-2">
-            <Button
-              ref={cancelButton}
-              variant="secondary"
-              disabled={pending}
-              onClick={() => setConfirm(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={pending}
-              loadingText="Saving…"
-              onClick={() => {
-                if (confirm)
-                  void mutate(confirm.action, "Deal access updated.");
-              }}
-            >
-              Confirm change
-            </Button>
+            <Button ref={cancelButton} variant="secondary" disabled={pending} onClick={() => setConfirm(null)}>Cancel</Button>
+            <Button variant="primary" loading={pending} loadingText="Saving…" onClick={() => { if (confirm) void mutate(confirm.action, "Deal access updated."); }}>Confirm change</Button>
           </div>
         </AlertDialogContent>
       </AlertDialog>
     </section>
-  );
-}
-function TeamRow({
-  team,
-  members,
-  canManage,
-  pending,
-  mutate,
-  dealId,
-}: {
-  team: DealTeam;
-  members: DealMember[];
-  canManage: boolean;
-  pending: boolean;
-  mutate: (action: () => Promise<void>, success: string) => Promise<void>;
-  dealId: string;
-}) {
-  const fieldId = useId();
-  const [name, setName] = useState(team.name);
-  const [selected, setSelected] = useState("");
-  return (
-    <li className="rounded-lg border border-border p-4">
-      <h4 className="mb-2 font-semibold break-words">{team.name}</h4>
-      <Collapsible defaultOpen>
-        <CollapsibleTrigger>
-          {team.name} · {team.userIds.length} members
-        </CollapsibleTrigger>
-        <CollapsiblePanel contentClassName="pt-4 space-y-3">
-          <ul aria-label={`${team.name} members`}>
-            {team.userIds.map((id) => {
-              const member = members.find((m) => m.userId === id);
-              return (
-                <li
-                  className="flex items-center justify-between gap-2 py-1"
-                  key={id}
-                >
-                  <span>
-                    {member
-                      ? `${member.firstName} ${member.lastName}`
-                      : "Member"}
-                  </span>
-                  {canManage ? (
-                    <Button
-                      variant="ghost"
-                      disabled={pending}
-                      onClick={() =>
-                        void mutate(
-                          () =>
-                            runtime.api.removeDealTeamMember(
-                              dealId,
-                              team.teamId,
-                              id,
-                            ),
-                          "Team assignment removed.",
-                        )
-                      }
-                    >
-                      Remove from team
-                    </Button>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          {canManage ? (
-            <>
-              <form
-                className="flex flex-wrap items-end gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (selected)
-                    void mutate(
-                      () =>
-                        runtime.api.addDealTeamMember(
-                          dealId,
-                          team.teamId,
-                          Number(selected),
-                        ),
-                      "Team member assigned.",
-                    );
-                }}
-              >
-                <SelectField
-                  label={`Assign member to ${team.name}`}
-                  value={selected || null}
-                  onValueChange={setSelected}
-                  disabled={
-                    pending ||
-                    members.every((member) =>
-                      team.userIds.includes(member.userId),
-                    )
-                  }
-                  className="min-w-48 flex-1"
-                  placeholder="Select a member"
-                  options={members
-                    .filter((member) => !team.userIds.includes(member.userId))
-                    .map((member) => ({
-                      value: String(member.userId),
-                      label: `${member.firstName} ${member.lastName}`,
-                    }))}
-                />
-                <Button
-                  variant="primary"
-                  type="submit"
-                  loading={pending}
-                  disabled={!selected}
-                >
-                  Assign member
-                </Button>
-              </form>
-              <form
-                className="flex flex-wrap items-end gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void mutate(
-                    () =>
-                      runtime.api.renameDealTeam(dealId, team.teamId, {
-                        name,
-                        expectedRevision: team.revision,
-                      }),
-                    "Team renamed.",
-                  );
-                }}
-              >
-                <Field className="min-w-0 flex-1" disabled={pending}>
-                  <FieldLabel htmlFor={fieldId}>Rename {team.name}</FieldLabel>
-                  <Input
-                    id={fieldId}
-                    required
-                    maxLength={100}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </Field>
-                <Button disabled={pending || !name.trim()} type="submit">
-                  Rename team
-                </Button>
-              </form>
-              <Button
-                variant="secondary"
-                disabled={pending}
-                onClick={() =>
-                  void mutate(
-                    () => runtime.api.deleteDealTeam(dealId, team.teamId),
-                    "Team deleted. Deal membership is unchanged.",
-                  )
-                }
-              >
-                Delete team
-              </Button>
-            </>
-          ) : null}
-        </CollapsiblePanel>
-      </Collapsible>
-    </li>
   );
 }
 

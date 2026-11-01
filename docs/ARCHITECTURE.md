@@ -701,9 +701,20 @@ opening the dialog does not capture the page chrome as part of that transition.
 Deal creation has four draft steps: details, companies, an optional team name, and metadata.
 Finish (including Skip metadata) creates the deal, then its named team through the existing
 membership API. These are separate requests; a team or metadata failure retains the created deal
-for retry, and metadata retries reuse a successfully created team. Settings shows the team name
-and member assignment before deal access management and deal editing. Deals without a team can
-create one in Settings; creation is hidden once one exists. The repository checks the one-team
+for retry, and metadata retries reuse a successfully created team.
+Settings uses a bounded, responsive workspace with a team header, avatar-based member roster,
+and add-member/access-guide rail. Settings cards match the Overview cards' muted-to-transparent
+surface, 8-pixel corners, and borderless, shadowless treatment. Each member's controlled permissions
+picker adapts Stealth's FollowButton label reservation, animated check and label transition to
+the existing deal roles;
+permissions remain server-owned, and owner permissions and roles viewed by non-owners stay
+read-only. Row action menus
+assign or remove team membership and expose permitted transfer/removal actions. Team rename and
+delete live in a collapsed management panel; deletion, ownership transfer, and membership removal
+use explicit confirmations and focus restoration. Edit deal sits in the page header. Role transitions
+and layout motion respect
+reduced motion, and the roster layout responds to available content width as well as viewport size.
+Deals without a team can create one in Settings; creation is hidden once one exists. The repository checks the one-team
 limit inside the mutation transaction and returns HTTP 409 for a second team, including a different
 name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
 but cannot add more. The paginated team API and schema are unchanged.
