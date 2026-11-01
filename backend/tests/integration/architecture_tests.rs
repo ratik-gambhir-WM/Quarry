@@ -180,6 +180,8 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "DocumentGraphSearch::new(",
         "IdentityRepository::new(",
         "ResourceAccess::new(",
+        "MembershipRepository::new(",
+        "DealAccessService::new(",
     ];
 
     for (path, source) in rust_sources("src") {
@@ -231,6 +233,7 @@ fn cross_domain_imports_do_not_reach_private_layers() {
         "templates",
         "identity",
         "notebooks",
+        "memberships",
     ];
     for (path, source) in rust_sources("src/domains") {
         let owner = domain_names
@@ -268,12 +271,15 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(matches.len(), 1, "unexpected document-to-deal query count");
     assert!(
-        matches[0].ends_with("/domains/documents/store/sqlite.rs"),
-        "cross-context attachment check moved to {}",
-        matches[0]
+        matches.is_empty(),
+        "document authorization must use the canonical membership transaction policy"
     );
+    let store = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/sqlite.rs"),
+    )
+    .unwrap();
+    assert!(store.contains("transaction_result_async") && store.contains("require_deal"));
 
     let behavior_tests = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))

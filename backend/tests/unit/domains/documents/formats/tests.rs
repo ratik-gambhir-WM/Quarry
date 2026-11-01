@@ -20,7 +20,7 @@ fn uploaded_docx_keeps_filename_without_a_local_path() {
     };
 
     assert_eq!(assembly.document.file_name, "report.docx");
-    assert_eq!(assembly.document.user_id, "user-1");
+    assert_eq!(assembly.document.deal_id, "user-1");
     assert!(assembly.document.local_path.is_none());
     assert_eq!(assembly.chunks[0].text, "Generated Quarry report.");
 }
@@ -32,7 +32,7 @@ fn parser_requires_user_scope() {
         .parse("")
         .unwrap_err();
 
-    assert_eq!(error, "user_id cannot be empty");
+    assert_eq!(error, "deal_id cannot be empty");
 }
 
 #[test]

@@ -19,6 +19,7 @@ import {
 import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
 
 const {
+  createDealTeam,
   createDeal,
   createCompany,
   updateCompany,
@@ -26,6 +27,7 @@ const {
   saveDealMetadata,
   listCompanies,
 } = vi.hoisted(() => ({
+  createDealTeam: vi.fn(),
   createDeal: vi.fn(),
   createCompany: vi.fn(),
   updateCompany: vi.fn(),
@@ -37,6 +39,7 @@ const {
 vi.mock("@quarry/runtime", () => ({
   runtime: {
     api: {
+      createDealTeam,
       createDeal,
       createCompany,
       updateCompany,
@@ -58,6 +61,8 @@ afterEach(cleanup);
 describe("AddDealModal", () => {
   beforeEach(() => {
     listCompanies.mockResolvedValue({ companies: [], hasMore: false });
+    createDealTeam.mockReset();
+    createDealTeam.mockResolvedValue(undefined);
     createDeal.mockReset();
     createCompany.mockReset();
     updateCompany.mockReset();
@@ -241,7 +246,7 @@ describe("AddDealModal", () => {
     expect(screen.getByRole("button", { name: /Deal details.*completed/ })).toHaveProperty("disabled", true);
   });
 
-  it("collects three steps before creating the deal and saving metadata on Finish deal", async () => {
+  it("collects four steps before creating the deal and saving metadata on Finish deal", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -316,6 +321,7 @@ describe("AddDealModal", () => {
     await user.click(screen.getByRole("button", { name: "Skip metadata" }));
 
     expect(saveDealMetadata).not.toHaveBeenCalled();
+    expect(createDealTeam).not.toHaveBeenCalled();
     expect(createDeal).toHaveBeenCalledTimes(1);
     await waitFor(() =>
       expect(screen.getByTestId("location").textContent).toBe(
@@ -367,6 +373,8 @@ describe("AddDealModal", () => {
     expect(
       (screen.getByLabelText("Role for company 1") as HTMLSelectElement).value,
     ).toBe("buyer");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(screen.getByLabelText("Team name (optional)"), "Diligence");
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.type(
       screen.getByLabelText("SOW link"),
@@ -438,6 +446,40 @@ describe("AddDealModal", () => {
     expect(createDeal).toHaveBeenCalledTimes(1);
   });
 
+  it("retries team creation without duplicating the deal and reuses the team after metadata failure", async () => {
+    const user = userEvent.setup();
+    createDealTeam.mockRejectedValueOnce(new Error("Team unavailable"));
+    saveDealMetadata.mockRejectedValueOnce(new Error("Metadata unavailable"));
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    await completeDealDetails(user);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.type(screen.getByLabelText("Team name (optional)"), "  Diligence  ");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Finish deal" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("team could not be saved");
+    expect(saveDealMetadata).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Finish deal" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("metadata could not be saved");
+    await user.click(screen.getByRole("button", { name: "Finish deal" }));
+    await waitFor(() => expect(saveDealMetadata).toHaveBeenCalledTimes(2));
+    expect(createDeal).toHaveBeenCalledTimes(1);
+    expect(createDealTeam).toHaveBeenCalledTimes(2);
+    expect(createDealTeam).toHaveBeenLastCalledWith(savedDeal.dealId, { name: "Diligence" });
+  });
+
+  it("creates the named team even when metadata is skipped", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /><LocationProbe /></MemoryRouter>);
+    await completeDealDetails(user);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.type(screen.getByLabelText("Team name (optional)"), "Diligence");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Skip metadata" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`/hub/deals/${savedDeal.dealId}`));
+    expect(createDealTeam).toHaveBeenCalledWith(savedDeal.dealId, { name: "Diligence" });
+    expect(saveDealMetadata).not.toHaveBeenCalled();
+  });
+
   it("returns to company assignments if the core deal is rejected and allows retry", async () => {
     const user = userEvent.setup();
     createDeal.mockRejectedValueOnce(
@@ -456,6 +498,7 @@ describe("AddDealModal", () => {
     );
     expect(saveDealMetadata).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
     await waitFor(() => expect(saveDealMetadata).toHaveBeenCalledTimes(1));
     expect(createDeal).toHaveBeenCalledTimes(2);
@@ -471,6 +514,8 @@ async function completeDealDetails(user: ReturnType<typeof userEvent.setup>) {
   });
   await user.click(screen.getByRole("button", { name: "Next" }));
   await screen.findByRole("heading", { name: "Assign companies and roles" });
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByRole("heading", { name: "Create team" });
   await user.click(screen.getByRole("button", { name: "Next" }));
   await screen.findByRole("heading", { name: "Add deal metadata" });
 }

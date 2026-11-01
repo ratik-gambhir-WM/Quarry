@@ -57,7 +57,21 @@ async fn request(app: &Router, method: &str, path: &str, value: Value) -> (Statu
     )
 }
 fn deal() -> Value {
-    json!({"dealId":"DEAL-MODEL","userEmail":"owner@example.com","dealName":"Pipeline","dealCode":null,"engagementType":"sell_side","transactionType":"unknown","status":"pipeline","startDate":null,"expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":null,"parties":[],"scopes":[]})
+    json!({
+        "dealId": "DEAL-MODEL",
+        "userEmail": "owner@example.com",
+        "dealName": "Pipeline",
+        "dealCode": null,
+        "engagementType": "sell_side",
+        "transactionType": "unknown",
+        "status": "pipeline",
+        "startDate": null,
+        "expectedCloseDate": null,
+        "actualCloseDate": null,
+        "engagementCompletedDate": null,
+        "parties": [],
+        "scopes": []
+    })
 }
 async fn app() -> Router {
     let app = test_application().unwrap();
@@ -314,7 +328,7 @@ async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
         )
         .await
         .0,
-        StatusCode::CONFLICT
+        StatusCode::NOT_FOUND
     );
     let (_, archived) = request(&app, "POST", "/api/v1/deals/DEAL-MODEL/archive", json!({})).await;
     assert_eq!(archived["status"], "pipeline");

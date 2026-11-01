@@ -48,6 +48,8 @@ pub(crate) fn authenticated_test_application() -> Result<TestApplication, Bootst
     app.sqlite.with_connection(|c| {
         for id in ["DEAL-LARGE", "DEAL-1", "DEAL-TEST", "DEAL-IMAGES", "DEAL-OFFICE", "DEAL-PATH"] {
             c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES (?1,1,'Test','buy_side','unknown','pipeline',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)", [id])?;
+            c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,1,'owner','now','now')",[id])?;
+            c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[id])?;
         }
         Ok(())
     }).unwrap();

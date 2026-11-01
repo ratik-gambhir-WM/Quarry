@@ -80,6 +80,19 @@ describe("DataRoomTools", () => {
     expect(screen.queryByRole("button", { name: "Data Room tools" })).toBeNull();
   });
 
+  it("releases an open tool panel when leaving the Data Room", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <DataRoomToolsProvider active dealId="DEAL-000184">Files</DataRoomToolsProvider>,
+    );
+    await launch(user, "Workspace Search");
+    await screen.findByRole("dialog", { name: "Workspace Search" }, { timeout: 5000 });
+    rerender(<DataRoomToolsProvider active={false} dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    expect(screen.queryByRole("dialog", { name: "Workspace Search" })).toBeNull();
+    rerender(<DataRoomToolsProvider active dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    expect(screen.queryByRole("dialog", { name: "Workspace Search" })).toBeNull();
+  });
+
   it("offers only Assistant and Workspace Search from the logo", async () => {
     const user = userEvent.setup();
     render(<DataRoomToolsProvider dealId="DEAL-000184">Content</DataRoomToolsProvider>);

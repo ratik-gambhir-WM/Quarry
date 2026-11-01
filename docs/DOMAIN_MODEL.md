@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Current-state companion to `ARCHITECTURE.md` |
-| Last verified | 2026-09-25 |
+| Last verified | 2026-11-01 |
 | Repository snapshot | Live working tree; optional legacy Diligence Studio is in a separate checkout |
 | Audience | Quarry product engineers, reviewers, and coding agents |
 | Scope | Product-domain ownership, durable entities, projections, ephemeral models, and known gaps |
@@ -44,13 +44,15 @@ and tests first.
 
 | Domain | Current responsibility | Durable model | Important boundary or limitation |
 | --- | --- | --- | --- |
-| `users` | Development profile creation and lookup by email | `users` | Profile lookup is not authentication; the development-era `api_key` is not an AI provider key |
-| `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive sets `archivedAt` while retaining the stage; owner email is resolved through the public `UserDirectory` facade |
+| `users` | Public account profiles and private password hash persistence | `users` | No public directory; identity supplies authenticated actors |
+| `identity` | Password verification, bearer sessions and principal extraction | `auth_sessions` | Digested tokens; session identity is authoritative |
+| `memberships` | Deal roles/capabilities, teams, optimistic access revisions and durable activity | `deal_memberships`, `deal_teams`, assignments, revisions and activity | No organization tenancy or independent team access |
+| `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive sets `archivedAt` while retaining the stage; authenticated identity is supplied by handlers; creator provenance is immutable |
 | `data_rooms` | Browse and preview a deal's configured local filesystem source | None of its own | Reads a local root from deal metadata or server configuration; does not own stored document blobs or activate SharePoint |
 | `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | SQLite is canonical; Helix is a search projection; jobs and locks are process-local |
-| `summaries` | List summarizable server files, summarize paths/uploads, and write Markdown | None | OpenAI-backed when configured; filesystem-oriented operations have a development trust model |
+| `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | Expose and mutate the validated app-scoped slide-template catalog | None in Quarry's canonical store | The optional legacy Diligence Studio service, maintained in a separate checkout, owns its ephemeral PPTX conversion, slide splitting, previews, and catalog rows; no deal ownership or selection |
+| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared SQLite catalog and Helix projection in default embedded mode | Explicit legacy mode uses the independent Diligence Studio service; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -62,9 +64,7 @@ capabilities each domain receives and merges already-state-bound feature routers
 
 | Domain | Intended ownership | Current reality |
 | --- | --- | --- |
-| `identity` | Authenticated principals and credential verification | Reserved; no inbound authentication or principal extractor |
 | `workspaces` | Tenant workspace lifecycle | Reserved; no workspace table or trusted workspace aggregate |
-| `memberships` | Principal-to-workspace roles and access policy | Reserved; no server-side tenant authorization |
 | `user_settings` | Durable user preferences | Reserved backend boundary; current theme/preferences are client-local |
 | `connections` | External data-source connection lifecycle | Reserved; SharePoint adapter is dormant and the UI modal does not submit an integration |
 | `diligence` | Questions, findings, evidence, and review state | Reserved; some frontend review/search content is fixture-derived |
@@ -123,87 +123,42 @@ these lower layers reads ambient configuration or imports application-wide state
 
 ## 4. Canonical relational model
 
-SQLite schema version 7 is the canonical durable product store. The active relationships are:
+SQLite schema 14 is canonical. It preserves validated schema-12/13 data and adds shared access,
+nullable uploader attribution, deal-scoped content claims and immutable document identity manifests.
+The full table inventory is in [Architecture](ARCHITECTURE.md#91-shared-sqlite-schema-marker-14).
 
 ```mermaid
 erDiagram
-    USER ||--o{ DEAL : owns
-    USER ||--o{ DEAL_METADATA : records
-    DEAL ||--o| DEAL_METADATA : has
+    USER ||--o{ DEAL : creates
+    USER ||--o{ DEAL_MEMBERSHIP : joins
+    DEAL ||--|{ DEAL_MEMBERSHIP : authorizes
+    DEAL ||--o{ DEAL_TEAM : organizes
+    DEAL_TEAM ||--o{ TEAM_MEMBERSHIP : contains
+    DEAL_MEMBERSHIP ||--o{ TEAM_MEMBERSHIP : assigns
+    DEAL ||--o{ DEAL_ACTIVITY_EVENT : records
+    USER ||--o{ DEAL_ACTIVITY_EVENT : authors
     DEAL ||--o{ QUARRY_FILE : contains
     QUARRY_FILE ||--|{ QUARRY_FILE_VERSION : versions
+    USER o|--o{ QUARRY_FILE_VERSION : uploads
     QUARRY_FILE_VERSION ||--|| QUARRY_FILE_BLOB : stores
-
-    USER {
-        integer id PK
-        text email UK
-        text first_name
-        text last_name
-        text api_key
-        text role
-        text created_at
-        text updated_at
-    }
-    DEAL {
-        text deal_id PK
-        integer user_id FK
-        text deal_name
-        text status
-        text start_date
-        text close_date
-        text transaction_type
-        text target_company
-        text primary_buyer
-        text deal_sponsor
-    }
-    DEAL_METADATA {
-        text deal_id PK
-        integer user_id FK
-        json key_questions_json
-        text local_path nullable
-        text sharepoint_link nullable
-        text sow_link nullable
-        text fact_sheet_link nullable
-        text rl_link nullable
-    }
-    QUARRY_FILE {
-        text file_id PK
-        text deal_id FK
-        text workspace_id
-        text display_name
-        text source_uri nullable
-        json metadata_json
-        text deleted_at nullable
-    }
-    QUARRY_FILE_VERSION {
-        text version_id PK
-        text file_id FK
-        integer version_number
-        text original_filename
-        text mime_type
-        text content_sha256
-        integer byte_size
-        boolean is_current
-    }
-    QUARRY_FILE_BLOB {
-        text version_id PK
-        blob file_bytes
-    }
+    QUARRY_FILE_VERSION ||--|| DOCUMENT_IDENTITY_MANIFEST : identifies
+    DOCUMENT_IDENTITY_MANIFEST ||--o{ DOCUMENT_CHUNK_IDENTITY : preserves
 ```
 
-`app_metadata` and `reminders` also exist in schema version 7, but no current registered domain
-service or route consumes them. They are dormant schema, not evidence of implemented application
-metadata or reminder domains.
+Membership removal cascades team assignments, while authored activity and uploader references
+remain. Team removal never removes deal membership. Exactly one owner, revision checks, current
+content claims and activity writes are protected by immediate mutation transactions. Removing the
+creator grants them no implicit access; `deals.user_id` remains creator provenance only.
 
-### 4.1 Development user profile
+`app_metadata` stores completed document-scope/index readiness. `reminders` remains dormant.
 
-A `User` is currently a development profile with a numeric SQLite ID and unique email. Deals use
-the numeric ID as their owner reference. The profile's `api_key` field is returned by current API
-responses, but Quarry's OpenAI features use server-side `OPENAI_API_KEY`; creating a profile does
-not configure AI.
+### 4.1 Accounts and sessions
 
-There is no authenticated principal attached to requests. Email, `userId`, and `workspaceId`
-values supplied by clients are not trustworthy identity assertions.
+A user has a numeric ID, unique normalized username/email, public display profile and private
+Argon2id password hash. Job title grants no privileges. Sessions contain token digests and server
+expiry/revocation; raw bearer tokens stay out of SQLite and logs. Every protected request has a
+verified principal; caller hints never establish identity. AI credentials remain server-side.
+See [authentication](authentication.md) and [deal policy](shared-deal-projects.md#access-policy).
 
 ### 4.2 Deal aggregate
 
@@ -232,17 +187,17 @@ working stages and Closed; Pipeline and Pencils Down permit incomplete parties. 
 stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
 independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
 
-Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-13-and-development-reset).
+Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-14-and-development-reset).
 
 ### 4.3 Logical file aggregate
 
-A `QuarryFile` is the stable logical attachment within a deal/workspace scope. It owns one or more
+A `QuarryFile` is the stable logical attachment within canonical deal scope. It owns one or more
 immutable `QuarryFileVersion` records, and each version owns exactly one byte blob.
 
 Core invariants enforced by schema and repository logic include:
 
-- a file belongs to exactly one existing deal and one stored `workspace_id`;
-- a reused `file_id` cannot move between deals or workspace IDs;
+- a file belongs to exactly one existing deal;
+- a reused `file_id` cannot move between deals;
 - soft-deleted files are excluded from active reads and cannot be silently restored by ingestion;
 - version numbers and content hashes are unique within a file;
 - at most one version is current for a file;
@@ -250,10 +205,10 @@ Core invariants enforced by schema and repository logic include:
 - child versions/blobs cascade when the owning file or version is deleted;
 - an archived deal rejects new document persistence but retains existing records.
 
-The current ingestion path uses the request's normalized `userId` value as `workspace_id` and
-checks it against the deal owner's normalized email before persistence. This is a consistency
-check, not authorization, because the request has no authenticated principal. The naming reflects
-an incomplete tenant model and should not be generalized into a trusted Workspace entity.
+Authenticated upload context separates actor attribution from canonical deal scope. The commit
+transaction repeats membership, upload capability and archive checks. Existing versions keep null
+uploader attribution (`legacy_unknown`); retries never invent/reassign an uploader or duplicate an
+accepted upload event. A per-deal current-content claim serializes same-byte deduplication.
 
 ## 5. Document identity and version lifecycle
 
@@ -264,21 +219,19 @@ The parser and persistence layers use several identifiers with different meaning
 | `deal_id` | Client-supplied, validated `DEAL-...` string | Deal aggregate identity |
 | `file_id` | Random on parse unless exact-content lookup reuses an existing file | Logical file identity |
 | `content_sha256` | SHA-256 of original bytes | Exact content identity |
-| `document_id` | SHA-256 of normalized request identity plus content hash | Ingestion/result identity; not the logical file key |
+| `document_id` | SHA-256 of deal ID plus content hash for new versions; legacy content IDs retained | Ingestion/result identity; not the logical file key |
 | `version_id` | SHA-256 of file ID plus content hash | Immutable file-version identity |
-| `chunk_id` | Deterministic from file/version/index generation, order, and chunk hash | Search projection chunk identity |
+| `chunk_id` | New IDs derive from deal/file/version/generation/order/hash; legacy IDs remain exact | Search projection chunk identity |
 | `index_generation` | Currently the version ID | Identifies the projected chunk generation |
 
 The ordinary ingestion lifecycle is:
 
 1. Validate the deal/request and compute the uploaded content hash.
-2. Look for a current SQLite attachment with the same deal, stored workspace identity, and exact
-   content hash.
+2. Look for a current SQLite attachment with the same deal and exact content hash.
 3. If both SQLite and Helix already contain the same current version, report the upload as
    successfully skipped.
-4. Otherwise parse PDF/DOCX, produce normalized chunks, and generate embeddings.
-5. Persist the logical file, immutable version metadata, and original bytes in one SQLite
-   transaction.
+4. Otherwise parse PDF/DOCX/XLSX/PPTX or cached/generated image descriptions, produce normalized chunks, and generate embeddings.
+5. Persist the file, immutable version/blob, exact identity manifest, uploader and activity in one SQLite transaction.
 6. Project the committed file/version/chunks into Helix.
 
 Parsers assign a new random `file_id`. Exact-content re-upload can reuse a committed file ID, but
@@ -298,12 +251,11 @@ FileVersion
   └── HAS_CHUNK ─────────> FileChunk
 ```
 
-- `QuarryFile` projects workspace ID, file ID, and display name.
+- `QuarryFile` projects canonical deal ID, file ID and display name.
 - `FileVersion` projects immutable version/content metadata and index generation.
 - `FileChunk` projects ordered text, embedding, hashes, token count, page/character ranges,
   section path, and timestamps.
-- Keyword and vector search operate on current projected chunks within a caller-supplied workspace
-  identity.
+- Keyword/vector search derive accessible deals from the authenticated actor or authorize one explicit deal. Canonical current/live chunk candidates are selected and verified before ranking and rechecked before exposing text.
 
 SQLite commits before Helix indexing. If the Helix write fails, the canonical SQLite version and
 blob remain committed. Re-uploading the exact bytes can reuse that identity and retry projection.
@@ -404,24 +356,21 @@ is no notebook search integration yet. See [notebook API and recovery](notebook-
 
 ## 9. Known model gaps
 
-- Identity, workspace, and membership aggregates do not exist, so current resource scoping is not
-  tenant authorization.
-- `workspace_id` in the document model currently carries a normalized client-supplied identity
-  that is checked against deal-owner email; it is not backed by a Workspace table.
-- The development `users.api_key` field is exposed through profile DTOs and should not be treated
-  as a production-safe secret model.
-- Changed-content uploads usually create new logical files rather than later versions of an
-  existing attachment.
-- SQLite-to-Helix recovery is incomplete without a general reindex command.
-- Document jobs, workflow-like processing, caches, and locks are not durable or distributed.
-- Local paths and SharePoint links describe mutually exclusive deal sources, but only local
-  filesystem browsing is active; SharePoint import is not wired.
-- Diligence questions/findings/evidence, deliverables, vaults, assistant conversations,
-  notifications, and durable activity have reserved owners but no canonical backend models.
-- `reminders` and `app_metadata` tables have no current domain consumer and should not be expanded
-  until ownership is decided.
-- Search endpoints trust caller-supplied workspace identity, and the Data Room search overlay is a
-  separate fixture-backed frontend experience rather than a consumer of those endpoints.
+- Organization tenancy, invitations/guests and production identity recovery/MFA remain absent.
+- Teams organize members; they do not grant access or create private team documents.
+- Personal notebooks/chats are durable and private; shared notebooks/chats, persistent PDF
+  annotations/findings and live co-editing remain deferred.
+- Changed-content uploads normally create a new logical file rather than version 2.
+- Resumable deal-scope migration exists; a general canonical-to-Helix rebuild/outbox does not.
+- Document jobs, caches and locks remain process-local; notebook save jobs have a separate durable lifecycle.
+- Local source authorization stays creator/current-owner only. SharePoint import remains unwired.
+- Diligence findings, deliverables, vaults and notifications do not gain a durable implementation
+  from shared deal access. The selected-PDF fixture search remains separate from API document search.
+- API document search is bounded and returns an explicit error for oversized/incomplete projections;
+  exact cross-document page activation remains deferred.
+
+See [shared deal recovery](shared-deal-projects.md) for scope migration, exact-byte retries,
+revision/role policy, search ranking and legacy uploader limits.
 
 ## 10. Rules for extending the model
 

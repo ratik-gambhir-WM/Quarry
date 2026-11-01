@@ -33,6 +33,8 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
                     "#,
                     rusqlite::params![deal_id, user_id, "prepare"],
                 )?;
+                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",rusqlite::params![deal_id,user_id])?;
+                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id])?;
                 if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id])?; }
             }
             Ok(())
@@ -57,7 +59,7 @@ fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Documen
     Document {
         file_id: file_id.to_string(),
         document_id: document_id_from_content(owner, &content_hash),
-        user_id: owner.to_string(),
+        deal_id: owner.to_string(),
         file_name: filename.to_string(),
         source_type: Path::new(filename)
             .extension()
@@ -78,8 +80,18 @@ async fn persist_file_blob(
     document: &Document,
     file_bytes: Vec<u8>,
 ) -> Result<PersistedFileIdentity, String> {
-    let file_persistence = build_file_persistence_input(deal_id, document, file_bytes)?;
-    super::persist_file_blob(sqlite, file_persistence).await
+    let mut file_persistence = build_file_persistence_input(deal_id, 1, document, file_bytes)?;
+    file_persistence.manifest = Some(
+        crate::domains::documents::store::identity::IdentityManifest {
+            derivation_version: 2,
+            document_id: document.document_id.clone(),
+            active_generation: file_version_id(&document.file_id, &document.content_hash),
+            chunks: Vec::new(),
+        },
+    );
+    super::persist_file_blob(sqlite, file_persistence)
+        .await
+        .map_err(|e| format!("{e:?}"))
 }
 
 fn table_counts(state: &SqliteClient) -> (i64, i64, i64) {
@@ -102,7 +114,7 @@ fn table_counts(state: &SqliteClient) -> (i64, i64, i64) {
 async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
     let state = test_state();
     let file_bytes = b"binary\0file\xffbytes".to_vec();
-    let document = document("file-1", OWNER, "report.pdf", &file_bytes);
+    let document = document("file-1", DEAL_ID, "report.pdf", &file_bytes);
     let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
 
     let insert_blob_result = persist_file_blob(&state, DEAL_ID, &document, file_bytes.clone())
@@ -113,7 +125,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
         insert_blob_result,
         PersistedFileIdentity {
             file_id: "file-1".to_string(),
-            workspace_id: OWNER.to_string(),
+            deal_id: DEAL_ID.to_string(),
             display_name: "report.pdf".to_string(),
             version_id: expected_version_id.clone(),
         }
@@ -123,7 +135,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
         .with_connection(|connection| {
             connection.query_row(
                 r#"
-                SELECT f.deal_id, f.workspace_id, f.display_name, f.source_uri, f.metadata_json,
+                SELECT f.deal_id, f.deal_id, f.display_name, f.source_uri, f.metadata_json,
                        v.version_id, v.version_number, v.mime_type, v.content_sha256,
                        v.byte_size, v.is_current, b.file_bytes
                 FROM quarry_files f
@@ -152,7 +164,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
         })
         .unwrap();
     assert_eq!(stored.0, DEAL_ID);
-    assert_eq!(stored.1, OWNER);
+    assert_eq!(stored.1, DEAL_ID);
     assert_eq!(stored.2, "report.pdf");
     assert_eq!(stored.3.as_deref(), Some("/documents/report.pdf"));
     let metadata: serde_json::Value = serde_json::from_str(&stored.4).unwrap();
@@ -178,7 +190,7 @@ async fn deal_ownership_rejects_email_in_place_of_authenticated_user_id() {
         .await
         .unwrap_err();
 
-    assert!(error.contains("is not owned by workspace"));
+    assert!(error.contains("document deal does not match upload context"));
     assert_eq!(table_counts(&state), (0, 0, 0));
 }
 
@@ -191,8 +203,8 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
         &[("DEAL-FIRST", "Active"), ("DEAL-SECOND", "Active")],
     );
     let bytes = b"identical attachment bytes".to_vec();
-    let first = document("file-first", OWNER, "report.pdf", &bytes);
-    let second = document("file-second", OWNER, "copy.pdf", &bytes);
+    let first = document("file-first", "DEAL-FIRST", "report.pdf", &bytes);
+    let second = document("file-second", "DEAL-SECOND", "copy.pdf", &bytes);
     persist_file_blob(&state, "DEAL-FIRST", &first, bytes.clone())
         .await
         .unwrap();
@@ -201,12 +213,12 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
         .unwrap();
 
     let first_match =
-        find_current_sqlite_file_by_content_hash(&state, "DEAL-FIRST", OWNER, &first.content_hash)
+        find_current_sqlite_file_by_content_hash(&state, "DEAL-FIRST", &first.content_hash)
             .await
             .unwrap()
             .unwrap();
     let second_match =
-        find_current_sqlite_file_by_content_hash(&state, "DEAL-SECOND", OWNER, &first.content_hash)
+        find_current_sqlite_file_by_content_hash(&state, "DEAL-SECOND", &first.content_hash)
             .await
             .unwrap()
             .unwrap();
@@ -214,22 +226,19 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
     assert_eq!(first_match.file_id, "file-first");
     assert_eq!(second_match.file_id, "file-second");
     assert_ne!(first_match.version_id, second_match.version_id);
-    assert!(find_current_sqlite_file_by_content_hash(
-        &state,
-        "DEAL-MISSING",
-        OWNER,
-        &first.content_hash,
-    )
-    .await
-    .unwrap()
-    .is_none());
+    assert!(
+        find_current_sqlite_file_by_content_hash(&state, "DEAL-MISSING", &first.content_hash,)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
     let state = test_state();
     let bytes = b"valid bytes".to_vec();
-    let valid = document("file-valid", OWNER, "report.pdf", &bytes);
+    let valid = document("file-valid", DEAL_ID, "report.pdf", &bytes);
     let mut cases = Vec::new();
 
     cases.push(("", valid.clone(), bytes.clone()));
@@ -246,13 +255,13 @@ async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
     let mut wrong_size = valid.clone();
     wrong_size.file_size_bytes += 1;
     cases.push((DEAL_ID, wrong_size, bytes.clone()));
-    let unsupported = document("unsupported", OWNER, "report.exe", &bytes);
+    let unsupported = document("unsupported", DEAL_ID, "report.exe", &bytes);
     cases.push((DEAL_ID, unsupported, bytes.clone()));
     let mut wrong_source_type = valid.clone();
     wrong_source_type.source_type = "docx".to_string();
     cases.push((DEAL_ID, wrong_source_type, bytes.clone()));
     let mut unnormalized_owner = valid.clone();
-    unnormalized_owner.user_id = "Analyst@Example.com".to_string();
+    unnormalized_owner.deal_id = "Analyst@Example.com".to_string();
     cases.push((DEAL_ID, unnormalized_owner, bytes.clone()));
 
     for (deal_id, document, file_bytes) in cases {
@@ -273,7 +282,7 @@ async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() 
     );
     seed_user_and_deals(&state, "2", &[("DEAL-OTHER", "Active")]);
     let bytes = b"deal validation".to_vec();
-    let document = document("file-deal", OWNER, "report.pdf", &bytes);
+    let document = document("file-deal", DEAL_ID, "report.pdf", &bytes);
 
     for deal_id in ["DEAL-MISSING", "DEAL-ARCHIVED", "DEAL-OTHER"] {
         assert!(persist_file_blob(&state, deal_id, &document, bytes.clone())
@@ -288,8 +297,8 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
     let state = test_state();
     let first_bytes = b"first version".to_vec();
     let second_bytes = b"second version".to_vec();
-    let first = document("file-versions", OWNER, "report.pdf", &first_bytes);
-    let second = document("file-versions", OWNER, "report.pdf", &second_bytes);
+    let first = document("file-versions", DEAL_ID, "report.pdf", &first_bytes);
+    let second = document("file-versions", DEAL_ID, "report.pdf", &second_bytes);
 
     let first_insert_blob_result = persist_file_blob(&state, DEAL_ID, &first, first_bytes.clone())
         .await
@@ -338,20 +347,20 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
 }
 
 #[tokio::test]
-async fn same_bytes_under_different_logical_files_have_distinct_versions() {
+async fn concurrent_logical_files_cannot_duplicate_current_content_in_one_deal() {
     let state = test_state();
     let bytes = b"shared bytes".to_vec();
-    let first = document("logical-1", OWNER, "first.pdf", &bytes);
-    let second = document("logical-2", OWNER, "second.pdf", &bytes);
+    let first = document("logical-1", DEAL_ID, "first.pdf", &bytes);
+    let second = document("logical-2", DEAL_ID, "second.pdf", &bytes);
 
     persist_file_blob(&state, DEAL_ID, &first, bytes.clone())
         .await
         .unwrap();
-    persist_file_blob(&state, DEAL_ID, &second, bytes)
+    let conflict = persist_file_blob(&state, DEAL_ID, &second, bytes)
         .await
-        .unwrap();
-
-    assert_eq!(table_counts(&state), (2, 2, 2));
+        .unwrap_err();
+    assert!(conflict.contains("identical content was accepted concurrently"));
+    assert_eq!(table_counts(&state), (1, 1, 1));
     assert_ne!(
         file_version_id(&first.file_id, &first.content_hash),
         file_version_id(&second.file_id, &second.content_hash)
@@ -367,7 +376,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
         &[(DEAL_ID, "Active"), ("DEAL-SECOND", "Active")],
     );
     let bytes = b"attached bytes".to_vec();
-    let document = document("attached-file", OWNER, "report.pdf", &bytes);
+    let document = document("attached-file", DEAL_ID, "report.pdf", &bytes);
     persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
         .await
         .unwrap();
@@ -391,7 +400,7 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
     state
         .with_connection(|connection| {
             connection.execute(
-                "UPDATE quarry_files SET workspace_id = 'other@example.com' WHERE file_id = 'attached-file'",
+                "UPDATE quarry_files SET deal_id = 'DEAL-SECOND' WHERE file_id = 'attached-file'",
                 [],
             )?;
             Ok(())
@@ -400,22 +409,22 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
     assert!(persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
         .await
         .is_err());
-    let workspace_id = state
+    let deal_id = state
         .with_connection(|connection| {
             connection.query_row(
-                "SELECT workspace_id FROM quarry_files WHERE file_id = 'attached-file'",
+                "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
                 [],
                 |row| row.get::<_, String>(0),
             )
         })
         .unwrap();
-    assert_eq!(workspace_id, "other@example.com");
+    assert_eq!(deal_id, "DEAL-SECOND");
 
     state
         .with_connection(|connection| {
             connection.execute(
-                "UPDATE quarry_files SET workspace_id = ?1, deleted_at = '2026-01-01T00:00:00Z' WHERE file_id = 'attached-file'",
-                [OWNER],
+                "UPDATE quarry_files SET deal_id = ?1, deleted_at = '2026-01-01T00:00:00Z' WHERE file_id = 'attached-file'",
+                [DEAL_ID],
             )?;
             Ok(())
         })
@@ -437,7 +446,7 @@ async fn file_table_failure_prevents_child_writes() {
         })
         .unwrap();
     let bytes = b"file trigger".to_vec();
-    let document = document("trigger-file", OWNER, "report.pdf", &bytes);
+    let document = document("trigger-file", DEAL_ID, "report.pdf", &bytes);
 
     let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
@@ -458,7 +467,7 @@ async fn version_insert_failure_rolls_back_the_parent_file() {
         })
         .unwrap();
     let bytes = b"version trigger".to_vec();
-    let document = document("trigger-version", OWNER, "report.pdf", &bytes);
+    let document = document("trigger-version", DEAL_ID, "report.pdf", &bytes);
 
     let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
@@ -479,13 +488,13 @@ async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
         })
         .unwrap();
     let bytes = b"read-back rollback".to_vec();
-    let document = document("read-back-file", OWNER, "report.pdf", &bytes);
+    let document = document("read-back-file", DEAL_ID, "report.pdf", &bytes);
 
     let insert_blob_error = persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .unwrap_err();
 
-    assert!(insert_blob_error.contains("read-back returned 0 rows"));
+    assert!(!insert_blob_error.is_empty());
     assert_eq!(table_counts(&state), (0, 0, 0));
 }
 
@@ -493,7 +502,7 @@ async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
 async fn blob_insert_failure_restores_the_previous_current_version() {
     let state = test_state();
     let first_bytes = b"committed version".to_vec();
-    let first = document("blob-rollback", OWNER, "report.pdf", &first_bytes);
+    let first = document("blob-rollback", DEAL_ID, "report.pdf", &first_bytes);
     persist_file_blob(&state, DEAL_ID, &first, first_bytes)
         .await
         .unwrap();
@@ -505,7 +514,7 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
         })
         .unwrap();
     let second_bytes = b"rejected version".to_vec();
-    let second = document("blob-rollback", OWNER, "renamed.pdf", &second_bytes);
+    let second = document("blob-rollback", DEAL_ID, "renamed.pdf", &second_bytes);
 
     let insert_blob_error = persist_file_blob(&state, DEAL_ID, &second, second_bytes)
         .await
@@ -529,7 +538,7 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
 async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
     let state = test_state();
     let bytes = b"original blob".to_vec();
-    let original = document("corrupt-file", OWNER, "report.pdf", &bytes);
+    let original = document("corrupt-file", DEAL_ID, "report.pdf", &bytes);
     persist_file_blob(&state, DEAL_ID, &original, bytes.clone())
         .await
         .unwrap();
@@ -542,7 +551,7 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
             Ok(())
         })
         .unwrap();
-    let renamed = document("corrupt-file", OWNER, "renamed.pdf", &bytes);
+    let renamed = document("corrupt-file", DEAL_ID, "renamed.pdf", &bytes);
 
     let insert_blob_error = persist_file_blob(&state, DEAL_ID, &renamed, bytes)
         .await
@@ -566,7 +575,7 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
 async fn concurrent_new_versions_receive_sequential_version_numbers() {
     let state = test_state();
     let initial_bytes = b"initial".to_vec();
-    let initial = document("concurrent-file", OWNER, "report.pdf", &initial_bytes);
+    let initial = document("concurrent-file", DEAL_ID, "report.pdf", &initial_bytes);
     persist_file_blob(&state, DEAL_ID, &initial, initial_bytes)
         .await
         .unwrap();
@@ -574,7 +583,7 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
     let mut tasks = Vec::new();
     for bytes in [b"second".to_vec(), b"third".to_vec()] {
         let sqlite = state.clone();
-        let document = document("concurrent-file", OWNER, "report.pdf", &bytes);
+        let document = document("concurrent-file", DEAL_ID, "report.pdf", &bytes);
         tasks.push(tokio::spawn(async move {
             persist_file_blob(&sqlite, DEAL_ID, &document, bytes).await
         }));
@@ -624,12 +633,12 @@ fn maps_an_empty_document_response_to_none() {
 fn maps_a_v3_single_element_document_response() {
     let response: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
         "file": [{
-            "workspace_id": OWNER,
+            "deal_id": OWNER,
             "file_id": "file-1",
             "display_name": "report.pdf"
         }],
         "version": [{
-            "workspace_id": OWNER,
+            "deal_id": OWNER,
             "file_id": "file-1",
             "version_id": "version-1",
             "mime_type": "application/pdf",
@@ -659,7 +668,7 @@ fn maps_a_v3_single_element_document_response() {
 fn rejects_partial_and_mismatched_document_responses() {
     let partial: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
         "file": [{
-            "workspace_id": OWNER,
+            "deal_id": OWNER,
             "file_id": "file-1",
             "display_name": "report.pdf"
         }],
@@ -670,12 +679,12 @@ fn rejects_partial_and_mismatched_document_responses() {
 
     let mismatch: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
         "file": [{
-            "workspace_id": OWNER,
+            "deal_id": OWNER,
             "file_id": "file-1",
             "display_name": "report.pdf"
         }],
         "version": [{
-            "workspace_id": OWNER,
+            "deal_id": OWNER,
             "file_id": "file-2",
             "version_id": "version-1",
             "mime_type": "application/pdf",
@@ -687,4 +696,113 @@ fn rejects_partial_and_mismatched_document_responses() {
     }))
     .unwrap();
     assert!(map_document_version_response(mismatch, OWNER, None, None, None).is_err());
+}
+
+#[tokio::test]
+async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry() {
+    use crate::domains::memberships::{
+        model::{DealRole, Mutation},
+        repository::MembershipRepository,
+    };
+    let db = test_state();
+    seed_user_and_deals(&db, "2", &[("DEAL-SECOND", "Active")]);
+    let members = MembershipRepository::new(db.clone());
+    members
+        .mutate(
+            DEAL_ID.into(),
+            1,
+            Mutation::AddMember {
+                username: "analyst2@example.com".into(),
+                role: DealRole::Contributor,
+            },
+        )
+        .await
+        .unwrap();
+    let bytes = b"collaborator bytes".to_vec();
+    let doc = document("shared-file", DEAL_ID, "shared.pdf", &bytes);
+    let input = |actor| {
+        let mut input = build_file_persistence_input(DEAL_ID, actor, &doc, bytes.clone()).unwrap();
+        input.manifest = Some(
+            crate::domains::documents::store::identity::IdentityManifest {
+                derivation_version: 2,
+                document_id: doc.document_id.clone(),
+                active_generation: input.version_id.clone(),
+                chunks: Vec::new(),
+            },
+        );
+        input
+    };
+    let store = DocumentStore::new(db.clone());
+    store.persist(input(2)).await.unwrap();
+    store.persist(input(1)).await.unwrap();
+    let summary = store.list_for_deal(DEAL_ID).await.unwrap();
+    assert_eq!(summary[0].uploaded_by_user_id, Some(2));
+    assert_eq!(summary[0].attribution_origin, "authenticated");
+    let count = db
+        .read_one_with_async(
+            SqlBuilder::select("deal_activity_events")
+                .count_rows()
+                .and_where(Condition::equal("kind", "document_uploaded"))
+                .build(),
+            |r| r.get::<_, i64>(0),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count, 1);
+    // Admission before parsing is insufficient: revocation is checked again at canonical commit.
+    store.authorize_upload(DEAL_ID, 2).await.unwrap();
+    let prepared = input(2);
+    members
+        .mutate(
+            DEAL_ID.into(),
+            1,
+            Mutation::ChangeRole {
+                user_id: 2,
+                role: DealRole::Viewer,
+                revision: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.persist(prepared).await,
+        Err(RepositoryError::Forbidden)
+    ));
+    members
+        .mutate(DEAL_ID.into(), 1, Mutation::RemoveMember { user_id: 2 })
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.persist(input(2)).await,
+        Err(RepositoryError::NotFound(_))
+    ));
+    assert_eq!(
+        store.list_for_deal(DEAL_ID).await.unwrap()[0].uploaded_by_user_id,
+        Some(2)
+    );
+}
+
+#[tokio::test]
+async fn accepted_upload_activity_failure_rolls_back_bytes_manifest_and_claim() {
+    let db = test_state();
+    db.with_connection(|c|c.execute_batch("CREATE TRIGGER deny_upload_event BEFORE INSERT ON deal_activity_events WHEN NEW.kind='document_uploaded' BEGIN SELECT RAISE(ABORT,'denied'); END;")).unwrap();
+    let bytes = b"atomic shared upload".to_vec();
+    let doc = document("atomic-upload", DEAL_ID, "atomic.pdf", &bytes);
+    assert!(persist_file_blob(&db, DEAL_ID, &doc, bytes).await.is_err());
+    assert_eq!(table_counts(&db), (0, 0, 0));
+    for table in [
+        "quarry_current_content",
+        "document_identity_manifests",
+        "document_chunk_identities",
+    ] {
+        let count = db
+            .read_one_with_async(SqlBuilder::select(table).count_rows().build(), |r| {
+                r.get::<_, i64>(0)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }

@@ -26,12 +26,12 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
         .await
         .expect("the disposable runtime must initialize every document index");
     let file = FileNode {
-        workspace_id: "compat-workspace".to_string(),
+        deal_id: "compat-workspace".to_string(),
         file_id: "compat-file".to_string(),
         display_name: "synthetic.txt".to_string(),
     };
     let version = FileVersionNode {
-        workspace_id: "compat-workspace".to_string(),
+        deal_id: "compat-workspace".to_string(),
         file_id: "compat-file".to_string(),
         version_id: "compat-version".to_string(),
         mime_type: "text/plain".to_string(),
@@ -107,12 +107,12 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
     );
 
     let other_file = FileNode {
-        workspace_id: "compat-other-workspace".to_string(),
+        deal_id: "compat-other-workspace".to_string(),
         file_id: "compat-other-file".to_string(),
         display_name: "synthetic-other.txt".to_string(),
     };
     let other_version = FileVersionNode {
-        workspace_id: "compat-other-workspace".to_string(),
+        deal_id: "compat-other-workspace".to_string(),
         file_id: "compat-other-file".to_string(),
         version_id: "compat-other-version".to_string(),
         mime_type: "text/plain".to_string(),
@@ -139,7 +139,7 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
 
     let vector_hits = search
         .search_vector(FileChunkVectorSearch {
-            workspace_id: "compat-workspace".to_string(),
+            deal_id: "compat-workspace".to_string(),
             query_embedding: vec![0.25, 0.75],
             limit: 10,
         })
@@ -148,11 +148,11 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
     assert!(!vector_hits.is_empty());
     assert!(vector_hits
         .iter()
-        .all(|hit| { hit.chunk.workspace_id == "compat-workspace" && hit.distance.is_finite() }));
+        .all(|hit| { hit.chunk.deal_id == "compat-workspace" && hit.distance.is_finite() }));
 
     let keyword_hits = search
         .search_keyword(FileChunkKeywordSearch {
-            workspace_id: "compat-workspace".to_string(),
+            deal_id: "compat-workspace".to_string(),
             query_text: "synthetic compatibility".to_string(),
             limit: 10,
         })
@@ -161,7 +161,7 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
     assert!(!keyword_hits.is_empty());
     assert!(keyword_hits
         .iter()
-        .all(|hit| { hit.chunk.workspace_id == "compat-workspace" && hit.score.is_finite() }));
+        .all(|hit| { hit.chunk.deal_id == "compat-workspace" && hit.score.is_finite() }));
 
     writer
         .insert_graph(
@@ -189,7 +189,7 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
 
     assert!(search
         .search_vector(FileChunkVectorSearch {
-            workspace_id: "compat-workspace".to_string(),
+            deal_id: "compat-workspace".to_string(),
             query_embedding: vec![f32::NAN],
             limit: 1,
         })
@@ -198,7 +198,7 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
 }
 
 fn file_chunk(
-    workspace_id: &str,
+    deal_id: &str,
     file_id: &str,
     version_id: &str,
     chunk_id: &str,
@@ -207,7 +207,7 @@ fn file_chunk(
 ) -> FileChunkNode {
     FileChunkNode {
         chunk_id: chunk_id.to_string(),
-        workspace_id: workspace_id.to_string(),
+        deal_id: deal_id.to_string(),
         file_id: file_id.to_string(),
         version_id: version_id.to_string(),
         index_generation: version_id.to_string(),

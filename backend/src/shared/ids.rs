@@ -11,8 +11,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-pub fn document_id_from_content(user_id: &str, content_hash: &str) -> String {
-    sha256_hex(format!("{user_id}\0{content_hash}").as_bytes())
+pub fn document_id_from_content(scope_id: &str, content_hash: &str) -> String {
+    sha256_hex(format!("{scope_id}\0{content_hash}").as_bytes())
 }
 
 pub fn file_version_id(file_id: &str, content_hash: &str) -> String {

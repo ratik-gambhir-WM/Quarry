@@ -32,14 +32,14 @@ pub(super) async fn list_deals_handler(
 }
 
 pub(super) async fn get_deal_handler(
-    Extension(_actor): Extension<AuthenticatedUser>,
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<DealWithMetadata>> {
     validate_deal_id(&deal_id)?;
     state
         .deals
-        .get(&deal_id)
+        .get(&deal_id, actor.user.id)
         .await
         .map(Json)
         .map_err(AppError::from)
@@ -157,7 +157,7 @@ fn validate_fields(fields: &DealFields) -> AppResult<()> {
     Ok(())
 }
 pub(super) async fn update_deal_handler(
-    Extension(_actor): Extension<AuthenticatedUser>,
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(id): Path<String>,
     fields: Result<Json<DealFields>, axum::extract::rejection::JsonRejection>,
@@ -168,7 +168,7 @@ pub(super) async fn update_deal_handler(
         Err(rejection) => return Ok(deal_json_rejection(rejection)),
     };
     validate_fields(&fields)?;
-    Ok(Json(state.deals.update(&id, fields).await?).into_response())
+    Ok(Json(state.deals.update(&id, actor.user.id, fields).await?).into_response())
 }
 
 pub(super) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
@@ -225,14 +225,14 @@ fn trim_optional(value: Option<&str>) -> Option<&str> {
 }
 
 pub(super) async fn archive_deal_handler(
-    Extension(_actor): Extension<AuthenticatedUser>,
+    Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
 ) -> crate::app::http::error::AppResult<Json<Deal>> {
     validate_deal_id(&deal_id)?;
     state
         .deals
-        .archive(&deal_id)
+        .archive(&deal_id, actor.user.id)
         .await
         .map(Json)
         .map_err(AppError::from)

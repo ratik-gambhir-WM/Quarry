@@ -15,7 +15,7 @@ pub const MAX_FILE_CHUNK_SEARCH_LIMIT: usize = 100;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChunkVectorSearch {
     #[serde(default)]
-    pub workspace_id: String,
+    pub deal_id: String,
     pub query_embedding: Vec<f32>,
     pub limit: usize,
 }
@@ -24,7 +24,7 @@ pub struct FileChunkVectorSearch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileChunkKeywordSearch {
     #[serde(default)]
-    pub workspace_id: String,
+    pub deal_id: String,
     pub query_text: String,
     pub limit: usize,
 }
@@ -38,7 +38,7 @@ pub struct HelixDocumentVersion {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileChunkResult {
     pub chunk_id: String,
-    pub workspace_id: String,
+    pub deal_id: String,
     pub file_id: String,
     pub version_id: String,
     pub index_generation: String,
@@ -69,39 +69,39 @@ pub struct KeywordFileChunkHit {
 }
 
 pub fn find_current_helix_document_by_content_hash(
-    workspace_id: String,
+    deal_id: String,
     content_sha256: String,
 ) -> Result<QueryRequest, String> {
-    validate_nonempty("workspace_id", &workspace_id)?;
+    validate_nonempty("deal_id", &deal_id)?;
     validate_nonempty("content_sha256", &content_sha256)?;
-    find_current_helix_document_by_content_hash_route(workspace_id, content_sha256)
+    find_current_helix_document_by_content_hash_route(deal_id, content_sha256)
         .map_err(|error| format!("failed to construct Helix content-hash query: {error}"))
 }
 
 #[query]
 fn find_current_helix_document_by_content_hash_route(
-    workspace_id: String,
+    deal_id: String,
     content_sha256: String,
 ) -> ReadBatch {
-    let _ = (&workspace_id, &content_sha256);
+    let _ = (&deal_id, &content_sha256);
     read_batch()
         .var_as(
             "candidate_versions",
             g().n_with_label(FILE_VERSION_LABEL)
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("content_sha256", "content_sha256")),
         )
         .var_as(
             "canonical_file",
             g().n(NodeRef::var("candidate_versions"))
                 .in_(Some(CURRENT_VERSION_LABEL))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as(
             "canonical_version",
             g().n(NodeRef::var("canonical_file"))
                 .out(Some(CURRENT_VERSION_LABEL))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("content_sha256", "content_sha256")),
         )
         .var_as(
@@ -118,24 +118,24 @@ fn find_current_helix_document_by_content_hash_route(
 }
 
 pub fn get_current_helix_document(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
 ) -> Result<QueryRequest, String> {
-    validate_workspace_file(&workspace_id, &file_id)?;
-    get_current_helix_document_route(workspace_id, file_id)
+    validate_deal_id_file(&deal_id, &file_id)?;
+    get_current_helix_document_route(deal_id, file_id)
         .map_err(|error| format!("failed to construct current Helix document query: {error}"))
 }
 
 #[query]
-fn get_current_helix_document_route(workspace_id: String, file_id: String) -> ReadBatch {
-    let _ = (&workspace_id, &file_id);
+fn get_current_helix_document_route(deal_id: String, file_id: String) -> ReadBatch {
+    let _ = (&deal_id, &file_id);
     read_batch()
         .var_as("canonical_file", exact_file())
         .var_as(
             "canonical_version",
             g().n(NodeRef::var("canonical_file"))
                 .out(Some(CURRENT_VERSION_LABEL))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("file_id", "file_id")),
         )
         .var_as(
@@ -152,22 +152,22 @@ fn get_current_helix_document_route(workspace_id: String, file_id: String) -> Re
 }
 
 pub fn get_helix_document_version(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
 ) -> Result<QueryRequest, String> {
-    validate_workspace_file_version(&workspace_id, &file_id, &version_id)?;
-    get_helix_document_version_route(workspace_id, file_id, version_id)
+    validate_deal_id_file_version(&deal_id, &file_id, &version_id)?;
+    get_helix_document_version_route(deal_id, file_id, version_id)
         .map_err(|error| format!("failed to construct Helix document-version query: {error}"))
 }
 
 #[query]
 fn get_helix_document_version_route(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
 ) -> ReadBatch {
-    let _ = (&workspace_id, &file_id, &version_id);
+    let _ = (&deal_id, &file_id, &version_id);
     read_batch()
         .var_as("canonical_file", exact_file())
         .var_as(
@@ -188,22 +188,22 @@ fn get_helix_document_version_route(
 }
 
 pub fn get_helix_document_version_chunks(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
 ) -> Result<QueryRequest, String> {
-    validate_workspace_file_version(&workspace_id, &file_id, &version_id)?;
-    get_helix_document_version_chunks_route(workspace_id, file_id, version_id)
+    validate_deal_id_file_version(&deal_id, &file_id, &version_id)?;
+    get_helix_document_version_chunks_route(deal_id, file_id, version_id)
         .map_err(|error| format!("failed to construct Helix version-chunk query: {error}"))
 }
 
 #[query]
 fn get_helix_document_version_chunks_route(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
 ) -> ReadBatch {
-    let _ = (&workspace_id, &file_id, &version_id);
+    let _ = (&deal_id, &file_id, &version_id);
     read_batch()
         .var_as("canonical_file", exact_file())
         .var_as(
@@ -214,7 +214,7 @@ fn get_helix_document_version_chunks_route(
             "chunks",
             g().n(NodeRef::var("canonical_version"))
                 .out(Some(HAS_CHUNK_LABEL))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("file_id", "file_id"))
                 .where_(Predicate::eq_param("version_id", "version_id"))
                 .order_by("chunk_index", Order::Asc)
@@ -227,32 +227,28 @@ pub fn search_document_chunks_by_vector(
     search: FileChunkVectorSearch,
 ) -> Result<QueryRequest, String> {
     let FileChunkVectorSearch {
-        workspace_id,
+        deal_id,
         query_embedding,
         limit,
     } = search;
-    validate_nonempty("workspace_id", &workspace_id)?;
+    validate_nonempty("deal_id", &deal_id)?;
     if query_embedding.is_empty() {
         return Err("query embedding cannot be empty".to_string());
     }
     if query_embedding.iter().any(|value| !value.is_finite()) {
         return Err("query embedding must contain only finite values".to_string());
     }
-    search_document_chunks_by_vector_route(
-        workspace_id,
-        query_embedding,
-        search_limit_to_i64(limit)?,
-    )
-    .map_err(|error| format!("failed to construct Helix vector-search query: {error}"))
+    search_document_chunks_by_vector_route(deal_id, query_embedding, search_limit_to_i64(limit)?)
+        .map_err(|error| format!("failed to construct Helix vector-search query: {error}"))
 }
 
 #[query]
 fn search_document_chunks_by_vector_route(
-    workspace_id: String,
+    deal_id: String,
     query_embedding: Vec<f32>,
     limit: i64,
 ) -> ReadBatch {
-    let _ = (&workspace_id, &query_embedding, &limit);
+    let _ = (&deal_id, &query_embedding, &limit);
     read_batch()
         .var_as(
             "chunks",
@@ -261,7 +257,7 @@ fn search_document_chunks_by_vector_route(
                 "embedding",
                 PropertyInput::param("query_embedding"),
                 Expr::param("limit"),
-                Some(PropertyInput::param("workspace_id")),
+                Some(PropertyInput::param("deal_id")),
             )
             .project(ranked_chunk_projection("$distance", "distance")),
         )
@@ -272,25 +268,25 @@ pub fn search_document_chunks_by_keyword(
     search: FileChunkKeywordSearch,
 ) -> Result<QueryRequest, String> {
     let FileChunkKeywordSearch {
-        workspace_id,
+        deal_id,
         query_text,
         limit,
     } = search;
-    validate_nonempty("workspace_id", &workspace_id)?;
+    validate_nonempty("deal_id", &deal_id)?;
     if query_text.trim().is_empty() {
         return Err("keyword query cannot be empty".to_string());
     }
-    search_document_chunks_by_keyword_route(workspace_id, query_text, search_limit_to_i64(limit)?)
+    search_document_chunks_by_keyword_route(deal_id, query_text, search_limit_to_i64(limit)?)
         .map_err(|error| format!("failed to construct Helix keyword-search query: {error}"))
 }
 
 #[query]
 fn search_document_chunks_by_keyword_route(
-    workspace_id: String,
+    deal_id: String,
     query_text: String,
     limit: i64,
 ) -> ReadBatch {
-    let _ = (&workspace_id, &query_text, &limit);
+    let _ = (&deal_id, &query_text, &limit);
     read_batch()
         .var_as(
             "chunks",
@@ -299,7 +295,7 @@ fn search_document_chunks_by_keyword_route(
                 "text",
                 PropertyInput::param("query_text"),
                 Expr::param("limit"),
-                Some(PropertyInput::param("workspace_id")),
+                Some(PropertyInput::param("deal_id")),
             )
             .project(ranked_chunk_projection("$score", "score")),
         )
@@ -308,14 +304,14 @@ fn search_document_chunks_by_keyword_route(
 
 fn exact_file() -> Traversal<OnNodes> {
     g().n_with_label(QUARRY_FILE_LABEL)
-        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+        .where_(Predicate::eq_param("deal_id", "deal_id"))
         .where_(Predicate::eq_param("file_id", "file_id"))
 }
 
 fn exact_version_from_file(edge_label: &str) -> Traversal<OnNodes> {
     g().n(NodeRef::var("canonical_file"))
         .out(Some(edge_label))
-        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+        .where_(Predicate::eq_param("deal_id", "deal_id"))
         .where_(Predicate::eq_param("file_id", "file_id"))
         .where_(Predicate::eq_param("version_id", "version_id"))
 }
@@ -329,17 +325,17 @@ fn ranked_chunk_projection(
     projection
 }
 
-fn validate_workspace_file(workspace_id: &str, file_id: &str) -> Result<(), String> {
-    validate_nonempty("workspace_id", workspace_id)?;
+fn validate_deal_id_file(deal_id: &str, file_id: &str) -> Result<(), String> {
+    validate_nonempty("deal_id", deal_id)?;
     validate_nonempty("file_id", file_id)
 }
 
-fn validate_workspace_file_version(
-    workspace_id: &str,
+fn validate_deal_id_file_version(
+    deal_id: &str,
     file_id: &str,
     version_id: &str,
 ) -> Result<(), String> {
-    validate_workspace_file(workspace_id, file_id)?;
+    validate_deal_id_file(deal_id, file_id)?;
     validate_nonempty("version_id", version_id)
 }
 
@@ -366,3 +362,64 @@ fn search_limit_to_i64(limit: usize) -> Result<i64, String> {
 #[cfg(test)]
 #[path = "../../../../tests/unit/domains/documents/graph/query_tests.rs"]
 mod tests;
+
+/// Select canonical live-version candidates before ranking. A limit sentinel prevents partial results.
+#[query]
+pub(crate) fn current_keyword_candidates(deal_id: String, chunk_ids: Vec<String>) -> ReadBatch {
+    let _ = (&deal_id, &chunk_ids);
+    read_batch()
+        .var_as(
+            "chunks",
+            g().n_with_label(FILE_CHUNK_LABEL)
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
+                .where_(Predicate::is_in_param("chunk_id", "chunk_ids"))
+                .limit(10001)
+                .project(file_chunk_projection()),
+        )
+        .returning(["chunks"])
+}
+#[query]
+pub(crate) fn current_vector_candidates(
+    deal_id: String,
+    chunk_ids: Vec<String>,
+    query_embedding: Vec<f32>,
+    limit: i64,
+) -> ReadBatch {
+    let _ = (&deal_id, &chunk_ids, &query_embedding, &limit);
+    read_batch()
+        .var_as(
+            "chunks",
+            g().n_with_label(FILE_CHUNK_LABEL)
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
+                .where_(Predicate::is_in_param("chunk_id", "chunk_ids"))
+                .vector_search_with(
+                    FILE_CHUNK_LABEL,
+                    "embedding",
+                    PropertyInput::param("query_embedding"),
+                    Expr::param("limit"),
+                    Some(PropertyInput::param("deal_id")),
+                )
+                .project(ranked_chunk_projection("$distance", "distance")),
+        )
+        .returning(["chunks"])
+}
+
+#[query]
+pub(crate) fn current_chunk_headers(deal_id: String, chunk_ids: Vec<String>) -> ReadBatch {
+    let _ = (&deal_id, &chunk_ids);
+    read_batch()
+        .var_as(
+            "chunks",
+            g().n_with_label(FILE_CHUNK_LABEL)
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
+                .where_(Predicate::is_in_param("chunk_id", "chunk_ids"))
+                .limit(10001)
+                .project(vec![
+                    PropertyProjection::new("chunk_id"),
+                    PropertyProjection::new("chunk_index"),
+                    PropertyProjection::new("index_generation"),
+                    PropertyProjection::new("chunk_sha256"),
+                ]),
+        )
+        .returning(["chunks"])
+}

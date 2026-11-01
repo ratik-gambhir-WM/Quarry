@@ -40,6 +40,33 @@ describe("useWorkspaceDeals", () => {
     expect(listDeals).toHaveBeenCalledTimes(2);
   });
 
+  it("blocks a late list and cache response from restoring revoked deal data, then accepts a fresh authorized list", async () => {
+    const pending = deferred<PersistedDeal[]>();
+    listDeals.mockReturnValueOnce(pending.promise);
+    const aggregate = { ...testDeal(), metadata: null };
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    act(() => result.current.forgetDeal(aggregate.dealId));
+    await act(async () => {
+      pending.resolve([aggregate]);
+      await pending.promise;
+    });
+    expect(result.current.resource).toMatchObject({
+      status: "success",
+      deals: [],
+    });
+    act(() => result.current.cacheDealResult(aggregate));
+    expect(result.current.resource).toMatchObject({
+      status: "success",
+      deals: [],
+    });
+    listDeals.mockResolvedValueOnce([aggregate]);
+    act(() => result.current.retry());
+    await waitFor(() => {
+      const resource = result.current.resource;
+      expect(resource.status === "success" && resource.deals.length).toBe(1);
+    });
+  });
+
   it("loads fixtures only in explicit demo mode", async () => {
     const { result } = renderHook(() => useWorkspaceDeals("demo"));
     await waitFor(() => expect(result.current.resource.status).toBe("success"));

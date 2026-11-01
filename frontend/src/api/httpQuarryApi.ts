@@ -1,3 +1,4 @@
+import { createDealMembershipApi } from "./dealMembershipApi";
 import { createNotebookApi } from "./notebookApi";
 import { subscribeNotebookSse } from "./notebookSse";
 import { sessionStore } from "../auth/sessionStore";
@@ -144,7 +145,8 @@ async function requestJson<TResponse>(
 
     if (!response.ok) {
       const errorBody = body as
-        { error?: string; message?: string } | undefined;
+        | { error?: string; message?: string }
+        | undefined;
       const message =
         (typeof errorBody === "object"
           ? (errorBody?.error ?? errorBody?.message)
@@ -938,6 +940,49 @@ function appendFiles(form: FormData, files: File[]) {
 }
 
 export const httpQuarryApi: QuarryApi = {
+  ...createDealMembershipApi(
+    <T>(
+      method: "GET" | "POST" | "PATCH" | "DELETE",
+      path: string,
+      body?: unknown,
+    ) =>
+      requestJson<T>(
+        path,
+        {
+          method,
+          ...(body === undefined
+            ? {}
+            : {
+                body: JSON.stringify(body),
+                headers: { "Content-Type": "application/json" },
+              }),
+        },
+        undefined,
+        false,
+      ),
+  ),
+  searchDealDocumentChunksByKeyword: (d, body) =>
+    requestJson(
+      `/api/v1/deals/${encodeURIComponent(d)}/documents/search/keyword`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      },
+      undefined,
+      false,
+    ),
+  searchDealDocumentChunksByVector: (d, body) =>
+    requestJson(
+      `/api/v1/deals/${encodeURIComponent(d)}/documents/search/vector`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      },
+      undefined,
+      false,
+    ),
   ...createNotebookApi({
     request: <T>(
       method: "GET" | "POST" | "PATCH" | "DELETE",

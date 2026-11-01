@@ -4,7 +4,7 @@ fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     DocumentChunk {
         chunk_id: "chunk-id".to_string(),
         document_id: "document-id".to_string(),
-        user_id: "user-id".to_string(),
+        deal_id: "user-id".to_string(),
         text: "chunk text".to_string(),
         embedding: None,
         sequence_number: 1,
@@ -128,4 +128,20 @@ fn upload_content_hash_is_stable_until_document_bytes_change() {
     let original_hash = uploaded_document_content_hash(&original);
     assert_eq!(original_hash, uploaded_document_content_hash(&renamed));
     assert_ne!(original_hash, uploaded_document_content_hash(&changed));
+}
+
+#[test]
+fn shared_upload_errors_disclose_only_recovery_state() {
+    let failed = failed_document(
+        "synthetic.pdf".into(),
+        "provider failure containing secret details".into(),
+    );
+    assert!(!failed.sqlite_committed);
+    assert!(!failed.error.unwrap().contains("secret"));
+    let committed=failed_document("synthetic.pdf".into(),"Helix indexing failed after SQLite committed file_id 'synthetic' and version_id 'synthetic': secret details".into());
+    assert!(committed.sqlite_committed);
+    let error = committed.error.unwrap();
+    assert!(error.contains("stored"));
+    assert!(error.contains("retry the same file"));
+    assert!(!error.contains("secret"));
 }

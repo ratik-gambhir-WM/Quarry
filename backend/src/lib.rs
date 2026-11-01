@@ -62,3 +62,11 @@ mod authentication_tests;
 #[cfg(test)]
 #[path = "../tests/integration/notebook_http_tests.rs"]
 mod notebook_http_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/memberships_http_tests.rs"]
+mod memberships_http_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/shared_document_search_tests.rs"]
+mod shared_document_search_tests;

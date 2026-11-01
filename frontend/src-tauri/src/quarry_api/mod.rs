@@ -11,3 +11,5 @@ pub use commands::{
     subscribe_document_job, subscribe_notebook_job,
 };
 pub use service::{QuarryApiService, QuerySubscriptions};
+
+mod memberships;

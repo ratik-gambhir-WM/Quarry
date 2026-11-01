@@ -313,7 +313,22 @@ async fn authentication_rejects_cross_owner_deals_companies_and_job_subscription
         .0,
         StatusCode::NOT_FOUND
     );
-    let deal = json!({"dealId":"DEAL-OWNED","dealName":"Owned","dealCode":null,"engagementType":"buy_side","transactionType":"unknown","status":"pipeline","startDate":null,"expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":null,"parties":[],"scopes":[],"localPath":null,"sharepointLink":null});
+    let deal = json!({
+        "dealId": "DEAL-OWNED",
+        "dealName": "Owned",
+        "dealCode": null,
+        "engagementType": "buy_side",
+        "transactionType": "unknown",
+        "status": "pipeline",
+        "startDate": null,
+        "expectedCloseDate": null,
+        "actualCloseDate": null,
+        "engagementCompletedDate": null,
+        "parties": [],
+        "scopes": [],
+        "localPath": null,
+        "sharepointLink": null
+    });
     assert_eq!(
         call(&app.router, "POST", "/api/v1/deals", deal, Some(&owner))
             .await
@@ -381,7 +396,16 @@ async fn authentication_logout_closes_an_admitted_stream_and_preflight_allows_he
         .route_layer(axum::middleware::from_fn_with_state(
             crate::app::http::auth::AuthBoundary {
                 identity: identity.clone(),
-                access: ResourceAccess::new(app.sqlite.clone()),
+                access: ResourceAccess::new(
+                    app.sqlite.clone(),
+                    std::sync::Arc::new(
+                        crate::domains::memberships::service::DealAccessService::new(
+                            crate::domains::memberships::repository::MembershipRepository::new(
+                                app.sqlite.clone(),
+                            ),
+                        ),
+                    ),
+                ),
             },
             crate::app::http::auth::authenticate,
         ));

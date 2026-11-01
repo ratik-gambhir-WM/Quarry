@@ -7,6 +7,7 @@ export type DataRoomTreeNode = {
   name: string;
   relativePath?: string;
   storedFileId?: string;
+  uploadedByName?: string | null;
 };
 
 export type DataRoomFileEntry = {
@@ -57,7 +58,11 @@ export function isUnconfiguredDataRoomError(error: unknown): boolean {
 }
 
 export function buildStoredDocumentNodes(
-  documents: ReadonlyArray<{ displayName: string; fileId: string }>,
+  documents: ReadonlyArray<{
+    displayName: string;
+    fileId: string;
+    uploadedByName?: string | null;
+  }>,
 ): DataRoomTreeNode[] {
   if (documents.length === 0) {
     return [];
@@ -71,6 +76,7 @@ export function buildStoredDocumentNodes(
         name: document.displayName,
         relativePath: `stored-document:${document.fileId}`,
         storedFileId: document.fileId,
+        uploadedByName: document.uploadedByName ?? null,
       })),
       defaultExpanded: true,
       id: "stored-documents",

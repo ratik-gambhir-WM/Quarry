@@ -16,6 +16,9 @@ use crate::{
 pub struct DealDocumentSummary {
     pub file_id: String,
     pub display_name: String,
+    pub uploaded_by_user_id: Option<i64>,
+    pub uploaded_by_name: Option<String>,
+    pub attribution_origin: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +39,40 @@ impl DocumentStore {
         Self { sqlite }
     }
 
+    pub async fn manifest(
+        &self,
+        version: String,
+    ) -> Result<Option<super::identity::IdentityManifest>, RepositoryError> {
+        super::identity::manifest(&self.sqlite, version).await
+    }
+    pub async fn authorize_read(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
+        let deal = deal.to_string();
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                crate::domains::memberships::require_deal(
+                    tx,
+                    &deal,
+                    actor,
+                    crate::domains::memberships::model::Capability::Read,
+                )
+                .map(|_| ())
+            })
+            .await
+    }
+    pub async fn authorize_upload(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
+        let deal = deal.to_string();
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                crate::domains::memberships::require_deal(
+                    tx,
+                    &deal,
+                    actor,
+                    crate::domains::memberships::model::Capability::Upload,
+                )
+                .map(|_| ())
+            })
+            .await
+    }
     pub async fn list_for_deal(
         &self,
         deal_id: &str,
@@ -58,26 +95,18 @@ impl DocumentStore {
     pub async fn find_current_by_hash(
         &self,
         deal_id: &str,
-        workspace_id: &str,
         content_sha256: &str,
     ) -> Result<Option<PersistedFileIdentity>, RepositoryError> {
-        find_current_sqlite_file_by_content_hash(
-            &self.sqlite,
-            deal_id,
-            workspace_id,
-            content_sha256,
-        )
-        .await
-        .map_err(RepositoryError::storage)
+        find_current_sqlite_file_by_content_hash(&self.sqlite, deal_id, content_sha256)
+            .await
+            .map_err(RepositoryError::storage)
     }
 
     pub(crate) async fn persist(
         &self,
         input: FilePersistenceInput,
     ) -> Result<PersistedFileIdentity, RepositoryError> {
-        persist_file_blob(&self.sqlite, input)
-            .await
-            .map_err(RepositoryError::storage)
+        persist_file_blob(&self.sqlite, input).await
     }
 }
 
@@ -86,11 +115,22 @@ async fn list_current_deal_documents(
     deal_id: &str,
 ) -> Result<Vec<DealDocumentSummary>, String> {
     let query = SqlBuilder::select("quarry_files")
-        .columns(["quarry_files.file_id", "quarry_files.display_name"])
+        .columns([
+            "quarry_files.file_id",
+            "quarry_files.display_name",
+            "quarry_file_versions.uploaded_by_user_id",
+            "users.first_name",
+            "users.last_name",
+        ])
         .inner_join(
             "quarry_file_versions",
             "quarry_files.file_id",
             "quarry_file_versions.file_id",
+        )
+        .left_join(
+            "users",
+            "quarry_file_versions.uploaded_by_user_id",
+            "users.id",
         )
         .and_where(Condition::equal("quarry_files.deal_id", deal_id))
         .and_where(Condition::is_null("quarry_files.deleted_at"))
@@ -108,6 +148,23 @@ async fn list_current_deal_documents(
             Ok(DealDocumentSummary {
                 file_id: required_text(&row, "file_id")?,
                 display_name: required_text(&row, "display_name")?,
+                uploaded_by_user_id: match row.get("uploaded_by_user_id") {
+                    Some(SqlValue::Integer(id)) => Some(*id),
+                    _ => None,
+                },
+                uploaded_by_name: match (row.get("first_name"), row.get("last_name")) {
+                    (Some(SqlValue::Text(a)), Some(SqlValue::Text(b))) => Some(format!("{a} {b}")),
+                    _ => None,
+                },
+                attribution_origin: if matches!(
+                    row.get("uploaded_by_user_id"),
+                    Some(SqlValue::Integer(_))
+                ) {
+                    "authenticated"
+                } else {
+                    "legacy_unknown"
+                }
+                .into(),
             })
         })
         .collect::<Result<Vec<_>, SqliteClientError>>()
@@ -161,13 +218,12 @@ async fn get_current_deal_document_blob(
 async fn find_current_sqlite_file_by_content_hash(
     sqlite: &SqliteClient,
     deal_id: &str,
-    workspace_id: &str,
     content_sha256: &str,
 ) -> Result<Option<PersistedFileIdentity>, String> {
     let query = SqlBuilder::select("quarry_files")
         .columns([
             "quarry_files.file_id",
-            "quarry_files.workspace_id",
+            "quarry_files.deal_id",
             "quarry_files.display_name",
             "quarry_file_versions.version_id",
         ])
@@ -182,7 +238,6 @@ async fn find_current_sqlite_file_by_content_hash(
             "quarry_file_blobs.version_id",
         )
         .and_where(Condition::equal("quarry_files.deal_id", deal_id))
-        .and_where(Condition::equal("quarry_files.workspace_id", workspace_id))
         .and_where(Condition::is_null("quarry_files.deleted_at"))
         .and_where(Condition::equal("quarry_file_versions.is_current", true))
         .and_where(Condition::equal(
@@ -205,7 +260,7 @@ async fn find_current_sqlite_file_by_content_hash(
         .map(|row| {
             Ok(PersistedFileIdentity {
                 file_id: required_text(&row, "file_id")?,
-                workspace_id: required_text(&row, "workspace_id")?,
+                deal_id: required_text(&row, "deal_id")?,
                 display_name: required_text(&row, "display_name")?,
                 version_id: required_text(&row, "version_id")?,
             })
@@ -217,11 +272,33 @@ async fn find_current_sqlite_file_by_content_hash(
 async fn persist_file_blob(
     sqlite: &SqliteClient,
     file_persistence: FilePersistenceInput,
-) -> Result<PersistedFileIdentity, String> {
+) -> Result<PersistedFileIdentity, RepositoryError> {
     sqlite
-        .transaction_async(move |transaction| {
-            validate_deal_ownership(transaction, &file_persistence)?;
+        .transaction_result_async(move |transaction| {
+            crate::domains::memberships::require_deal(
+                transaction,
+                &file_persistence.deal_id,
+                file_persistence.actor_id,
+                crate::domains::memberships::model::Capability::Upload,
+            )?;
 
+            if let Some(claim) = transaction.read_one_with(
+                SqlBuilder::select("quarry_current_content")
+                    .columns(["file_id"])
+                    .and_where(Condition::equal("deal_id", &file_persistence.deal_id))
+                    .and_where(Condition::equal(
+                        "content_sha256",
+                        &file_persistence.content_sha256,
+                    ))
+                    .build(),
+                |r| r.get::<_, String>(0),
+            )? {
+                if claim != file_persistence.file_id {
+                    return Err(RepositoryError::Conflict(
+                        "identical content was accepted concurrently; retry the same file".into(),
+                    ));
+                }
+            }
             // The aggregate is always mutated parent-to-child.
             validate_existing_quarry_file(transaction, &file_persistence)?;
             upsert_quarry_file(transaction, &file_persistence)?;
@@ -235,45 +312,39 @@ async fn persist_file_blob(
                 clear_current_file_version(transaction, &file_persistence)?;
                 insert_quarry_file_version(transaction, &file_persistence, version_number)?;
                 insert_quarry_file_blob(transaction, &file_persistence)?;
+                crate::domains::memberships::record_activity(
+                    transaction,
+                    &file_persistence.deal_id,
+                    Some(file_persistence.actor_id),
+                    "document_uploaded",
+                    Some(&file_persistence.version_id),
+                )?;
             }
 
-            read_back_persisted_file_identity(transaction, &file_persistence)
+            transaction.write(
+                SqlBuilder::delete_from("quarry_current_content")
+                    .and_where(Condition::equal("file_id", &file_persistence.file_id))
+                    .build(),
+            )?;
+            transaction.write(
+                SqlBuilder::insert_into("quarry_current_content")
+                    .value("deal_id", &file_persistence.deal_id)
+                    .value("content_sha256", &file_persistence.content_sha256)
+                    .value("file_id", &file_persistence.file_id)
+                    .value("version_id", &file_persistence.version_id)
+                    .build(),
+            )?;
+            let manifest = file_persistence.manifest.as_ref().ok_or_else(|| {
+                SqliteClientError::transaction_aborted("identity manifest required")
+            })?;
+            super::identity::save(transaction, &file_persistence.version_id, manifest, true)
+                .map_err(|e| SqliteClientError::transaction_aborted(e.to_string()))?;
+            Ok(read_back_persisted_file_identity(
+                transaction,
+                &file_persistence,
+            )?)
         })
         .await
-        .map_err(|error| format!("failed to persist file transaction: {error}"))
-}
-
-fn validate_deal_ownership(
-    transaction: &SqliteTransaction<'_>,
-    input: &FilePersistenceInput,
-) -> Result<(), SqliteClientError> {
-    let query = SqlBuilder::select("deals")
-        .columns(["deals.archived_at", "deals.user_id"])
-        .and_where(Condition::equal("deals.deal_id", &input.deal_id))
-        .build();
-    let row = transaction
-        .read_one(query)
-        .map_err(|error| error.context("failed to read deal ownership"))?
-        .ok_or_else(|| {
-            SqliteClientError::transaction_aborted(format!(
-                "deal `{}` does not exist",
-                input.deal_id
-            ))
-        })?;
-    if matches!(row.get("archived_at"), Some(SqlValue::Text(_))) {
-        return Err(SqliteClientError::transaction_aborted(format!(
-            "deal `{}` is archived",
-            input.deal_id
-        )));
-    }
-    let owner = required_integer(&row, "user_id")?.to_string();
-    if owner != input.workspace_id {
-        return Err(SqliteClientError::transaction_aborted(format!(
-            "deal `{}` is not owned by workspace `{}`",
-            input.deal_id, input.workspace_id
-        )));
-    }
-    Ok(())
 }
 
 fn validate_existing_quarry_file(
@@ -281,7 +352,7 @@ fn validate_existing_quarry_file(
     input: &FilePersistenceInput,
 ) -> Result<(), SqliteClientError> {
     let query = SqlBuilder::select("quarry_files")
-        .columns(["deal_id", "workspace_id", "deleted_at"])
+        .columns(["deal_id", "deleted_at"])
         .and_where(Condition::equal("file_id", &input.file_id))
         .build();
     let Some(row) = transaction
@@ -294,12 +365,6 @@ fn validate_existing_quarry_file(
     if required_text(&row, "deal_id")? != input.deal_id {
         return Err(SqliteClientError::transaction_aborted(format!(
             "file `{}` already belongs to another deal",
-            input.file_id
-        )));
-    }
-    if required_text(&row, "workspace_id")? != input.workspace_id {
-        return Err(SqliteClientError::transaction_aborted(format!(
-            "file `{}` already belongs to another workspace",
             input.file_id
         )));
     }
@@ -319,7 +384,6 @@ fn upsert_quarry_file(
     let query = SqlBuilder::insert_into("quarry_files")
         .value("file_id", &input.file_id)
         .value("deal_id", &input.deal_id)
-        .value("workspace_id", &input.workspace_id)
         .value("display_name", &input.display_name)
         .value("source_uri", input.source_uri.clone())
         .value("metadata_json", &input.metadata_json)
@@ -486,6 +550,7 @@ fn insert_quarry_file_version(
 ) -> Result<(), SqliteClientError> {
     let query = SqlBuilder::insert_into("quarry_file_versions")
         .value("version_id", &input.version_id)
+        .value("uploaded_by_user_id", input.actor_id)
         .value("file_id", &input.file_id)
         .value("version_number", version_number)
         .value("original_filename", &input.display_name)
@@ -528,7 +593,7 @@ fn read_back_persisted_file_identity(
     let query = SqlBuilder::select("quarry_files")
         .columns([
             "quarry_files.file_id",
-            "quarry_files.workspace_id",
+            "quarry_files.deal_id",
             "quarry_files.display_name",
             "quarry_file_versions.version_id",
         ])
@@ -555,12 +620,12 @@ fn read_back_persisted_file_identity(
     let row = &rows[0];
     let identity = PersistedFileIdentity {
         file_id: required_text(row, "file_id")?,
-        workspace_id: required_text(row, "workspace_id")?,
+        deal_id: required_text(row, "deal_id")?,
         display_name: required_text(row, "display_name")?,
         version_id: required_text(row, "version_id")?,
     };
     if identity.file_id != input.file_id
-        || identity.workspace_id != input.workspace_id
+        || identity.deal_id != input.deal_id
         || identity.display_name != input.display_name
         || identity.version_id != input.version_id
     {

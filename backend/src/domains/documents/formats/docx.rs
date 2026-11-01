@@ -64,7 +64,7 @@ pub fn parse_docx_from_path(path: &Path) -> Result<String, String> {
 /// [`parse_docx_from_path`], with an exclusive `end_offset`.
 pub fn parse_docx_chunks_from_path(
     path: &Path,
-    user_id: impl Into<String>,
+    deal_id: impl Into<String>,
 ) -> Result<DocxAssembly, String> {
     let text = parse_docx_from_path(path)?;
     let source_path = path.canonicalize().unwrap_or_else(|_| PathBuf::from(path));
@@ -80,7 +80,7 @@ pub fn parse_docx_chunks_from_path(
 
     Ok(parse_docx_file_with_metadata(
         Some(&source_path),
-        &user_id.into(),
+        &deal_id.into(),
         &text,
         file_size_bytes,
         content_hash,
@@ -93,7 +93,7 @@ pub fn parse_docx_chunks_from_path(
 pub fn parse_docx_chunks_from_bytes(
     bytes: Vec<u8>,
     path: Option<&Path>,
-    user_id: impl Into<String>,
+    deal_id: impl Into<String>,
 ) -> Result<DocxAssembly, String> {
     let file_size_bytes = u64::try_from(bytes.len())
         .map_err(|_| format!("DOCX byte length `{}` does not fit in u64", bytes.len()))?;
@@ -103,7 +103,7 @@ pub fn parse_docx_chunks_from_bytes(
 
     Ok(parse_docx_file_with_metadata(
         source_path.as_deref(),
-        &user_id.into(),
+        &deal_id.into(),
         &text,
         file_size_bytes,
         content_hash,
@@ -112,14 +112,14 @@ pub fn parse_docx_chunks_from_bytes(
 
 fn parse_docx_file_with_metadata(
     path: Option<&Path>,
-    user_id: &str,
+    deal_id: &str,
     text: &str,
     file_size_bytes: u64,
     content_hash: String,
 ) -> DocxAssembly {
     let local_path = path.map(|path| path.to_string_lossy().into_owned());
-    let document_id = document_id_from_content(user_id, &content_hash);
-    let chunks = chunk_nodes_from_text(text, &document_id, user_id);
+    let document_id = document_id_from_content(deal_id, &content_hash);
+    let chunks = chunk_nodes_from_text(text, &document_id, deal_id);
     let token_count = chunks
         .iter()
         .map(|chunk| u64::from(chunk.token_count))
@@ -127,7 +127,7 @@ fn parse_docx_file_with_metadata(
     let document = Document {
         file_id: Uuid::new_v4().to_string(),
         document_id,
-        user_id: user_id.to_string(),
+        deal_id: deal_id.to_string(),
         file_name: path
             .and_then(Path::file_name)
             .and_then(|name| name.to_str())
@@ -144,7 +144,7 @@ fn parse_docx_file_with_metadata(
     DocxAssembly { document, chunks }
 }
 
-fn chunk_nodes_from_text(text: &str, document_id: &str, user_id: &str) -> Vec<DocumentChunk> {
+fn chunk_nodes_from_text(text: &str, document_id: &str, deal_id: &str) -> Vec<DocumentChunk> {
     token_bounded_ranges(text)
         .into_iter()
         .enumerate()
@@ -156,13 +156,13 @@ fn chunk_nodes_from_text(text: &str, document_id: &str, user_id: &str) -> Vec<Do
             let chunk_text = &text[start_offset..end_offset];
             let content_hash = content_hash_for_text(chunk_text);
             let chunk_id = content_hash_for_text(&format!(
-                "{user_id}\0{document_id}\0{sequence_number}\0{content_hash}"
+                "{deal_id}\0{document_id}\0{sequence_number}\0{content_hash}"
             ));
 
             DocumentChunk {
                 chunk_id,
                 document_id: document_id.to_string(),
-                user_id: user_id.to_string(),
+                deal_id: deal_id.to_string(),
                 text: chunk_text.to_string(),
                 embedding: None,
                 sequence_number,

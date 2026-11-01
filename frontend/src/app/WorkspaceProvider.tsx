@@ -28,6 +28,7 @@ type WorkspaceContextValue = {
   initiatives: WorkspaceSidebarTool[];
   navigationState?: WorkspaceLocationState;
   retryDeals: () => void;
+  forgetDeal: (dealId: string) => void;
   cacheDealResult: (aggregate: PersistedDeal) => void;
   saveCompanyResult: (company: Company) => void;
   saveDealResult: (
@@ -50,6 +51,7 @@ export function WorkspaceProvider({
   const {
     resource,
     retry,
+    forgetDeal,
     cacheDealResult,
     saveDealResult,
     saveCompanyResult,
@@ -67,6 +69,7 @@ export function WorkspaceProvider({
         initiatives: workspaceInitiatives,
         navigationState,
         retryDeals: retry,
+        forgetDeal,
         cacheDealResult,
         saveDealResult,
         saveCompanyResult,

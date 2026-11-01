@@ -14,14 +14,14 @@ pub const HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
 
 pub const DOCUMENT_INDEX_NAMES: [&str; 13] = [
     "file_id_unique",
-    "file_workspace_id",
+    "file_deal_id",
     "file_display_name",
     "version_id_unique",
-    "version_workspace_id",
+    "version_deal_id",
     "version_file_id",
     "version_content_sha256",
     "chunk_id_unique",
-    "chunk_workspace_id",
+    "chunk_deal_id",
     "chunk_file_id",
     "chunk_version_id",
     "chunk_embedding",
@@ -58,7 +58,7 @@ pub(crate) fn insert_file_version_graph(
 #[allow(clippy::too_many_arguments)]
 #[query]
 fn setup_file_version_graph_route(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     display_name: String,
     version_id: String,
@@ -69,7 +69,7 @@ fn setup_file_version_graph_route(
     indexed_at: String,
 ) -> WriteBatch {
     let _ = (
-        &workspace_id,
+        &deal_id,
         &file_id,
         &display_name,
         &version_id,
@@ -85,7 +85,7 @@ fn setup_file_version_graph_route(
             "existing_file",
             g().n_with_label(QUARRY_FILE_LABEL)
                 .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as_if(
             "created_file",
@@ -93,7 +93,7 @@ fn setup_file_version_graph_route(
             g().add_n(
                 QUARRY_FILE_LABEL,
                 vec![
-                    ("workspace_id", PropertyInput::param("workspace_id")),
+                    ("deal_id", PropertyInput::param("deal_id")),
                     ("file_id", PropertyInput::param("file_id")),
                     ("display_name", PropertyInput::param("display_name")),
                 ],
@@ -103,7 +103,7 @@ fn setup_file_version_graph_route(
             "canonical_file",
             g().n_with_label(QUARRY_FILE_LABEL)
                 .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as(
             "file",
@@ -118,7 +118,7 @@ fn setup_file_version_graph_route(
             g().add_n(
                 FILE_VERSION_LABEL,
                 vec![
-                    ("workspace_id", PropertyInput::param("workspace_id")),
+                    ("deal_id", PropertyInput::param("deal_id")),
                     ("file_id", PropertyInput::param("file_id")),
                     ("version_id", PropertyInput::param("version_id")),
                     ("mime_type", PropertyInput::param("mime_type")),
@@ -140,9 +140,10 @@ fn setup_file_version_graph_route(
         .var_as(
             "removed_version_chunks",
             g().n_with_label(FILE_CHUNK_LABEL)
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("file_id", "file_id"))
                 .where_(Predicate::eq_param("version_id", "version_id"))
+                .where_(Predicate::eq_param("index_generation", "index_generation"))
                 .drop(),
         )
         .returning(["file", "version", "removed_version_chunks"])
@@ -150,23 +151,23 @@ fn setup_file_version_graph_route(
 
 #[query]
 fn publish_file_version_graph_route(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
 ) -> WriteBatch {
-    let _ = (&workspace_id, &file_id, &version_id);
+    let _ = (&deal_id, &file_id, &version_id);
 
     write_batch()
         .var_as(
             "canonical_file",
             g().n_with_label(QUARRY_FILE_LABEL)
                 .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("workspace_id", "workspace_id")),
+                .where_(Predicate::eq_param("deal_id", "deal_id")),
         )
         .var_as(
             "canonical_version",
             g().n_with_label(FILE_VERSION_LABEL)
-                .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                .where_(Predicate::eq_param("deal_id", "deal_id"))
                 .where_(Predicate::eq_param("file_id", "file_id"))
                 .where_(Predicate::eq_param("version_id", "version_id")),
         )
@@ -211,12 +212,12 @@ fn publish_file_version_graph_route(
 
 #[query]
 fn insert_file_version_chunk_batch_route(
-    workspace_id: String,
+    deal_id: String,
     file_id: String,
     version_id: String,
     chunks: Vec<ParamObject>,
 ) -> WriteBatch {
-    let _ = (&workspace_id, &file_id, &version_id, &chunks);
+    let _ = (&deal_id, &file_id, &version_id, &chunks);
 
     write_batch()
         .for_each_param(
@@ -225,7 +226,7 @@ fn insert_file_version_chunk_batch_route(
                 .var_as(
                     "chunk_version",
                     g().n_with_label(FILE_VERSION_LABEL)
-                        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+                        .where_(Predicate::eq_param("deal_id", "deal_id"))
                         .where_(Predicate::eq_param("file_id", "file_id"))
                         .where_(Predicate::eq_param("version_id", "version_id")),
                 )
@@ -236,7 +237,7 @@ fn insert_file_version_chunk_batch_route(
                         FILE_CHUNK_LABEL,
                         vec![
                             ("chunk_id", PropertyInput::param("chunk_id")),
-                            ("workspace_id", PropertyInput::param("workspace_id")),
+                            ("deal_id", PropertyInput::param("deal_id")),
                             ("file_id", PropertyInput::param("file_id")),
                             ("version_id", PropertyInput::param("version_id")),
                             ("index_generation", PropertyInput::param("index_generation")),
@@ -278,7 +279,7 @@ fn setup_file_version_graph_query(
     version: &FileVersionNode,
 ) -> Result<QueryRequest, String> {
     let query = setup_file_version_graph_route(
-        file.workspace_id.clone(),
+        file.deal_id.clone(),
         file.file_id.clone(),
         file.display_name.clone(),
         version.version_id.clone(),
@@ -302,7 +303,7 @@ fn publish_file_version_graph_query(
     version: &FileVersionNode,
 ) -> Result<QueryRequest, String> {
     let query = publish_file_version_graph_route(
-        file.workspace_id.clone(),
+        file.deal_id.clone(),
         file.file_id.clone(),
         version.version_id.clone(),
     )
@@ -388,7 +389,7 @@ fn insert_file_version_chunk_batch_query(
     chunks: Vec<ParamObject>,
 ) -> Result<QueryRequest, String> {
     insert_file_version_chunk_batch_route(
-        file.workspace_id.clone(),
+        file.deal_id.clone(),
         file.file_id.clone(),
         version.version_id.clone(),
         chunks,
@@ -421,7 +422,7 @@ fn next_chunk_batch_payload_bytes(
 
 fn version_by_immutable_identity() -> Traversal<OnNodes> {
     g().n_with_label(FILE_VERSION_LABEL)
-        .where_(Predicate::eq_param("workspace_id", "workspace_id"))
+        .where_(Predicate::eq_param("deal_id", "deal_id"))
         .where_(Predicate::eq_param("file_id", "file_id"))
         .where_(Predicate::eq_param("version_id", "version_id"))
         .where_(Predicate::eq_param("mime_type", "mime_type"))
@@ -435,7 +436,7 @@ fn validate_graph_identity(
     chunks: &[FileChunkNode],
 ) -> Result<(), String> {
     for (field, value) in [
-        ("workspace_id", file.workspace_id.as_str()),
+        ("deal_id", file.deal_id.as_str()),
         ("file_id", file.file_id.as_str()),
         ("display_name", file.display_name.as_str()),
         ("version_id", version.version_id.as_str()),
@@ -451,14 +452,14 @@ fn validate_graph_identity(
     if version.byte_size < 0 {
         return Err("byte_size cannot be negative".to_string());
     }
-    if file.workspace_id != version.workspace_id || file.file_id != version.file_id {
+    if file.deal_id != version.deal_id || file.file_id != version.file_id {
         return Err("file and version graph identities do not match".to_string());
     }
     let mut chunk_ids = HashSet::with_capacity(chunks.len());
     let mut chunk_indices = HashSet::with_capacity(chunks.len());
     let mut embedding_dimension = None;
     for chunk in chunks {
-        if chunk.workspace_id != version.workspace_id
+        if chunk.deal_id != version.deal_id
             || chunk.file_id != version.file_id
             || chunk.version_id != version.version_id
             || chunk.index_generation != version.index_generation
@@ -574,8 +575,8 @@ fn file_chunk_params(chunk: &FileChunkNode) -> ParamObject {
             PropertyValue::String(chunk.chunk_id.clone()),
         ),
         (
-            "workspace_id".to_string(),
-            PropertyValue::String(chunk.workspace_id.clone()),
+            "deal_id".to_string(),
+            PropertyValue::String(chunk.deal_id.clone()),
         ),
         (
             "file_id".to_string(),
@@ -648,10 +649,10 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                 )),
             )
             .var_as(
-                "file_workspace_id",
+                "file_deal_id",
                 g().create_index_if_not_exists(IndexSpec::node_equality(
                     QUARRY_FILE_LABEL,
-                    "workspace_id",
+                    "deal_id",
                 )),
             )
             .var_as(
@@ -670,10 +671,10 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                 )),
             )
             .var_as(
-                "version_workspace_id",
+                "version_deal_id",
                 g().create_index_if_not_exists(IndexSpec::node_equality(
                     FILE_VERSION_LABEL,
-                    "workspace_id",
+                    "deal_id",
                 )),
             )
             .var_as(
@@ -698,10 +699,10 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                 )),
             )
             .var_as(
-                "chunk_workspace_id",
+                "chunk_deal_id",
                 g().create_index_if_not_exists(IndexSpec::node_equality(
                     FILE_CHUNK_LABEL,
-                    "workspace_id",
+                    "deal_id",
                 )),
             )
             .var_as(
@@ -725,7 +726,7 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                     "embedding",
                     vector_dimension,
                     VectorDistanceMetric::Cosine,
-                    Some("workspace_id"),
+                    Some("deal_id"),
                 )),
             )
             .var_as(
@@ -733,19 +734,19 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                 g().create_index_if_not_exists(IndexSpec::node_text(
                     FILE_CHUNK_LABEL,
                     "text",
-                    Some("workspace_id"),
+                    Some("deal_id"),
                 )),
             )
             .returning([
                 "file_id_unique",
-                "file_workspace_id",
+                "file_deal_id",
                 "file_display_name",
                 "version_id_unique",
-                "version_workspace_id",
+                "version_deal_id",
                 "version_file_id",
                 "version_content_sha256",
                 "chunk_id_unique",
-                "chunk_workspace_id",
+                "chunk_deal_id",
                 "chunk_file_id",
                 "chunk_version_id",
                 "chunk_embedding",
@@ -764,7 +765,7 @@ pub fn get_document_index_operation(operation_id: String) -> QueryRequest {
 
 pub(super) fn file_projection() -> Vec<PropertyProjection> {
     vec![
-        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("deal_id"),
         PropertyProjection::new("file_id"),
         PropertyProjection::new("display_name"),
     ]
@@ -772,7 +773,7 @@ pub(super) fn file_projection() -> Vec<PropertyProjection> {
 
 pub(super) fn file_version_projection() -> Vec<PropertyProjection> {
     vec![
-        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("deal_id"),
         PropertyProjection::new("file_id"),
         PropertyProjection::new("version_id"),
         PropertyProjection::new("mime_type"),
@@ -786,7 +787,7 @@ pub(super) fn file_version_projection() -> Vec<PropertyProjection> {
 pub(super) fn file_chunk_projection() -> Vec<PropertyProjection> {
     vec![
         PropertyProjection::new("chunk_id"),
-        PropertyProjection::new("workspace_id"),
+        PropertyProjection::new("deal_id"),
         PropertyProjection::new("file_id"),
         PropertyProjection::new("version_id"),
         PropertyProjection::new("index_generation"),

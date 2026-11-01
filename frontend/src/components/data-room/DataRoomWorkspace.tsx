@@ -23,8 +23,8 @@ type DataRoomWorkspaceProps = {
   dealRoomPath: string;
   email?: string;
   navigationState?: WorkspaceLocationState;
-  onConnectToSharePoint: () => void;
-  onUploadFiles: () => void;
+  onConnectToSharePoint?: () => void;
+  onUploadFiles?: () => void;
 };
 
 export function DataRoomWorkspace({
@@ -85,7 +85,12 @@ export function DataRoomWorkspace({
       },
       onSelectionFocus: focusDocumentPreview,
     };
-  }, [selectedDocument, searchBoundaryElement, documentPageCount, focusDocumentPreview]);
+  }, [
+    selectedDocument,
+    searchBoundaryElement,
+    documentPageCount,
+    focusDocumentPreview,
+  ]);
   useDataRoomDocumentSearch(searchContext);
 
   return (
@@ -106,7 +111,11 @@ export function DataRoomWorkspace({
           />
         </div>
       ) : null}
-      <main id="main-content" tabIndex={-1} className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0"
+      >
         {contents.isUnavailable ? (
           <UnavailableDataRoomState
             onConnectToSharePoint={onConnectToSharePoint}
@@ -196,8 +205,8 @@ function EmptyDataRoomState({
   onConnectToSharePoint,
   onUploadFiles,
 }: {
-  onConnectToSharePoint: () => void;
-  onUploadFiles: () => void;
+  onConnectToSharePoint?: () => void;
+  onUploadFiles?: () => void;
 }) {
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
@@ -208,17 +217,31 @@ function EmptyDataRoomState({
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
-          action={{ label: "Upload files", onClick: onUploadFiles }}
+          action={
+            onUploadFiles
+              ? { label: "Upload files", onClick: onUploadFiles }
+              : undefined
+          }
           className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
-          description="Add deal documents from your device, or connect SharePoint to bring your data room into Quarry."
+          description={
+            onUploadFiles
+              ? "Add deal documents from your device."
+              : "No documents have been uploaded. A contributor can upload documents to this deal."
+          }
           frame="dashed"
           headingLevel={2}
-          secondaryAction={{
-            label: "Connect SharePoint",
-            onClick: onConnectToSharePoint,
-          }}
+          secondaryAction={
+            onConnectToSharePoint
+              ? {
+                  label: "Connect SharePoint",
+                  onClick: onConnectToSharePoint,
+                }
+              : undefined
+          }
           size="lg"
-          title="Upload your first file"
+          title={
+            onUploadFiles ? "Upload your first file" : "No shared documents yet"
+          }
           variant="first-use"
         />
       </div>
@@ -230,7 +253,7 @@ function UnavailableDataRoomState({
   onConnectToSharePoint,
   onRetry,
 }: {
-  onConnectToSharePoint: () => void;
+  onConnectToSharePoint?: () => void;
   onRetry: () => void;
 }) {
   return (
@@ -247,10 +270,14 @@ function UnavailableDataRoomState({
           description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
           frame="card"
           headingLevel={2}
-          secondaryAction={{
-            label: "Connect SharePoint",
-            onClick: onConnectToSharePoint,
-          }}
+          secondaryAction={
+            onConnectToSharePoint
+              ? {
+                  label: "Connect SharePoint",
+                  onClick: onConnectToSharePoint,
+                }
+              : undefined
+          }
           size="lg"
           title="Data room unavailable"
           variant="error"

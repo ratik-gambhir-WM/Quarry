@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Document {
     pub file_id: String,
     pub document_id: String,
-    pub user_id: String,
+    pub deal_id: String,
     pub file_name: String,
     pub source_type: String,
     pub local_path: Option<String>,
@@ -18,7 +18,7 @@ pub struct Document {
 pub struct DocumentChunk {
     pub chunk_id: String,
     pub document_id: String,
-    pub user_id: String,
+    pub deal_id: String,
     pub text: String,
     pub embedding: Option<Vec<f32>>,
     pub sequence_number: u32,

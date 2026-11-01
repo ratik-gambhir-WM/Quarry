@@ -870,9 +870,7 @@ async fn document_search_validates_input_before_calling_helix() {
         .oneshot(
             Request::post("/api/documents/search/keyword")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"workspaceId":"user-1","queryText":"","limit":10}"#,
-                ))
+                .body(Body::from(r#"{"queryText":"","limit":10}"#))
                 .unwrap(),
         )
         .await
@@ -1092,6 +1090,8 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
                     "#,
                     rusqlite::params![deal_id, user_id],
                 )?;
+                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",rusqlite::params![deal_id,user_id])?;
+                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id])?;
             }
             insert_stored_document(
                 connection,
@@ -1153,9 +1153,9 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     assert_eq!(
         listed,
         serde_json::json!([
-            {"fileId": "file-alpha", "displayName": "Alpha.pdf"},
-            {"fileId": "file-raw", "displayName": "Raw.docx"},
-            {"fileId": "file-zulu", "displayName": "Zulu.pdf"}
+            {"fileId": "file-alpha", "displayName": "Alpha.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
+            {"fileId": "file-raw", "displayName": "Raw.docx", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
+            {"fileId": "file-zulu", "displayName": "Zulu.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"}
         ])
     );
 
@@ -1228,8 +1228,8 @@ fn insert_stored_document(
     connection.execute(
         r#"
         INSERT INTO quarry_files (
-            file_id, deal_id, workspace_id, display_name, metadata_json, created_at, updated_at
-        ) VALUES (?1, ?2, 'analyst@example.com', ?3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+            file_id, deal_id, display_name, metadata_json, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
         "#,
         rusqlite::params![file_id, deal_id, display_name],
     )?;

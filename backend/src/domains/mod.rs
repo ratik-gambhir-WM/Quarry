@@ -13,3 +13,5 @@ pub mod companies;
 pub mod identity;
 
 pub mod notebooks;
+
+pub mod memberships;

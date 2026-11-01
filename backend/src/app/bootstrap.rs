@@ -98,6 +98,14 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
+    if !crate::domains::documents::store::identity::ready(&sqlite)
+        .await
+        .map_err(|e| BootstrapError::HelixIndexes(e.to_string()))?
+    {
+        return Err(BootstrapError::HelixIndexes(
+            "document scope checkpoint incomplete; keep writers drained and restore the matching verified SQLite/Helix backup before startup".into(),
+        ));
+    }
     DocumentGraphWriter::new(helix.clone())
         .initialize(config.helix.vector_dimension)
         .await
@@ -153,7 +161,12 @@ fn assemble_api_with_templates(
         sqlite.clone(),
         UserRepository::new(sqlite.clone()),
     )));
-    let access = ResourceAccess::new(sqlite.clone());
+    let memberships = Arc::new(
+        crate::domains::memberships::service::DealAccessService::new(
+            crate::domains::memberships::repository::MembershipRepository::new(sqlite.clone()),
+        ),
+    );
+    let access = ResourceAccess::new(sqlite.clone(), memberships.clone());
     let users_repository = UserRepository::new(sqlite.clone());
     let deals_repository = DealRepository::new(sqlite.clone());
     let document_files = DocumentStore::new(sqlite.clone());
@@ -277,6 +290,7 @@ fn assemble_api_with_templates(
         .merge(identity::route::protected(identity.clone()))
         .merge(native_routes)
         .merge(deals::route::routes(deals))
+        .merge(crate::domains::memberships::route::routes(memberships))
         .merge(companies::route::routes(companies))
         .merge(notebooks::route::routes(notebooks))
         .merge(data_rooms::route::routes(data_rooms))

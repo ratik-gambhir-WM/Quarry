@@ -109,6 +109,7 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
                 fact_sheet_link: Some("https://example.com/fact-sheet".to_string()),
                 rl_link: Some("https://example.com/request-list".to_string()),
             },
+            1,
         )
         .await
         .unwrap_err();

@@ -1,8 +1,9 @@
-//! Planned owner of principal-to-workspace membership and role policy.
-//!
-//! This comment-only module does not authorize access. Caller-supplied user or workspace IDs
-//! remain untrusted until identity and membership enforcement are implemented together.
+//! Deal membership is the canonical shared-project authorization boundary.
+pub mod model;
+pub(crate) mod repository;
+pub(crate) mod route;
+pub mod service;
 
-// TODO: Define membership, role, invitation, and lifecycle invariants.
-// TODO: Add a policy service that evaluates an authenticated principal against a workspace.
-// TODO: Enforce the policy in resource-owning domains and cover cross-tenant denial paths.
+pub(crate) use repository::{
+    event as record_activity, initialize as initialize_deal, require as require_deal,
+};

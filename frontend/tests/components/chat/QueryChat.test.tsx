@@ -197,7 +197,7 @@ describe("QueryChat", () => {
 
     expect(screen.getByText("Partial answer")).toBeTruthy();
     expect(await screen.findByText("Response stopped.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Send message" })).toBeTruthy();
     expect(cleanupStream).toHaveBeenCalledTimes(1);
   });
 

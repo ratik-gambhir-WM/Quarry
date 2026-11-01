@@ -1,6 +1,6 @@
 import type { Company } from "../data/dealModel";
 import type { PersistedDeal } from "../contracts/quarryApi";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import {
   buildWorkspaceDealFromExtractionResult,
@@ -37,6 +37,8 @@ export function getWorkspaceDataSource(
 function createDealsStore(dataSourceValue: string | undefined) {
   let resource: WorkspaceDealsResource = { status: "loading" };
   let generation = 0;
+  const revoked = new Map<string, number>();
+  let revocationRevision = 0;
   const writesDuringLoad = new Map<string, WorkspaceDeal>();
   const companiesDuringLoad = new Map<string, Company>();
   let pendingLoad = false;
@@ -46,8 +48,24 @@ function createDealsStore(dataSourceValue: string | undefined) {
     for (const listener of listeners) listener();
   };
   const cache = (deal: WorkspaceDeal) => {
+    if (revoked.has(deal.room.id)) return;
     if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
     const existing = resource.status === "success" ? resource.deals : [];
+    const previous = existing.find((d) => d.room.id === deal.room.id);
+    if (
+      previous &&
+      previous.persisted?.accessRevision === deal.persisted?.accessRevision &&
+      previous.persistedMetadata?.sowLink === deal.persistedMetadata?.sowLink
+    ) {
+      deal.room.resources = deal.room.resources.map((item) => {
+        const sourceName = previous.room.resources.find(
+          (old) => old.id === item.id,
+        )?.sourceName;
+        return !item.sourceName && sourceName
+          ? { ...item, sourceName, availability: "available" }
+          : item;
+      });
+    }
     publish({
       status: "success",
       source: "server",
@@ -56,6 +74,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
   };
   const load = () => {
     const request = ++generation;
+    const revokedAtStart = new Map(revoked);
     pendingLoad = true;
     writesDuringLoad.clear();
     companiesDuringLoad.clear();
@@ -90,9 +109,19 @@ function createDealsStore(dataSourceValue: string | undefined) {
       .then((next) => {
         if (request !== generation) return;
         pendingLoad = false;
+        const authorized = next.deals.filter((deal) => {
+          const revision = revoked.get(deal.room.id);
+          if (
+            revision !== undefined &&
+            revokedAtStart.get(deal.room.id) !== revision
+          )
+            return false;
+          revoked.delete(deal.room.id);
+          return true;
+        });
         const merged = [
           ...writesDuringLoad.values(),
-          ...next.deals.filter((deal) => !writesDuringLoad.has(deal.room.id)),
+          ...authorized.filter((deal) => !writesDuringLoad.has(deal.room.id)),
         ];
         const deals = merged.map((deal) => {
           for (const company of companiesDuringLoad.values())
@@ -112,15 +141,23 @@ function createDealsStore(dataSourceValue: string | undefined) {
       });
   };
   return {
-    load,
-    cancel: () => {
-      generation++;
+    forget: (id: string) => {
+      revoked.set(id, ++revocationRevision);
+      writesDuringLoad.delete(id);
+      if (resource.status === "success")
+        publish({
+          ...resource,
+          deals: resource.deals.filter((d) => d.room.id !== id),
+        });
     },
+    load,
     getSnapshot: () => resource,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
+      if (listeners.size === 1) load();
       return () => {
         listeners.delete(listener);
+        if (listeners.size === 0) generation++;
       };
     },
     saveCompany: (company: Company) => {
@@ -211,13 +248,10 @@ export function useWorkspaceDeals(
     store.getSnapshot,
     store.getSnapshot,
   );
-  useEffect(() => {
-    store.load();
-    return store.cancel;
-  }, [store]);
   return {
     resource,
     retry: store.load,
+    forgetDeal: store.forget,
     cacheDealResult: store.cache,
     saveDealResult: store.save,
     saveCompanyResult: store.saveCompany,

@@ -1,3 +1,4 @@
+import { createDealMembershipApi } from "./dealMembershipApi";
 import { createNotebookApi, notebookEventReceiver } from "./notebookApi";
 import { sessionStore } from "../auth/sessionStore";
 import type { Company, CompanyPage } from "../data/dealModel";
@@ -123,6 +124,32 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
   }
 
   return {
+    ...createDealMembershipApi(
+      <T>(
+        method: "GET" | "POST" | "PATCH" | "DELETE",
+        path: string,
+        body?: unknown,
+      ): Promise<T> => {
+        if (method === "GET") return transport.get<T>(path);
+        if (method === "DELETE")
+          return transport.delete(path).then(() => undefined as T);
+        if (method === "PATCH")
+          return transport.patch
+            ? transport.patch<T>(path, body)
+            : Promise.reject(new Error("Desktop PATCH transport unavailable."));
+        return transport.post<T>(path, body);
+      },
+    ),
+    searchDealDocumentChunksByKeyword: (d, body) =>
+      transport.post(
+        `/api/v1/deals/${encodeURIComponent(d)}/documents/search/keyword`,
+        body,
+      ),
+    searchDealDocumentChunksByVector: (d, body) =>
+      transport.post(
+        `/api/v1/deals/${encodeURIComponent(d)}/documents/search/vector`,
+        body,
+      ),
     ...createNotebookApi({
       request: <T>(
         method: "GET" | "POST" | "PATCH" | "DELETE",

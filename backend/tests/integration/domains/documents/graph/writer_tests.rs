@@ -15,7 +15,7 @@ use crate::{
 
 fn file() -> FileNode {
     FileNode {
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         file_id: "file-1".to_string(),
         display_name: "report.pdf".to_string(),
     }
@@ -23,7 +23,7 @@ fn file() -> FileNode {
 
 fn version() -> FileVersionNode {
     FileVersionNode {
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         file_id: "file-1".to_string(),
         version_id: "version-1".to_string(),
         mime_type: "application/pdf".to_string(),
@@ -37,7 +37,7 @@ fn version() -> FileVersionNode {
 fn chunk(index: i64) -> FileChunkNode {
     FileChunkNode {
         chunk_id: format!("chunk-{index}"),
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         file_id: "file-1".to_string(),
         version_id: "version-1".to_string(),
         index_generation: "version-1".to_string(),
@@ -290,7 +290,7 @@ fn indexes_versioned_file_graph_properties() {
     assert!(json.contains("chunk_id"));
     assert!(json.contains("content_sha256"));
     assert!(json.contains("embedding"));
-    assert!(json.contains("workspace_id"));
+    assert!(json.contains("deal_id"));
     assert!(json.contains(FILE_CHUNK_LABEL));
     assert!(json.contains("cosine"));
     assert!(!json.contains("document_id"));

@@ -10,7 +10,10 @@ type ActiveModal = "none" | "sharepoint" | "upload";
 
 export function DataRoomPage() {
   const { deal, email, navigationState } = useDealRoom();
-  const contents = useDataRoomContents(deal.room.id);
+  const contents = useDataRoomContents(
+    deal.room.id,
+    Boolean(deal.persisted?.capabilities?.localSource),
+  );
   const [activeModal, setActiveModal] = useState<ActiveModal>("none");
 
   function closeUploadModal() {
@@ -28,8 +31,16 @@ export function DataRoomPage() {
         email={email}
         key={deal.room.id}
         navigationState={navigationState}
-        onConnectToSharePoint={() => setActiveModal("sharepoint")}
-        onUploadFiles={() => setActiveModal("upload")}
+        onConnectToSharePoint={
+          deal.persisted?.capabilities?.localSource
+            ? () => setActiveModal("sharepoint")
+            : undefined
+        }
+        onUploadFiles={
+          deal.persisted?.capabilities?.upload
+            ? () => setActiveModal("upload")
+            : undefined
+        }
       />
       {activeModal === "upload" ? (
         <UploadFilesModal

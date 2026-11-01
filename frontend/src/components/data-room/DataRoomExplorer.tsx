@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { DealExtractionLocationState } from "../../data/dealExtraction";
 import { SidebarFrame } from "../hub/sidebar/SidebarFrame";
@@ -11,7 +11,7 @@ type DataRoomExplorerProps = {
   navigationState?: DealExtractionLocationState;
   nodes: DataRoomTreeNode[];
   onSelectFile: (node: DataRoomTreeNode) => void;
-  onUploadNewFile: () => void;
+  onUploadNewFile?: () => void;
   rootPath?: string;
   selectedFilePath?: string;
   treeLoading?: boolean;
@@ -29,30 +29,22 @@ export function DataRoomExplorer({
   selectedFilePath,
   treeLoading = false,
 }: DataRoomExplorerProps) {
-  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-
-  useEffect(() => {
-    setExpandedNodeIds((current) => {
-      const next = new Set(current);
-      collectDefaultExpandedNodeIds(nodes, next);
-      return next;
-    });
-  }, [nodes]);
-
+  const [expansionOverrides, setExpansionOverrides] = useState<
+    Map<string, boolean>
+  >(() => new Map());
+  const expandedNodeIds = useMemo(() => {
+    const expanded = new Set<string>();
+    collectDefaultExpandedNodeIds(nodes, expanded);
+    for (const [id, open] of expansionOverrides) {
+      if (open) expanded.add(id);
+      else expanded.delete(id);
+    }
+    return expanded;
+  }, [expansionOverrides, nodes]);
   function toggleNode(nodeId: string) {
-    setExpandedNodeIds((current) => {
-      const next = new Set(current);
-
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-
-      return next;
-    });
+    setExpansionOverrides((current) =>
+      new Map(current).set(nodeId, !expandedNodeIds.has(nodeId)),
+    );
   }
 
   return (
@@ -112,7 +104,7 @@ type ExplorerNodeItemProps = {
   node: DataRoomTreeNode;
   onSelectFile: (node: DataRoomTreeNode) => void;
   onToggle: (nodeId: string) => void;
-  onUploadNewFile: () => void;
+  onUploadNewFile?: () => void;
   selectedFilePath?: string;
 };
 
@@ -182,6 +174,7 @@ function ExplorerNodeItem({
           <button
             aria-label="Upload files to Saved documents"
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            disabled={!onUploadNewFile}
             onClick={onUploadNewFile}
             title="Upload files"
             type="button"

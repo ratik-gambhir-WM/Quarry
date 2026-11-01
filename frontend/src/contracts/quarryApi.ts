@@ -1,3 +1,5 @@
+import type { DealMembershipApi } from "./dealMemberships";
+export type * from "./dealMemberships";
 import type { NotebookApi } from "./notebooks";
 export type * from "./notebooks";
 import type {
@@ -48,6 +50,7 @@ export type CurrentUserResponse = {
 };
 
 export type ProcessedDocument = {
+  sqliteCommitted?: boolean;
   chunkCount: number;
   documentId: string | null;
   error: string | null;
@@ -158,6 +161,9 @@ export type SendQueryEventHandlers = {
 };
 
 export type DealDocumentSummary = {
+  uploadedByUserId?: number | null;
+  uploadedByName?: string | null;
+  attributionOrigin?: "authenticated" | "legacy_unknown";
   displayName: string;
   fileId: string;
 };
@@ -198,7 +204,7 @@ export type FileChunkResult = {
   text: string;
   token_count: number;
   version_id: string;
-  workspace_id: string;
+  deal_id: string;
 };
 
 export type VectorFileChunkHit = FileChunkResult & { distance: number };
@@ -248,7 +254,7 @@ export type AssistantThreadListOptions = {
   scope?: "all" | "freeform" | "deal";
   dealId?: string;
 };
-export interface QuarryApi extends NotebookApi {
+export interface QuarryApi extends NotebookApi, DealMembershipApi {
   createCompany(input: CompanyInput): Promise<Company>;
   updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
   listCompanies(options?: CompanySearch): Promise<CompanyPage>;
@@ -309,6 +315,14 @@ export interface QuarryApi extends NotebookApi {
     input: RunAssistantThreadInput,
     handlers: SendQueryEventHandlers,
   ): () => void;
+  searchDealDocumentChunksByKeyword(
+    dealId: string,
+    search: FileChunkKeywordSearch,
+  ): Promise<KeywordFileChunkHit[]>;
+  searchDealDocumentChunksByVector(
+    dealId: string,
+    search: FileChunkVectorSearch,
+  ): Promise<VectorFileChunkHit[]>;
   searchDocumentChunksByKeyword(
     search: FileChunkKeywordSearch,
   ): Promise<KeywordFileChunkHit[]>;

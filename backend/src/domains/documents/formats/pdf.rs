@@ -83,7 +83,7 @@ pub fn extract_pdf_pages(path: &Path) -> Result<Vec<PdfPage>, String> {
 /// page whose text it overlaps.
 pub fn parse_pdf_document(
     path: &Path,
-    user_id: impl Into<String>,
+    deal_id: impl Into<String>,
 ) -> Result<PdfDocumentAssembly, String> {
     let pages = extract_pdf_pages(path)?;
     let source_path = path.canonicalize().unwrap_or_else(|_| PathBuf::from(path));
@@ -99,7 +99,7 @@ pub fn parse_pdf_document(
 
     Ok(parse_pdf_file_with_metadata(
         Some(&source_path),
-        &user_id.into(),
+        &deal_id.into(),
         &pages,
         file_size_bytes,
         content_hash,
@@ -112,7 +112,7 @@ pub fn parse_pdf_document(
 pub fn parse_pdf_by_bytes(
     bytes: Vec<u8>,
     path: Option<&Path>,
-    user_id: impl Into<String>,
+    deal_id: impl Into<String>,
 ) -> Result<PdfDocumentAssembly, String> {
     let file_size_bytes = u64::try_from(bytes.len())
         .map_err(|_| format!("PDF byte length `{}` does not fit in u64", bytes.len()))?;
@@ -122,7 +122,7 @@ pub fn parse_pdf_by_bytes(
 
     Ok(parse_pdf_file_with_metadata(
         source_path.as_deref(),
-        &user_id.into(),
+        &deal_id.into(),
         &pages,
         file_size_bytes,
         content_hash,
@@ -145,13 +145,13 @@ pub fn parse_pdf_from_bytes(bytes: &[u8]) -> Result<String, String> {
 
 fn parse_pdf_file_with_metadata(
     path: Option<&Path>,
-    user_id: &str,
+    deal_id: &str,
     pages: &[PdfPage],
     file_size_bytes: u64,
     content_hash: String,
 ) -> PdfDocumentAssembly {
     let local_path = path.map(|path| path.to_string_lossy().into_owned());
-    let document_id = document_id_from_content(user_id, &content_hash);
+    let document_id = document_id_from_content(deal_id, &content_hash);
     let file_name = path
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
@@ -169,14 +169,14 @@ fn parse_pdf_file_with_metadata(
             let text = &document_text[start_offset..end_offset];
             let content_hash = deterministic_id(text);
             let chunk_id = deterministic_id(&format!(
-                "{user_id}\0{document_id}\0{sequence_number}\0{content_hash}"
+                "{deal_id}\0{document_id}\0{sequence_number}\0{content_hash}"
             ));
             let page_numbers = overlapping_page_numbers(start_offset, end_offset, &page_ranges);
 
             DocumentChunk {
                 chunk_id,
                 document_id: document_id.clone(),
-                user_id: user_id.to_string(),
+                deal_id: deal_id.to_string(),
                 text: text.to_string(),
                 embedding: None,
                 sequence_number,
@@ -197,7 +197,7 @@ fn parse_pdf_file_with_metadata(
     let document = IngestionDocument {
         file_id: Uuid::new_v4().to_string(),
         document_id: document_id.clone(),
-        user_id: user_id.to_string(),
+        deal_id: deal_id.to_string(),
         file_name,
         source_type: "pdf".to_string(),
         local_path: local_path.clone(),

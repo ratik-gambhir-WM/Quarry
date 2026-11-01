@@ -22,6 +22,7 @@ pub(crate) async fn authenticate(
     next: Next,
 ) -> AppResult<Response> {
     let (mut parts, body) = request.into_parts();
+    let mut stream_deal = None;
     if parts.headers.get_all(header::AUTHORIZATION).iter().count() != 1
         || parts.headers.get_all("x-user-id").iter().count() != 1
     {
@@ -56,12 +57,61 @@ pub(crate) async fn authenticate(
             {
                 return Err(AppError::bad_request("invalid dealId"));
             }
-            boundary.access.deal(deal.clone(), actor.user.id).await?;
+            use crate::domains::memberships::model::Capability;
+            let path = parts.uri.path();
+            let method = &parts.method;
+            let capability = if path.contains("/data-room") {
+                Capability::LocalSource
+            } else if method == axum::http::Method::GET || path.contains("/documents/search/") {
+                Capability::Read
+            } else if path.ends_with("/documents/process")
+                || path.ends_with("/documents/process_file")
+            {
+                Capability::Upload
+            } else if path.ends_with("/archive") {
+                Capability::Transfer
+            } else if path.ends_with("/metadata")
+                || path.ends_with("/extraction/upload")
+                || path.ends_with("/update")
+            {
+                Capability::Edit
+            } else if path.contains("/teams") {
+                Capability::ManageTeams
+            } else if path.ends_with("/ownership-transfer") {
+                Capability::Transfer
+            } else if path.contains("/members") {
+                if method == axum::http::Method::DELETE {
+                    if params.get("user_id").and_then(|id| id.parse::<i64>().ok())
+                        == Some(actor.user.id)
+                    {
+                        Capability::Leave
+                    } else {
+                        Capability::RemoveMember
+                    }
+                } else {
+                    Capability::ManageMembers
+                }
+            } else {
+                return Err(AppError::Forbidden);
+            }; // Canonical mutations repeat this policy in their write transaction.
+            boundary
+                .access
+                .policy()
+                .require(deal, actor.user.id, capability)
+                .await?;
+            stream_deal = Some(deal.clone());
         }
     }
+    let is_read =
+        parts.method == axum::http::Method::GET || parts.uri.path().contains("/documents/search/");
     let mut revoked = boundary.identity.revocations();
     parts.extensions.insert(actor.clone());
     let response = next.run(Request::from_parts(parts, body)).await;
+    if is_read {
+        if let Some(deal) = &stream_deal {
+            boundary.access.deal(deal.clone(), actor.user.id).await?;
+        }
+    }
     if response
         .headers()
         .get(header::CONTENT_TYPE)
@@ -70,12 +120,27 @@ pub(crate) async fn authenticate(
         return Ok(response);
     }
     let identity = boundary.identity;
+    let access = boundary.access;
     let stopped = async move {
         let mut revalidate = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
-                event = revoked.recv() => { match event { Ok(hash) if hash != actor.token_hash => continue, _ => break } }
-                _ = revalidate.tick() => { if identity.authenticate_hash(actor.token_hash.clone()).await.is_err() { break; } }
+                event = revoked.recv() => {
+                    match event {
+                        Ok(hash) if hash != actor.token_hash => continue,
+                        _ => break,
+                    }
+                }
+                _ = revalidate.tick() => {
+                    if identity.authenticate_hash(actor.token_hash.clone()).await.is_err() {
+                        break;
+                    }
+                    if let Some(deal) = &stream_deal {
+                        if access.deal(deal.clone(), actor.user.id).await.is_err() {
+                            break;
+                        }
+                    }
+                }
             }
         }
     };
