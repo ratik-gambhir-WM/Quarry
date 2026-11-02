@@ -1,5 +1,4 @@
 import type { Company } from "../data/dealModel";
-import type { PersistedDeal } from "../contracts/quarryApi";
 import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import {
@@ -38,6 +37,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
   let resource: WorkspaceDealsResource = { status: "loading" };
   let generation = 0;
   const revoked = new Map<string, number>();
+  const forgotten = new Set<string>();
   let revocationRevision = 0;
   const writesDuringLoad = new Map<string, WorkspaceDeal>();
   const companiesDuringLoad = new Map<string, Company>();
@@ -48,7 +48,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
     for (const listener of listeners) listener();
   };
   const cache = (deal: WorkspaceDeal) => {
-    if (revoked.has(deal.room.id)) return;
+    if (forgotten.has(deal.room.id)) return;
     if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
     const existing = resource.status === "success" ? resource.deals : [];
     const previous = existing.find((d) => d.room.id === deal.room.id);
@@ -116,7 +116,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
             revokedAtStart.get(deal.room.id) !== revision
           )
             return false;
-          revoked.delete(deal.room.id);
+          forgotten.delete(deal.room.id);
           return true;
         });
         const merged = [
@@ -143,6 +143,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
   return {
     forget: (id: string) => {
       revoked.set(id, ++revocationRevision);
+      forgotten.add(id);
       writesDuringLoad.delete(id);
       if (resource.status === "success")
         publish({
@@ -166,8 +167,18 @@ function createDealsStore(dataSourceValue: string | undefined) {
       const updated = resource.deals.map((deal) => withCompany(deal, company));
       publish({ ...resource, deals: updated });
     },
-    cache: (aggregate: PersistedDeal) =>
-      cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata)),
+    loadDeal: async (id: string) => {
+      const revision = revoked.get(id);
+      const aggregate = await runtime.api.getDeal(id);
+      if (revoked.get(id) !== revision) {
+        throw new Error("Deal access changed. Try again.");
+      }
+      // Keep revocation revisions even after access is restored so older requests
+      // cannot repopulate the cache after this fresh authorized response.
+      forgotten.delete(id);
+      cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata));
+      return aggregate;
+    },
     save: (
       result: SaveDealResponse | SaveDealMetadataResponse,
       sowSourceName?: string,
@@ -252,7 +263,7 @@ export function useWorkspaceDeals(
     resource,
     retry: store.load,
     forgetDeal: store.forget,
-    cacheDealResult: store.cache,
+    loadDeal: store.loadDeal,
     saveDealResult: store.save,
     saveCompanyResult: store.saveCompany,
   };

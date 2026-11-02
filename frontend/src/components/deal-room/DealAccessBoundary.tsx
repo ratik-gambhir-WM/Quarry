@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import { Navigate, useLocation } from "react-router-dom";
-import { runtime } from "@quarry/runtime";
+import {
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { useLocation } from "react-router-dom";
 import { useWorkspace } from "../../app/WorkspaceProvider";
 import { createRequestResource } from "../../data/requests/requestResource";
 import type { WorkspaceDeal } from "../../data/workspace";
@@ -9,23 +13,24 @@ import type { WorkspaceDeal } from "../../data/workspace";
 export function DealAccessBoundary({
   deal,
   children,
+  onAccessDenied,
 }: {
   deal: WorkspaceDeal;
   children: (deal: WorkspaceDeal) => ReactNode;
+  onAccessDenied: () => void;
 }) {
-  const { cacheDealResult, forgetDeal } = useWorkspace();
+  const { loadDeal } = useWorkspace();
   const location = useLocation();
   const resource = useMemo(
     () =>
-      createRequestResource(() => runtime.api.getDeal(deal.room.id), {
-        onSuccess: cacheDealResult,
+      createRequestResource(() => loadDeal(deal.room.id), {
         onError: (error) => {
-          if (deniesAccess(error)) forgetDeal(deal.room.id);
+          if (deniesAccess(error)) onAccessDenied();
         },
         refreshOnFocus: true,
         pollMs: 5000,
       }),
-    [cacheDealResult, deal.room.id, forgetDeal],
+    [loadDeal, deal.room.id, onAccessDenied],
   );
   const access = useSyncExternalStore(
     resource.subscribe,
@@ -36,13 +41,7 @@ export function DealAccessBoundary({
     resource.revalidate();
   }, [location.key, resource]);
   if (access.status === "error" && deniesAccess(access.error)) {
-    return (
-      <Navigate
-        replace
-        to="/hub/deals"
-        state={{ notice: "You no longer have access to this deal." }}
-      />
-    );
+    return null;
   }
   if (access.status === "error") {
     return (

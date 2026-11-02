@@ -16,7 +16,7 @@ use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::documents::{
         formats::{
-            image::{build_image_assembly, validate_image_by_bytes},
+            image::{build_image_assembly, validate_image_by_bytes, ImageAssembly},
             ParsedQuarryFile, QuarryFile,
         },
         graph::repository::{DocumentGraphReader, DocumentGraphWriter},
@@ -293,12 +293,29 @@ impl DocumentIngestionService {
         openai: &OpenAiClient,
     ) -> Result<(String, usize), String> {
         let filename = file.filename.clone();
+        let recovery = match existing_attachment {
+            Some(existing)
+                if infer_supported_image_mime_type(Path::new(&existing.display_name)).is_some() =>
+            {
+                Some(
+                    self.files
+                        .image_assembly(&existing.version_id)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .ok_or(
+                            "accepted image text is unavailable; maintenance recovery required",
+                        )?,
+                )
+            }
+            _ => None,
+        };
         let mut graph = parse_document(
             file,
             deal_id.clone(),
             openai,
             &self.image_description_model,
             Arc::clone(&self.office_parse_semaphore),
+            recovery,
         )
         .await?;
         if let Some(existing) = existing_attachment {
@@ -500,7 +517,20 @@ async fn parse_document(
     openai: &OpenAiClient,
     image_description_model: &str,
     office_parse_semaphore: Arc<Semaphore>,
+    recovery: Option<ImageAssembly>,
 ) -> Result<ParsedDocumentGraph, String> {
+    if let Some(assembly) = recovery {
+        if assembly.document.deal_id != deal_id
+            || assembly.document.content_hash != uploaded_document_content_hash(&file)
+        {
+            return Err("stored image recovery does not match upload".into());
+        }
+        return Ok(ParsedDocumentGraph {
+            document: assembly.document,
+            chunks: assembly.chunks,
+            file_bytes: file.bytes,
+        });
+    }
     let filename = file.filename.clone();
     let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())

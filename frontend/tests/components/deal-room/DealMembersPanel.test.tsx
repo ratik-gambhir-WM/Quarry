@@ -37,13 +37,12 @@ const mocks = vi.hoisted(() => ({
     deleteDealTeam: vi.fn(),
     getDeal: vi.fn(),
   },
-  cache: vi.fn(),
   forget: vi.fn(),
 }));
 vi.mock("@quarry/runtime", () => ({ runtime: { api: mocks.api } }));
 vi.mock("@/app/WorkspaceProvider", () => ({
   useWorkspace: () => ({
-    cacheDealResult: mocks.cache,
+    loadDeal: mocks.api.getDeal,
     forgetDeal: mocks.forget,
   }),
 }));
@@ -132,7 +131,7 @@ it("adds a registered user and refreshes authoritative access and roster", async
       role: "contributor",
     }),
   );
-  await waitFor(() => expect(mocks.cache).toHaveBeenCalled());
+  await waitFor(() => expect(mocks.api.getDeal).toHaveBeenCalled());
   expect(mocks.api.listDealMembers).toHaveBeenCalledTimes(2);
 });
 it("uses the member revision and refreshes on a conflict", async () => {

@@ -401,6 +401,12 @@ global state or query-cache library.
   by origin JavaScript, as detailed in [authentication](authentication.md).
 - `UserProvider` owns verified identity/session state for the product tree; `WorkspaceProvider`
   owns deal-resource state for `/hub/*` and reads the verified profile through its session hook.
+  Its `loadDeal` operation captures the deal’s local revocation revision before each API request;
+  eviction rejects older responses while a fresh authorized lookup can restore membership access.
+  Revisions survive restoration so late pre-eviction list/lookup responses stay excluded.
+  `DealAccessBoundary` reports denied requests to `DealRoomPage`, which owns the redirect state
+  and cache eviction. The parent keeps rendering the deal-list redirect and access-loss notice
+  after eviction unmounts the boundary, without starting a replacement lookup.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
   sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
@@ -448,7 +454,7 @@ global state or query-cache library.
   reload. Editor content/undo stays mounted across the first save/server-ID URL change. Saved note
   deletion calls the API and keeps the local buffer on failure; unresolved saves prevent deletion.
   The independently lazy editor uses BlockNote's shadcn controls with Quarry semantic tokens,
-  Geist Sans, and reduced-motion handling. Both block controls appear when hovering anywhere across
+  Geist Serif, and reduced-motion handling. Both block controls appear when hovering anywhere across
   a block's row, including the document's responsive side padding. Its dedicated six-dot handle
   has no click menu. An adjacent plus button opens the same block options as typing `/`, reusing
   an empty block or inserting a paragraph after a nonempty block. Both insertion paths remain
@@ -646,12 +652,15 @@ operational failures.
 [`frontend/src/index.css`](../frontend/src/index.css) is the styling source of truth. It imports
 Tailwind 4, animation utilities, and shadcn CSS, then defines semantic tokens for canvas, surfaces,
 content, borders, interaction, sidebar, status, typography, spacing, radii, and shared panels.
-The shared heading, body, sidebar, and sans tokens use locally bundled Geist Sans; the mono token
-uses Geist Mono for code, logs, and technical text. Upright and italic variable WOFF2 faces (Geist
-1.9.0, SIL OFL 1.1) live under `frontend/public/fonts/geist/` with their license and source notes.
-CSS declares `font-display: swap`; the main HTML preloads only upright Sans, with other faces loaded
-on demand. System fallbacks remain available. The fonts are served from the application origin and
-packaged into both builds, requiring no Google Fonts requests or desktop CSP changes for UI text.
+The shared heading, body, sidebar, sans, and mono compatibility tokens all use locally bundled
+Geist Serif, including code, logs, PDF controls, and technical labels. Existing `font-mono` classes
+remain semantic compatibility hooks but render proportional Serif by product choice. The official
+Geist 1.9.0 Serif regular WOFF2 face is weight 400; browsers synthesize the existing bold and italic
+UI styles. It lives under `frontend/public/fonts/geist/` with its SIL OFL 1.1 license and source notes.
+CSS declares `font-display: swap`; the main HTML preloads the Serif face. Serif system fallbacks
+remain available. The font is served from the application origin and packaged into both builds,
+requiring no Google Fonts requests or desktop CSP changes for UI text. Previously bundled Sans
+and Mono files remain retained assets but are not registered or preloaded by the UI.
 Existing type sizes, weights, tabular-number usage, and document/template-specific font choices
 remain intact; PDF signature font configuration is separate.
 The active light palette uses neutral gray surface/hover/border tokens, preserves the slate text
@@ -1072,8 +1081,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 14. Startup creates a fresh schema, upgrades validated markers 12/13,
-or validates/reuses marker 14; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 15. Startup creates a fresh schema, upgrades validated markers 12/13/14,
+or validates/reuses marker 15; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -1289,9 +1298,9 @@ deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses
 Stop old clients and writers before the explicit schema-12 development reset, pair SQLite with a
 fresh isolated Helix store, rebuild/reload matching clients, sign up again, and recreate data
 manually. No status conversion or automatic downgrade is provided. See
-[development reset and recovery](authentication.md#schema-13-and-development-reset).
+[development reset and recovery](authentication.md#schema-15-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 14
+### 9.1 Shared SQLite schema marker 15
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1320,6 +1329,7 @@ schema currently contains:
 | `quarry_files` | Logical file identity, canonical deal scope, soft-delete metadata | Used |
 | `quarry_current_content` | Unique current/live content claims per deal | Serializes upload deduplication |
 | `document_identity_manifests`, `document_chunk_identities` | Derivation version, content ID, active generation and exact chunk IDs/order/hashes | Durable pre-graph checkpoints and legacy retry recovery |
+| `document_image_recovery` | Immutable accepted image document/chunk JSON, without embeddings, keyed by version | Exact-byte recovery before vision or embedding calls |
 | `quarry_file_versions` | Immutable version identity/hash/current marker and nullable authenticated uploader | Legacy attribution remains unknown |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
@@ -1353,15 +1363,18 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 14` is the shared marker. Empty databases receive the complete schema.
+`PRAGMA user_version = 15` is the shared marker. Empty databases receive the complete schema.
 Validated marker 12 receives notebooks first; validated 12/13 then receives the data-preserving
 membership/file-scope upgrade. Memberships backfill the creator as owner, including archived deals;
-legacy uploader attribution remains null. Schema/layout, foreign keys and exactly-one-owner
+legacy uploader attribution remains null. Validated 12/13/14 layouts also receive the additive
+image-recovery table before marker 15 is committed; no existing image text is fabricated or
+backfilled. Schema/layout, foreign keys and exactly-one-owner
 invariants are checked before advancing the marker and on restart. Malformed/unsupported layouts
 fail without deletion or silent repairs. The file rebuild restores foreign-key enforcement even
 on failure. Startup refuses incomplete document identity/graph-scope migration. The required
 coordinated drain, consistent backups, offline graph maintenance, readiness and rollback procedure
-are in [shared deal projects](shared-deal-projects.md#schema-14-rollout-and-recovery).
+are in [shared deal projects](shared-deal-projects.md#schema-14-rollout-and-recovery). The additive
+image checkpoint rollout is described in [schema 15 image recovery](shared-deal-projects.md#schema-15-image-recovery).
 
 All aggregate reads use one transaction snapshot: deals `LEFT JOIN` their optional metadata, then
 bounded batches fetch parties joined to companies and scopes separately. These reads run sequentially on the same transaction connection
@@ -1437,13 +1450,19 @@ Document persistence is not a distributed transaction:
 
 1. Validate parser-derived identities and chunk invariants.
 2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence only when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
-3. Commit the logical file/version/blob aggregate in SQLite and confirm the returned identity matches the prepared plan.
+3. Commit the logical file/version/blob aggregate, identity manifest, and accepted image document/chunks (for image inputs) in SQLite and confirm the returned identity matches the prepared plan.
 4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
 5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
 
 The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
 the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert. Once a
-`file_id` is selected, version and graph-chunk identities are reproducible. General recovery from
+`file_id` is selected, version and graph-chunk identities are reproducible. Image retries load the
+accepted document/chunk snapshot from `document_image_recovery` before parsing or calling vision,
+then embed that exact text and enforce the existing immutable manifest. The checkpoint commits
+with the file/version/blob and contains no vectors; changed descriptions cannot replace it.
+Images accepted before schema 15 have no checkpoint: already-published images still skip normally,
+but a missing projection requires reviewed maintenance using the original accepted text. A new
+AI description cannot recover a lost original. General recovery from
 SQLite without the original bytes remains an operational design, not implemented tooling; deleting
 the SQLite record to conceal a Helix failure would violate source ownership. A single oversized
 chunk is rejected before canonical persistence; documents whose individual chunks fit are split
@@ -1530,20 +1549,23 @@ sequenceDiagram
     API->>Ingestion: process upload/job
     Ingestion->>Parser: parse PDF/DOCX/XLSX/PPTX or validate image bytes
     Parser-->>Ingestion: normalized chunks or validated image
-    Ingestion->>AI: describe validated image bytes (image inputs only)
+    Ingestion->>AI: describe validated image bytes (new image inputs only)
     AI-->>Ingestion: image description
     Ingestion->>Parser: build image description chunks (image inputs only)
     Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
     Ingestion->>AI: embed chunk text
     AI-->>Ingestion: embeddings
     Ingestion->>H: preflight setup, chunk-batch, and publication graph requests
-    Ingestion->>SQL: transactionally persist file/version/blob
+    Ingestion->>SQL: transactionally persist file/version/blob, manifest, image checkpoint
     SQL-->>Ingestion: committed file/version identities
     Ingestion->>H: insert version graph, bounded chunks, then publish it
     H-->>Ingestion: indexed or recoverable error
     Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
+
+For an existing image awaiting graph recovery, ingestion loads the accepted SQLite image snapshot
+instead of repeating the parse/vision steps above.
 
 PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path.
 Image decoding and document parsing run on blocking workers. XLSX preflights every worksheet's
@@ -2020,7 +2042,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 14 SQLite, preserving 12/13 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 15 SQLite, preserving 12/13/14 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

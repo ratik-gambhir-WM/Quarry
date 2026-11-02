@@ -3,7 +3,7 @@
 Current rollout (2026-10-28): schema **13** adds personal notebooks/save jobs through a validated,
 additive **12 → 13** upgrade that preserves product and template records. See [notebook recovery](notebook-api.md).
 Schema 11 and older still require the deliberately selected, drained development reset described in
-[authentication](authentication.md#schema-13-and-development-reset), paired with a fresh isolated
+[authentication](authentication.md#schema-15-and-development-reset), paired with a fresh isolated
 Helix store. Historical schema-9/10 upgrade instructions below do not authorize an older migration.
 
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.

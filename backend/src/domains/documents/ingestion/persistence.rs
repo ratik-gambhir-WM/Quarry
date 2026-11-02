@@ -99,6 +99,19 @@ fn prepare_document_persistence(
     ensure_document_graph_invariants(document, chunks)?;
     let mut file_persistence =
         build_file_persistence_input(deal_id, actor_id, document, file_bytes)?;
+    if infer_supported_image_mime_type(Path::new(&document.file_name)).is_some() {
+        let mut chunks = chunks.to_vec();
+        for chunk in &mut chunks {
+            chunk.embedding = None;
+        }
+        file_persistence.image_assembly_json = Some(
+            serde_json::to_string(&crate::domains::documents::formats::image::ImageAssembly {
+                document: document.clone(),
+                chunks,
+            })
+            .map_err(|e| e.to_string())?,
+        );
+    }
     let expected_identity = PersistedFileIdentity {
         file_id: file_persistence.file_id.clone(),
         deal_id: file_persistence.deal_id.clone(),
@@ -267,6 +280,7 @@ pub(crate) fn build_file_persistence_input(
         byte_size,
         file_bytes,
         manifest: None,
+        image_assembly_json: None,
     })
 }
 

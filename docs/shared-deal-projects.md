@@ -150,3 +150,27 @@ graph/index state. After shared writes, preserve/export new records before choos
 A SQLite-only rollback cannot restore removed graph properties or index definitions. Never use
 `clear_helix`, automatic reset or automatic downgrade for this rollout. A general graph rebuild
 and collaboration outbox remain unimplemented.
+
+## Schema 15 image recovery
+
+Schema 15 additively upgrades validated schemas 12, 13, and 14. The existing membership/scope
+upgrade still applies to 12/13. One transaction creates `document_image_recovery`, validates the
+complete layout, foreign keys and owners, and advances the marker. Records, blobs, manifests and
+graph identities are preserved. The table holds the accepted image document and exact chunk
+text/order/ranges/hashes as JSON keyed by immutable version ID; vectors are omitted. It commits
+with the original file/version/blob and manifest before graph writes. Recovery reuses it before
+vision, re-embeds the accepted chunks, and keeps the manifest's IDs. A differing snapshot is
+rejected rather than overwritten.
+
+Drain writers and retain a consistent pre-upgrade SQLite backup with its matching binary before
+rollout. Deploy the schema-15 backend; existing web/desktop API contracts and Helix schemas are
+unchanged. Verify schema upgrade/reopen, exact-byte image recovery after a graph failure, and
+unchanged version/chunk identities using disposable data. No reset or graph clear is required.
+Rollback requires a drained window and the matching pre-upgrade database/binary; preserve/export
+new writes before restoring that backup. Do not lower the marker or delete the recovery table
+from a live database to run an older binary.
+
+Existing images have no automatic checkpoint backfill. Published versions continue to skip on
+exact-byte upload. If an older image's graph is missing or partial, retain SQLite and recover the
+original accepted description/chunk text through reviewed offline maintenance; a fresh AI
+paraphrase cannot reproduce an immutable chunk hash. Missing checkpoints fail explicitly.

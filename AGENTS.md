@@ -71,7 +71,7 @@ not exist.
   Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
   projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
   in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
-- `app/migrations.rs` owns all SQLite schema (marker 14), including templates, assets, previews,
+- `app/migrations.rs` owns all SQLite schema (marker 15), including templates, assets, previews,
   metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
   `SqliteClient` to product and template repositories. Old schemas require an explicit offline development reset;
   no standalone template database setting, initializer, or memory-store default exists. Previously
@@ -151,8 +151,11 @@ request -> router -> handler -> service -> repository/client
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current shared schema marker is 14. Startup creates an empty database, additively upgrades
-  validated marker-12/13 layouts, or validates/reuses schema 14. Existing documents require verified identity/graph checkpoints before serving. The one-time Helix migration tool was removed after local cutover; see `docs/shared-deal-projects.md` for offline recovery. Older profile schemas require the
+- The current shared schema marker is 15. Startup creates an empty database, additively upgrades
+  validated marker-12/13/14 layouts, or validates/reuses schema 15. Accepted image document/chunk
+  text is checkpointed per immutable version for retry recovery; old images without a checkpoint
+  require reviewed maintenance if their projection is lost. Existing documents require verified
+  identity/graph checkpoints before serving. The one-time Helix migration tool was removed after local cutover; see `docs/shared-deal-projects.md` for offline recovery. Older profile schemas require the
   explicit offline development reset. The notebook upgrade preserves existing data; rollback
   requires a matching pre-upgrade backup and binary during a drained window.
   Incompatible schemas fail without deleting records. The explicit offline

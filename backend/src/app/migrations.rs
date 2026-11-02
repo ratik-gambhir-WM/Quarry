@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 14;
+const LATEST_SCHEMA_VERSION: i64 = 15;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -37,7 +37,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if version != LATEST_SCHEMA_VERSION && version != 12 && version != 13 {
+        if ![12, 13, 14, LATEST_SCHEMA_VERSION].contains(&version) {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
@@ -60,6 +60,22 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
             INSERT INTO deal_access_revisions(deal_id) SELECT deal_id FROM deals;
             INSERT INTO deal_activity_events(event_id,deal_id,kind,created_at) SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now') || '_backfill-' || deal_id,deal_id,'membership_backfilled',strftime('%Y-%m-%dT%H:%M:%f000Z','now') FROM deals;")?;
     }
+    // Validate the previous complete layout before accepting the additive upgrade.
+    if version == 14 {
+        validate_owned_schema(
+            &transaction,
+            &[
+                SCHEMA,
+                TEMPLATE_SCHEMA,
+                NOTEBOOK_SCHEMA,
+                MEMBERSHIP_SCHEMA,
+                DOCUMENT_SCOPE_UPGRADE,
+            ],
+        )?;
+    }
+    if version < 15 {
+        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
+    }
     validate_template_schema(&transaction)?;
     validate_owned_schema(
         &transaction,
@@ -69,6 +85,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
             NOTEBOOK_SCHEMA,
             MEMBERSHIP_SCHEMA,
             DOCUMENT_SCOPE_UPGRADE,
+            IMAGE_RECOVERY_SCHEMA,
         ],
     )?;
     let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
@@ -153,7 +170,8 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
     let result = (|| -> Result<(), MigrationError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
-            "DROP TABLE IF EXISTS quarry_current_content;
+            "DROP TABLE IF EXISTS document_image_recovery;
+             DROP TABLE IF EXISTS quarry_current_content;
              DROP TABLE IF EXISTS document_chunk_identities;
              DROP TABLE IF EXISTS document_identity_manifests;
              DROP TABLE IF EXISTS deal_team_memberships;
@@ -194,6 +212,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
         transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
         transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
+        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -607,6 +626,13 @@ fn validate_owned_schema(connection: &Connection, schemas: &[&str]) -> rusqlite:
     }
     Ok(())
 }
+
+const IMAGE_RECOVERY_SCHEMA: &str = r#"
+CREATE TABLE document_image_recovery (
+    version_id TEXT PRIMARY KEY NOT NULL REFERENCES document_identity_manifests(version_id) ON DELETE CASCADE,
+    assembly_json TEXT NOT NULL CHECK(json_valid(assembly_json) AND json_type(assembly_json) = 'object')
+);
+"#;
 
 const MEMBERSHIP_SCHEMA: &str = r#"
 CREATE TABLE deal_memberships (

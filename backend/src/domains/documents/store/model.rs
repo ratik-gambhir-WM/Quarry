@@ -27,6 +27,7 @@ pub(crate) struct FilePersistenceInput {
     pub(crate) byte_size: i64,
     pub(crate) file_bytes: Vec<u8>,
     pub(crate) manifest: Option<super::identity::IdentityManifest>,
+    pub(crate) image_assembly_json: Option<String>,
 }
 
 /// SQLite projection used to verify or reactivate an existing file version.

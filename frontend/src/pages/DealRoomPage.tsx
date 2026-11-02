@@ -1,6 +1,5 @@
 import { DealAccessBoundary } from "../components/deal-room/DealAccessBoundary";
-import { runtime } from "@quarry/runtime";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { createRequestResource } from "../data/requests/requestResource";
 import {
   Navigate,
@@ -52,7 +51,14 @@ export function DealRoomPage() {
     email,
     navigationState,
     retryDeals,
+    forgetDeal,
   } = useWorkspace();
+  const [deniedDealId, setDeniedDealId] = useState<string>();
+  const denyAccess = useCallback(() => {
+    if (!dealId) return;
+    setDeniedDealId(dealId);
+    forgetDeal(dealId);
+  }, [dealId, forgetDeal]);
   const extractionState = location.state as DealExtractionLocationState | null;
   const extractionResult = extractionState?.result;
   const extractedDeal =
@@ -83,6 +89,16 @@ export function DealRoomPage() {
         sowSourceName: extractionState?.sowSourceName,
       } satisfies DealExtractionLocationState)
     : navigationState;
+
+  if (dealId && deniedDealId === dealId) {
+    return (
+      <Navigate
+        replace
+        to="/hub/deals"
+        state={{ notice: "You no longer have access to this deal." }}
+      />
+    );
+  }
 
   if (!deal && dealsResource.status === "error") {
     return (
@@ -125,7 +141,11 @@ export function DealRoomPage() {
     dealsResource.source === "server"
   ) {
     return (
-      <DealAccessBoundary key={`${email ?? ""}:${deal.room.id}`} deal={deal}>
+      <DealAccessBoundary
+        key={`${email ?? ""}:${deal.room.id}`}
+        deal={deal}
+        onAccessDenied={denyAccess}
+      >
         {(current) => (
           <DealRoomWorkspace
             deal={current}
@@ -149,13 +169,10 @@ export function DealRoomPage() {
 }
 
 function DealRoomLookup({ id }: { id: string }) {
-  const { cacheDealResult } = useWorkspace();
+  const { loadDeal } = useWorkspace();
   const resource = useMemo(
-    () =>
-      createRequestResource(() => runtime.api.getDeal(id), {
-        onSuccess: cacheDealResult,
-      }),
-    [cacheDealResult, id],
+    () => createRequestResource(() => loadDeal(id)),
+    [loadDeal, id],
   );
   const result = useSyncExternalStore(
     resource.subscribe,

@@ -123,9 +123,10 @@ these lower layers reads ambient configuration or imports application-wide state
 
 ## 4. Canonical relational model
 
-SQLite schema 14 is canonical. It preserves validated schema-12/13 data and adds shared access,
+SQLite schema 15 is canonical. It preserves validated schema-12/13/14 data and retains shared access,
 nullable uploader attribution, deal-scoped content claims and immutable document identity manifests.
-The full table inventory is in [Architecture](ARCHITECTURE.md#91-shared-sqlite-schema-marker-14).
+Accepted image document/chunk snapshots are canonical version-keyed recovery inputs without vectors.
+The full table inventory is in [Architecture](ARCHITECTURE.md#91-shared-sqlite-schema-marker-15).
 
 ```mermaid
 erDiagram
@@ -187,7 +188,7 @@ working stages and Closed; Pipeline and Pencils Down permit incomplete parties. 
 stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
 independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
 
-Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-14-and-development-reset).
+Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-15-and-development-reset).
 
 ### 4.3 Logical file aggregate
 

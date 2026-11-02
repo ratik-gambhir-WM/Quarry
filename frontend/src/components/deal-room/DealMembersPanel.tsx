@@ -47,7 +47,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
   const formId = useId();
   const cancelButton = useRef<HTMLButtonElement>(null);
   const { roster, reload } = useDealCollaboration(deal.dealId);
-  const { cacheDealResult, forgetDeal } = useWorkspace();
+  const { loadDeal, forgetDeal } = useWorkspace();
   const navigate = useNavigate();
   const [workflow, dispatch] = useReducer(mutationReducer, { status: "idle" });
   const inFlight = useRef(false);
@@ -71,8 +71,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
         await action();
         setConfirm(null);
         dispatch({ type: "success", message: success });
-        const current = await runtime.api.getDeal(deal.dealId);
-        cacheDealResult(current);
+        await loadDeal(deal.dealId);
         reload();
       } catch (e) {
         const status =
@@ -98,7 +97,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
         heading.current?.focus();
       }
     },
-    [cacheDealResult, deal.dealId, forgetDeal, navigate, reload],
+    [loadDeal, deal.dealId, forgetDeal, navigate, reload],
   );
   function askForConfirmation(value: DealConfirmation, trigger: HTMLElement | null) {
     confirmationTrigger.current = trigger;

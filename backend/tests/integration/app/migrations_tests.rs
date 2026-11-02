@@ -498,7 +498,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 14
+            supported: 15
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -645,7 +645,7 @@ fn notebook_schema_upgrade_preserves_existing_product_records_and_reopens() {
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        14
+        LATEST_SCHEMA_VERSION
     );
     check_foreign_keys(&connection).unwrap();
 }
@@ -822,4 +822,74 @@ fn shared_fresh_and_upgraded_owned_layouts_are_identical() {
         c.prepare("SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().map(Result::unwrap).collect()
     }
     assert_eq!(ddl(&fresh), ddl(&upgraded));
+}
+
+fn image_schema_fourteen() -> Connection {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    seed_deal(&connection, "DEAL-IMAGE", "prepare");
+    insert_file_aggregate(&connection, "DEAL-IMAGE", "image-file", "image-version");
+    connection
+        .execute_batch("DROP TABLE document_image_recovery; PRAGMA user_version = 14;")
+        .unwrap();
+    connection
+}
+
+#[test]
+fn image_recovery_upgrade_preserves_schema_fourteen_records_and_reopens() {
+    let mut connection = image_schema_fourteen();
+    let before = product_snapshot(&connection);
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(table_count(&connection, "document_image_recovery"), 0);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        15
+    );
+    check_foreign_keys(&connection).unwrap();
+}
+
+#[test]
+fn image_recovery_upgrade_rejects_forged_layout_without_changing_records_or_marker() {
+    let mut connection = image_schema_fourteen();
+    connection
+        .execute_batch("DROP INDEX uq_quarry_file_versions_current;")
+        .unwrap();
+    let before = product_snapshot(&connection);
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        14
+    );
+    assert!(table_columns(&connection, "document_image_recovery").is_empty());
+}
+
+#[test]
+fn image_recovery_upgrade_rolls_back_new_table_and_marker_when_owner_validation_fails() {
+    let mut connection = image_schema_fourteen();
+    connection
+        .execute("DELETE FROM deal_memberships", [])
+        .unwrap();
+    let before = product_snapshot(&connection);
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        14
+    );
+    assert!(table_columns(&connection, "document_image_recovery").is_empty());
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

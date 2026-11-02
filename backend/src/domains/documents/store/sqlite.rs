@@ -45,6 +45,26 @@ impl DocumentStore {
     ) -> Result<Option<super::identity::IdentityManifest>, RepositoryError> {
         super::identity::manifest(&self.sqlite, version).await
     }
+    pub(crate) async fn image_assembly(
+        &self,
+        version: &str,
+    ) -> Result<Option<crate::domains::documents::formats::image::ImageAssembly>, RepositoryError>
+    {
+        let json = self
+            .sqlite
+            .read_one_with_async(
+                SqlBuilder::select("document_image_recovery")
+                    .columns(["assembly_json"])
+                    .and_where(Condition::equal("version_id", version))
+                    .build(),
+                |r| r.get::<_, String>(0),
+            )
+            .await?;
+        json.map(|json| {
+            serde_json::from_str(&json).map_err(|e| RepositoryError::storage(e.to_string()))
+        })
+        .transpose()
+    }
     pub async fn authorize_read(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
         self.sqlite
@@ -339,6 +359,31 @@ async fn persist_file_blob(
             })?;
             super::identity::save(transaction, &file_persistence.version_id, manifest, true)
                 .map_err(|e| SqliteClientError::transaction_aborted(e.to_string()))?;
+            if let Some(assembly) = &file_persistence.image_assembly_json {
+                let existing = transaction.read_one_with(
+                    SqlBuilder::select("document_image_recovery")
+                        .columns(["assembly_json"])
+                        .and_where(Condition::equal("version_id", &file_persistence.version_id))
+                        .build(),
+                    |r| r.get::<_, String>(0),
+                )?;
+                match existing {
+                    Some(existing) if existing != *assembly => {
+                        return Err(RepositoryError::Conflict(
+                            "image recovery text differs from immutable version".into(),
+                        ))
+                    }
+                    Some(_) => {}
+                    None => {
+                        transaction.write(
+                            SqlBuilder::insert_into("document_image_recovery")
+                                .value("version_id", &file_persistence.version_id)
+                                .value("assembly_json", assembly)
+                                .build(),
+                        )?;
+                    }
+                }
+            }
             Ok(read_back_persisted_file_identity(
                 transaction,
                 &file_persistence,

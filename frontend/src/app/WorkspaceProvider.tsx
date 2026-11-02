@@ -29,7 +29,7 @@ type WorkspaceContextValue = {
   navigationState?: WorkspaceLocationState;
   retryDeals: () => void;
   forgetDeal: (dealId: string) => void;
-  cacheDealResult: (aggregate: PersistedDeal) => void;
+  loadDeal: (dealId: string) => Promise<PersistedDeal>;
   saveCompanyResult: (company: Company) => void;
   saveDealResult: (
     result: SaveDealResponse | SaveDealMetadataResponse,
@@ -52,7 +52,7 @@ export function WorkspaceProvider({
     resource,
     retry,
     forgetDeal,
-    cacheDealResult,
+    loadDeal,
     saveDealResult,
     saveCompanyResult,
   } = useWorkspaceDeals(dataSource);
@@ -70,7 +70,7 @@ export function WorkspaceProvider({
         navigationState,
         retryDeals: retry,
         forgetDeal,
-        cacheDealResult,
+        loadDeal,
         saveDealResult,
         saveCompanyResult,
         tools: workspaceTools,

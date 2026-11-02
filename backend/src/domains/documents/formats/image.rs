@@ -28,7 +28,7 @@ const MAX_IMAGE_DIMENSION: u32 = 20_000;
 const MAX_IMAGE_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImageAssembly {
     pub document: Document,
     pub chunks: Vec<DocumentChunk>,

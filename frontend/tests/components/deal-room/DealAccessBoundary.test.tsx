@@ -8,16 +8,11 @@ import { buildWorkspaceDealFromPersisted } from "@/data/dealExtraction";
 import { testDeal } from "@/test/fixtures/deals";
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
-  cache: vi.fn(),
-  forget: vi.fn(),
-}));
-vi.mock("@quarry/runtime", () => ({
-  runtime: { api: { getDeal: mocks.get } },
+  denied: vi.fn(),
 }));
 vi.mock("@/app/WorkspaceProvider", () => ({
   useWorkspace: () => ({
-    cacheDealResult: mocks.cache,
-    forgetDeal: mocks.forget,
+    loadDeal: mocks.get,
   }),
 }));
 afterEach(() => {
@@ -32,28 +27,25 @@ function show() {
         <Route
           path="/deal"
           element={
-            <DealAccessBoundary deal={deal}>
+            <DealAccessBoundary deal={deal} onAccessDenied={mocks.denied}>
               {() => <p>Protected document content</p>}
             </DealAccessBoundary>
           }
         />
-        <Route path="/hub/deals" element={<p>Accessible deals</p>} />
       </Routes>
     </MemoryRouter>,
   );
-  return deal;
 }
 it.each([403, 404])(
-  "forgets the cached deal and unmounts protected content on %s during revalidation",
+  "reports denied access and unmounts protected content on %s during revalidation",
   async (status) => {
     mocks.get
       .mockResolvedValueOnce({ ...testDeal(), metadata: null })
       .mockRejectedValueOnce({ status });
-    const deal = show();
+    show();
     await screen.findByText("Protected document content");
     window.dispatchEvent(new Event("focus"));
-    await screen.findByText("Accessible deals");
-    expect(mocks.forget).toHaveBeenCalledWith(deal.room.id);
+    await waitFor(() => expect(mocks.denied).toHaveBeenCalledOnce());
     expect(screen.queryByText("Protected document content")).toBeNull();
   },
 );
@@ -68,10 +60,10 @@ it("keeps content hidden while access is unknown and supports transient-error re
   );
   expect(screen.queryByText("Protected document content")).toBeNull();
   await screen.findByRole("alert");
-  expect(mocks.forget).not.toHaveBeenCalled();
+  expect(mocks.denied).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("Protected document content");
-  await waitFor(() => expect(mocks.cache).toHaveBeenCalledOnce());
+  await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2));
 });
 
 it("keeps the workspace mounted while navigation revalidates access", async () => {
@@ -85,11 +77,10 @@ it("keeps the workspace mounted while navigation revalidates access", async () =
     <MemoryRouter initialEntries={["/deal"]}>
       <Routes>
         <Route path="/deal/*" element={
-          <DealAccessBoundary deal={deal}>
+          <DealAccessBoundary deal={deal} onAccessDenied={mocks.denied}>
             {() => <><Link to="/deal/analysis">Analysis</Link><input aria-label="Workspace state" /></>}
           </DealAccessBoundary>
         } />
-        <Route path="/hub/deals" element={<p>Accessible deals</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -101,6 +92,6 @@ it("keeps the workspace mounted while navigation revalidates access", async () =
   expect(input).toHaveProperty("value", "retained");
   expect(screen.queryByText("Checking deal access…")).toBeNull();
   rejectRevalidation({ status: 403 });
-  await screen.findByText("Accessible deals");
+  await waitFor(() => expect(mocks.denied).toHaveBeenCalledOnce());
   expect(screen.queryByLabelText("Workspace state")).toBeNull();
 });

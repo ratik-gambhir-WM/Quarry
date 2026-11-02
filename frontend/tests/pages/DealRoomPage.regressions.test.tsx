@@ -3,9 +3,9 @@ import { sessionStore } from "@/auth/sessionStore";
 import { testSession } from "@/test/fixtures/auth";
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider, useWorkspace } from "@/app/WorkspaceProvider";
 import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
@@ -93,6 +93,65 @@ function renderDealRoutes(pathname: string) {
 }
 
 describe("DealRoomPage", () => {
+  function AccessProbe() {
+    const { forgetDeal } = useWorkspace();
+    const location = useLocation();
+    return (
+      <>
+        <button onClick={() => forgetDeal(testDeal().dealId)}>Forget access</button>
+        <Link to={`/hub/deals/${testDeal().dealId}`}>Open restored deal</Link>
+        <output aria-label="Current route">{location.pathname}</output>
+        <output aria-label="Access notice">{location.state?.notice}</output>
+        <PortfolioProbe />
+      </>
+    );
+  }
+  function renderAccessRoutes(pathname: string) {
+    render(
+      <MemoryRouter initialEntries={[pathname]}>
+        <UserProvider>
+          <WorkspaceProvider dataSource="api">
+            <AccessProbe />
+            <Routes>
+              <Route path="/hub/deals" element={<p>Accessible deals</p>} />
+              <Route path="/hub/deals/:dealId" element={<DealRoomPage />}>
+                <Route index element={<DealRoomOverviewPage />} />
+              </Route>
+            </Routes>
+          </WorkspaceProvider>
+        </UserProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it.each([403, 404])("redirects and evicts with the real workspace store on %s", async (status) => {
+    const deal = testDeal();
+    api.listDeals.mockResolvedValue([{ ...deal, metadata: null }]);
+    renderAccessRoutes(`/hub/deals/${deal.dealId}`);
+    await screen.findByRole("heading", { name: deal.dealName });
+    api.getDeal.mockRejectedValue({ status });
+    act(() => window.dispatchEvent(new Event("focus")));
+    await screen.findByText("Accessible deals");
+    expect(api.getDeal).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Portfolio deals").textContent).toBe("");
+    expect(screen.getByLabelText("Current route").textContent).toBe("/hub/deals");
+    expect(screen.getByLabelText("Access notice").textContent).toBe(
+      "You no longer have access to this deal.",
+    );
+    expect(screen.queryByRole("heading", { name: deal.dealName })).toBeNull();
+  });
+
+  it("opens a freshly authorized direct link after the deal was forgotten", async () => {
+    const user = userEvent.setup();
+    renderAccessRoutes("/hub/deals");
+    await screen.findByText("Accessible deals");
+    await user.click(screen.getByRole("button", { name: "Forget access" }));
+    await user.click(screen.getByRole("link", { name: "Open restored deal" }));
+    await screen.findByRole("heading", { name: testDeal().dealName });
+    expect(screen.getByLabelText("Portfolio deals").textContent).toBe(testDeal().dealId);
+    expect(api.listDeals).toHaveBeenCalledTimes(1);
+  });
+
   it("shows an uploaded SOW after creation and retains it when core deal fields are edited", async () => {
     const user = userEvent.setup();
     const deal = testDeal();
