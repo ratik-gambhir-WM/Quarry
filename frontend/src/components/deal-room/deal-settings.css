@@ -20,6 +20,7 @@
 }
 .deal-team-card { border-radius: 8px; }
 .deal-team-heading { display: flex; align-items: center; gap: 16px; padding: 24px; }
+.deal-team-heading > div { flex-basis: 160px; }
 .deal-team-icon { display: grid; width: 48px; height: 48px; flex: none; place-items: center; border: 1px solid color-mix(in srgb, var(--color-action) 12%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--color-action) 4%, var(--color-surface-container-lowest)); color: var(--color-primary); }
 .deal-team-name { overflow-wrap: anywhere; font-size: 20px; line-height: 1.3; letter-spacing: -.025em; font-weight: 600; }
 .deal-team-count { margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--color-muted); font-variant-numeric: tabular-nums; }

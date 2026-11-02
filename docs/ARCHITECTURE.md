@@ -448,7 +448,7 @@ global state or query-cache library.
   reload. Editor content/undo stays mounted across the first save/server-ID URL change. Saved note
   deletion calls the API and keeps the local buffer on failure; unresolved saves prevent deletion.
   The independently lazy editor uses BlockNote's shadcn controls with Quarry semantic tokens,
-  Inter, and reduced-motion handling. Both block controls appear when hovering anywhere across
+  Geist Sans, and reduced-motion handling. Both block controls appear when hovering anywhere across
   a block's row, including the document's responsive side padding. Its dedicated six-dot handle
   has no click menu. An adjacent plus button opens the same block options as typing `/`, reusing
   an empty block or inserting a paragraph after a nonempty block. Both insertion paths remain
@@ -646,6 +646,14 @@ operational failures.
 [`frontend/src/index.css`](../frontend/src/index.css) is the styling source of truth. It imports
 Tailwind 4, animation utilities, and shadcn CSS, then defines semantic tokens for canvas, surfaces,
 content, borders, interaction, sidebar, status, typography, spacing, radii, and shared panels.
+The shared heading, body, sidebar, and sans tokens use locally bundled Geist Sans; the mono token
+uses Geist Mono for code, logs, and technical text. Upright and italic variable WOFF2 faces (Geist
+1.9.0, SIL OFL 1.1) live under `frontend/public/fonts/geist/` with their license and source notes.
+CSS declares `font-display: swap`; the main HTML preloads only upright Sans, with other faces loaded
+on demand. System fallbacks remain available. The fonts are served from the application origin and
+packaged into both builds, requiring no Google Fonts requests or desktop CSP changes for UI text.
+Existing type sizes, weights, tabular-number usage, and document/template-specific font choices
+remain intact; PDF signature font configuration is separate.
 The active light palette uses neutral gray surface/hover/border tokens, preserves the slate text
 tokens, and separates deep-navy action fills from text/link interaction colors. Enabled neutral
 buttons share the light-gray hover surface; filled primary actions share the deep-navy action
