@@ -391,7 +391,6 @@ const THUMBNAIL_LABEL_HEIGHT = 24;
 const THUMBNAIL_GAP = 12;
 const THUMBNAIL_PANE_PADDING_Y = 16;
 const RIGHT_PANEL_INLINE_MIN_WIDTH = 1100;
-const TOOLBAR_STACK_MAX_WIDTH = 640;
 const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8;
@@ -1597,45 +1596,38 @@ function PdfEditorSearchControl({
 function PdfEditorModeSwitch({
   mode,
   features,
-  compact = false,
   onModeChange,
 }: {
   mode: PdfEditorMode;
   features: PdfEditorResolvedFeatures;
-  compact?: boolean;
   onModeChange: (mode: PdfEditorMode) => void;
 }) {
   const options = PDF_EDITOR_MODE_OPTIONS.filter(
     (option) => option.feature === null || features[option.feature],
   );
   return (
-    <div
-      role="group"
-      aria-label="Editor mode"
-      className="flex shrink-0 items-center gap-0.5 rounded-lg bg-surface-container-high p-0.5"
+    <Select
+      value={mode}
+      onValueChange={(value) => {
+        const selected = options.find((option) => option.id === value);
+        if (selected) onModeChange(selected.id);
+      }}
     >
-      {options.map((option) => {
-        const Glyph = option.glyph;
-        const active = option.id === mode;
-        return (
-          <Button
-            key={option.id}
-            type="button"
-            size={compact ? "icon-xs" : "xs"}
-            variant={active ? "default" : "ghost"}
-            aria-pressed={active}
-            aria-label={option.label}
-            className={cn("gap-1.5", !active && "text-muted-foreground")}
-            onClick={() => onModeChange(option.id)}
-          >
-            <Glyph className="size-3.5" />
-            {compact ? null : (
-              <span className="hidden md:inline">{option.label}</span>
-            )}
-          </Button>
-        );
-      })}
-    </div>
+      <SelectTrigger size="sm" aria-label="Editor mode" className="shrink-0">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false}>
+        {options.map((option) => {
+          const Glyph = option.glyph;
+          return (
+            <SelectItem key={option.id} value={option.id}>
+              <Glyph className="size-3.5" />
+              {option.label}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }
 /* -------------------------------------------------------------------------- */
@@ -1975,8 +1967,6 @@ function PdfEditorInner({
   const [shellRef, shellWidth] = useElementWidth<HTMLDivElement>();
   const leftInline = useInlineThumbnailSidebar(shellWidth);
   const rightInline = shellWidth >= RIGHT_PANEL_INLINE_MIN_WIDTH;
-  const compactToolbar =
-    shellWidth > 0 && shellWidth <= TOOLBAR_STACK_MAX_WIDTH;
   const activePage = scrollState.currentPage;
   const numPages = pdfDocument?.pageCount ?? 0;
   const controlsDisabled = !numPages;
@@ -2863,22 +2853,6 @@ function PdfEditorInner({
           >
             <TrashGlyph className="size-4" />
           </PdfEditorToolButton>
-          {features.comments ? (
-            <PdfEditorToolButton
-              label="Comments"
-              active={rightPanel === "comments"}
-              onClick={() => toggleRightPanel("comments")}
-            >
-              <CommentsGlyph className="size-4" />
-            </PdfEditorToolButton>
-          ) : null}
-          <PdfEditorToolButton
-            label="Properties"
-            active={rightPanel === "properties"}
-            onClick={() => toggleRightPanel("properties")}
-          >
-            <SlidersGlyph className="size-4" />
-          </PdfEditorToolButton>
         </div>
       </>
     );
@@ -3196,17 +3170,9 @@ function PdfEditorInner({
                 <fieldset disabled={controlsDisabled} className="contents">
                   <div
                     data-slot="pdf-editor-toolbar"
-                    className={cn(
-                      "flex min-h-12 flex-wrap items-center justify-between gap-2 border-b bg-background px-3 py-2",
-                      compactToolbar && "gap-0 px-0 py-0",
-                    )}
+                    className="flex min-h-12 items-center gap-2 border-b bg-background px-3 py-2"
                   >
-                    <div
-                      className={cn(
-                        "flex min-w-0 items-center gap-2",
-                        compactToolbar && "w-full px-3 py-2",
-                      )}
-                    >
+                    <div className="flex min-w-0 items-center gap-2">
                       <PdfEditorToolButton
                         label="Pages sidebar"
                         active={leftPanel !== null}
@@ -3222,22 +3188,24 @@ function PdfEditorInner({
                         onPageChange={(pageNumber) => scrollToPage(pageNumber)}
                       />
                     </div>
+                  </div>
+                  <div
+                    data-slot="pdf-editor-ribbon"
+                    className="flex min-h-10 items-center gap-1 border-b bg-surface-container-low px-3 py-1.5"
+                  >
+                    <PdfEditorModeSwitch
+                      mode={mode}
+                      features={features}
+                      onModeChange={setMode}
+                    />
+                    <PdfEditorToolbarSeparator className="mx-1.5" />
                     <InlineScrollArea2
                       orientation="horizontal"
                       scrollFade
                       scrollbarOverflowOnly
-                      className={cn(
-                        "min-w-0 flex-1",
-                        compactToolbar && "h-12 w-full flex-none border-t",
-                      )}
-                      viewportClassName={cn(compactToolbar && "px-3 py-2")}
+                      className="min-w-0 flex-1 self-stretch"
                     >
-                      <div
-                        className={cn(
-                          "flex w-max min-w-full items-center gap-1",
-                          compactToolbar ? "justify-start" : "justify-end",
-                        )}
-                      >
+                      <div className="flex w-max min-w-full items-center gap-0.5 py-0.5">
                         <div className="flex items-center gap-0.5">
                           <PdfEditorToolButton
                             label="Undo"
@@ -3285,14 +3253,6 @@ function PdfEditorInner({
                           open={searchOpen}
                           onOpenChange={setSearchOpen}
                         />
-                        <PdfEditorToolButton
-                          label="Details panel"
-                          active={rightPanel !== null}
-                          disabled={controlsDisabled}
-                          onClick={() => toggleRightPanel("properties")}
-                        >
-                          <PanelRightGlyph className="size-4" />
-                        </PdfEditorToolButton>
                         {toolbarActions ? (
                           <>
                             <PdfEditorToolbarSeparator />
@@ -3300,208 +3260,197 @@ function PdfEditorInner({
                           </>
                         ) : null}
                         <PdfEditorToolbarSeparator />
-                        {showDownload ? (
+                        {ribbon}
+                        <div className="ml-auto flex items-center">
                           <PdfEditorToolButton
-                            label="Download"
-                            shortcut="mod+S"
-                            disabled={controlsDisabled || isDownloading}
-                            onClick={() => void downloadDocument()}
+                            label="Details panel"
+                            active={rightPanel !== null}
+                            disabled={controlsDisabled}
+                            onClick={() => toggleRightPanel("properties")}
                           >
-                            {isDownloading ? (
-                              <InlineSpinner className="size-4" />
-                            ) : (
-                              <DownloadGlyph className="size-4" />
-                            )}
+                            <PanelRightGlyph className="size-4" />
                           </PdfEditorToolButton>
-                        ) : null}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label="More actions"
-                              >
-                                <MoreGlyph className="size-4" />
-                              </Button>
-                            }
-                          ></DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-60">
-                            <DropdownMenuGroup>
-                              <DropdownMenuLabel className="truncate">
-                                {fileName}
-                              </DropdownMenuLabel>
-                              {showUpload ? (
+                          {showDownload ? (
+                            <PdfEditorToolButton
+                              label="Download"
+                              shortcut="mod+S"
+                              disabled={controlsDisabled || isDownloading}
+                              onClick={() => void downloadDocument()}
+                            >
+                              {isDownloading ? (
+                                <InlineSpinner className="size-4" />
+                              ) : (
+                                <DownloadGlyph className="size-4" />
+                              )}
+                            </PdfEditorToolButton>
+                          ) : null}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label="More actions"
+                                >
+                                  <MoreGlyph className="size-4" />
+                                </Button>
+                              }
+                            ></DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-60">
+                              <DropdownMenuGroup>
+                                <DropdownMenuLabel className="truncate">
+                                  {fileName}
+                                </DropdownMenuLabel>
+                                {showUpload ? (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      uploadInputRef.current?.click()
+                                    }
+                                  >
+                                    <UploadGlyph className="size-4" />
+                                    Open PDF…
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {showDownload ? (
+                                  <DropdownMenuItem
+                                    disabled={controlsDisabled}
+                                    onClick={() => void downloadDocument()}
+                                  >
+                                    <DownloadGlyph className="size-4" />
+                                    Download
+                                    <DropdownMenuShortcut>
+                                      ⌘S
+                                    </DropdownMenuShortcut>
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {features.print ? (
+                                  <DropdownMenuItem
+                                    disabled={
+                                      controlsDisabled || !permissions.canPrint
+                                    }
+                                    onClick={() => setDialog({ type: "print" })}
+                                  >
+                                    <PrintGlyph className="size-4" />
+                                    Print…
+                                    <DropdownMenuShortcut>
+                                      ⌘P
+                                    </DropdownMenuShortcut>
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {features.capture ? (
+                                  <DropdownMenuItem
+                                    disabled={controlsDisabled}
+                                    onClick={() =>
+                                      capture?.toggleMarqueeCapture()
+                                    }
+                                  >
+                                    <CameraGlyph className="size-4" />
+                                    Capture area as image
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {features.fullscreen ? (
+                                  <DropdownMenuItem
+                                    onClick={() => fullscreen?.toggleFullscreen()}
+                                  >
+                                    {fullscreenState.isFullscreen ? (
+                                      <ExitFullscreenGlyph className="size-4" />
+                                    ) : (
+                                      <FullscreenGlyph className="size-4" />
+                                    )}
+                                    {fullscreenState.isFullscreen
+                                      ? "Exit full screen"
+                                      : "Full screen"}
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </DropdownMenuGroup>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuGroup>
                                 <DropdownMenuItem
+                                  disabled={controlsDisabled}
                                   onClick={() =>
-                                    uploadInputRef.current?.click()
+                                    setDialog({ type: "properties" })
+                                  }
+                                >
+                                  <InfoGlyph className="size-4" />
+                                  Document properties…
+                                </DropdownMenuItem>
+                                {features.security ? (
+                                  <DropdownMenuItem
+                                    disabled={controlsDisabled}
+                                    onClick={() =>
+                                      setDialog({ type: "security" })
+                                    }
+                                  >
+                                    <ShieldGlyph className="size-4" />
+                                    Security…
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuItem
+                                  disabled={
+                                    controlsDisabled ||
+                                    !permissions.canModifyContents
+                                  }
+                                  onClick={flattenDocument}
+                                >
+                                  <LayersGlyph className="size-4" />
+                                  Flatten annotations…
+                                </DropdownMenuItem>
+                              </DropdownMenuGroup>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuGroup>
+                                <DropdownMenuItem
+                                  disabled={controlsDisabled}
+                                  onClick={exportAnnotationsJson}
+                                >
+                                  <DownloadGlyph className="size-4" />
+                                  Export annotations (JSON)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={
+                                    controlsDisabled ||
+                                    !permissions.canModifyAnnotations
+                                  }
+                                  onClick={() =>
+                                    annotationImportInputRef.current?.click()
                                   }
                                 >
                                   <UploadGlyph className="size-4" />
-                                  Open PDF…
+                                  Import annotations (JSON)…
                                 </DropdownMenuItem>
-                              ) : null}
-                              {showDownload ? (
-                                <DropdownMenuItem
-                                  disabled={controlsDisabled}
-                                  onClick={() => void downloadDocument()}
-                                >
-                                  <DownloadGlyph className="size-4" />
-                                  Download
-                                  <DropdownMenuShortcut>
-                                    ⌘S
-                                  </DropdownMenuShortcut>
-                                </DropdownMenuItem>
-                              ) : null}
-                              {features.print ? (
-                                <DropdownMenuItem
-                                  disabled={
-                                    controlsDisabled || !permissions.canPrint
-                                  }
-                                  onClick={() => setDialog({ type: "print" })}
-                                >
-                                  <PrintGlyph className="size-4" />
-                                  Print…
-                                  <DropdownMenuShortcut>
-                                    ⌘P
-                                  </DropdownMenuShortcut>
-                                </DropdownMenuItem>
-                              ) : null}
-                              {features.capture ? (
-                                <DropdownMenuItem
-                                  disabled={controlsDisabled}
-                                  onClick={() =>
-                                    capture?.toggleMarqueeCapture()
+                              </DropdownMenuGroup>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuGroup>
+                                <DropdownMenuLabel>Page layout</DropdownMenuLabel>
+                                <DropdownMenuRadioGroup
+                                  value={spreadMode}
+                                  onValueChange={(value) =>
+                                    spread?.setSpreadMode(
+                                      String(value) as SpreadMode,
+                                    )
                                   }
                                 >
-                                  <CameraGlyph className="size-4" />
-                                  Capture area as image
-                                </DropdownMenuItem>
-                              ) : null}
-                              {features.fullscreen ? (
-                                <DropdownMenuItem
-                                  onClick={() => fullscreen?.toggleFullscreen()}
-                                >
-                                  {fullscreenState.isFullscreen ? (
-                                    <ExitFullscreenGlyph className="size-4" />
-                                  ) : (
-                                    <FullscreenGlyph className="size-4" />
-                                  )}
-                                  {fullscreenState.isFullscreen
-                                    ? "Exit full screen"
-                                    : "Full screen"}
-                                </DropdownMenuItem>
-                              ) : null}
-                            </DropdownMenuGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuGroup>
+                                  <DropdownMenuRadioItem value={SpreadMode.None}>
+                                    Single page
+                                  </DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value={SpreadMode.Odd}>
+                                    Two pages
+                                  </DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value={SpreadMode.Even}>
+                                    Two pages, cover first
+                                  </DropdownMenuRadioItem>
+                                </DropdownMenuRadioGroup>
+                              </DropdownMenuGroup>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem
-                                disabled={controlsDisabled}
-                                onClick={() =>
-                                  setDialog({ type: "properties" })
-                                }
+                                onClick={() => setDialog({ type: "shortcuts" })}
                               >
-                                <InfoGlyph className="size-4" />
-                                Document properties…
+                                <KeyboardGlyph className="size-4" />
+                                Keyboard shortcuts
                               </DropdownMenuItem>
-                              {features.security ? (
-                                <DropdownMenuItem
-                                  disabled={controlsDisabled}
-                                  onClick={() =>
-                                    setDialog({ type: "security" })
-                                  }
-                                >
-                                  <ShieldGlyph className="size-4" />
-                                  Security…
-                                </DropdownMenuItem>
-                              ) : null}
-                              <DropdownMenuItem
-                                disabled={
-                                  controlsDisabled ||
-                                  !permissions.canModifyContents
-                                }
-                                onClick={flattenDocument}
-                              >
-                                <LayersGlyph className="size-4" />
-                                Flatten annotations…
-                              </DropdownMenuItem>
-                            </DropdownMenuGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuGroup>
-                              <DropdownMenuItem
-                                disabled={controlsDisabled}
-                                onClick={exportAnnotationsJson}
-                              >
-                                <DownloadGlyph className="size-4" />
-                                Export annotations (JSON)
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={
-                                  controlsDisabled ||
-                                  !permissions.canModifyAnnotations
-                                }
-                                onClick={() =>
-                                  annotationImportInputRef.current?.click()
-                                }
-                              >
-                                <UploadGlyph className="size-4" />
-                                Import annotations (JSON)…
-                              </DropdownMenuItem>
-                            </DropdownMenuGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuGroup>
-                              <DropdownMenuLabel>Page layout</DropdownMenuLabel>
-                              <DropdownMenuRadioGroup
-                                value={spreadMode}
-                                onValueChange={(value) =>
-                                  spread?.setSpreadMode(
-                                    String(value) as SpreadMode,
-                                  )
-                                }
-                              >
-                                <DropdownMenuRadioItem value={SpreadMode.None}>
-                                  Single page
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value={SpreadMode.Odd}>
-                                  Two pages
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value={SpreadMode.Even}>
-                                  Two pages, cover first
-                                </DropdownMenuRadioItem>
-                              </DropdownMenuRadioGroup>
-                            </DropdownMenuGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => setDialog({ type: "shortcuts" })}
-                            >
-                              <KeyboardGlyph className="size-4" />
-                              Keyboard shortcuts
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </InlineScrollArea2>
-                  </div>
-                  <div
-                    data-slot="pdf-editor-ribbon"
-                    className="flex min-h-10 items-center gap-1 border-b bg-surface-container-low px-3 py-1.5"
-                  >
-                    <PdfEditorModeSwitch
-                      mode={mode}
-                      features={features}
-                      compact={compactToolbar}
-                      onModeChange={setMode}
-                    />
-                    <PdfEditorToolbarSeparator className="mx-1.5" />
-                    <InlineScrollArea2
-                      orientation="horizontal"
-                      scrollFade
-                      scrollbarOverflowOnly
-                      className="min-w-0 flex-1 self-stretch"
-                    >
-                      <div className="flex w-max min-w-full items-center gap-0.5 py-0.5">
-                        {ribbon}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
                     </InlineScrollArea2>
                   </div>

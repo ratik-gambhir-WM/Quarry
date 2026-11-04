@@ -1,3 +1,5 @@
+import { parseTextParagraph, type TextParagraph } from "./diligenceText";
+
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = {
@@ -5,6 +7,7 @@ export type JsonObject = {
 };
 
 export type DiligenceTextRun = JsonObject & {
+  paragraph?: TextParagraph;
   bold?: boolean;
   breakLine?: boolean;
   color: string;
@@ -281,6 +284,7 @@ function validateOptionalRuns(value: unknown, path: string) {
     requireOptionalBoolean(run.italic, `${runPath}.italic`);
     requireOptionalBoolean(run.underline, `${runPath}.underline`);
     requireOptionalBoolean(run.breakLine, `${runPath}.breakLine`);
+    parseTextParagraph(run.paragraph);
   });
 }
 

@@ -11,7 +11,8 @@ use zip_slide::ZipArchive;
 use super::super::{
     ArrowType, CanvasDocument, Conversion, DashStyle, ElbowDirection, Element, HorizontalAlign,
     ImageCrop, ImageElement, ImageFit, LineElement, LineType, Presentation, ShapeElement, Slide,
-    SlideResult, SlideTemplateError, TextElement, TextRun, VerticalAlign,
+    SlideResult, SlideTemplateError, TextElement, TextParagraph, TextRun, TextSpacing, TextTabStop,
+    VerticalAlign,
 };
 
 const DRAWING_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -441,6 +442,7 @@ impl RunStyle {
 
     fn text_run(&self, text: String) -> TextRun {
         TextRun {
+            paragraph: None,
             text,
             color: self.color.clone().unwrap_or_else(|| "111827".to_owned()),
             font_face: self.font_face.clone().unwrap_or_else(|| "Arial".to_owned()),
@@ -465,6 +467,7 @@ struct ParagraphStyle {
     run: RunStyle,
     bullet: Option<BulletStyle>,
     align: Option<HorizontalAlign>,
+    layout: TextParagraph,
 }
 
 impl ParagraphStyle {
@@ -502,17 +505,80 @@ impl ParagraphStyle {
             ),
             bullet,
             align: node.attribute("algn").map(parse_align),
+            layout: TextParagraph {
+                margin_left: optional_emu(node, "marL"),
+                margin_right: optional_emu(node, "marR"),
+                indent: optional_emu(node, "indent"),
+                default_tab_size: optional_emu(node, "defTabSz"),
+                tab_stops: node
+                    .children()
+                    .find(|n| n.tag_name().name() == "tabLst")
+                    .map(|tabs| {
+                        tabs.children()
+                            .filter(|n| n.tag_name().name() == "tab")
+                            .filter_map(|tab| {
+                                Some(TextTabStop {
+                                    position: optional_emu(tab, "pos")?,
+                                    align: parse_align(tab.attribute("algn").unwrap_or("l")),
+                                })
+                            })
+                            .collect()
+                    }),
+                line_spacing: paragraph_spacing(node, "lnSpc"),
+                space_before: paragraph_spacing(node, "spcBef"),
+                space_after: paragraph_spacing(node, "spcAft"),
+                align: node.attribute("algn").map(parse_align),
+            },
         }
     }
 
     fn overlay(&mut self, other: &Self) {
         self.run.overlay(&other.run);
+        macro_rules! overlay_layout {
+            ($($field:ident),*) => { $(if other.layout.$field.is_some() {
+                self.layout.$field.clone_from(&other.layout.$field);
+            })* };
+        }
+        overlay_layout!(
+            margin_left,
+            margin_right,
+            indent,
+            default_tab_size,
+            tab_stops,
+            line_spacing,
+            space_before,
+            space_after,
+            align
+        );
         if other.align.is_some() {
             self.align = other.align;
         }
         if other.bullet.is_some() {
             self.bullet.clone_from(&other.bullet);
         }
+    }
+}
+
+fn optional_emu(node: Node<'_, '_>, attribute: &str) -> Option<f64> {
+    node.attribute(attribute)?
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite())
+        .map(|v| v / EMUS_PER_PIXEL)
+}
+
+fn paragraph_spacing(node: Node<'_, '_>, tag: &str) -> Option<TextSpacing> {
+    let spacing = node.children().find(|n| n.tag_name().name() == tag)?;
+    let value = spacing.children().find(Node::is_element)?;
+    let number = value
+        .attribute("val")?
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)?;
+    match value.tag_name().name() {
+        "spcPts" => Some(TextSpacing::Points(number / 100.0)),
+        "spcPct" => Some(TextSpacing::Percent(number / 100_000.0)),
+        _ => None,
     }
 }
 
@@ -2391,8 +2457,7 @@ fn text_runs(
             .min(8);
         let mut paragraph_style = ParagraphStyle {
             run: shape_style.clone(),
-            bullet: None,
-            align: None,
+            ..ParagraphStyle::default()
         };
         paragraph_style.overlay(&text_styles.paragraph_style(node, level));
         let level_tag = format!("lvl{}pPr", level + 1);
@@ -2428,11 +2493,15 @@ fn text_runs(
             style.overlay(&RunStyle::from_node(run_properties, theme_colors));
             runs.push(style.text_run(text));
         }
-        let local_bullet = ParagraphStyle::from_node(paragraph_properties, theme_colors).bullet;
+        let local_bullet = paragraph_style.bullet.clone();
         let prefix = match local_bullet {
-            Some(BulletStyle::Character(character)) => Some(format!("{character} ")),
+            Some(BulletStyle::Character(character)) => Some(format!("{character}\t")),
             Some(BulletStyle::Automatic { kind, start_at }) => {
-                let suffix = if kind.contains("ParenR") { ") " } else { ". " };
+                let suffix = if kind.contains("ParenR") {
+                    ")\t"
+                } else {
+                    ".\t"
+                };
                 Some(format!("{}{suffix}", start_at + paragraph_index))
             }
             _ => None,
@@ -2443,6 +2512,12 @@ fn text_runs(
             } else {
                 runs.push(paragraph_style.run.text_run(prefix.trim_end().to_owned()));
             }
+        }
+        if runs.len() == paragraph_start {
+            runs.push(paragraph_style.run.text_run(String::new()));
+        }
+        if paragraph_style.layout != TextParagraph::default() {
+            runs[paragraph_start].paragraph = Some(paragraph_style.layout);
         }
         if runs.len() > paragraph_start {
             if let Some(last) = runs.last_mut() {

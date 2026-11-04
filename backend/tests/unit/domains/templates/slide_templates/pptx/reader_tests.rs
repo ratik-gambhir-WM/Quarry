@@ -391,7 +391,7 @@ fn character_and_automatic_bullets_match_reference_numeric_and_empty_markers() {
     );
 
     assert_eq!(runs.len(), 4);
-    assert_eq!(text_from_runs(&runs), "1) First\n2) Second\n• Third\n4)");
+    assert_eq!(text_from_runs(&runs), "1)\tFirst\n2)\tSecond\n•\tThird\n4)");
 }
 
 #[test]
@@ -661,4 +661,97 @@ fn shape_with_text<'a>(elements: &'a [Element], text: &str) -> &'a ShapeElement 
 
 fn assert_close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 0.001, "{actual} != {expected}");
+}
+
+#[test]
+fn paragraph_spacing_indents_and_tabs_inherit_and_preserve_explicit_zero() {
+    let xml = r#"<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+      <p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr marL="190500" indent="-190500"><a:lnSpc><a:spcPct val="120000"/></a:lnSpc><a:spcAft><a:spcPts val="600"/></a:spcAft><a:buChar char="•"/></a:lvl1pPr></a:lstStyle>
+      <a:p><a:pPr defTabSz="457200"><a:tabLst><a:tab pos="381000" algn="r"/></a:tabLst></a:pPr><a:r><a:t>First</a:t></a:r></a:p>
+      <a:p><a:pPr marL="0" indent="0"><a:lnSpc><a:spcPts val="1200"/></a:lnSpc><a:spcAft><a:spcPts val="0"/></a:spcAft><a:buNone/></a:pPr><a:r><a:t>Second</a:t></a:r></a:p>
+      <a:p/>
+      </p:txBody></p:sp>"#;
+    let xml = Document::parse(xml).unwrap();
+    let runs = text_runs(
+        xml.root_element(),
+        &ThemeColors::default(),
+        &InheritedTextStyles::default(),
+    );
+    let first = runs[0].paragraph.as_ref().unwrap();
+    assert_eq!(first.margin_left, Some(20.0));
+    assert_eq!(first.indent, Some(-20.0));
+    assert_eq!(first.line_spacing, Some(TextSpacing::Percent(1.2)));
+    assert_eq!(first.space_after, Some(TextSpacing::Points(6.0)));
+    assert_eq!(first.default_tab_size, Some(48.0));
+    assert_eq!(first.tab_stops.as_ref().unwrap()[0].position, 40.0);
+    assert_eq!(runs[0].text, "•\tFirst");
+    let second = runs[1].paragraph.as_ref().unwrap();
+    assert_eq!(second.margin_left, Some(0.0));
+    assert_eq!(second.line_spacing, Some(TextSpacing::Points(12.0)));
+    assert_eq!(second.space_after, Some(TextSpacing::Points(0.0)));
+    assert_eq!(runs[1].text, "Second");
+    assert!(runs[2].break_line);
+}
+
+#[test]
+fn paragraph_layout_survives_normalization_export_and_reimport() {
+    use crate::domains::templates::slide_templates::pptx;
+    let input = serde_json::json!({"presentation":{"title":"Spacing","showBranding":false,"slides":[{"elements":[{
+        "type":"text","id":"body","x":10,"y":10,"w":400,"h":300,"text":"•\tFirst\ncontinued\nNext",
+        "runs":[{"text":"•\tFirst\ncontinued","fontSize":12,"breakLine":true,"paragraph":{
+            "marginLeft":24,"indent":-24,"marginRight":6,"defaultTabSize":48,
+            "tabStops":[{"position":24,"align":"left"}],
+            "lineSpacing":{"unit":"percent","value":1.2},"spaceAfter":{"unit":"points","value":6}
+        }},{"text":"Next","fontSize":12,"paragraph":{"lineSpacing":{"unit":"points","value":14},"spaceBefore":{"unit":"points","value":0}}}]
+    }]}]}});
+    let (document, _) =
+        crate::domains::templates::slide_templates::normalize::normalize(&input).unwrap();
+    let bytes = pptx::write(&document).unwrap();
+    let imported = pptx::read(&bytes).unwrap();
+    let Element::Text(before) = &document.presentation.slides[0].elements[0] else {
+        panic!("text expected")
+    };
+    let Element::Text(after) = &imported.template_json.presentation.slides[0].elements[0] else {
+        panic!("text expected")
+    };
+    assert_eq!(
+        after.runs[0].paragraph.as_ref().unwrap().margin_left,
+        Some(24.0)
+    );
+    assert_eq!(
+        after.runs[0].paragraph.as_ref().unwrap().line_spacing,
+        before.runs[0].paragraph.as_ref().unwrap().line_spacing
+    );
+    assert_eq!(
+        after.runs[0].paragraph.as_ref().unwrap().space_after,
+        before.runs[0].paragraph.as_ref().unwrap().space_after
+    );
+    assert_eq!(
+        after
+            .runs
+            .last()
+            .unwrap()
+            .paragraph
+            .as_ref()
+            .unwrap()
+            .line_spacing,
+        before.runs[1].paragraph.as_ref().unwrap().line_spacing
+    );
+    assert_eq!(after.text, before.text);
+    assert!(
+        !after.runs[0].break_line,
+        "soft break must stay within its paragraph"
+    );
+}
+
+#[test]
+fn export_rejects_invalid_paragraph_layout_instead_of_losing_it() {
+    for paragraph in [
+        serde_json::json!({"lineSpacing":{"unit":"points","value":-1}}),
+        serde_json::json!({"indent":"bad"}),
+        serde_json::json!({"defaultTabSize":0}),
+    ] {
+        let input = serde_json::json!({"slides":[{"elements":[{"type":"text","runs":[{"text":"Test","paragraph":paragraph}]}]}]});
+        assert!(crate::domains::templates::slide_templates::normalize::normalize(&input).is_err());
+    }
 }

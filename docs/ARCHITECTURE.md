@@ -518,8 +518,12 @@ global state or query-cache library.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
-  Annotate modes. The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
-  creation controls; existing shape annotations remain renderable. Forms, signatures, stamps,
+  Annotate modes through a mode dropdown. The top toolbar contains the pages sidebar and page
+  navigation; document controls and preview actions appear in the horizontally scrollable ribbon.
+  The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
+  creation controls; existing shape annotations remain renderable. The details-panel, download, and
+  more-actions controls sit at the right end of the ribbon in both modes; the annotation ribbon has
+  no separate comments or properties buttons. Forms, signatures, stamps,
   redaction, capture, print, security, attachments, and fullscreen controls remain disabled. Annotation snapshots are retained only in module memory by
   selected-document ID, restored when a document is reopened in the same browser session, and
   intentionally disappear on refresh. Signature persistence is disabled so the editor does not
@@ -1100,6 +1104,19 @@ sanitized error mapping. Client headers/query parameters cannot select another a
 asset, preview, Location, and Link URLs target the actual native namespace. Static and dynamic
 routes have explicit tests. Internal text/semantic/hybrid/filter/similar/by-ID/facet retrieval and
 finding-to-slide matching remain in-process capabilities; no public search endpoint was added.
+
+Embedded PowerPoint imports retain paragraph line spacing (points or percentage), before/after
+spacing, left/right margins, first-line/hanging indents, default tab size and aligned tab stops,
+including inherited settings and explicit zero overrides. The additive optional `runs[].paragraph`
+object belongs to the paragraph's first run; margins and tabs use slide pixels, point spacing uses
+typographic points, and percentages use multipliers. Inline styles and soft line breaks remain
+separate from paragraph boundaries. The shared SVG gallery/editor preview and edited text retain
+these properties, and native export writes them back to DrawingML. Existing saved imports/previews
+need re-import to recover previously discarded properties; no stored documents are rewritten.
+Legacy Diligence Studio conversion remains a separate implementation. Browser font metrics and
+fonts unavailable on the host can still change wrapping. Plate retains custom tab stops on edits,
+while its live HTML editing surface uses the default tab interval; SVG previews and PowerPoint
+export apply explicit stops.
 
 The embedded domain owns OOXML, normalization, JSON contracts, built-ins, catalog persistence,
 classification and retrieval rules. Adapters own Chromium/CDP, optional QuickLook, and bounded

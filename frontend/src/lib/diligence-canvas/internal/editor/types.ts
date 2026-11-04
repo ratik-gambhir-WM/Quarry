@@ -11,6 +11,7 @@ export type PlateTextLeaf = {
 };
 
 export type PlateParagraph = {
+  paragraph?: import("@/contracts/diligenceText").TextParagraph;
   align?: HorizontalAlign;
   children: PlateTextLeaf[];
   type: "p";

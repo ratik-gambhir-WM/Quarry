@@ -115,6 +115,7 @@ export interface ValidationIssue {
 }
 
 export interface NormalizedTextRun {
+  paragraph?: import("@/contracts/diligenceText").TextParagraph;
   text: string;
   bold: boolean;
   italic: boolean;

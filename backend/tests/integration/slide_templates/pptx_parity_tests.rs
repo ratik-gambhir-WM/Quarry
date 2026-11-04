@@ -19,12 +19,18 @@ fn imported_drawables_match_reference_typography_geometry_and_visibility() {
 }
 
 // JSON has one number type. Compare 1 and 1.0 numerically while enforcing exact
-// object keys, array ordering, and every compact field value.
+// object keys, array ordering, and every compact field value. Paragraph layout
+// intentionally extends the legacy oracle and has separate round-trip coverage.
 fn assert_reference_fields(actual: &Value, expected: &Value, path: &str) {
     match expected {
         Value::Object(values) => {
             assert_eq!(
-                actual.as_object().unwrap().keys().collect::<Vec<_>>(),
+                actual
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .filter(|key| key.as_str() != "paragraph")
+                    .collect::<Vec<_>>(),
                 values.keys().collect::<Vec<_>>(),
                 "{path}: object fields"
             );
