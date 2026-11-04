@@ -164,6 +164,22 @@ impl QuarryHttpClient {
         Ok(response)
     }
 
+    pub async fn post_pptx_stream(
+        &self,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> Result<reqwest::Response, String> {
+        let response = self.client.post(self.url(path)?)
+            .headers(self.headers.clone())
+            .header(reqwest::header::CONTENT_TYPE, super::templates::POWERPOINT_CONTENT_TYPE)
+            .body(bytes).send().await
+            .map_err(|_| "Template import could not be confirmed. It may have completed; refresh templates before trying again.".to_owned())?;
+        if !response.status().is_success() {
+            return Err(self.response_error(response).await);
+        }
+        Ok(response)
+    }
+
     pub async fn post_multipart(&self, path: &str, form: Form) -> Result<Value, String> {
         self.send_json(
             self.client

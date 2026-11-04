@@ -1,3 +1,4 @@
+import { Spinner } from "@/components/ui/spinner";
 import { useRef } from "react";
 
 import {
@@ -75,13 +76,14 @@ export function PptxTemplateImportButtons({
       />
       <Button
         aria-label="Import Slide Template"
+        aria-busy={activeMode === "single"}
         disabled={disabled}
         onClick={slideActions.openFileDialog}
         ref={slideTrigger}
         size="sm"
         type="button"
       >
-        <Icon className="size-3.5" name="upload" />
+        {activeMode === "single" ? <span aria-hidden="true"><Spinner className="size-3.5 motion-reduce:animate-none" /></span> : <Icon className="size-3.5" name="upload" />}
         <span className="hidden sm:inline">Import Slide Template</span>
         <span aria-hidden="true" className="sm:hidden">
           Slide
@@ -89,13 +91,14 @@ export function PptxTemplateImportButtons({
       </Button>
       <Button
         aria-label="Import Deck Template"
+        aria-busy={activeMode === "batch"}
         disabled={disabled}
         onClick={deckActions.openFileDialog}
         ref={deckTrigger}
         size="sm"
         type="button"
       >
-        <Icon className="size-3.5" name="upload" />
+        {activeMode === "batch" ? <span aria-hidden="true"><Spinner className="size-3.5 motion-reduce:animate-none" /></span> : <Icon className="size-3.5" name="upload" />}
         <span className="hidden sm:inline">Import Deck Template</span>
         <span aria-hidden="true" className="sm:hidden">
           Deck

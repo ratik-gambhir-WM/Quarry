@@ -59,3 +59,18 @@ impl SlideEmbedder for FixtureEmbedder {
         })
     }
 }
+
+/// A real bounded PNG without browser or provider dependencies.
+pub struct FixturePreview;
+impl TemplatePreviewGenerator for FixturePreview {
+    fn generate(&self, _: &[u8]) -> anyhow::Result<Option<GeneratedTemplatePreview>> {
+        let image = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255]));
+        let mut output = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut output, image::ImageOutputFormat::Png)?;
+        Ok(Some(GeneratedTemplatePreview {
+            bytes: output.into_inner(),
+            width: 1,
+            height: 1,
+        }))
+    }
+}

@@ -16,6 +16,7 @@ const DEFAULT_FONT: &str = "Aptos";
 pub(super) fn normalize(
     input: &Value,
 ) -> Result<(CanvasDocument, Vec<String>), SlideTemplateError> {
+    validate_paragraph_layouts(input)?;
     let mut warnings = Vec::new();
     let (presentation_node, slides_source): (&Map<String, Value>, Vec<&Value>) = match input {
         Value::Array(slides) => {
@@ -47,6 +48,46 @@ pub(super) fn normalize(
         _ => return Err(invalid_presentation()),
     };
     normalize_parts(presentation_node, slides_source, &mut warnings)
+}
+
+// Parse additive paragraph data before permissive legacy normalization so malformed
+// layout cannot silently disappear on export. Overall JSON complexity is bounded by the caller.
+fn validate_paragraph_layouts(input: &Value) -> Result<(), SlideTemplateError> {
+    let mut pending = vec![input];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Array(values) => pending.extend(values),
+            Value::Object(values) => {
+                if let Some(paragraph) = values.get("paragraph") {
+                    let p: super::TextParagraph = serde_json::from_value(paragraph.clone())
+                        .map_err(|_| invalid_presentation())?;
+                    let bounded = |v: f64| v.is_finite() && v.abs() <= 1_000_000.0;
+                    let spacing_valid = |s: &super::TextSpacing| {
+                        let (super::TextSpacing::Points(v) | super::TextSpacing::Percent(v)) = s;
+                        bounded(*v) && *v >= 0.0
+                    };
+                    if ![p.margin_left, p.margin_right, p.indent, p.default_tab_size]
+                        .into_iter()
+                        .flatten()
+                        .all(bounded)
+                        || p.default_tab_size.is_some_and(|v| v <= 0.0)
+                        || ![p.line_spacing, p.space_before, p.space_after]
+                            .iter()
+                            .flatten()
+                            .all(spacing_valid)
+                        || p.tab_stops.as_ref().is_some_and(|tabs| {
+                            tabs.len() > 1000 || tabs.iter().any(|tab| !bounded(tab.position))
+                        })
+                    {
+                        return Err(invalid_presentation());
+                    }
+                }
+                pending.extend(values.values());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn empty_map() -> Map<String, Value> {
@@ -341,6 +382,9 @@ fn text_runs(
         .flatten()
         .filter_map(Value::as_object)
         .map(|run| TextRun {
+            paragraph: run
+                .get("paragraph")
+                .and_then(|value| serde_json::from_value(value.clone()).ok()),
             text: string(run.get("text")).unwrap_or("").to_owned(),
             color: color(run.get("color"), fallback_color),
             font_face: string(run.get("fontFace"))
@@ -355,6 +399,7 @@ fn text_runs(
         .collect::<Vec<_>>();
     if runs.is_empty() && !fallback_text.is_empty() {
         runs.push(TextRun {
+            paragraph: None,
             text: fallback_text.to_owned(),
             color: fallback_color.to_owned(),
             font_face: fallback_font.to_owned(),

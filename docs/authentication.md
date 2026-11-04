@@ -118,6 +118,8 @@ introduced the deal-status CHECK with nine diligence stages. Schema 11 and older
 layouts require the same explicit reset; no status remapping or credential backfill runs.
 Schema 15 adds immutable image recovery checkpoints without changing authentication or graph scope;
 see [image recovery rollout](shared-deal-projects.md#schema-15-image-recovery).
+Schema 16 preserves authentication while renaming the template classification state table and
+activating durable background classification/embedding; see [classified import recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
 Stop old clients/writers and rebuild/reload matching web and desktop clients after reset.
 
 `users` replaces `api_key`/authorization-looking `role` with username, password_hash and optional
@@ -127,7 +129,7 @@ Helix is a recoverable projection, not an identity database.
 
 Deploy the backend and updated web/desktop clients together: old profile-only clients cannot
 authenticate against the new contract. There is no conversion from old profiles to passwords. Normal startup initializes an empty
-database, preserves and upgrades validated schema 12/13/14, or validates schema 15; other older/newer/forged
+database, preserves and upgrades validated schema 12/13/14/15, or validates schema 16; other older/newer/forged
 layouts fail without erasing records. See [notebook rollout and recovery](notebook-api.md#additive-schema-12--13-and-recovery)
 for backup, drained rollout and binary/backup rollback requirements. Use the
 explicit offline `reset_development --discard <absolute-disposable-database-path>` binary after

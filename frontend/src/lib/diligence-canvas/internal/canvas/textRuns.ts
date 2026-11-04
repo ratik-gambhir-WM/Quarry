@@ -29,10 +29,11 @@ export function normalizeTextRuns(
         typeof run.underline === "boolean"
           ? run.underline
           : (fallback?.underline ?? false),
+      ...(run.paragraph ? { paragraph: run.paragraph } : undefined),
       ...(run.breakLine ? { breakLine: true } : undefined),
     };
     const previous = normalized[normalized.length - 1];
-    if (previous && !previous.breakLine && sameTextRunStyle(previous, next)) {
+    if (previous && !next.paragraph && !previous.breakLine && sameTextRunStyle(previous, next)) {
       previous.text += next.text;
       if (next.breakLine) previous.breakLine = true;
     } else {
@@ -89,9 +90,11 @@ export function buildNormalizedTextRuns(
   const existingRuns =
     element.kind === "shape" ? element.textRuns : element.runs;
   const fallbackRun = existingRuns[0];
+  const paragraphs = existingRuns.filter((_, index) => index === 0 || existingRuns[index - 1].breakLine);
   const lines = text.split("\n");
 
   return lines.map((line, index) => ({
+    ...(paragraphs[index]?.paragraph ? { paragraph: paragraphs[index].paragraph } : undefined),
     bold: existingRuns[index]?.bold ?? fallbackRun?.bold ?? element.bold,
     breakLine: index < lines.length - 1,
     color:
@@ -121,6 +124,7 @@ export function buildRawTextRuns(element: JsonObject, text: string) {
     ? element.runs.filter(isRecord)
     : [];
   const fallbackRun = existingRuns[0];
+  const paragraphs = existingRuns.filter((_, index) => index === 0 || existingRuns[index - 1].breakLine === true);
   const lines = text.split("\n");
 
   return lines.map((line, index) => {
@@ -145,6 +149,7 @@ export function buildRawTextRuns(element: JsonObject, text: string) {
       : asBoolean(fallbackRun?.underline);
 
     return {
+      ...(paragraphs[index]?.paragraph ? { paragraph: paragraphs[index].paragraph } : undefined),
       ...(bold !== undefined ? { bold } : undefined),
       breakLine: index < lines.length - 1,
       ...(color ? { color } : undefined),

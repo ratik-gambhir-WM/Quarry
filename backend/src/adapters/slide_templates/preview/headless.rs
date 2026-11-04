@@ -13,7 +13,7 @@ pub struct HeadlessTemplatePreviewGenerator {
     max_dimension: u32,
     render_size: u32,
     timeout: Duration,
-    queue: Mutex<()>,
+    queue: [Mutex<()>; 4],
 }
 impl HeadlessTemplatePreviewGenerator {
     pub fn new(
@@ -31,7 +31,7 @@ impl HeadlessTemplatePreviewGenerator {
             max_dimension,
             render_size,
             timeout,
-            queue: Mutex::new(()),
+            queue: std::array::from_fn(|_| Mutex::new(())),
         }
     }
     fn render(
@@ -44,15 +44,23 @@ impl HeadlessTemplatePreviewGenerator {
                 !cancellation.is_some_and(RequestCancellation::is_cancelled),
                 "preview was cancelled"
             );
-            match self.queue.try_lock() {
-                Ok(guard) => break guard,
-                Err(std::sync::TryLockError::Poisoned(_)) => {
-                    anyhow::bail!("preview queue poisoned")
-                }
-                Err(std::sync::TryLockError::WouldBlock) => {
-                    thread::sleep(Duration::from_millis(20))
+            let mut acquired = None;
+            for slot in &self.queue {
+                match slot.try_lock() {
+                    Ok(guard) => {
+                        acquired = Some(guard);
+                        break;
+                    }
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        anyhow::bail!("preview queue poisoned")
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {}
                 }
             }
+            if let Some(guard) = acquired {
+                break guard;
+            }
+            thread::sleep(Duration::from_millis(20));
         };
         // Browser launch has Playwright's independent default startup budget. Each
         // subsequent navigation/locator/screenshot operation gets the configured budget.

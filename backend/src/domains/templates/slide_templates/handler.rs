@@ -17,6 +17,7 @@ impl IntoResponse for SlideTemplateError {
     fn into_response(self) -> Response {
         let status = match self.kind {
             FailureKind::Invalid => StatusCode::BAD_REQUEST,
+            FailureKind::Conflict => StatusCode::CONFLICT,
             FailureKind::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             FailureKind::Unsupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             FailureKind::NotFound => StatusCode::NOT_FOUND,
@@ -209,6 +210,12 @@ pub(super) async fn import_classified(
 ) -> SlideResult<Response> {
     import_inner(s, request, false, true).await
 }
+pub(super) async fn batch_import_classified(
+    State(s): State<EndpointState>,
+    request: Request,
+) -> SlideResult<Response> {
+    import_inner(s, request, true, true).await
+}
 async fn import_inner(
     s: EndpointState,
     request: Request,
@@ -227,10 +234,17 @@ async fn import_inner(
         return Err(invalid("A PowerPoint file is required."));
     }
     if batch {
-        let result = s.studio.batch(source, kind).await?;
+        let result = if classified {
+            s.studio.batch_classified(source, kind).await?
+        } else {
+            s.studio.batch(source, kind).await?
+        };
         let count = result.templates.len();
         let warnings = result.warnings.len();
         let mut response = json_response(&s.studio, StatusCode::CREATED, move || {
+            if classified {
+                return super::service::classified_batch_json(&result);
+            }
             let mut body = serde_json::to_value(&result).map_err(SlideTemplateError::internal)?;
             if let Some(templates) = body["templates"].as_array_mut() {
                 for (value, template) in templates.iter_mut().zip(&result.templates) {
@@ -259,7 +273,20 @@ async fn import_inner(
     let preview_status = result.preview_status;
     let warning_count = result.warnings.len();
     let response_id = template_id.clone();
-    let mut response=json_response(&s.studio,StatusCode::CREATED,move||Ok(if classified {serde_json::json!({"templateId":response_id,"templateJson":compact_document(&result.template_json),"warnings":result.warnings,"previewAvailable":preview_status==TemplatePreviewStatus::Ready,"retrieval":{"status":"ready"}})}else{compact_document(&result.template_json)})).await?;
+    let mut response = json_response(&s.studio, StatusCode::CREATED, move || {
+        Ok(if classified {
+            serde_json::json!({
+                "templateId": response_id,
+                "templateJson": compact_document(&result.template_json),
+                "warnings": result.warnings,
+                "previewAvailable": preview_status == TemplatePreviewStatus::Ready,
+                "retrieval": {"status": "pending", "embeddingStatus": "not_ready"},
+            })
+        } else {
+            compact_document(&result.template_json)
+        })
+    })
+    .await?;
     let location = format!(
         "{}/catalog/{}?appId=Quarry_WestMonroe",
         super::route::PREFIX,
@@ -418,6 +445,25 @@ pub(super) async fn asset(
     }
     Ok(private(response))
 }
+pub(super) async fn retry_processing(
+    State(s): State<EndpointState>,
+    Path(id): Path<String>,
+    request: Request,
+) -> SlideResult<Response> {
+    validate_id(&id)?;
+    query(request.uri(), request.headers(), &[])?;
+    headers(request.headers(), "application/json", 1024)?;
+    let input: serde_json::Value = serde_json::from_slice(&bytes(request, 1024).await?)
+        .map_err(|_| invalid("Retry requires an empty JSON object."))?;
+    if !input.as_object().is_some_and(|object| object.is_empty()) {
+        return Err(invalid("Retry requires an empty JSON object."));
+    }
+    let result = s.studio.retry_processing(id).await?;
+    Ok(private(
+        json_response(&s.studio, StatusCode::ACCEPTED, move || Ok(result)).await?,
+    ))
+}
+
 pub(super) async fn retrieval(
     State(s): State<EndpointState>,
     Path(id): Path<String>,

@@ -7,6 +7,7 @@ mod handler;
 mod json_contract;
 mod models;
 mod normalize;
+mod parallel;
 pub mod pptx;
 mod preview;
 mod providers;
@@ -25,3 +26,14 @@ pub use repository::{AppRegistration, SqliteTemplateRepository, StoredApp, Templ
 pub use retrieval::*;
 pub use service::{ExportService, ImportService, TEMPLATE_PREVIEW_PAGE_SIZE};
 pub(crate) const APP_ID: &str = repository::DEFAULT_APP_ID;
+
+pub(super) fn check_cancelled(cancellation: Option<&RequestCancellation>) -> SlideResult<()> {
+    if cancellation.is_some_and(RequestCancellation::is_cancelled) {
+        return Err(SlideTemplateError::new(
+            FailureKind::Cancelled,
+            "request_cancelled",
+            "The template import was cancelled.",
+        ));
+    }
+    Ok(())
+}

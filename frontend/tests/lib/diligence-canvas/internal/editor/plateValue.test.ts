@@ -36,6 +36,22 @@ const element: NormalizedTextElement = {
 };
 
 describe("Plate value adapters", () => {
+  it("preserves paragraph spacing and indents through an inline edit", () => {
+    const paragraph = { marginLeft: 24, indent: -12, spaceAfter: { unit: "points" as const, value: 6 } };
+    const source = { ...element, runs: [run("Alpha", { paragraph, breakLine: true }), run("Beta")] };
+    const value = toPlateValue(source);
+    value[0].children[0].text = "Edited";
+    const result = fromPlateValue(value, source);
+    expect(result.runs[0].paragraph).toEqual(paragraph);
+    expect(result.runs[1].paragraph).toBeUndefined();
+  });
+  it("keeps soft line breaks inside a spaced paragraph", () => {
+    const source = { ...element, runs: [run("First\ncontinued", { paragraph: { spaceAfter: { unit: "points" as const, value: 6 } } })] };
+    const value = toPlateValue(source);
+    expect(value).toHaveLength(1);
+    expect(fromPlateValue(value, source).runs).toEqual(source.runs);
+  });
+
   it("round-trips mixed inline formatting without collapsing adjacent styles", () => {
     const source: NormalizedTextElement = {
       ...element,

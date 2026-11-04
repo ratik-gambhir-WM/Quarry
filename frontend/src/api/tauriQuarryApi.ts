@@ -1,3 +1,7 @@
+import {
+  classifiedTemplateImportPath,
+  validateTemplateImportFile,
+} from "./classifiedTemplateImport";
 import { createDealMembershipApi } from "./dealMembershipApi";
 import { createNotebookApi, notebookEventReceiver } from "./notebookApi";
 import { sessionStore } from "../auth/sessionStore";
@@ -29,6 +33,8 @@ import type {
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
+  TemplateRetrieval,
+  TemplateProcessingRetry,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import { parseQueryEvent } from "./querySse";
@@ -302,12 +308,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       file,
       importMode: PptxTemplateImportMode,
     ): Promise<PptxTemplateImportResult> {
-      if (!file.name.toLowerCase().endsWith(".pptx")) {
-        throw new Error("Template imports require a .pptx file.");
-      }
+      validateTemplateImportFile(file);
       return transport.postMultipart<PptxTemplateImportResult>(
         await multipartFiles(
-          `/api/v1/templates/import?mode=${encodeURIComponent(importMode)}`,
+          classifiedTemplateImportPath(importMode),
           [file],
           [],
           "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -336,6 +340,15 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     listTemplatePreviews: (page) =>
       transport.get<TemplatePreviewPage>(
         `/api/v1/templates/previews?page=${encodeURIComponent(String(page))}`,
+      ),
+    getTemplateRetrieval: (templateId, includeEmbeddings = false) =>
+      transport.get<TemplateRetrieval>(
+        `/api/v1/templates/slide-templates/catalog/${encodeURIComponent(templateId)}/retrieval?metadata=true&embeddings=${includeEmbeddings}`,
+      ),
+    retryTemplateProcessing: (templateId) =>
+      transport.post<TemplateProcessingRetry>(
+        `/api/v1/templates/slide-templates/catalog/${encodeURIComponent(templateId)}/retrieval/retry`,
+        {},
       ),
     previewDealDocument: (dealId, relativePath) =>
       transport.post<DocumentPreviewResponse>(

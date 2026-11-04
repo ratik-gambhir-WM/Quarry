@@ -1,3 +1,4 @@
+import type { PptxTemplateImportMode } from "@/contracts/quarryApi";
 import {
   templateDisplayName,
   type DeliverableSlide,
@@ -6,6 +7,7 @@ import {
 import { PptxTemplateUploadEmptyState } from "../examples/c-file-upload-4";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
+import { Spinner } from "../ui/spinner";
 import { DeliverablesCarousel } from "./DeliverablesCarousel";
 import {
   useTemplatePreviewActions,
@@ -37,15 +39,19 @@ export function DeliverableTemplatesView({
   };
 
   return (
-    <div className="flex h-full min-h-[600px] flex-col">
+    <div className="relative flex h-full min-h-[600px] flex-col">
       <section
+        aria-busy={activeImportMode !== null}
         aria-labelledby="deliverable-template-gallery"
         className="flex min-h-0 flex-1 flex-col"
       >
         <h2 className="sr-only" id="deliverable-template-gallery">
           Available slide templates
         </h2>
-        <div className="flex min-h-0 flex-1 items-center justify-center py-6 text-center">
+        <div
+          inert={activeImportMode !== null}
+          className="flex min-h-0 flex-1 items-center justify-center py-6 text-center"
+        >
           {previewState.status === "loading" ? (
             <TemplateCarouselSkeleton />
           ) : null}
@@ -66,16 +72,6 @@ export function DeliverableTemplatesView({
           previewState.slides.length === 0 ? (
             <div className="flex w-full flex-col items-center gap-3">
               <TemplateActionFeedback onRefresh={reload} />
-              {activeOperation?.type === "pptxImport" ? (
-                <p
-                  aria-live="polite"
-                  className="text-sm text-muted"
-                  role="status"
-                >
-                  Importing{" "}
-                  {activeOperation.importMode === "single" ? "slide" : "deck"}…
-                </p>
-              ) : null}
               {activeOperation?.type === "reload" ? (
                 <p
                   aria-live="polite"
@@ -99,16 +95,6 @@ export function DeliverableTemplatesView({
               {activeOperation?.type === "delete" ? (
                 <p className="sr-only" role="status">
                   Deleting {templateDisplayName(activeOperation.templateId)}
-                </p>
-              ) : null}
-              {activeOperation?.type === "pptxImport" ? (
-                <p
-                  aria-live="polite"
-                  className="text-sm text-muted"
-                  role="status"
-                >
-                  Importing{" "}
-                  {activeOperation.importMode === "single" ? "slide" : "deck"}…
                 </p>
               ) : null}
               {activeOperation?.type === "reload" ? (
@@ -137,6 +123,47 @@ export function DeliverableTemplatesView({
           ) : null}
         </div>
       </section>
+      {activeOperation?.type === "pptxImport" ? (
+        <TemplateImportProgress
+          mode={activeOperation.importMode}
+          phase={activeOperation.phase}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function TemplateImportProgress({ mode, phase }: {
+  mode: PptxTemplateImportMode;
+  phase: "saving" | "refreshing";
+}) {
+  const subject = mode === "single" ? "slide" : "deck";
+  const saving = phase === "saving";
+  return (
+    <div className="template-import-progress absolute inset-0 z-10 flex items-center justify-center bg-surface/90 px-6">
+      <div
+        aria-label={saving ? `Importing ${subject}` : "Refreshing template gallery"}
+        aria-live="polite"
+        className="flex w-full max-w-[24rem] flex-col items-center gap-4 rounded-xl bg-surface px-6 py-5 text-center"
+        role="status"
+      >
+        <span
+          aria-hidden="true"
+          className="flex size-14 items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest text-primary shadow-sm dark:shadow-none"
+        >
+          <Spinner className="size-6 motion-reduce:animate-none" />
+        </span>
+        <div className="space-y-1.5">
+          <p className="text-sm font-semibold text-text-main">
+            {saving ? `Importing ${subject}…` : "Refreshing gallery…"}
+          </p>
+          <p className="text-xs leading-relaxed text-muted">
+            {saving
+              ? "Preparing slide previews and saving your templates."
+              : "Your templates are saved. Updating the gallery."}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

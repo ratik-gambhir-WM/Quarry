@@ -51,6 +51,9 @@ impl Element {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextRun {
+    /// Paragraph layout is carried by its first run; lengths are slide pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paragraph: Option<TextParagraph>,
     pub text: String,
     pub color: String,
     pub font_face: String,
@@ -63,6 +66,44 @@ pub struct TextRun {
     pub underline: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub break_line: bool,
+}
+
+/// Source paragraph geometry, independent of inline font styling.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextParagraph {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_left: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_right: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_tab_size: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_stops: Option<Vec<TextTabStop>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<TextSpacing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_before: Option<TextSpacing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_after: Option<TextSpacing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<HorizontalAlign>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextTabStop {
+    pub position: f64,
+    pub align: HorizontalAlign,
+}
+
+/// Point spacing stays in typographic points; percent is a line-height multiplier.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "unit", content = "value", rename_all = "camelCase")]
+pub enum TextSpacing {
+    Points(f64),
+    Percent(f64),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

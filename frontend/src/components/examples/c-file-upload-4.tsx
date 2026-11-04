@@ -1,3 +1,4 @@
+import { Spinner } from "@/components/ui/spinner";
 import { UploadIcon } from "lucide-react";
 import { useRef } from "react";
 
@@ -114,12 +115,13 @@ export function PptxTemplateUploadEmptyState({
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button
+              aria-busy={activeMode === "single"}
               disabled={disabled}
               onClick={openFileDialog}
               ref={slideTrigger}
               type="button"
             >
-              <UploadIcon className="size-4" />
+              {activeMode === "single" ? <span aria-hidden="true"><Spinner className="size-4 motion-reduce:animate-none" /></span> : <UploadIcon aria-hidden="true" className="size-4" />}
               Import Slide Template
             </Button>
             <input
@@ -131,12 +133,13 @@ export function PptxTemplateUploadEmptyState({
               })}
             />
             <Button
+              aria-busy={activeMode === "batch"}
               disabled={disabled}
               onClick={deckActions.openFileDialog}
               ref={deckTrigger}
               type="button"
             >
-              <UploadIcon className="size-4" />
+              {activeMode === "batch" ? <span aria-hidden="true"><Spinner className="size-4 motion-reduce:animate-none" /></span> : <UploadIcon aria-hidden="true" className="size-4" />}
               Import Deck Template
             </Button>
           </div>

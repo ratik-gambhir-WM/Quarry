@@ -1,3 +1,4 @@
+import { parseTextParagraph } from "@/contracts/diligenceText";
 import {
   DEFAULT_FONT_FACE,
   DEFAULT_HEIGHT_PX,
@@ -441,6 +442,7 @@ function normalizeNativeTextRuns(
       fontFace: asString(run.fontFace) || fallbackFontFace,
       fontSize: coerceNumber(run.fontSize, fallbackFontSize),
       breakLine: coerceBoolean(run.breakLine) || undefined,
+      paragraph: parseTextParagraph(run.paragraph),
     }));
 }
 

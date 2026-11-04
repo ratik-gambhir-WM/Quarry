@@ -35,6 +35,12 @@ pub(crate) fn routes(studio: Arc<SlideTemplates>) -> Router {
             )),
         )
         .route(
+            "/batch-import/classified",
+            post(handler::batch_import_classified).layer(DefaultBodyLimit::max(
+                super::super::model::MAX_PPTX_TEMPLATE_IMPORT_BYTES,
+            )),
+        )
+        .route(
             "/import/classified",
             post(handler::import_classified).layer(DefaultBodyLimit::max(
                 super::super::model::MAX_PPTX_TEMPLATE_IMPORT_BYTES,
@@ -45,6 +51,10 @@ pub(crate) fn routes(studio: Arc<SlideTemplates>) -> Router {
         .route("/catalog/{id}", get(handler::get).delete(handler::delete))
         .route("/catalog/{id}/preview", get(handler::preview))
         .route("/catalog/{id}/retrieval", get(handler::retrieval))
+        .route(
+            "/catalog/{id}/retrieval/retry",
+            post(handler::retry_processing).layer(DefaultBodyLimit::max(1024)),
+        )
         .route("/import/{id}", get(handler::get))
         .route("/import/{id}/assets/{asset}", get(handler::asset))
         .with_state(EndpointState {

@@ -1,3 +1,5 @@
+mod batch_tests;
+mod retry_tests;
 use crate::{
     domains::templates::{self, slide_templates::*},
     slide_template_test_support as support,
@@ -53,7 +55,13 @@ async fn cross_origin_export_exposes_headers_required_by_the_browser_adapter() {
     let exposed = response.headers()["access-control-expose-headers"]
         .to_str()
         .unwrap();
-    for required in ["content-disposition", "x-powerpoint-warning-count"] {
+    for required in [
+        "content-disposition",
+        "x-powerpoint-warning-count",
+        "x-template-id",
+        "x-template-preview-status",
+        "x-imported-template-count",
+    ] {
         assert!(exposed
             .split(',')
             .any(|header| header.trim().eq_ignore_ascii_case(required)));
@@ -324,72 +332,138 @@ async fn projection_failure_preserves_the_canonical_import_without_fallback() {
     assert_eq!(reopened.list(None).unwrap(), saved);
 }
 
+struct GatedClassifier {
+    release: Arc<tokio::sync::Semaphore>,
+}
+impl SlideClassifier for GatedClassifier {
+    fn classify<'a>(
+        &'a self,
+        input: &'a SlideClassificationInput,
+    ) -> ProviderFuture<'a, SlideRetrievalMetadata> {
+        Box::pin(async move {
+            assert!(input.preview.is_some(), "worker must read the saved PNG");
+            self.release.acquire().await.unwrap().forget();
+            support::FixtureClassifier.classify(input).await
+        })
+    }
+}
+
 #[tokio::test]
-async fn classified_http_waits_for_both_embeddings_and_keeps_failed_artifacts_unpublished() {
-    for failure in [false, true] {
-        let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
-        let classifier = Arc::new(SlideClassificationService::new(
-            SlideClassificationServiceOptions {
-                classifier: Arc::new(support::FixtureClassifier),
-                classification_model: "fixture-classifier".into(),
-                embedder: Arc::new(support::FixtureEmbedder(failure)),
-                embedding_dimensions: Some(2),
-                embedding_max_text_bytes: 32_000,
-                embedding_model: "fixture-embedder".into(),
-                input_limits: Default::default(),
-                repository: repository.clone(),
-            },
-        ));
-        let app = routes(Arc::new(SlideTemplates::new(
-            repository.clone(),
-            Arc::new(DisabledTemplatePreviewGenerator),
-            Some(classifier),
-            None,
-            true,
-        )));
-        let (status, body) = send(
+async fn classified_http_returns_saved_json_and_preview_before_classification_finishes() {
+    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let classifier = Arc::new(SlideClassificationService::new(
+        SlideClassificationServiceOptions {
+            classifier: Arc::new(GatedClassifier {
+                release: release.clone(),
+            }),
+            classification_model: "fixture-classifier".into(),
+            embedder: Arc::new(support::FixtureEmbedder(false)),
+            embedding_dimensions: Some(2),
+            embedding_max_text_bytes: 32_000,
+            embedding_model: "fixture-embedder".into(),
+            input_limits: Default::default(),
+            repository: repository.clone(),
+        },
+    ));
+    let studio = Arc::new(SlideTemplates::new(
+        repository.clone(),
+        Arc::new(support::FixturePreview),
+        Some(classifier),
+        None,
+        true,
+    ));
+    let app = routes(studio.clone());
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(2),
+        send(
             &app,
             Request::post("/api/v1/templates/slide-templates/import/classified")
                 .header("content-type", PPTX)
                 .body(Body::from(pptx::write(&document()).unwrap()))
                 .unwrap(),
-        )
-        .await;
-        assert_eq!(
-            status,
-            if failure {
-                StatusCode::GATEWAY_TIMEOUT
-            } else {
-                StatusCode::CREATED
+        ),
+    )
+    .await
+    .expect("HTTP must not wait for the gated provider");
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["retrieval"]["status"], "pending");
+    assert_eq!(body["previewAvailable"], true);
+    let id = body["templateId"].as_str().unwrap();
+    assert!(repository.find_by_id(id).unwrap().is_some());
+    assert!(repository.find_preview(id).unwrap().is_some());
+    let state = repository.find_slide_classification(id).unwrap().unwrap();
+    assert!(state.metadata.is_none());
+    assert!(state.subject_vector.is_none());
+    // Progress is visible without requesting metadata or enabling vector inspection.
+    let (status, progress) = send(
+        &app,
+        Request::get(format!(
+            "/api/v1/templates/slide-templates/catalog/{id}/retrieval"
+        ))
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(matches!(
+        progress["classification"]["status"].as_str(),
+        Some("pending" | "processing")
+    ));
+    assert_eq!(progress["embedding"]["status"], "not_ready");
+    release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let state = repository.find_slide_classification(id).unwrap().unwrap();
+            if state.embedding_status == "ready" {
+                break;
             }
-        );
-        let id = repository.list(None).unwrap()[0]
-            .template
-            .template_id
-            .clone();
-        if failure {
-            // Failure recording is offloaded on cancellation/error; no successful artifacts may be visible.
-            let state = repository.find_slide_classification(&id).unwrap().unwrap();
-            assert!(state.metadata.is_none());
-            assert!(state.subject_vector.is_none());
-            assert!(state.capability_vector.is_none());
-            assert!(repository
-                .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
-                .unwrap()
-                .is_empty());
-        } else {
-            assert_eq!(body["retrieval"]["status"], "ready");
-            let state = repository.find_slide_classification(&id).unwrap().unwrap();
-            assert_eq!(state.embedding_status, "ready");
-            assert_eq!(state.subject_vector.as_ref().unwrap().len(), 2);
-            assert_eq!(state.capability_vector.as_ref().unwrap().len(), 2);
-            let (status,body)=send(&app,Request::get(format!("/api/v1/templates/slide-templates/catalog/{id}/retrieval?metadata=true&embeddings=true")).body(Body::empty()).unwrap()).await;
-            assert_eq!(status, StatusCode::OK);
-            assert!(body["metadata"].is_object());
-            assert_eq!(body["retrievalStatus"], "ready");
-            assert_eq!(body["embeddings"]["status"], "ready");
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    }
+    })
+    .await
+    .unwrap();
+    let state = repository.find_slide_classification(id).unwrap().unwrap();
+    assert_eq!(state.status, "ready");
+    assert_eq!(state.subject_vector.as_ref().unwrap().len(), 2);
+    assert_eq!(state.capability_vector.as_ref().unwrap().len(), 2);
+    studio.shutdown();
+    studio.stop_worker().await;
+}
+
+#[tokio::test]
+async fn classified_import_does_not_acknowledge_saved_preview_when_preview_generation_fails() {
+    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let classifier = Arc::new(SlideClassificationService::new(
+        SlideClassificationServiceOptions {
+            classifier: Arc::new(support::FixtureClassifier),
+            classification_model: "fixture".into(),
+            embedder: Arc::new(support::FixtureEmbedder(false)),
+            embedding_dimensions: Some(2),
+            embedding_max_text_bytes: 32_000,
+            embedding_model: "fixture".into(),
+            input_limits: Default::default(),
+            repository: repository.clone(),
+        },
+    ));
+    let studio = Arc::new(SlideTemplates::new(
+        repository.clone(),
+        Arc::new(DisabledTemplatePreviewGenerator),
+        Some(classifier),
+        None,
+        false,
+    ));
+    let app = routes(studio);
+    let (status, _) = send(
+        &app,
+        Request::post("/api/v1/templates/slide-templates/import/classified")
+            .header("content-type", PPTX)
+            .body(Body::from(pptx::write(&document()).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(repository.list(None).unwrap().is_empty());
 }
 
 #[tokio::test]

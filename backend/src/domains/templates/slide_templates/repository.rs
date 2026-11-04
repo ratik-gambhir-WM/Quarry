@@ -17,6 +17,17 @@ const MAX_STORED_PREVIEW_DIMENSION: u32 = 10_000;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 /// Persistence boundary used by both import and export services.
 pub trait TemplateRepository: Send + Sync {
+    /// Atomically reset only a terminal failed stage in this app's saved template.
+    fn retry_failed_slide_processing(
+        &self,
+        id: &str,
+    ) -> RepositoryResult<RetrySlideProcessingOutcome>;
+    /// Publish every slide and its pending job in the same transaction.
+    fn insert_many_with_pending_classification_cancellable(
+        &self,
+        records: &[(TemplateInsert, PendingSlideClassification)],
+        cancellation: Option<&super::RequestCancellation>,
+    ) -> RepositoryResult<()>;
     fn insert_with_pending_classification(
         &self,
         record: &TemplateInsert,
@@ -114,23 +125,16 @@ pub trait TemplateRepository: Send + Sync {
         check_publication(cancellation)?;
         self.insert_many(records)
     }
-    fn insert_with_processing_classification_cancellable(
+    fn insert_with_pending_classification_cancellable(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
         check_publication(cancellation)?;
-        self.insert_with_processing_classification(record, pending)
+        self.insert_with_pending_classification(record, pending)
     }
-    fn complete_slide_processing_cancellable(
-        &self,
-        result: &CompleteSlideProcessing,
-        cancellation: Option<&super::RequestCancellation>,
-    ) -> RepositoryResult<()> {
-        check_publication(cancellation)?;
-        self.complete_slide_processing(result)
-    }
+
     /// Inserts a group of templates and their related records atomically.
     fn insert_many(&self, records: &[TemplateInsert]) -> RepositoryResult<()>;
     /// Updates a template and adds newly externalized assets atomically.
@@ -186,6 +190,19 @@ impl SqliteTemplateRepository {
     }
 }
 impl TemplateRepository for SqliteTemplateRepository {
+    fn retry_failed_slide_processing(
+        &self,
+        id: &str,
+    ) -> RepositoryResult<RetrySlideProcessingOutcome> {
+        repository_boundary(|| Self::retry_failed_slide_processing(self, id))
+    }
+    fn insert_many_with_pending_classification_cancellable(
+        &self,
+        records: &[(TemplateInsert, PendingSlideClassification)],
+        cancellation: Option<&super::RequestCancellation>,
+    ) -> RepositoryResult<()> {
+        repository_boundary(|| self.insert_classifications(records, cancellation))
+    }
     fn insert_with_pending_classification(
         &self,
         record: &TemplateInsert,
@@ -385,25 +402,17 @@ impl TemplateRepository for SqliteTemplateRepository {
             })
         })
     }
-    fn insert_with_processing_classification_cancellable(
+    fn insert_with_pending_classification_cancellable(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.insert_classification(record, pending, true, cancellation)
+            self.insert_classification(record, pending, false, cancellation)
         })
     }
-    fn complete_slide_processing_cancellable(
-        &self,
-        result: &CompleteSlideProcessing,
-        cancellation: Option<&super::RequestCancellation>,
-    ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.publish(&result.classification, Some(result), cancellation)
-        })
-    }
+
     fn update(&self, template: &StoredTemplate, assets: &[TemplateAsset]) -> RepositoryResult<()> {
         repository_boundary(|| -> anyhow::Result<_> {
             ensure!(

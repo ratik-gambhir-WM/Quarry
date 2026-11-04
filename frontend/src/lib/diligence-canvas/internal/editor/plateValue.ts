@@ -1,3 +1,4 @@
+import { parseTextParagraph } from "@/contracts/diligenceText";
 import { DEFAULT_FONT_FACE } from "../shared/PowerpointConstants";
 import type {
   HorizontalAlign,
@@ -43,22 +44,22 @@ function plateValueFromRuns(
 ): PlateValue {
   const paragraphs: PlateParagraph[] = [];
   let leaves: PlateTextLeaf[] = [];
+  let paragraph: NormalizedTextRun["paragraph"];
 
   const finishParagraph = () => {
     paragraphs.push({
-      align,
+      align: paragraph?.align ?? align,
+      ...(paragraph ? { paragraph } : undefined),
       children: leaves.length ? leaves : [{ text: "" }],
       type: "p",
     });
     leaves = [];
+    paragraph = undefined;
   };
 
   runs.forEach((run) => {
-    const parts = run.text.replace(/\r\n?/gu, "\n").split("\n");
-    parts.forEach((part, index) => {
-      leaves.push(toPlateLeaf({ ...run, text: part }));
-      if (index < parts.length - 1) finishParagraph();
-    });
+    if (run.paragraph) paragraph = run.paragraph;
+    leaves.push(toPlateLeaf({ ...run, text: run.text.replace(/\r\n?/gu, "\n") }));
     if (run.breakLine) finishParagraph();
   });
 
@@ -94,8 +95,13 @@ export function fromPlateValue(
 
     const leaves = collectLeaves(paragraph?.children, options.strict ?? false);
     const sourceLeaves = leaves.length ? leaves : [{ text: "" }];
-    sourceLeaves.forEach((leaf) => {
+    const layout = parseTextParagraph(paragraph?.paragraph);
+    if (layout?.align && isHorizontalAlign(paragraph?.align)) {
+      layout.align = paragraph.align;
+    }
+    sourceLeaves.forEach((leaf, leafIndex) => {
       runs.push({
+        ...(leafIndex === 0 ? { paragraph: layout } : undefined),
         bold: asBoolean(leaf.bold) ?? fallback.bold,
         color: normalizeColor(leaf.color, fallback.color),
         fontFace: asNonEmptyString(leaf.fontFamily) ?? fallback.fontFace,

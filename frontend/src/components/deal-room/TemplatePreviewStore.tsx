@@ -22,7 +22,7 @@ import {
 
 type ActiveOperation =
   | { type: "delete"; templateId: string }
-  | { type: "pptxImport"; importMode: PptxTemplateImportMode }
+  | { type: "pptxImport"; importMode: PptxTemplateImportMode; phase: "saving" | "refreshing" }
   | { type: "reload" };
 
 type ActionFeedback = {
@@ -239,7 +239,7 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
     const version = ++operationVersion;
     previewState = {
       ...previewState,
-      activeOperation: { type: "pptxImport", importMode },
+      activeOperation: { type: "pptxImport", importMode, phase: "saving" },
       feedback: null,
     };
     notify();
@@ -262,6 +262,12 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
       notify();
       return;
     }
+
+    previewState = {
+      ...previewState,
+      activeOperation: { type: "pptxImport", importMode, phase: "refreshing" },
+    };
+    notify();
 
     try {
       const slides = await loadTemplatePreviews();
@@ -331,8 +337,8 @@ function pptxImportCountMessage(result: PptxTemplateImportResult) {
 
 function pptxImportSuccessMessage(result: PptxTemplateImportResult) {
   const imported = pptxImportCountMessage(result);
-  if (result.warningCount === 0) return imported;
-  return `${imported} The import completed with ${result.warningCount} ${result.warningCount === 1 ? "warning" : "warnings"}. Templates without generated previews may not appear in this preview-only gallery.`;
+  if (result.warningCount === 0) return `${imported} Classification continues in the background.`;
+  return `${imported} The import completed with ${result.warningCount} ${result.warningCount === 1 ? "warning" : "warnings"}. Classification continues in the background.`;
 }
 
 function pptxImportErrorMessage(
@@ -340,7 +346,7 @@ function pptxImportErrorMessage(
   importMode: PptxTemplateImportMode,
 ) {
   const message = error instanceof Error ? error.message : "";
-  if (message.includes("Use Import Deck Template instead")) {
+  if (message.includes("Use Import Deck Template instead") || message.includes("must contain exactly one slide")) {
     return "This PowerPoint contains multiple slides. Use Import Deck Template instead.";
   }
   if (message.includes("Template import could not be confirmed")) {

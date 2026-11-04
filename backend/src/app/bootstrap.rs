@@ -423,6 +423,7 @@ async fn build_templates(
             "Helix template reconciliation failed; canonical SQLite records were preserved".into(),
         )
     })?;
+    embedded.start_worker();
     Ok((
         Arc::new(TemplateService::embedded(embedded.clone())),
         Some(embedded),

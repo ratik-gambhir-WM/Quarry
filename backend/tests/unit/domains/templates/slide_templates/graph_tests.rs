@@ -20,14 +20,21 @@ impl SlideEmbedder for Embedder {
 }
 async fn record() -> TemplateProjectionRecord {
     let repository = Arc::new(support::repository(Path::new(":memory:")).unwrap());
-    let importer = ImportService::new(repository.clone());
+    let importer = ImportService::with_preview_generator(
+        repository.clone(),
+        Arc::new(support::FixturePreview),
+    );
     let source = include_bytes!("../../../../fixtures/slide_templates/pptx/styled.pptx");
-    let (_, job) = importer
-        .prepare_import_v2_cancellable(
+    importer
+        .queue_classified_import(
             source,
             TemplateKind::Diagram,
             &RequestCancellation::default(),
         )
+        .unwrap();
+    let job = repository
+        .claim_next_slide_classification("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .unwrap()
         .unwrap();
     let classifier = SlideClassificationService::new(SlideClassificationServiceOptions {
         classifier: Arc::new(Classifier),

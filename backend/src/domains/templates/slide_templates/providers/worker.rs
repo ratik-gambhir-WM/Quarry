@@ -1,4 +1,4 @@
-//! Dormant compatibility worker. The server's import v2 path processes slides synchronously.
+//! Durable, bounded classification and embedding worker for saved slide imports.
 
 use super::super::{
     retrieval::{SlideClassificationJob, SlideEmbeddingJob},
@@ -30,6 +30,9 @@ pub struct SlideClassificationWorkerOptions {
     pub random: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub repository: Arc<dyn TemplateRepository>,
     pub service: Arc<SlideClassificationService>,
+    pub import: Arc<super::super::ImportService>,
+    pub projection: Option<Arc<super::super::graph::TemplateGraph>>,
+    pub mutations: Arc<tokio::sync::Mutex<()>>,
 }
 
 pub struct SlideClassificationWorker {
@@ -82,11 +85,15 @@ impl SlideClassificationWorker {
             worker.run().await;
         }));
     }
-    /// Stop claiming jobs, then cancel provider futures after the bounded drain.
-    pub async fn stop(&self, drain_timeout: Duration) {
+    /// Stop new claims immediately; in-flight jobs can still drain.
+    pub fn request_stop(&self) {
         self.stopping.store(true, Ordering::Release);
         self.polling.store(false, Ordering::Release);
         self.wake.notify_one();
+    }
+    /// Stop claiming jobs, then cancel provider futures after the bounded drain.
+    pub async fn stop(&self, drain_timeout: Duration) {
+        self.request_stop();
         let task = self.task.lock().ok().and_then(|mut task| task.take());
         if let Some(mut task) = task {
             if tokio::time::timeout(drain_timeout, &mut task)
@@ -194,28 +201,48 @@ impl SlideClassificationWorker {
         } else {
             "embedding"
         };
+        let maximum = if classification {
+            self.options.classification_max_attempts
+        } else {
+            self.options.embedding_max_attempts
+        };
+        let timeout = if classification {
+            self.options.classification_timeout
+        } else {
+            self.options.embedding_timeout
+        };
         let operation = async {
-            match &work {
-                Work::Classification(job) => self.options.service.classify(job).await,
-                Work::Embedding(job) => self.options.service.embed(job).await,
+            // Expired leases also consume the bounded attempt budget.
+            if attempt > maximum {
+                return Err(
+                    SlideProviderError::new(format!("{stage}_attempts_exhausted"), false).into(),
+                );
+            }
+            match work {
+                Work::Classification(job) => {
+                    if job.preview.is_none() {
+                        Err(
+                            SlideProviderError::new("classification_preview_unavailable", false)
+                                .into(),
+                        )
+                    } else {
+                        self.options.service.classify(job).await
+                    }
+                }
+                Work::Embedding(job) => self.options.service.embed(&job).await,
             }
         };
         let result = if *cancelled.borrow() {
             Err(SlideProviderError::new(format!("{stage}_timeout"), true).into())
         } else {
             tokio::select! {
-                result=operation=>result,
+                result=tokio::time::timeout(timeout, operation)=>result.unwrap_or_else(|_| Err(SlideProviderError::new(format!("{stage}_timeout"),true).into())),
                 _=cancelled.changed()=>Err(SlideProviderError::new(format!("{stage}_timeout"),true).into()),
             }
         };
         if let Err(error) = result {
             let provider = error.downcast_ref::<SlideProviderError>();
-            let maximum = if classification {
-                self.options.classification_max_attempts
-            } else {
-                self.options.embedding_max_attempts
-            };
-            let retry = if provider.is_some_and(|error| error.retryable) && attempt < maximum {
+            let retry = if provider.is_none_or(|error| error.retryable) && attempt < maximum {
                 Some(self.retry_at(attempt))
             } else {
                 None
@@ -224,6 +251,7 @@ impl SlideClassificationWorker {
             let code = provider.map_or(fallback.as_str(), |error| error.code.as_str());
             let repository = self.options.repository.clone();
             let code = code.to_owned();
+            let id = id.clone();
             let recorded = tokio::task::spawn_blocking(move || {
                 if classification {
                     repository.record_slide_classification_failure(&id, &code, retry.as_deref())
@@ -237,6 +265,25 @@ impl SlideClassificationWorker {
             if let Err(error) = recorded {
                 let _ = error;
                 tracing::warn!("classification worker could not record failure");
+            }
+        }
+        if let Some(projection) = &self.options.projection {
+            // Serialize the snapshot + graph write with HTTP deletion/publication.
+            let _mutation = self.options.mutations.lock().await;
+            let import = self.options.import.clone();
+            let record = tokio::task::spawn_blocking(move || import.projection_record(&id)).await;
+            match record {
+                Ok(Ok(Some(record))) => {
+                    if !matches!(
+                        tokio::time::timeout(Duration::from_secs(10), projection.upsert(record))
+                            .await,
+                        Ok(Ok(()))
+                    ) {
+                        tracing::warn!("classification saved; template projection failed and will reconcile on restart");
+                    }
+                }
+                Ok(Ok(None)) => {} // Deleted while the provider was running.
+                _ => tracing::warn!("classification worker could not read projection record"),
             }
         }
     }
@@ -254,3 +301,7 @@ fn iso(value: DateTime<Utc>) -> String {
 fn chrono_duration(value: Duration) -> chrono::Duration {
     chrono::Duration::milliseconds(value.as_millis().min(i64::MAX as u128) as i64)
 }
+
+#[cfg(test)]
+#[path = "../../../../../tests/unit/domains/templates/slide_templates/providers/worker_tests.rs"]
+mod tests;

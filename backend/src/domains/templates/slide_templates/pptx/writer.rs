@@ -5,7 +5,8 @@ use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::super::{
     ArrowType, CanvasDocument, DashStyle, ElbowDirection, Element, HorizontalAlign, ImageCrop,
-    ImageElement, LineElement, LineType, ShapeElement, TextElement, TextRun, VerticalAlign,
+    ImageElement, LineElement, LineType, ShapeElement, TextElement, TextParagraph, TextRun,
+    TextSpacing, VerticalAlign,
 };
 
 const EMUS_PER_PIXEL: f64 = 9_525.0;
@@ -413,6 +414,7 @@ fn text_body(text: &str, runs: &[TextRun], options: TextBodyOptions<'_>) -> Stri
     let margin = points_to_emu(options.padding);
     let effective_runs = if runs.is_empty() {
         vec![TextRun {
+            paragraph: None,
             text: text.to_owned(),
             color: options.color.to_owned(),
             font_face: options.font_face.to_owned(),
@@ -426,19 +428,29 @@ fn text_body(text: &str, runs: &[TextRun], options: TextBodyOptions<'_>) -> Stri
         runs.to_vec()
     };
     let mut body = format!(
-        r#"<p:txBody><a:bodyPr wrap="square" lIns="{margin}" tIns="{margin}" rIns="{margin}" bIns="{margin}" anchor="{anchor}"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="{align}"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft></a:pPr>"#
+        r#"<p:txBody><a:bodyPr wrap="square" lIns="{margin}" tIns="{margin}" rIns="{margin}" bIns="{margin}" anchor="{anchor}"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p>"#
     );
+    body.push_str(&paragraph_xml(
+        effective_runs
+            .first()
+            .and_then(|run| run.paragraph.as_ref()),
+        align,
+    ));
     for (index, run) in effective_runs.iter().enumerate() {
         for (line_index, line) in run.text.split('\n').enumerate() {
             if line_index > 0 {
-                write!(body, r#"</a:p><a:p><a:pPr algn="{align}"/>"#).ok();
+                body.push_str("<a:br/>");
             }
             write!(body, r#"<a:r><a:rPr lang="en-US" sz="{}" b="{}" i="{}" u="{}"><a:solidFill><a:srgbClr val="{}"/></a:solidFill><a:latin typeface="{}"/></a:rPr><a:t>{}</a:t></a:r>"#,
             (run.font_size * 100.0).round() as i64, u8::from(run.bold), u8::from(run.italic), if run.underline { "sng" } else { "none" }, safe_color(&run.color, options.color), xml_escape(&run.font_face), xml_escape(line)
         ).ok();
         }
         if run.break_line && index + 1 < effective_runs.len() {
-            write!(body, r#"</a:p><a:p><a:pPr algn="{align}"/>"#).ok();
+            body.push_str("</a:p><a:p>");
+            body.push_str(&paragraph_xml(
+                effective_runs[index + 1].paragraph.as_ref(),
+                align,
+            ));
         }
     }
     write!(
@@ -448,6 +460,77 @@ fn text_body(text: &str, runs: &[TextRun], options: TextBodyOptions<'_>) -> Stri
     )
     .ok();
     body
+}
+
+fn paragraph_xml(paragraph: Option<&TextParagraph>, fallback_align: &str) -> String {
+    let default = TextParagraph::default();
+    let p = paragraph.unwrap_or(&default);
+    let align = p.align.map_or(fallback_align, |a| match a {
+        HorizontalAlign::Left => "l",
+        HorizontalAlign::Center => "ctr",
+        HorizontalAlign::Right => "r",
+    });
+    let mut xml = format!(r#"<a:pPr algn="{align}""#);
+    for (name, value) in [
+        ("marL", p.margin_left),
+        ("marR", p.margin_right),
+        ("indent", p.indent),
+        ("defTabSz", p.default_tab_size),
+    ] {
+        if let Some(value) = value {
+            write!(xml, r#" {name}="{}""#, px_to_emu(value)).ok();
+        }
+    }
+    xml.push('>');
+    for (tag, spacing) in [
+        ("lnSpc", &p.line_spacing),
+        ("spcBef", &p.space_before),
+        ("spcAft", &p.space_after),
+    ] {
+        if let Some(spacing) = spacing {
+            let (kind, value) = match spacing {
+                TextSpacing::Points(v) => ("spcPts", v * 100.0),
+                TextSpacing::Percent(v) => ("spcPct", v * 100_000.0),
+            };
+            write!(
+                xml,
+                r#"<a:{tag}><a:{kind} val="{}"/></a:{tag}>"#,
+                value.round() as i64
+            )
+            .ok();
+        }
+    }
+    // Markers are literal text in the canvas model; suppress inherited master bullets.
+    xml.push_str("<a:buNone/>");
+    // Literal bullet markers need the same implicit hanging tab as native bullets.
+    let hanging_tab = p
+        .margin_left
+        .filter(|margin| *margin > 0.0 && p.indent.is_some_and(|indent| indent < 0.0))
+        .map(|position| {
+            vec![super::super::TextTabStop {
+                position,
+                align: HorizontalAlign::Left,
+            }]
+        });
+    if let Some(tabs) = p.tab_stops.as_ref().or(hanging_tab.as_ref()) {
+        xml.push_str("<a:tabLst>");
+        for tab in tabs {
+            let align = match tab.align {
+                HorizontalAlign::Left => "l",
+                HorizontalAlign::Center => "ctr",
+                HorizontalAlign::Right => "r",
+            };
+            write!(
+                xml,
+                r#"<a:tab pos="{}" algn="{align}"/>"#,
+                px_to_emu(tab.position)
+            )
+            .ok();
+        }
+        xml.push_str("</a:tabLst>");
+    }
+    xml.push_str("</a:pPr>");
+    xml
 }
 
 fn transform(x: f64, y: f64, w: f64, h: f64, rotate: f64, flip_h: bool, flip_v: bool) -> String {

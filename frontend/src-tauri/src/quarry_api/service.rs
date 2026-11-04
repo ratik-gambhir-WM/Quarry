@@ -196,6 +196,9 @@ impl QuarryApiService {
 
     pub async fn post_multipart(&self, request: MultipartRequest) -> Result<Value, String> {
         validate_api_path(&request.path)?;
+        if let Some(mode) = super::templates::import_mode(&request.path) {
+            return super::templates::import(&self.client, request, mode).await;
+        }
         let mut total_bytes = 0usize;
         let mut form = Form::new();
         for field in request.fields {

@@ -74,7 +74,7 @@ fn save(connection: &SqliteTransaction<'_>, row: &Row) -> anyhow::Result<()> {
         .map(serialize_embedding)
         .transpose()?;
     connection.write(
-        SqlBuilder::update("slide_classifications")
+        SqlBuilder::update("template_classification_status")
             .set("status", &state.status)
             .set("metadata_json", metadata_json)
             .set(
@@ -232,15 +232,82 @@ fn fts(
 fn load(tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<Option<Row>> {
     Ok(tx
         .read_result_with(
-            SqlBuilder::select("slide_classifications")
+            SqlBuilder::select("template_classification_status")
                 .and_where(Condition::equal("template_id", id))
                 .build(),
             map_row,
         )?
         .pop())
 }
-fn all_rows(tx: &SqliteTransaction<'_>) -> anyhow::Result<Vec<Row>> {
-    tx.read_result_with(SqlBuilder::select("slide_classifications").build(), map_row)
+// Select one due row instead of decoding every completed template/vector on each poll.
+fn next_job_row(
+    tx: &SqliteTransaction<'_>,
+    app_id: &str,
+    embedding: bool,
+    now: &str,
+) -> anyhow::Result<Option<Row>> {
+    use crate::adapters::sqlite::query::ComparisonOperator;
+    let (status, retry, lease) = if embedding {
+        (
+            "embedding_status",
+            "embedding_next_attempt_at",
+            "embedding_lease_expires_at",
+        )
+    } else {
+        ("status", "next_attempt_at", "lease_expires_at")
+    };
+    // Reclaim one expired lease first. Due pending rows follow, with unscheduled work first.
+    for (state, due, order) in [
+        (
+            "processing",
+            Condition::compare(lease, ComparisonOperator::LessThanOrEqual, now),
+            lease,
+        ),
+        ("pending", Condition::is_null(retry), retry),
+        (
+            "pending",
+            Condition::compare(retry, ComparisonOperator::LessThanOrEqual, now),
+            retry,
+        ),
+    ] {
+        let mut query = SqlBuilder::select("template_classification_status")
+            .columns(["template_classification_status.*"])
+            .inner_join(
+                "app_templates",
+                "template_classification_status.template_id",
+                "app_templates.template_id",
+            )
+            .and_where(Condition::equal("app_templates.app_id", app_id))
+            .and_where(Condition::equal(status, state))
+            .and_where(due);
+        if embedding {
+            for column in [
+                "subject_embedding_document",
+                "subject_embedding_fingerprint",
+                "capability_embedding_document",
+                "capability_embedding_fingerprint",
+            ] {
+                query = query.and_where(Condition::is_not_null(column));
+            }
+        }
+        if let Some(row) = tx
+            .read_result_with(
+                query
+                    .order_by(order, SortDirection::Ascending)
+                    .order_by(
+                        "template_classification_status.template_id",
+                        SortDirection::Ascending,
+                    )
+                    .limit(1)
+                    .build(),
+                map_row,
+            )?
+            .pop()
+        {
+            return Ok(Some(row));
+        }
+    }
+    Ok(None)
 }
 impl SqliteTemplateRepository {
     pub fn complete_slide_classification(
@@ -382,6 +449,57 @@ impl SqliteTemplateRepository {
             Ok(())
         })
     }
+    pub fn retry_failed_slide_processing(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<RetrySlideProcessingOutcome> {
+        self.client.transaction_result(|tx| {
+            if !visible(tx, &self.app_id, id)? {
+                return Ok(RetrySlideProcessingOutcome::NotFound);
+            }
+            let Some(mut row) = load(tx, id)? else {
+                return Ok(RetrySlideProcessingOutcome::NotFailed);
+            };
+            // A duplicate request or an active worker must never reset an in-flight lease.
+            if row.state.status == "processing" || row.state.embedding_status == "processing" {
+                return Ok(RetrySlideProcessingOutcome::NotFailed);
+            }
+            let stage = if row.state.status == "failed" {
+                row.state.status = "pending".into();
+                row.state.attempt_count = 0;
+                row.state.next_attempt_at = None;
+                row.state.last_error_code = None;
+                row.lease = None;
+                // Successful classification will enqueue new embedding documents. Until then,
+                // retain existing artifacts but do not allow stale embedding work to be claimed.
+                row.state.embedding_status = "not_ready".into();
+                row.state.embedding_attempt_count = 0;
+                row.state.embedding_next_attempt_at = None;
+                row.state.embedding_last_error_code = None;
+                row.embedding_lease = None;
+                SlideProcessingStage::Classification
+            } else if row.state.status == "ready" && row.state.embedding_status == "failed" {
+                ensure!(
+                    row.state.metadata.is_some()
+                        && row.state.subject_embedding_document.is_some()
+                        && row.state.subject_embedding_fingerprint.is_some()
+                        && row.state.capability_embedding_document.is_some()
+                        && row.state.capability_embedding_fingerprint.is_some(),
+                    "failed embedding job is missing classification artifacts"
+                );
+                row.state.embedding_status = "pending".into();
+                row.state.embedding_attempt_count = 0;
+                row.state.embedding_next_attempt_at = None;
+                row.state.embedding_last_error_code = None;
+                row.embedding_lease = None;
+                SlideProcessingStage::Embedding
+            } else {
+                return Ok(RetrySlideProcessingOutcome::NotFailed);
+            };
+            save(tx, &row)?;
+            Ok(RetrySlideProcessingOutcome::Queued(stage))
+        })
+    }
     pub fn refresh_pending_slide_classification(
         &self,
         id: &str,
@@ -466,16 +584,29 @@ impl SqliteTemplateRepository {
             check_publication(cancellation)?;
             Self::write_new(tx, &r.template, &r.assets, &r.metadata, r.preview.as_ref())?;
             membership(tx, &self.app_id, &r.template.template_id)?;
-            tx.write(
-                SqlBuilder::insert_into("slide_classifications")
-                    .value("template_id", &r.template.template_id)
-                    .value("status", if processing { "processing" } else { "pending" })
-                    .value("input_fingerprint", &p.input_fingerprint)
-                    .value("prompt_version", &p.prompt_version)
-                    .value("schema_version", p.schema_version)
-                    .value("attempt_count", i64::from(processing))
-                    .build(),
-            )?;
+            write_pending(tx, &r.template.template_id, p, processing)?;
+            check_publication(cancellation)
+        })
+    }
+    pub(super) fn insert_classifications(
+        &self,
+        records: &[(TemplateInsert, PendingSlideClassification)],
+        cancellation: Option<&super::super::RequestCancellation>,
+    ) -> anyhow::Result<()> {
+        self.client.transaction_result(|tx| {
+            check_publication(cancellation)?;
+            for (record, pending) in records {
+                check_publication(cancellation)?;
+                Self::write_new(
+                    tx,
+                    &record.template,
+                    &record.assets,
+                    &record.metadata,
+                    record.preview.as_ref(),
+                )?;
+                membership(tx, &self.app_id, &record.template.template_id)?;
+                write_pending(tx, &record.template.template_id, pending, false)?;
+            }
             check_publication(cancellation)
         })
     }
@@ -496,24 +627,7 @@ impl SqliteTemplateRepository {
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideClassificationJob>> {
         self.client.transaction_result(|tx| {
-            let mut rows = all_rows(tx)?;
-            for row in &mut rows {
-                if row.state.status == "processing"
-                    && row.lease.as_deref().is_some_and(|t| t <= now)
-                {
-                    row.state.status = "pending".into();
-                    row.lease = None;
-                    save(tx, row)?;
-                }
-            }
-            rows.sort_by(|a, b| {
-                (&a.state.next_attempt_at, &a.state.template_id)
-                    .cmp(&(&b.state.next_attempt_at, &b.state.template_id))
-            });
-            let Some(mut row) = rows.into_iter().find(|r| {
-                r.state.status == "pending"
-                    && r.state.next_attempt_at.as_deref().is_none_or(|t| t <= now)
-            }) else {
+            let Some(mut row) = next_job_row(tx, &self.app_id, false, now)? else {
                 return Ok(None);
             };
             row.state.status = "processing".into();
@@ -567,31 +681,7 @@ impl SqliteTemplateRepository {
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideEmbeddingJob>> {
         self.client.transaction_result(|tx| {
-            let mut rows = all_rows(tx)?;
-            for row in &mut rows {
-                if row.state.embedding_status == "processing"
-                    && row.embedding_lease.as_deref().is_some_and(|t| t <= now)
-                {
-                    row.state.embedding_status = "pending".into();
-                    row.embedding_lease = None;
-                    save(tx, row)?;
-                }
-            }
-            rows.sort_by(|a, b| {
-                (&a.state.embedding_next_attempt_at, &a.state.template_id)
-                    .cmp(&(&b.state.embedding_next_attempt_at, &b.state.template_id))
-            });
-            let Some(mut row) = rows.into_iter().find(|r| {
-                r.state.embedding_status == "pending"
-                    && r.state.subject_embedding_document.is_some()
-                    && r.state.subject_embedding_fingerprint.is_some()
-                    && r.state.capability_embedding_document.is_some()
-                    && r.state.capability_embedding_fingerprint.is_some()
-                    && r.state
-                        .embedding_next_attempt_at
-                        .as_deref()
-                        .is_none_or(|t| t <= now)
-            }) else {
+            let Some(mut row) = next_job_row(tx, &self.app_id, true, now)? else {
                 return Ok(None);
             };
             row.state.embedding_status = "processing".into();
@@ -630,11 +720,11 @@ impl SqliteTemplateRepository {
     ) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
         self.client.transaction_result(|tx| {
             let rows = tx.read_result_with(
-                SqlBuilder::select("slide_classifications")
-                    .columns(["slide_classifications.*"])
+                SqlBuilder::select("template_classification_status")
+                    .columns(["template_classification_status.*"])
                     .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
                         "app_templates.template_id",
-                        "slide_classifications.template_id",
+                        "template_classification_status.template_id",
                     )))
                     .and_where(Condition::equal("app_templates.app_id", app_id))
                     .and_where(Condition::is_not_null("metadata_json"))
@@ -685,15 +775,18 @@ impl SqliteTemplateRepository {
                     "slide_classifications_fts.template_id",
                 )
                 .inner_join(
-                    "slide_classifications",
-                    "slide_classifications.template_id",
+                    "template_classification_status",
+                    "template_classification_status.template_id",
                     "slide_classifications_fts.template_id",
                 )
                 .and_where(Condition::equal("app_templates.app_id", app_id))
                 .and_where(Condition::is_not_null(
-                    "slide_classifications.metadata_json",
+                    "template_classification_status.metadata_json",
                 ))
-                .and_where(Condition::equal("slide_classifications.schema_version", 2))
+                .and_where(Condition::equal(
+                    "template_classification_status.schema_version",
+                    2,
+                ))
                 .and_where(Condition::full_text_match(
                     "slide_classifications_fts",
                     fts_query,
@@ -714,4 +807,23 @@ impl SqliteTemplateRepository {
             |r| r.get(0),
         )?)
     }
+}
+
+fn write_pending(
+    tx: &SqliteTransaction<'_>,
+    id: &str,
+    pending: &PendingSlideClassification,
+    processing: bool,
+) -> anyhow::Result<()> {
+    tx.write(
+        SqlBuilder::insert_into("template_classification_status")
+            .value("template_id", id)
+            .value("status", if processing { "processing" } else { "pending" })
+            .value("input_fingerprint", &pending.input_fingerprint)
+            .value("prompt_version", &pending.prompt_version)
+            .value("schema_version", pending.schema_version)
+            .value("attempt_count", i64::from(processing))
+            .build(),
+    )?;
+    Ok(())
 }

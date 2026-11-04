@@ -1,3 +1,8 @@
+import {
+  classifiedTemplateImportPath,
+  classifiedTemplateImportResult,
+  validateTemplateImportFile,
+} from "./classifiedTemplateImport";
 import { createDealMembershipApi } from "./dealMembershipApi";
 import { createNotebookApi } from "./notebookApi";
 import { subscribeNotebookSse } from "./notebookSse";
@@ -38,6 +43,8 @@ import type {
   PptxTemplateImportMode,
   PptxTemplateImportResult,
   TemplatePreviewPage,
+  TemplateRetrieval,
+  TemplateProcessingRetry,
   VectorFileChunkHit,
 } from "../contracts/quarryApi";
 import { QuerySseParser } from "./querySse";
@@ -480,6 +487,22 @@ function listTemplatePreviews(page: number) {
   );
 }
 
+function getTemplateRetrieval(templateId: string, includeEmbeddings = false) {
+  return requestJson<TemplateRetrieval>(
+    `/api/v1/templates/slide-templates/catalog/${encodeURIComponent(templateId)}/retrieval?metadata=true&embeddings=${includeEmbeddings}`,
+    undefined,
+    undefined,
+    false,
+  );
+}
+
+function retryTemplateProcessing(templateId: string) {
+  return post<TemplateProcessingRetry, Record<string, never>>(
+    `/api/v1/templates/slide-templates/catalog/${encodeURIComponent(templateId)}/retrieval/retry`,
+    {},
+  );
+}
+
 async function getTemplate(templateId: string) {
   const value = await requestJson<unknown>(
     `/api/v1/templates/${encodeURIComponent(templateId)}`,
@@ -490,13 +513,39 @@ async function getTemplate(templateId: string) {
   return parseDiligenceCanvasDocument(value);
 }
 
-function importPptxTemplate(file: File, importMode: PptxTemplateImportMode) {
-  const form = new FormData();
-  form.append("files", file, file.name);
-  return postForm<PptxTemplateImportResult>(
-    `/api/v1/templates/import?mode=${encodeURIComponent(importMode)}`,
-    form,
-  );
+async function importPptxTemplate(
+  file: File,
+  importMode: PptxTemplateImportMode,
+): Promise<PptxTemplateImportResult> {
+  validateTemplateImportFile(file);
+  let response: Response;
+  try {
+    response = await authFetch(apiUrl(classifiedTemplateImportPath(importMode)), {
+      method: "POST",
+      headers: { "Content-Type": POWERPOINT_CONTENT_TYPE },
+      body: file,
+    });
+  } catch {
+    throw new Error(
+      "Template import could not be confirmed. It may have completed; refresh templates before trying again.",
+    );
+  }
+  try {
+    if (!response.ok) {
+      const body: unknown = await response.json().catch(() => null);
+      const message =
+        body && typeof body === "object" && "error" in body && typeof body.error === "string"
+          ? body.error
+          : "The template could not be imported. Try again.";
+      throw new BackendApiError(message, response.status);
+    }
+    return classifiedTemplateImportResult(
+      response.status, response.headers, importMode,
+    );
+  } finally {
+    // The server commits before sending these headers. Release the unused document body.
+    await response.body?.cancel().catch(() => undefined);
+  }
 }
 
 async function deleteTemplate(templateId: string) {
@@ -1059,6 +1108,8 @@ export const httpQuarryApi: QuarryApi = {
   getDealDocumentPdf,
   getDealDocumentText,
   getTemplate,
+  getTemplateRetrieval,
+  retryTemplateProcessing,
   importPptxTemplate,
   listDealDataRoom,
   listAssistantThreads,

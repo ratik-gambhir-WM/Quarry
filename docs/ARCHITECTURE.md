@@ -518,8 +518,12 @@ global state or query-cache library.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
-  Annotate modes. The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
-  creation controls; existing shape annotations remain renderable. Forms, signatures, stamps,
+  Annotate modes through a mode dropdown. The top toolbar contains the pages sidebar and page
+  navigation; document controls and preview actions appear in the horizontally scrollable ribbon.
+  The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
+  creation controls; existing shape annotations remain renderable. The details-panel, download, and
+  more-actions controls sit at the right end of the ribbon in both modes; the annotation ribbon has
+  no separate comments or properties buttons. Forms, signatures, stamps,
   redaction, capture, print, security, attachments, and fullscreen controls remain disabled. Annotation snapshots are retained only in module memory by
   selected-document ID, restored when a document is reopened in the same browser session, and
   intentionally disappear on refresh. Signature persistence is disabled so the editor does not
@@ -564,7 +568,12 @@ global state or query-cache library.
   populated states without page-level effect state. Small-screen template headers hide the subtitle and use compact
   Slide/Deck import labels while retaining full accessible names. The store owns mutually exclusive template
   deletion, PPTX import, and catalog-refresh operations. It keeps the current carousel visible
-  during writes, refreshes every preview page after a successful import, and distinguishes a
+  during writes. Classified slide/deck imports show a centered, delayed spinner/status panel over
+  the retained gallery, mark it busy and inert, disable both actions, and distinguish saving from
+  the subsequent gallery refresh. The panel uses semantic theme colors, polite announcements,
+  and reduced-motion handling; populated catalogs restore focus to the initiating header button. The store refreshes
+  every preview page after a successful save, explains that classification continues in the
+  background, and distinguishes a
   failed write from a completed write whose preview refresh failed. The template header and
   gallery subscribe to that same store: a populated catalog exposes explicit single-slide and
   deck import actions, while an empty catalog provides the same actions plus a single-slide PPTX
@@ -812,7 +821,7 @@ The contract covers:
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
 - app-scoped template deletion through `deleteTemplate`
-- explicit single-slide or deck PPTX import through `importPptxTemplate`
+- classified single-slide or deck PPTX import through `importPptxTemplate`; save acknowledgment does not wait for background classification/embeddings
 - uploaded-file summarization
 - platform-specific local data-room selection/read and file export
 
@@ -1033,7 +1042,20 @@ reference data. Freeform runs receive no implicit deal context; context is not d
 | POST | `/templates/import?mode=single\|batch` | Import one PPTX as one slide template or as one template per deck slide | Selected template backend capability |
 | DELETE | `/templates/{template_id}` | Delete one template from Quarry's selected app catalog | Selected template backend capability |
 
-The five existing template operations retain their frontend and Tauri contracts. `TemplateService`
+The existing template facade routes remain available. The shared `importPptxTemplate` API retains
+its file/mode inputs and compact result, but the template buttons now use the native classified
+`/templates/slide-templates/import/classified` and `/templates/slide-templates/batch-import/classified`
+endpoints. Web sends raw PPTX bytes with the PowerPoint MIME and existing bearer credentials.
+Desktop retains the validated multipart IPC envelope; its relay recognizes only these two exact
+paths, enforces one `.pptx` file with a 25 MiB decoded limit and matching base64 bound, and forwards
+raw bytes to Axum.
+Both transports validate 201/JSON, warning count and saved-template/preview or deck-count headers,
+then discard the unused hydrated JSON body. Neither waits for enrichment or retries an uncertain
+write. CORS exposes these acknowledgment headers for configured cross-origin web builds. Gallery
+refresh failure offers refresh-only recovery. Classified actions require configured providers and
+embedded mode; explicit legacy mode does not receive an unclassified fallback.
+
+`TemplateService`
 selects exactly one backend for the process through `QUARRY_TEMPLATE_BACKEND`: the default
 `embedded` calls `domains::templates::slide_templates` directly in Axum; explicit `diligence-studio`
 uses the retained typed adapter. An absent legacy URL remains an unavailable capability. There is no per-operation fallback, dual write, conversion subprocess,
@@ -1071,8 +1093,10 @@ Embedded mode additionally mounts the following relative paths beneath
 | GET | `/import/{id}` | Hydrated lookup alias |
 | GET | `/catalog/{id}/preview` | Bounded PNG and dimensions; distinguish missing template from unavailable preview |
 | GET | `/import/{id}/assets/{assetId}` | Validated, template-owned image bytes |
-| POST | `/import/classified` | Synchronous import, classification, both embeddings, then atomic artifact/FTS publication |
-| GET | `/catalog/{id}/retrieval?metadata=true&embeddings=true` | Optional retrieval inspection; vectors require a separate server setting |
+| POST | `/batch-import/classified?kind=diagram\|commentary` | Raw deck; parallel preparation, atomic save of every slide/preview/pending job, then 201 before background enrichment |
+| POST | `/import/classified` | Generate preview, atomically save JSON/assets/preview and pending work, then return 201; classification/embeddings run in the background |
+| GET | `/catalog/{id}/retrieval?metadata=true&embeddings=true` | Classification/embedding progress and optional artifacts; vectors require a separate server setting |
+| POST | `/catalog/{id}/retrieval/retry` | Empty JSON object; atomically requeue a failed classification or embedding stage and return 202 with `templateId` and `stage` |
 
 The source's global `/api/v2`, Express case/slash/ETag/HEAD policies, logger, fallback, and inactivity
 timeout are not mounted. Native routes use Quarry's request IDs, tracing, CORS, timeout, and
@@ -1081,10 +1105,25 @@ asset, preview, Location, and Link URLs target the actual native namespace. Stat
 routes have explicit tests. Internal text/semantic/hybrid/filter/similar/by-ID/facet retrieval and
 finding-to-slide matching remain in-process capabilities; no public search endpoint was added.
 
+Embedded PowerPoint imports retain paragraph line spacing (points or percentage), before/after
+spacing, left/right margins, first-line/hanging indents, default tab size and aligned tab stops,
+including inherited settings and explicit zero overrides. The additive optional `runs[].paragraph`
+object belongs to the paragraph's first run; margins and tabs use slide pixels, point spacing uses
+typographic points, and percentages use multipliers. Inline styles and soft line breaks remain
+separate from paragraph boundaries. The shared SVG gallery/editor preview and edited text retain
+these properties, and native export writes them back to DrawingML. Existing saved imports/previews
+need re-import to recover previously discarded properties; no stored documents are rewritten.
+Legacy Diligence Studio conversion remains a separate implementation. Browser font metrics and
+fonts unavailable on the host can still change wrapping. Plate retains custom tab stops on edits,
+while its live HTML editing surface uses the default tab interval; SVG previews and PowerPoint
+export apply explicit stops.
+
 The embedded domain owns OOXML, normalization, JSON contracts, built-ins, catalog persistence,
 classification and retrieval rules. Adapters own Chromium/CDP, optional QuickLook, and bounded
 provider HTTP transport. SQLite work, conversion, browser work, and projection serialization are
-offloaded. Four shared HTTP admissions remain held until response-body consumption/drop, with two CPU/conversion workers and one admitted write. Busy requests fail explicitly
+offloaded. Four shared HTTP admissions remain held until response-body consumption/drop, with two
+blocking-operation permits and one admitted write. Classified decks use at most four additional
+scoped slide workers, as described below. Busy requests fail explicitly
 instead of accumulating an unbounded queue. Cancellation on dropped/expired requests and host
 shutdown reaches previews and is checked inside publication transactions. Blocking workers keep
 their capacity permit until they actually exit. No database guard is held while awaiting a preview
@@ -1098,8 +1137,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 15. Startup creates a fresh schema, upgrades validated markers 12/13/14,
-or validates/reuses marker 15; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 16. Startup creates a fresh schema, upgrades validated markers 12/13/14/15,
+or validates/reuses marker 16; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -1114,7 +1153,80 @@ Helix holds a recoverable template projection: a searchable `SlideTemplate` root
 and separate `SlideTemplateSubject`/`SlideTemplateCapability` vector nodes. SQLite image BLOBs remain
 the canonical binary assets. Projection writes follow SQLite commits; failures report a saved-but-
 unconfirmed indexing outcome without deleting SQLite data or falling back. Native classified imports
-produce embeddings when configured; ordinary imports and built-ins do not fabricate vectors.
+require configured providers and a generated PNG before committing. They return `201 Created`
+with `retrieval.status: pending` after JSON, assets, metadata, preview and a pending
+`template_classification_status` row commit together. Preview failure returns 503 without inserting
+a template. The response retains template/preview links and headers; it never waits for providers
+or Helix. `POST /batch-import/classified` applies the same save-before-enrichment contract to
+an entire raw PPTX deck (up to 100 slides, with the existing 25 MiB upload and 50 MiB response
+limits). ZIP validation/expansion runs once; slide parsing and single-slide preparation each use
+at most four scoped blocking workers, preserving deck order. Preview rendering has four shared
+Chromium slots with independent temporary browser profiles. Source-only preview adapters receive
+separate single-slide packages. Any parse, preview, response-size, cancellation or publication
+failure prevents the entire deck and its jobs from being committed. The final SQLite transaction
+saves every JSON document, asset, metadata record, PNG and pending job together; it intentionally
+serializes database writes while conversion and preview work run in parallel. The 201 body contains
+ordered `templates` (`templateId`, `templateJson`, `previewAvailable`), `warnings`, `importedCount`,
+and `retrieval: {status: "pending", embeddingStatus: "not_ready"}`; imported-count and warning-count
+headers and `private, no-store` match ordinary batch import. Poll each saved ID's retrieval resource
+for actual progress. The shared web and desktop template import actions use these classified native endpoints; the
+legacy Diligence Studio import contract remains separate. Ordinary imports and built-ins retain best-effort previews
+and do not fabricate vectors.
+
+One background worker starts after embedded reconciliation, leases saved JSON/preview from SQLite,
+and alternates classification and embedding stages with concurrency four. Classification commits
+metadata/FTS and embedding documents before embeddings run; a failed embedding preserves those
+artifacts. Each stage has up to three attempts, a 150-second operation timeout, 30-second lease
+padding and exponential retries starting at five seconds with up to 25% jitter. Retryable provider
+and persistence failures retry; permanent provider errors fail immediately. Missing or out-of-bounds
+classification previews fail explicitly instead of using a text-only fallback. Pending retry times,
+attempts, leases, sanitized error codes and terminal `failed`/`ready` states are durable. Process
+restart resumes pending/due jobs and recovers expired leases. These are single-host workers, not a
+distributed queue; live pipeline changes require draining old writers. HTTP disconnects after commit
+do not cancel saved jobs. Shutdown stops claims, drains for five seconds, then cancels provider
+futures and records retryable work. Job claims enforce the fixed app membership.
+
+Manual retry is available only for a terminal failed stage on an existing app-visible template.
+The retry transaction resets that stage's attempts, retry schedule, error and lease, then wakes the
+same bounded worker after committing. A failed classification restarts from the saved JSON/preview
+and resets dependent embedding work; an embedding-only failure preserves completed metadata and
+reuses its saved embedding documents. Each manual retry gets the normal three-attempt budget.
+Saved slides, previews and completed classification artifacts are retained; retry never re-imports
+or creates another template. The repository checks membership and status atomically, so duplicate
+requests and active/successful/unclassified jobs cannot reset work (409); missing or out-of-scope
+templates return 404, and an unconfigured worker returns 503. The endpoint uses existing bearer
+authentication and fixed app scope, rejects nonempty JSON/unknown queries and retains `private,
+no-store`. Pending retries survive disconnects/restarts. No schema change is required.
+
+`GET /catalog/{id}/retrieval` always returns `classification` and `embedding` progress objects
+(`status`, `attemptCount`, `nextAttemptAt`, `lastErrorCode`), even without artifact query flags.
+`retrievalStatus` describes classification; callers must also check `embedding.status` for vector
+readiness. `metadata=true` includes metadata, while `embeddings=true` retains its separate server
+inspection gate. Saved/failed templates and previews remain readable.
+
+The shared template gallery has a three-dot menu on each card with **View metadata**. Its controlled
+modal fetches this resource only when opened through the web API or existing desktop GET relay.
+It shows saved metadata, separate classification/embedding progress and expandable complete subject
+and capability vectors (model and dimensions included). While either stage is pending/processing,
+the modal shows a loading indicator and polls sequentially every three seconds; closing or switching
+templates ignores late responses and stops further polling. Terminal failures and templates without
+classification have explicit non-loading states. Metadata is requested independently of raw vectors,
+so disabled embedding inspection does not hide classification data. Vector values require
+`QUARRY_SLIDE_TEMPLATES_ALLOW_EMBEDDING_INSPECTION=true`; unavailable vectors show a separate message
+and can be refreshed. Retrieval payloads are excluded from frontend activity-log response details.
+The modal exposes **Retry** only when a stage is failed. The web and desktop adapters POST the same
+native retry resource through their existing transports; the control prevents duplicate clicks,
+shows a busy state, and reloads progress/polling after acceptance. Retry errors leave saved metadata
+visible and direct the user to refresh the status; closing the modal ignores a late response while
+the queued server job continues. **Refresh** only reads status and never restarts a job. Explicit
+legacy Diligence Studio mode has no native classification/retry resource and remains unsupported
+for these actions.
+The dialog preserves keyboard focus, internal scrolling, reduced motion and theme tokens, following
+the [Stealth UI menu and dialog patterns](https://www.stealth.pm/ui).
+
+Each worker stage refreshes Helix after SQLite commits, serialized with HTTP deletion and bounded to
+ten seconds; projection failures are logged and
+reconciled at restart without deleting canonical data or retrying successful provider work.
 Startup reconciles only this fixed app's template projection from the shared SQLite database,
 including stale deleted records. It does not clear document graph data. There is no
 new general reindex CLI or public search UI. Legacy mode does not publish this projection.
@@ -1323,7 +1435,7 @@ fresh isolated Helix store, rebuild/reload matching clients, sign up again, and 
 manually. No status conversion or automatic downgrade is provided. See
 [development reset and recovery](authentication.md#schema-15-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 15
+### 9.1 Shared SQLite schema marker 16
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1358,7 +1470,7 @@ schema currently contains:
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
 | `template_assets`, `template_previews` | Image and PNG preview BLOBs with dimensions | Embedded templates |
 | `apps`, `app_templates` | Template app registry and memberships, including built-in deletion choices | Embedded templates |
-| `slide_classifications` | Classification metadata, leases, fingerprints, subject/capability embeddings, model/dimensions | Embedded classification/retrieval |
+| `template_classification_status` | Classification/embedding progress, attempts, retry times, errors, leases, metadata, fingerprints, subject/capability vectors and model/dimensions | Durable embedded classification worker/retrieval |
 | `slide_classifications_fts` | FTS5 derived retrieval fields | Embedded internal retrieval |
 
 Key invariants include:
@@ -1386,12 +1498,17 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 15` is the shared marker. Empty databases receive the complete schema.
+`PRAGMA user_version = 16` is the shared marker. Empty databases receive the complete schema.
 Validated marker 12 receives notebooks first; validated 12/13 then receives the data-preserving
 membership/file-scope upgrade. Memberships backfill the creator as owner, including archived deals;
 legacy uploader attribution remains null. Validated 12/13/14 layouts also receive the additive
-image-recovery table before marker 15 is committed; no existing image text is fabricated or
-backfilled. Schema/layout, foreign keys and exactly-one-owner
+image-recovery table introduced in schema 15; no existing image text is fabricated or
+backfilled. Schema 16 validates the complete preceding layout and transactionally renames
+`slide_classifications` to `template_classification_status`, preserving metadata, vectors, FTS,
+indexes and foreign keys. Old synchronous `processing` rows without a lease become pending with
+attempts reset and `classification_interrupted`; ready/failed and leased rows retain their state.
+See [classified import rollout and recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
+Schema/layout, foreign keys and exactly-one-owner
 invariants are checked before advancing the marker and on restart. Malformed/unsupported layouts
 fail without deletion or silent repairs. The file rebuild restores foreign-key enforcement even
 on failure. Startup refuses incomplete document identity/graph-scope migration. The required
@@ -2068,7 +2185,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 15 SQLite, preserving 12/13/14 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 16 SQLite, preserving 12/13/14/15 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

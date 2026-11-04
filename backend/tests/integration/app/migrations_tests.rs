@@ -498,7 +498,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 15
+            supported: 16
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -825,13 +825,19 @@ fn shared_fresh_and_upgraded_owned_layouts_are_identical() {
 }
 
 fn image_schema_fourteen() -> Connection {
-    let mut connection = Connection::open_in_memory().unwrap();
-    run_migrations(&mut connection).unwrap();
+    let connection = Connection::open_in_memory().unwrap();
+    for schema in [
+        SCHEMA,
+        TEMPLATE_SCHEMA,
+        NOTEBOOK_SCHEMA,
+        MEMBERSHIP_SCHEMA,
+        DOCUMENT_SCOPE_UPGRADE,
+    ] {
+        connection.execute_batch(schema).unwrap();
+    }
+    connection.pragma_update(None, "user_version", 14).unwrap();
     seed_deal(&connection, "DEAL-IMAGE", "prepare");
     insert_file_aggregate(&connection, "DEAL-IMAGE", "image-file", "image-version");
-    connection
-        .execute_batch("DROP TABLE document_image_recovery; PRAGMA user_version = 14;")
-        .unwrap();
     connection
 }
 
@@ -847,7 +853,7 @@ fn image_recovery_upgrade_preserves_schema_fourteen_records_and_reopens() {
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        15
+        LATEST_SCHEMA_VERSION
     );
     check_foreign_keys(&connection).unwrap();
 }
@@ -892,4 +898,80 @@ fn image_recovery_upgrade_rolls_back_new_table_and_marker_when_owner_validation_
             .unwrap(),
         1
     );
+}
+
+fn classification_schema_fifteen() -> Connection {
+    let connection = image_schema_fourteen();
+    connection.execute_batch(IMAGE_RECOVERY_SCHEMA).unwrap();
+    connection.pragma_update(None, "user_version", 15).unwrap();
+    connection
+        .execute("INSERT INTO templates VALUES('retained','{}')", [])
+        .unwrap();
+    connection.execute("INSERT INTO slide_classifications(template_id,status,input_fingerprint,prompt_version,schema_version,attempt_count,subject_embedding,embedding_dimensions) VALUES('retained','failed','fingerprint','prompt',2,2,X'01020304',1)", []).unwrap();
+    connection
+}
+#[test]
+fn classification_status_upgrade_preserves_artifacts_and_is_idempotent() {
+    let mut connection = classification_schema_fifteen();
+    let before = product_snapshot(&connection);
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(connection.query_row("SELECT status,attempt_count,subject_embedding FROM template_classification_status WHERE template_id='retained'", [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,Vec<u8>>(2)?))).unwrap(), ("failed".into(),2,vec![1,2,3,4]));
+    assert!(table_columns(&connection, "slide_classifications").is_empty());
+    check_foreign_keys(&connection).unwrap();
+}
+#[test]
+fn classification_status_upgrade_recovers_old_unleased_processing_rows() {
+    let mut connection = classification_schema_fifteen();
+    connection
+        .execute(
+            "UPDATE slide_classifications SET status='processing',attempt_count=1",
+            [],
+        )
+        .unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT status,attempt_count,last_error_code FROM template_classification_status",
+                [],
+                |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?
+                ))
+            )
+            .unwrap(),
+        ("pending".into(), 0, "classification_interrupted".into())
+    );
+}
+#[test]
+fn classification_status_upgrade_rejects_damaged_layout_and_rolls_back_rename() {
+    for damage in [false, true] {
+        let mut connection = classification_schema_fifteen();
+        if damage {
+            connection
+                .execute(
+                    "DROP INDEX slide_classifications_classification_jobs_idx",
+                    [],
+                )
+                .unwrap();
+        } else {
+            connection
+                .execute("DELETE FROM deal_memberships", [])
+                .unwrap();
+        }
+        let before = product_snapshot(&connection);
+        assert!(run_migrations(&mut connection).is_err());
+        assert_eq!(product_snapshot(&connection), before);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            15
+        );
+        assert_eq!(table_count(&connection, "slide_classifications"), 1);
+        assert!(table_columns(&connection, "template_classification_status").is_empty());
+    }
 }
