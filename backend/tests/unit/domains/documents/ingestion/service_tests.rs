@@ -1,5 +1,252 @@
 use super::*;
 
+#[tokio::test]
+async fn retries_repair_published_versions_before_skipping() {
+    use crate::{
+        adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+        domains::{
+            documents::{
+                formats::docx::parse_docx_chunks_from_bytes, graph::query::FileChunkKeywordSearch,
+                graph::repository::DocumentGraphSearch, search::service::DocumentSearchService,
+            },
+            identity::access::ResourceAccess,
+            memberships::{repository::MembershipRepository, service::DealAccessService},
+        },
+    };
+    use axum::{http::StatusCode, routing::post, Json, Router};
+    use docx_rust::{document::Paragraph, Docx};
+    use serde_json::{json, Value};
+    use std::{collections::VecDeque, io::Cursor};
+
+    let replies = Arc::new(Mutex::new(VecDeque::from(vec![
+        (StatusCode::OK, json!({}));
+        3
+    ])));
+    let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let queue = replies.clone();
+    let requests = captured.clone();
+    let app = Router::new()
+        .route(
+            "/v2/query",
+            post(move |Json(body): Json<Value>| {
+                let queue = queue.clone();
+                let requests = requests.clone();
+                async move {
+                    requests.lock().await.push(body);
+                    let (status, body) = queue
+                        .lock()
+                        .await
+                        .pop_front()
+                        .expect("unexpected graph request");
+                    (status, Json(body))
+                }
+            }),
+        )
+        .route(
+            "/embeddings",
+            post(|Json(body): Json<Value>| async move {
+                let data = body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| json!({"index": index, "embedding": [0.25, 0.75]}))
+                    .collect::<Vec<_>>();
+                Json(json!({"data": data}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let application = crate::integration_support::authenticated_test_application().unwrap();
+    let sqlite: SqliteClient = application.sqlite;
+    let files = DocumentStore::new(sqlite.clone());
+    let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
+    let writer = DocumentGraphWriter::new(helix.clone());
+    let mut source = Docx::default();
+    source
+        .document
+        .push(Paragraph::default().push_text("Synthetic architecture evidence."));
+    let bytes = source.write(Cursor::new(Vec::new())).unwrap().into_inner();
+    let mut assembly = parse_docx_chunks_from_bytes(bytes.clone(), None, "DEAL-TEST").unwrap();
+    assembly.document.file_name = "evidence.docx".into();
+    for chunk in &mut assembly.chunks {
+        chunk.embedding = Some(vec![0.25, 0.75]);
+    }
+    let accepted = persist_document_and_chunks(
+        &files,
+        &writer,
+        "DEAL-TEST",
+        1,
+        assembly.document.clone(),
+        assembly.chunks.clone(),
+        bytes.clone(),
+    )
+    .await
+    .unwrap();
+    let version = accepted.insert_blob_result.version_id;
+    let manifest = files.manifest(version.clone()).await.unwrap().unwrap();
+    let attribution = files.list_for_deal("DEAL-TEST").await.unwrap();
+    let published = json!({
+        "file": [{"deal_id": "DEAL-TEST", "file_id": assembly.document.file_id, "display_name": "evidence.docx"}],
+        "version": [{"deal_id": "DEAL-TEST", "file_id": assembly.document.file_id,
+            "version_id": version, "content_sha256": assembly.document.content_hash,
+            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "byte_size": bytes.len(), "index_generation": manifest.active_generation, "indexed_at": "now"}]
+    });
+    let search = DocumentSearchService::new(DocumentGraphSearch::new(helix.clone())).with_access(
+        ResourceAccess::new(
+            sqlite.clone(),
+            Arc::new(DealAccessService::new(MembershipRepository::new(sqlite))),
+        ),
+    );
+    let service = DocumentIngestionService::new(
+        files.clone(),
+        DocumentGraphReader::new(helix),
+        writer,
+        Some(Arc::new(OpenAiClient::with_embeddings_url(
+            reqwest::Client::new(),
+            format!("http://{address}/embeddings"),
+            crate::integration_support::prompt_catalog(),
+        ))),
+        "test".into(),
+        "unused".into(),
+        1,
+    );
+
+    // Search must reject a missing chunk, and the public ingestion workflow must repair it.
+    replies
+        .lock()
+        .await
+        .push_back((StatusCode::OK, json!({"chunks": []})));
+    assert!(search
+        .keyword_owned(
+            FileChunkKeywordSearch {
+                deal_id: "DEAL-TEST".into(),
+                query_text: "architecture".into(),
+                limit: 10,
+            },
+            1
+        )
+        .await
+        .is_err());
+    let mut corrupt = manifest.chunks.clone();
+    corrupt[0].chunk_sha256 = "f".repeat(64);
+    for headers in [json!({"chunks": []}), json!({"chunks": corrupt})] {
+        replies.lock().await.extend([
+            (StatusCode::OK, published.clone()),
+            (StatusCode::OK, headers),
+            (StatusCode::OK, json!({})),
+            (StatusCode::OK, json!({})),
+            (StatusCode::OK, json!({})),
+        ]);
+        let result = service
+            .process(
+                "DEAL-TEST",
+                1,
+                vec![UploadedDocument {
+                    filename: "renamed.docx".into(),
+                    bytes: bytes.clone(),
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(
+            files.manifest(version.clone()).await.unwrap().unwrap(),
+            manifest
+        );
+        assert_eq!(files.list_for_deal("DEAL-TEST").await.unwrap(), attribution);
+        let last = captured.lock().await.last().unwrap().to_string();
+        assert!(last.contains("added_current_version"));
+        let requests = captured.lock().await;
+        let chunk_write = requests[requests.len() - 2].to_string();
+        for chunk in &manifest.chunks {
+            assert!(chunk_write.contains(&chunk.chunk_id));
+            assert!(chunk_write.contains(&chunk.chunk_sha256));
+        }
+    }
+    let chunk = &assembly.chunks[0];
+    let identity = &manifest.chunks[0];
+    let indexed_chunk = json!({
+        "deal_id": "DEAL-TEST", "file_id": assembly.document.file_id, "version_id": version,
+        "chunk_id": identity.chunk_id, "index_generation": identity.index_generation,
+        "chunk_index": identity.chunk_index, "chunk_sha256": identity.chunk_sha256,
+        "text": chunk.text, "token_count": chunk.token_count, "page_start": null,
+        "page_end": null, "char_start": chunk.start_offset, "char_end": chunk.end_offset,
+        "section_path": "", "created_at": "now",
+    });
+    replies.lock().await.extend([
+        (StatusCode::OK, json!({"chunks": manifest.chunks})),
+        (StatusCode::OK, json!({"chunks": [indexed_chunk]})),
+    ]);
+    let hits = search
+        .keyword_owned(
+            FileChunkKeywordSearch {
+                deal_id: "DEAL-TEST".into(),
+                query_text: "architecture".into(),
+                limit: 10,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].chunk.chunk_id, identity.chunk_id);
+    assert_eq!(hits[0].chunk.text, chunk.text);
+    // A complete projection still skips, preserving idempotency and avoiding another embedding/write.
+    replies.lock().await.extend([
+        (StatusCode::OK, published.clone()),
+        (StatusCode::OK, json!({"chunks": manifest.chunks})),
+    ]);
+    let result = service
+        .process(
+            "DEAL-TEST",
+            1,
+            vec![UploadedDocument {
+                filename: "evidence.docx".into(),
+                bytes: bytes.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.skipped, 1);
+    assert_eq!(
+        result.documents[0].document_id.as_ref(),
+        Some(&manifest.document_id)
+    );
+
+    // An unavailable graph is not evidence of missing chunks: fail without rewriting it.
+    replies.lock().await.extend([
+        (StatusCode::OK, published),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": "unavailable"}),
+        ),
+    ]);
+    let result = service
+        .process(
+            "DEAL-TEST",
+            1,
+            vec![UploadedDocument {
+                filename: "evidence.docx".into(),
+                bytes,
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.failed, 1);
+    assert_eq!(result.skipped, 0);
+    assert!(replies.lock().await.is_empty());
+    server.abort();
+    let _ = server.await;
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+}
+
 fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     DocumentChunk {
         chunk_id: "chunk-id".to_string(),

@@ -78,6 +78,9 @@ use deal scope. The authenticated uploader is stored separately on each accepted
 Exact-byte retries retain original attribution and write no second upload event. `quarry_current_content`
 serializes current-content claims per deal, preventing concurrent duplicate logical attachments.
 Identical bytes in distinct deals remain isolated.
+An exact-byte upload skips only after the published active generation and canonical chunk headers
+match the immutable manifest. Missing or mismatched chunks trigger repair with the same version
+and chunk IDs; an unavailable verification read fails without replaying graph writes.
 
 `document_identity_manifests` records derivation version, original content ID, active generation
 and exact chunk count; `document_chunk_identities` preserves IDs, generation, order and hashes,

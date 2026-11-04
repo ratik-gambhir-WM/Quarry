@@ -229,21 +229,45 @@ impl DocumentIngestionService {
                     if indexed.version.version_id == existing.version_id
                         && indexed.version.content_sha256 == content_hash =>
                 {
-                    return Ok(ProcessedDocument {
-                        filename,
-                        document_id: Some(
-                            self.files
-                                .manifest(existing.version_id.clone())
-                                .await?
-                                .ok_or_else(|| ServiceError::internal("identity manifest missing"))?
-                                .document_id,
-                        ),
-                        chunk_count: 0,
-                        success: true,
-                        sqlite_committed: true,
-                        skipped: true,
-                        error: None,
-                    });
+                    let manifest = self
+                        .files
+                        .manifest(existing.version_id.clone())
+                        .await?
+                        .ok_or_else(|| ServiceError::internal("identity manifest missing"))?;
+                    let active = manifest
+                        .chunks
+                        .iter()
+                        .filter(|c| c.index_generation == manifest.active_generation)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    match self
+                        .graph_reader
+                        .has_complete_chunks(&deal_id, &active)
+                        .await
+                    {
+                        Ok(true)
+                            if indexed.version.index_generation == manifest.active_generation =>
+                        {
+                            return Ok(ProcessedDocument {
+                                filename,
+                                document_id: Some(manifest.document_id),
+                                chunk_count: 0,
+                                success: true,
+                                sqlite_committed: true,
+                                skipped: true,
+                                error: None,
+                            });
+                        }
+                        Ok(_) => {} // Repair the existing immutable version through the normal retry path.
+                        Err(error) => {
+                            return Ok(failed_document(
+                                filename,
+                                format!(
+                                    "failed to verify the existing deal attachment index: {error}"
+                                ),
+                            ))
+                        }
+                    }
                 }
                 Ok(Some(_)) | Ok(None) => {}
                 Err(error) => {

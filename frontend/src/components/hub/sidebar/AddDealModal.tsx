@@ -103,6 +103,7 @@ export function AddDealModal({
   );
   const [teamName, setTeamName] = useState("");
   const teamSaved = useRef(false);
+  const teamCreationAttempted = useRef(false);
   const submissionInFlight = useRef(false);
   const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] =
@@ -202,10 +203,31 @@ export function AddDealModal({
       }
       if (teamName.trim() && !teamSaved.current) {
         savingTeam = true;
-        await runtime.api.createDealTeam(savedCore.deal.dealId, {
-          name: teamName.trim(),
-        });
-        teamSaved.current = true;
+        // A failed response can follow a committed create. Reconcile before replaying it.
+        if (teamCreationAttempted.current) {
+          const teams = await runtime.api.listDealTeams(savedCore.deal.dealId, {
+            limit: 100,
+          });
+          const normalizedName = teamName
+            .trim()
+            .replace(/\p{White_Space}+/gu, " ")
+            .trim();
+          teamSaved.current = teams.items.some(
+            (team) => team.name === normalizedName,
+          );
+          if (!teamSaved.current && teams.items.length > 0) {
+            throw new Error(
+              "This deal already has a different team. Close this dialog and review it in Settings.",
+            );
+          }
+        }
+        if (!teamSaved.current) {
+          teamCreationAttempted.current = true;
+          await runtime.api.createDealTeam(savedCore.deal.dealId, {
+            name: teamName.trim(),
+          });
+          teamSaved.current = true;
+        }
         savingTeam = false;
       }
       if (includeMetadata) await saveSources(savedCore);

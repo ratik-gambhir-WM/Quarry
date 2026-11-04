@@ -718,7 +718,10 @@ opening the dialog does not capture the page chrome as part of that transition.
 Deal creation has four draft steps: details, companies, an optional team name, and metadata.
 Finish (including Skip metadata) creates the deal, then its named team through the existing
 membership API. These are separate requests; a team or metadata failure retains the created deal
-for retry, and metadata retries reuse a successfully created team.
+for retry, and metadata retries reuse a successfully created team. After an unsuccessful team
+creation response, a retry first reads the deal's teams and reuses the matching normalized name
+if creation already committed. An unavailable roster prevents replay; a different existing team
+requires review in Settings.
 Settings uses a bounded, responsive workspace with a team header, avatar-based member roster,
 and add-member/access-guide rail. Settings cards match the Overview cards' muted-to-transparent
 surface, 8-pixel corners, and borderless, shadowless treatment. Each member's controlled permissions
@@ -1465,8 +1468,11 @@ Document persistence is not a distributed transaction:
 5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
 
 The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
-the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert. Once a
-`file_id` is selected, version and graph-chunk identities are reproducible. Image retries load the
+the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert.
+An already-published version skips only when its active generation and every canonical chunk
+header match the identity manifest, using the same bounded header check as search. Missing or
+mismatched chunks enter the normal repair path; a failed verification read does not trigger graph
+writes. Once a `file_id` is selected, version and graph-chunk identities are reproducible. Image retries load the
 accepted document/chunk snapshot from `document_image_recovery` before parsing or calling vision,
 then embed that exact text and enforce the existing immutable manifest. The checkpoint commits
 with the file/version/blob and contains no vectors; changed descriptions cannot replace it.

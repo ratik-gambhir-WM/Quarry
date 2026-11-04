@@ -20,6 +20,7 @@ import { AddDealModal } from "@/components/hub/sidebar/AddDealModal";
 
 const {
   createDealTeam,
+  listDealTeams,
   createDeal,
   createCompany,
   updateCompany,
@@ -28,6 +29,7 @@ const {
   listCompanies,
 } = vi.hoisted(() => ({
   createDealTeam: vi.fn(),
+  listDealTeams: vi.fn(),
   createDeal: vi.fn(),
   createCompany: vi.fn(),
   updateCompany: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock("@quarry/runtime", () => ({
   runtime: {
     api: {
       createDealTeam,
+      listDealTeams,
       createDeal,
       createCompany,
       updateCompany,
@@ -63,6 +66,8 @@ describe("AddDealModal", () => {
     listCompanies.mockResolvedValue({ companies: [], hasMore: false });
     createDealTeam.mockReset();
     createDealTeam.mockResolvedValue(undefined);
+    listDealTeams.mockReset();
+    listDealTeams.mockResolvedValue({ items: [], nextCursor: null });
     createDeal.mockReset();
     createCompany.mockReset();
     updateCompany.mockReset();
@@ -465,6 +470,50 @@ describe("AddDealModal", () => {
     expect(createDeal).toHaveBeenCalledTimes(1);
     expect(createDealTeam).toHaveBeenCalledTimes(2);
     expect(createDealTeam).toHaveBeenLastCalledWith(savedDeal.dealId, { name: "Diligence" });
+  });
+
+  it.each(["Finish deal", "Skip metadata"])(
+    "reconciles a committed team after a lost response when retrying %s",
+    async (action) => {
+      const user = userEvent.setup();
+      createDealTeam.mockRejectedValueOnce(new Error("Response lost"));
+      // A replay would conflict: the first request already created this team.
+      createDealTeam.mockRejectedValue(new Error("A deal can have only one team"));
+      listDealTeams.mockResolvedValue({
+        items: [{ teamId: "team-created", name: "Diligence Team", revision: 1, userIds: [] }],
+        nextCursor: null,
+      });
+      render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /><LocationProbe /></MemoryRouter>);
+      await completeDealDetails(user);
+      await user.click(screen.getByRole("button", { name: "Back" }));
+      await user.type(screen.getByLabelText("Team name (optional)"), "  Diligence   Team  ");
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      await user.click(screen.getByRole("button", { name: "Finish deal" }));
+      expect((await screen.findByRole("alert")).textContent).toContain("team could not be saved");
+      await user.click(screen.getByRole("button", { name: action }));
+      await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`/hub/deals/${savedDeal.dealId}`));
+      expect(createDeal).toHaveBeenCalledTimes(1);
+      expect(createDealTeam).toHaveBeenCalledTimes(1);
+      expect(listDealTeams).toHaveBeenCalledWith(savedDeal.dealId, { limit: 100 });
+      expect(saveDealMetadata).toHaveBeenCalledTimes(action === "Finish deal" ? 1 : 0);
+    },
+  );
+
+  it("does not replay team creation when reconciliation is unavailable", async () => {
+    const user = userEvent.setup();
+    createDealTeam.mockRejectedValueOnce(new Error("Response lost"));
+    listDealTeams.mockRejectedValueOnce(new Error("Roster unavailable"));
+    render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
+    await completeDealDetails(user);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.type(screen.getByLabelText("Team name (optional)"), "Diligence");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Finish deal" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Finish deal" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Roster unavailable"));
+    expect(createDealTeam).toHaveBeenCalledTimes(1);
+    expect(saveDealMetadata).not.toHaveBeenCalled();
   });
 
   it("creates the named team even when metadata is skipped", async () => {

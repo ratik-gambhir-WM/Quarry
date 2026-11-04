@@ -29,6 +29,7 @@ use crate::{
             FileVersionGraphWrite, DOCUMENT_INDEX_NAMES,
         },
     },
+    domains::documents::store::identity::ChunkIdentity,
     shared::error::RepositoryError,
 };
 
@@ -179,6 +180,14 @@ pub struct DocumentGraphReader {
 impl DocumentGraphReader {
     pub fn new(helix: Arc<HelixClient>) -> Self {
         Self { helix }
+    }
+
+    pub async fn has_complete_chunks(
+        &self,
+        deal: &str,
+        expected: &[ChunkIdentity],
+    ) -> Result<bool, RepositoryError> {
+        has_complete_chunks(&self.helix, deal, expected).await
     }
 
     pub async fn current_document(
@@ -563,33 +572,44 @@ impl DocumentGraphSearch {
     pub async fn verify_candidates(
         &self,
         deal: String,
-        expected: Vec<crate::domains::documents::store::identity::ChunkIdentity>,
+        expected: Vec<ChunkIdentity>,
     ) -> Result<(), RepositoryError> {
-        if expected.is_empty() {
-            return Ok(());
-        }
-        #[derive(Deserialize)]
-        struct Headers {
-            chunks: Vec<crate::domains::documents::store::identity::ChunkIdentity>,
-        }
-        let query = super::query::current_chunk_headers(
-            deal,
-            expected.iter().map(|c| c.chunk_id.clone()).collect(),
-        )
-        .map_err(|e| RepositoryError::storage(e.to_string()))?;
-        let response: Headers = self
-            .helix
-            .execute_read_query("helix.file_chunk.verify_candidates", query)
-            .await
-            .map_err(RepositoryError::storage)?;
-        let actual_count = response.chunks.len();
-        let actual = response.chunks.into_iter().collect::<HashSet<_>>();
-        if actual_count != expected.len() || actual != expected.into_iter().collect::<HashSet<_>>()
-        {
+        if !has_complete_chunks(&self.helix, &deal, &expected).await? {
             return Err(RepositoryError::Unavailable(
                 "document indexing is incomplete; retry the original file before searching".into(),
             ));
         }
         Ok(())
     }
+}
+
+/// Share the same canonical header check between search and exact-byte upload retries.
+async fn has_complete_chunks(
+    helix: &HelixClient,
+    deal: &str,
+    expected: &[ChunkIdentity],
+) -> Result<bool, RepositoryError> {
+    #[derive(Deserialize)]
+    struct Headers {
+        chunks: Vec<ChunkIdentity>,
+    }
+    // Uploads may exceed the search candidate bound. Keep each verification query bounded.
+    for batch in expected.chunks(10_000) {
+        let query = super::query::current_chunk_headers(
+            deal.into(),
+            batch.iter().map(|c| c.chunk_id.clone()).collect(),
+        )
+        .map_err(|e| RepositoryError::storage(e.to_string()))?;
+        let response: Headers = helix
+            .execute_read_query("helix.file_chunk.verify_candidates", query)
+            .await
+            .map_err(RepositoryError::storage)?;
+        if response.chunks.len() != batch.len()
+            || response.chunks.iter().collect::<HashSet<_>>()
+                != batch.iter().collect::<HashSet<_>>()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
