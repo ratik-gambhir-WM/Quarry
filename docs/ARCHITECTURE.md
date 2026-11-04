@@ -410,7 +410,7 @@ global state or query-cache library.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
   sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
-  Workspace section containing Deals and Notebook. Vault's section rail includes Documents,
+  Workspace section containing Deals and Notebook. Vault's category filters include All items, Documents, Insights,
   Links, Prompts, Notes, Tasks, Templates, and Global variables. The Deal Room and non-Assistant Deal Hub
   headers identify the active sidebar without fixture-backed alternate
   spaces. `/hub/assistant` replaces that identity with Deal Hub and Chat sidebar-view tabs and
@@ -507,6 +507,13 @@ global state or query-cache library.
   distinguish expected close, actual close, and engagement completion.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
   type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
+  The table sits within the responsive page gutters, with aligned header/body padding,
+  browser-sized columns based on their headings and text, and horizontal row dividers.
+  The table begins 8px below the workspace header. Long names and metadata truncate at
+  bounded widths with full-text tooltips. The table fills the page width, sharing spare
+  space through automatic table layout rather than assigning it all to the project name.
+  Columns scroll together and sorting remains available. Native content sizing replaces
+  manual column resizing and pinning on this table.
   Missing values and unavailable links display `N/A`; external links open in a separate tab.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
@@ -580,7 +587,10 @@ global state or query-cache library.
   Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
   section enables Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents.
-  Deal Activity shows persisted activity for saved deals. Site Visits follows it and restores the
+  Deal Activity shows persisted activity for saved deals through a Quarry-themed Stealth activity
+  feed with day groups, event icons, exact timestamp labels, and a responsive timeline. It retains
+  the API’s oldest-first cursor order; loading, empty, retry, and paginated states remain owned by
+  the existing request resource. Site Visits follows it and restores the
   existing editable calendar, timeline, and tasks beneath the persistent tab header; demo Deal
   Activity retains its fixture timeline. Site Visits calendar edits remain session-only and do not
   create persisted activity events or durable visit records. Enabled tabs use the `section` query parameter, with Overview
@@ -636,14 +646,14 @@ operational failures.
 | --- | --- | --- |
 | Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
-| Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
+| Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
-| Initiative Vault | Full-width ReUI Vault table with transparent table/header surfaces showing the main inset background, and a visual-only Documents, Links, Prompts, Notes, Tasks, Templates, and Global variables category rail | The category rail does not yet filter or navigate; table data is fixture-derived and static |
+| Initiative Vault | Page-embedded ReUI library table without an outer card, with an explicit Sample data label, category counts, local text search, project filtering, result counts, and filter reset; project, practice area, and creator metadata are separate, with unavailable values shown as a dash | Data remains fixture-derived; filters are page-local and do not query the API. Empty categories show no matches; file opening, favorites, and category-specific creation are not implemented |
 | Logs | View/export/clear bounded activity log | Session-local only |
 | Account/profile | Shows the verified provider-owned profile and signs out the current session | No profile editing or recovery; theme picker remains unavailable |
 

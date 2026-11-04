@@ -1,6 +1,8 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import { createRequestResource } from "../../data/requests/requestResource";
+import { FileUp, History, Pencil, Plus, UserMinus, Users } from "lucide-react";
+import { ActivityFeed, type ActivityItem } from "../ui/stealth/activity-feed";
 import { Button } from "../ui/button";
 
 export function DealActivity({ dealId }: { dealId: string }) {
@@ -47,39 +49,40 @@ export function DealActivity({ dealId }: { dealId: string }) {
       {error ? (
         <div role="alert">
           <p>{error}</p>
-          <Button onClick={resource.refresh}>Retry activity</Button>
+          <Button onClick={page ? loadMore : resource.refresh}>
+            Retry activity
+          </Button>
         </div>
       ) : null}
-      {state.status === "loading" ? (
-        <p role="status">Loading activity…</p>
-      ) : null}
-      {page?.items.length === 0 ? (
-        <p>No activity yet.</p>
-      ) : (
-        <ol className="divide-y divide-border">
-          {page?.items.map((event) => (
-            <li className="py-3" key={event.eventId}>
-              <p>
-                {event.actorName ?? "System"} ·{" "}
-                {event.kind.split("_").join(" ")}
-              </p>
-              <time className="text-sm text-muted" dateTime={event.createdAt}>
-                {new Date(event.createdAt).toLocaleString()}
-              </time>
-            </li>
-          ))}
-        </ol>
-      )}
-      {page?.nextCursor ? (
-        <Button
-          disabled={state.status === "ready" && state.pending}
-          onClick={loadMore}
-        >
-          {state.status === "ready" && state.pending
-            ? "Loading…"
-            : "Load more activity"}
-        </Button>
-      ) : null}
+      <ActivityFeed
+        items={
+          page?.items.map((event): ActivityItem => ({
+            id: event.eventId,
+            actor: { name: event.actorName ?? "System" },
+            action: event.kind.split("_").join(" "),
+            at: event.createdAt,
+            icon: activityIcon(event.kind),
+          })) ?? []
+        }
+        loading={state.status === "loading"}
+        loadingMore={state.status === "ready" && state.pending}
+        hasMore={!!page?.nextCursor}
+        onLoadMore={loadMore}
+        hidden={state.status === "error"}
+      />
     </section>
   );
+}
+
+function activityIcon(kind: string) {
+  if (kind === "document_uploaded") return <FileUp />;
+  if (kind === "member_removed" || kind === "team_deleted") return <UserMinus />;
+  if (
+    kind.startsWith("member_") ||
+    kind.startsWith("team_") ||
+    kind === "ownership_transferred"
+  ) return <Users />;
+  if (kind.endsWith("created")) return <Plus />;
+  if (kind.endsWith("updated") || kind.endsWith("renamed")) return <Pencil />;
+  return <History />;
 }

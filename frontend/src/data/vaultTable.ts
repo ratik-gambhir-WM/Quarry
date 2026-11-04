@@ -1,31 +1,20 @@
-import { hubActivityTasks, hubRecentFiles } from "../fixtures/hub/activity";
-import { workspaceInsights } from "../fixtures/workspace/portfolio";
+import type { hubActivityTasks, hubRecentFiles } from "../fixtures/hub/activity";
+import type { workspaceInsights } from "../fixtures/workspace/portfolio";
 
 type VaultTableTypeIcon = "bookmark" | "checkCircle" | "doc" | "pdf" | "sheet";
 
 export type VaultTableRow = {
-  creator: string;
+  creator: string | null;
   description: string;
   id: string;
   name: string;
-  practiceArea: string;
+  practiceArea: string | null;
+  project: string;
   type: "Document" | "Insight" | "Task";
   typeIcon: VaultTableTypeIcon;
 };
 
-export const vaultTableRows = [
-  taskRow("task-q3-extract", hubActivityTasks[0]),
-  insightRow("insight-capex", workspaceInsights[0]),
-  fileRow("file-meeting-minutes", hubRecentFiles[1]),
-  taskRow("task-legal-disclosures", hubActivityTasks[1]),
-  insightRow("insight-distribution", workspaceInsights[1]),
-  fileRow("file-q3-report", hubRecentFiles[0]),
-  taskRow("task-transcript-summary", hubActivityTasks[2]),
-  fileRow("file-logistics-due-diligence", hubRecentFiles[2]),
-  taskRow("task-data-room", hubActivityTasks[3]),
-] satisfies readonly VaultTableRow[];
-
-function taskRow(
+export function taskRow(
   id: string,
   task: (typeof hubActivityTasks)[number],
 ): VaultTableRow {
@@ -36,37 +25,40 @@ function taskRow(
       : `Assigned to: ${task.creator}`,
     id,
     name: task.label,
-    practiceArea: task.practiceArea,
+    practiceArea: null,
+    project: task.practiceArea,
     type: "Task",
     typeIcon: "checkCircle",
   };
 }
 
-function insightRow(
+export function insightRow(
   id: string,
   insight: (typeof workspaceInsights)[number],
 ): VaultTableRow {
   return {
-    creator: insight.deal,
+    creator: null,
     description: `Source: ${insight.fileName}`,
     id,
     name: insight.quote,
     practiceArea: insight.category,
+    project: insight.deal,
     type: "Insight",
     typeIcon: "bookmark",
   };
 }
 
-function fileRow(
+export function fileRow(
   id: string,
   file: (typeof hubRecentFiles)[number],
 ): VaultTableRow {
   return {
-    creator: file.creator,
+    creator: null,
     description: `Recently opened · ${file.time}`,
     id,
     name: file.title,
-    practiceArea: file.deal,
+    practiceArea: null,
+    project: file.deal,
     type: "Document",
     typeIcon: file.icon,
   };

@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   ColumnDef,
-  ColumnPinningState,
   PaginationState,
   SortingState,
 } from "@tanstack/react-table";
@@ -31,7 +30,7 @@ import { ViewTransition } from "../ui/ViewTransition";
 
 const dealsDataGridTableClassNames = {
   ...quarryDataGridTableClassNames,
-  base: `${quarryDataGridTableClassNames.base} bg-[var(--theme-workspace-surface)] text-left`,
+  base: `${quarryDataGridTableClassNames.base} bg-[var(--theme-workspace-surface)] text-left [&_th]:px-4 [&_tbody_td]:px-4 [&_tbody_td]:py-3`,
   edgeCell: `${quarryDataGridTableClassNames.edgeCell} data-pinned:bg-[var(--theme-workspace-surface)]`,
   header: `${quarryDataGridTableClassNames.header} bg-[var(--theme-workspace-surface)] [&_th>div]:ms-0 [&_th>div]:justify-start`,
   headerRow: `${quarryDataGridTableClassNames.headerRow} bg-[var(--theme-workspace-surface)]`,
@@ -58,10 +57,6 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
     pageIndex: 0,
     pageSize: 10,
   });
-  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({
-    end: [],
-    start: ["deal"],
-  });
 
   const columns = useMemo<ColumnDef<DataGridFeatures, DealPortfolioView>[]>(
     () => [
@@ -70,7 +65,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
         id: "deal",
         header: ({ column }) => (
           <DataGridColumnHeader
-            className={quarryDataGridHeaderClassName}
+            className={`${quarryDataGridHeaderClassName} px-0`}
             column={column}
             title="Project name"
           />
@@ -83,7 +78,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
               name={deal.transitionName}
               share="morph"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 max-w-[24rem]">
                 <ViewTransition
                   default="none"
                   name={`${deal.transitionName}-title`}
@@ -91,6 +86,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
                 >
                   <Link
                     aria-label={`Open ${deal.name}`}
+                    title={deal.name.trim() || "N/A"}
                     className="block truncate font-medium text-foreground outline-none hover:text-primary focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
                     state={navigationState}
                     to={getDealRoomPath(deal.id)}
@@ -102,18 +98,16 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
             </ViewTransition>
           );
         },
-        minSize: 180,
-        size: 220,
-        meta: { fillWidth: true, headerTitle: "Project name" },
+        meta: { headerTitle: "Project name" },
       },
-      textColumn("status", "Status", 180),
-      textColumn("targetCompany", "Target", 170),
-      textColumn("portfolioCompany", "PortCo", 170),
-      textColumn("engagement", "Engagement type", 150),
-      textColumn("sponsor", "PE sponsor", 170),
-      linkColumn("sowHref", "SOW", 85),
-      linkColumn("factSheetHref", "Fact sheet", 100),
-      linkColumn("sharepointHref", "SharePoint", 110),
+      textColumn("status", "Status"),
+      textColumn("targetCompany", "Target"),
+      textColumn("portfolioCompany", "PortCo"),
+      textColumn("engagement", "Engagement type"),
+      textColumn("sponsor", "PE sponsor"),
+      linkColumn("sowHref", "SOW"),
+      linkColumn("factSheetHref", "Fact sheet"),
+      linkColumn("sharepointHref", "SharePoint"),
     ],
     [navigationState],
   );
@@ -123,8 +117,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
     columns,
     data: deals,
     getRowId: (row) => row.id,
-    state: { columnPinning, pagination, sorting },
-    onColumnPinningChange: setColumnPinning,
+    state: { pagination, sorting },
     onPaginationChange: setPagination,
     onSortingChange: setSorting,
     autoResetPageIndex: false,
@@ -133,16 +126,15 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
   if (deals.length === 0) return <DealsEmptyState onReset={onReset} />;
 
   return (
-    <div className="-mx-8 -mt-8 w-[calc(100%+4rem)] border-y border-outline-variant/70">
+    <div className="min-w-0 w-full">
       <DataGrid
         recordCount={deals.length}
         table={table}
         tableClassNames={dealsDataGridTableClassNames}
         tableLayout={{
-          cellBorder: true,
-          columnsPinnable: true,
-          columnsResizable: true,
-          dense: true,
+          cellBorder: false,
+          width: "auto",
+          dense: false,
           headerBackground: false,
           headerBorder: true,
           rowBorder: true,
@@ -153,7 +145,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
             <DataGridTable />
           </DataGridScrollArea>
         </DataGridContainer>
-        <div className="border-t border-outline-variant/70 px-5 py-2">
+        <div className="border-t border-outline-variant/70 px-4 py-3">
           <DataGridPagination sizes={[5, 10, 25, 50]} />
         </div>
       </DataGrid>
@@ -164,24 +156,21 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
 function textColumn(
   accessorKey: keyof DealPortfolioView,
   title: string,
-  size: number,
 ): ColumnDef<DataGridFeatures, DealPortfolioView> {
   return {
     accessorKey,
     header: ({ column }) => (
       <DataGridColumnHeader
-        className={quarryDataGridHeaderClassName}
+        className={`${quarryDataGridHeaderClassName} px-0`}
         column={column}
         title={title}
       />
     ),
     cell: ({ row }) => (
-      <span title={String(row.original[accessorKey] ?? "").trim() || "N/A"}>
+      <span className="block max-w-[20rem] truncate" title={String(row.original[accessorKey] ?? "").trim() || "N/A"}>
         {String(row.original[accessorKey] ?? "").trim() || "N/A"}
       </span>
     ),
-    minSize: 110,
-    size,
     meta: { headerTitle: title },
   };
 }
@@ -189,7 +178,6 @@ function textColumn(
 function linkColumn(
   accessorKey: "sowHref" | "factSheetHref" | "sharepointHref",
   title: string,
-  size: number,
 ): ColumnDef<DataGridFeatures, DealPortfolioView> {
   return {
     accessorKey,
@@ -202,7 +190,7 @@ function linkColumn(
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open ${title} for ${row.original.name}`}
-          className="inline-flex items-center gap-1 rounded-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {title}
           <ArrowUpRight aria-hidden="true" className="size-3.5" />
@@ -212,8 +200,6 @@ function linkColumn(
       );
     },
     enableSorting: false,
-    minSize: size,
-    size,
     meta: { headerTitle: title },
   };
 }

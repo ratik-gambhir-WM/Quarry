@@ -184,10 +184,17 @@ describe("Deals", () => {
         className.startsWith("max-w-"),
       ),
     ).toBe(false);
-    expect(tableFrame?.classList.contains("border-y")).toBe(true);
-    expect(tableFrame?.classList.contains("-mx-8")).toBe(true);
-    expect(tableFrame?.classList.contains("-mt-8")).toBe(true);
-    expect(tableFrame?.classList.contains("w-[calc(100%+4rem)]")).toBe(true);
+    expect(tableFrame?.classList.contains("border-y")).toBe(false);
+    expect(tableFrame?.classList.contains("-mx-8")).toBe(false);
+    expect(tableFrame?.classList.contains("-mt-8")).toBe(false);
+    expect(tableFrame?.classList.contains("w-full")).toBe(true);
+    expect(table.querySelectorAll("[data-pinned]")).toHaveLength(0);
+    expect(table.classList.contains("table-auto")).toBe(true);
+    expect(table.classList.contains("w-full")).toBe(true);
+    expect(table.classList.contains("w-max")).toBe(false);
+    for (const cell of table.querySelectorAll<HTMLElement>("th, td")) {
+      expect(cell.style.width).toBe("");
+    }
     expect(tableFrame?.classList.contains("rounded-2xl")).toBe(false);
     expect(tableFrame?.classList.contains("bg-surface-container-lowest")).toBe(
       false,
