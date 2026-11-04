@@ -8,7 +8,7 @@ use std::{
 
 use super::error::FailureKind;
 use super::retrieval::*;
-use super::RequestCancellation;
+use super::{check_cancelled, RequestCancellation};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 use uuid::Uuid;
@@ -164,7 +164,6 @@ impl ImportService {
     /// or persistence failures.
     pub fn import(&self, source: &[u8], kind: TemplateKind) -> SlideResult<ImportResponse> {
         self.import_single(source, kind, false, None)
-            .map(|(response, _)| response)
     }
     pub fn import_cancellable(
         &self,
@@ -173,53 +172,31 @@ impl ImportService {
         cancellation: &RequestCancellation,
     ) -> SlideResult<ImportResponse> {
         self.import_single(source, kind, false, Some(cancellation))
-            .map(|(response, _)| response)
     }
-    pub fn prepare_import_v2_cancellable(
+    /// Save the JSON, generated preview and pending work in one transaction.
+    pub fn queue_classified_import(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: &RequestCancellation,
-    ) -> SlideResult<(ImportResponse, SlideClassificationJob)> {
-        let (response, job) = self.import_single(source, kind, true, Some(cancellation))?;
-        Ok((
-            response,
-            job.ok_or_else(|| {
-                SlideTemplateError::internal(anyhow::anyhow!(
-                    "missing synchronous classification job"
-                ))
-            })?,
-        ))
+    ) -> SlideResult<ImportResponse> {
+        self.import_single(source, kind, true, Some(cancellation))
     }
     pub fn complete_processing(&self, result: &CompleteSlideProcessing) -> SlideResult<()> {
         self.repository
             .complete_slide_processing(result)
             .map_err(SlideTemplateError::internal)
     }
-    pub fn complete_processing_cancellable(
-        &self,
-        result: &CompleteSlideProcessing,
-        cancellation: &RequestCancellation,
-    ) -> SlideResult<()> {
-        self.repository
-            .complete_slide_processing_cancellable(result, Some(cancellation))
-            .map_err(map_repository_failure)
-    }
-    pub fn fail_processing(&self, template_id: &str, code: &str) -> SlideResult<()> {
-        self.repository
-            .record_slide_classification_failure(template_id, code, None)
-            .map_err(SlideTemplateError::internal)
-    }
     fn import_single(
         &self,
         source: &[u8],
         kind: TemplateKind,
-        processing: bool,
+        queue_classification: bool,
         cancellation: Option<&RequestCancellation>,
-    ) -> SlideResult<(ImportResponse, Option<SlideClassificationJob>)> {
+    ) -> SlideResult<ImportResponse> {
         let Conversion {
-            mut template_json,
-            mut warnings,
+            template_json,
+            warnings,
         } = pptx::read(source)?;
         if template_json.presentation.slides.len() != 1 {
             return Err(SlideTemplateError::new(
@@ -228,6 +205,38 @@ impl ImportService {
                 "Template PowerPoint files must contain exactly one slide.",
             ));
         }
+        let (record, result) = self.prepare_import(
+            source,
+            template_json,
+            warnings,
+            kind,
+            queue_classification,
+            cancellation,
+        )?;
+        check_cancelled(cancellation)?;
+        if queue_classification {
+            let pending = pending_classification(&record)?;
+            self.repository
+                .insert_with_pending_classification_cancellable(&record, &pending, cancellation)
+                .map_err(map_repository_failure)?;
+        } else {
+            self.repository
+                .insert_many_cancellable(&[record], cancellation)
+                .map_err(map_repository_failure)?;
+        }
+        Ok(result)
+    }
+
+    fn prepare_import(
+        &self,
+        source: &[u8],
+        mut template_json: CanvasDocument,
+        mut warnings: Vec<String>,
+        kind: TemplateKind,
+        require_preview: bool,
+        cancellation: Option<&RequestCancellation>,
+    ) -> SlideResult<(TemplateInsert, ImportResponse)> {
+        check_cancelled(cancellation)?;
         repair_canvas_dimensions(&mut template_json);
         let generated_preview = match self.preview_generator.generate_document_cancellable(
             source,
@@ -241,6 +250,12 @@ impl ImportService {
                 None
             }
         };
+        if require_preview && generated_preview.is_none() {
+            return Err(super::facade::unavailable(
+                "template_preview_unavailable",
+                "A preview could not be generated. Try importing the template again.",
+            ));
+        }
         if generated_preview.is_none() {
             warnings.push("A preview image could not be generated for this template.".to_owned());
         }
@@ -271,64 +286,91 @@ impl ImportService {
         let hydrated_template_json = hydrate_canvas_assets(template_json.clone(), &assets)?;
         super::facade::bound_json(&super::compact_document(&hydrated_template_json))?;
         check_cancelled(cancellation)?;
-        let job = if processing {
-            let preview_checksum = preview.as_ref().map(|p| checksum_bytes(&p.bytes));
-            let fingerprint = build_slide_classification_input_fingerprint(
-                &template_json,
-                preview_checksum.as_deref(),
-            )
-            .map_err(SlideTemplateError::internal)?;
-            self.repository
-                .insert_with_processing_classification_cancellable(
-                    &TemplateInsert {
-                        template: template.clone(),
-                        assets: assets.clone(),
-                        metadata,
-                        preview: preview.clone(),
-                    },
-                    &PendingSlideClassification {
-                        input_fingerprint: fingerprint.clone(),
-                        prompt_version: SLIDE_CLASSIFICATION_PROMPT_VERSION.into(),
-                        schema_version: SLIDE_CLASSIFICATION_SCHEMA_VERSION,
-                    },
-                    cancellation,
-                )
-                .map_err(map_repository_failure)?;
-            Some(SlideClassificationJob {
-                attempt_count: 1,
-                input_fingerprint: fingerprint,
-                kind,
-                preview: preview.clone(),
-                template,
-                title: template_json.presentation.title.clone(),
-            })
+        let preview_status = if preview.is_some() {
+            TemplatePreviewStatus::Ready
         } else {
-            self.repository
-                .insert_many_cancellable(
-                    &[TemplateInsert {
-                        template: template.clone(),
-                        assets: assets.clone(),
-                        metadata,
-                        preview: preview.clone(),
-                    }],
-                    cancellation,
-                )
-                .map_err(map_repository_failure)?;
-            None
+            TemplatePreviewStatus::Unavailable
         };
         Ok((
+            TemplateInsert {
+                template,
+                assets,
+                metadata,
+                preview,
+            },
             ImportResponse {
                 template_id,
                 template_json: hydrated_template_json,
                 warnings,
-                preview_status: if preview.is_some() {
-                    TemplatePreviewStatus::Ready
-                } else {
-                    TemplatePreviewStatus::Unavailable
-                },
+                preview_status,
             },
-            job,
         ))
+    }
+
+    /// Prepare slides concurrently, then commit the entire deck and durable jobs atomically.
+    pub fn queue_classified_batch_import(
+        &self,
+        source: &[u8],
+        kind: TemplateKind,
+        cancellation: &RequestCancellation,
+    ) -> SlideResult<BatchImportResponse> {
+        let Conversion {
+            template_json,
+            warnings,
+        } = pptx::read_parallel(source, cancellation)?;
+        let presentation = template_json.presentation;
+        let preserve_element_order = presentation.preserve_element_order;
+        let show_branding = presentation.show_branding;
+        let prepared = super::parallel::map(presentation.slides, |slide| {
+            check_cancelled(Some(cancellation))?;
+            let document = CanvasDocument {
+                presentation: Presentation {
+                    title: slide.name.clone(),
+                    preserve_element_order,
+                    show_branding,
+                    slides: vec![slide],
+                },
+            };
+            // Source-only preview adapters must receive a single-slide package.
+            let single_source;
+            let preview_source = if self.preview_generator.supports_independent_slides() {
+                source
+            } else {
+                single_source = pptx::write(&document).map_err(SlideTemplateError::internal)?;
+                &single_source
+            };
+            self.prepare_import(
+                preview_source,
+                document,
+                Vec::new(),
+                kind,
+                true,
+                Some(cancellation),
+            )
+        })?;
+        let mut records = Vec::with_capacity(prepared.len());
+        let mut templates = Vec::with_capacity(prepared.len());
+        let mut response = BatchImportResponse {
+            templates: Vec::new(),
+            warnings,
+        };
+        for (record, imported) in prepared {
+            let pending = pending_classification(&record)?;
+            records.push((record, pending));
+            templates.push(BatchImportTemplate {
+                template_id: imported.template_id,
+                template_json: imported.template_json,
+                preview_available: true,
+            });
+        }
+        response.templates = templates;
+        // Bound the complete wire response before committing, including repeated IDs/metadata.
+        super::facade::bound_json(&classified_batch_json(&response)?)?;
+        check_cancelled(Some(cancellation))?;
+        self.repository
+            .insert_many_with_pending_classification_cancellable(&records, Some(cancellation))
+            .map_err(map_repository_failure)?;
+        Ok(response)
     }
 
     /// Imports every PowerPoint slide as an independently stored template in one transaction.
@@ -659,6 +701,33 @@ impl ImportService {
             .map_err(SlideTemplateError::internal)
     }
 
+    /// Requeue only a failed stage, preserving the saved slide and completed artifacts.
+    pub fn retry_failed_processing(
+        &self,
+        template_id: &str,
+    ) -> SlideResult<RetrySlideProcessingResponse> {
+        let outcome = self
+            .repository
+            .retry_failed_slide_processing(template_id)
+            .map_err(SlideTemplateError::internal)?;
+        match outcome {
+            RetrySlideProcessingOutcome::Queued(stage) => Ok(RetrySlideProcessingResponse {
+                template_id: template_id.to_owned(),
+                stage,
+            }),
+            RetrySlideProcessingOutcome::NotFound => Err(SlideTemplateError::new(
+                FailureKind::NotFound,
+                "template_not_found",
+                "Template was not found.",
+            )),
+            RetrySlideProcessingOutcome::NotFailed => Err(SlideTemplateError::new(
+                FailureKind::Conflict,
+                "slide_processing_not_failed",
+                "Only failed slide processing can be retried. Refresh its status.",
+            )),
+        }
+    }
+
     /// Reads the opt-in v2 retrieval fields without hydrating the template document.
     ///
     /// The caller must have already selected an app-scoped service, so checking the template
@@ -673,9 +742,6 @@ impl ImportService {
             return Ok(None);
         }
         let mut result = serde_json::json!({"templateId": template_id});
-        if !include_metadata && !include_embeddings {
-            return Ok(Some(result));
-        }
         let classification = self
             .repository
             .find_slide_classification(template_id)
@@ -683,6 +749,18 @@ impl ImportService {
         result["retrievalStatus"] = serde_json::json!(classification
             .as_ref()
             .map_or("not_ready", |record| record.status.as_str()));
+        result["classification"] = serde_json::json!({
+            "status": classification.as_ref().map_or("not_ready", |r| r.status.as_str()),
+            "attemptCount": classification.as_ref().map_or(0, |r| r.attempt_count),
+            "nextAttemptAt": classification.as_ref().and_then(|r| r.next_attempt_at.as_ref()),
+            "lastErrorCode": classification.as_ref().and_then(|r| r.last_error_code.as_ref()),
+        });
+        result["embedding"] = serde_json::json!({
+            "status": classification.as_ref().map_or("not_ready", |r| r.embedding_status.as_str()),
+            "attemptCount": classification.as_ref().map_or(0, |r| r.embedding_attempt_count),
+            "nextAttemptAt": classification.as_ref().and_then(|r| r.embedding_next_attempt_at.as_ref()),
+            "lastErrorCode": classification.as_ref().and_then(|r| r.embedding_last_error_code.as_ref()),
+        });
         if include_metadata {
             result["metadata"] = classification
                 .as_ref()
@@ -703,17 +781,6 @@ impl ImportService {
         }
         Ok(Some(result))
     }
-}
-
-fn check_cancelled(cancellation: Option<&RequestCancellation>) -> SlideResult<()> {
-    if cancellation.is_some_and(RequestCancellation::is_cancelled) {
-        return Err(SlideTemplateError::new(
-            FailureKind::Cancelled,
-            "request_cancelled",
-            "The template import was cancelled.",
-        ));
-    }
-    Ok(())
 }
 
 fn invalid_preview_page() -> SlideTemplateError {
@@ -1082,4 +1149,40 @@ fn map_repository_failure(error: crate::shared::error::RepositoryError) -> Slide
     } else {
         SlideTemplateError::internal(error)
     }
+}
+
+fn pending_classification(record: &TemplateInsert) -> SlideResult<PendingSlideClassification> {
+    let checksum = record
+        .preview
+        .as_ref()
+        .map(|preview| checksum_bytes(&preview.bytes));
+    Ok(PendingSlideClassification {
+        input_fingerprint: build_slide_classification_input_fingerprint(
+            &record.template.template_json,
+            checksum.as_deref(),
+        )
+        .map_err(SlideTemplateError::internal)?,
+        prompt_version: SLIDE_CLASSIFICATION_PROMPT_VERSION.into(),
+        schema_version: SLIDE_CLASSIFICATION_SCHEMA_VERSION,
+    })
+}
+
+pub(super) fn classified_batch_json(result: &BatchImportResponse) -> SlideResult<Value> {
+    let templates = result
+        .templates
+        .iter()
+        .map(|template| {
+            serde_json::json!({
+                "templateId": template.template_id,
+                "templateJson": super::compact_document(&template.template_json),
+                "previewAvailable": template.preview_available,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "templates": templates,
+        "warnings": result.warnings,
+        "importedCount": result.templates.len(),
+        "retrieval": {"status": "pending", "embeddingStatus": "not_ready"},
+    }))
 }

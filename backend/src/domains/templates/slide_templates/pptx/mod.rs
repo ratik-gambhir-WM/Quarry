@@ -16,6 +16,13 @@ pub fn read(source: &[u8]) -> SlideResult<Conversion> {
     reader::read(source)
 }
 
+pub(super) fn read_parallel(
+    source: &[u8],
+    cancellation: &super::RequestCancellation,
+) -> SlideResult<Conversion> {
+    reader::read_parallel(source, cancellation)
+}
+
 /// Inserts generated slides into an existing PowerPoint OOXML package.
 pub(super) fn insert(
     generated: &[u8],

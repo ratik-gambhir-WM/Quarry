@@ -49,6 +49,7 @@ async fn shutdown_signal(
     }
     if let Some(templates) = templates {
         templates.shutdown();
+        templates.stop_worker().await;
     }
     tracing::info!("shutdown signal received");
 }

@@ -96,6 +96,21 @@ pub(super) fn validate_package(source: &[u8]) -> SlideResult<()> {
 }
 
 pub(super) fn read(source: &[u8]) -> SlideResult<Conversion> {
+    read_inner(source, false, None)
+}
+
+pub(super) fn read_parallel(
+    source: &[u8],
+    cancellation: &super::super::RequestCancellation,
+) -> SlideResult<Conversion> {
+    read_inner(source, true, Some(cancellation))
+}
+
+fn read_inner(
+    source: &[u8],
+    parallel: bool,
+    cancellation: Option<&super::super::RequestCancellation>,
+) -> SlideResult<Conversion> {
     let parts = read_package(source)?;
     let presentation_xml = utf8_part(&parts, "ppt/presentation.xml")?;
     let presentation_rels = utf8_part(&parts, "ppt/_rels/presentation.xml.rels")?;
@@ -122,15 +137,23 @@ pub(super) fn read(source: &[u8]) -> SlideResult<Conversion> {
         return Err(invalid_powerpoint());
     }
 
-    let mut warnings = Vec::new();
-    let mut slides = Vec::with_capacity(slide_paths.len());
-    for (index, slide_path) in slide_paths.iter().enumerate() {
-        let slide_xml = utf8_part(&parts, slide_path)?;
-        let rels_path = relationship_part_path(slide_path);
+    // A deck is bounded separately from the ZIP entry/expansion limits.
+    if parallel && slide_paths.len() > 100 {
+        return Err(SlideTemplateError::new(
+            FailureKind::TooLarge,
+            "too_many_slides",
+            "Classified deck imports support at most 100 slides.",
+        ));
+    }
+    let parse = |(index, slide_path): (usize, String)| {
+        super::super::check_cancelled(cancellation)?;
+        let mut warnings = Vec::new();
+        let slide_xml = utf8_part(&parts, &slide_path)?;
+        let rels_path = relationship_part_path(&slide_path);
         let slide_relationships = match parts.get(&rels_path) {
             Some(bytes) => relationships(
                 std::str::from_utf8(bytes).map_err(|_| invalid_powerpoint())?,
-                slide_path,
+                &slide_path,
             )?,
             None => HashMap::new(),
         };
@@ -142,7 +165,7 @@ pub(super) fn read(source: &[u8]) -> SlideResult<Conversion> {
             parts: &parts,
             relationships: &slide_relationships,
             slide_index: index,
-            source_path: slide_path,
+            source_path: &slide_path,
             theme_colors: &theme_colors,
             text_styles: &text_styles,
             warnings: &mut warnings,
@@ -169,8 +192,19 @@ pub(super) fn read(source: &[u8]) -> SlideResult<Conversion> {
             context.warnings.push(format!("slide {}: shapeTree.elements: No exportable slide elements were found. The PowerPoint will be empty.", index + 1));
         }
         slide.name = slide_title(&slide.elements, index);
-        slides.push(slide);
-    }
+        Ok((slide, warnings))
+    };
+    let indexed = slide_paths.into_iter().enumerate().collect::<Vec<_>>();
+    let parsed = if parallel {
+        super::super::parallel::map(indexed, parse)?
+    } else {
+        indexed
+            .into_iter()
+            .map(parse)
+            .collect::<SlideResult<Vec<_>>>()?
+    };
+    let (slides, warnings): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
+    let warnings = warnings.into_iter().flatten().collect();
     let title = slides
         .first()
         .map_or_else(|| "Slide 1".to_owned(), |slide| slide.name.clone());

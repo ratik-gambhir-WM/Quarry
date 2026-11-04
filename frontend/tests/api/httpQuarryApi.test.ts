@@ -2,8 +2,27 @@ import { dealStatusOptions } from "@/data/dealModel";
 import { testDeal, testDealInput, testMetadata } from "@/test/fixtures/deals";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { httpQuarryApi } from "@/api/httpQuarryApi";
+import { testTemplateRetrieval } from "@/test/fixtures/templateRetrieval";
+import { clearActivityLog, getActivityLogEntries } from "@/lib/activityLog";
 
 describe("httpQuarryApi", () => {
+  it("explicitly retries a failed slide once through the versioned POST endpoint", async () => {
+    const payload = { templateId: "template-one", stage: "embedding" };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(httpQuarryApi.retryTemplateProcessing("template/one")).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/slide-templates/catalog/template%2Fone/retrieval/retry", expect.objectContaining({ method: "POST", body: "{}" }));
+  });
+  it.each([false, true])("reads template metadata with embeddings=%s using an encoded ID", async (includeEmbeddings) => {
+    const payload = testTemplateRetrieval();
+    clearActivityLog();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(httpQuarryApi.getTemplateRetrieval("template/one", includeEmbeddings)).resolves.toEqual(payload);
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/v1/templates/slide-templates/catalog/template%2Fone/retrieval?metadata=true&embeddings=${includeEmbeddings}`);
+    expect(getActivityLogEntries()[0]?.details).toBeUndefined();
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -214,35 +233,32 @@ describe("httpQuarryApi", () => {
   });
 
   it.each(["single", "batch"] as const)(
-    "imports one PPTX through the explicit %s template mode",
+    "imports one PPTX through the classified %s endpoint",
     async (importMode) => {
-      const result = {
-        importMode,
-        importedCount: importMode === "single" ? 1 : 3,
-        warningCount: 0,
-      };
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(Response.json(result, { status: 201 }));
+      const result = { importMode, importedCount: importMode === "single" ? 1 : 3, warningCount: 0 };
+      const fetchMock = vi.fn().mockResolvedValue(Response.json({}, { status: 201, headers: {
+        "x-template-id": "template-one", "x-template-preview-status": "ready",
+        "x-imported-template-count": "3", "x-powerpoint-warning-count": "0",
+      }}));
       vi.stubGlobal("fetch", fetchMock);
-      const file = new File(["presentation"], "template.pptx", {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      });
-
-      await expect(
-        httpQuarryApi.importPptxTemplate(file, importMode),
-      ).resolves.toEqual(result);
-
+      const file = new File(["presentation"], "template.pptx", { type: "" });
+      await expect(httpQuarryApi.importPptxTemplate(file, importMode)).resolves.toEqual(result);
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/v1/templates/import?mode=${importMode}`,
-        expect.objectContaining({ body: expect.any(FormData), method: "POST" }),
+        `/api/v1/templates/slide-templates/${importMode === "single" ? "import" : "batch-import"}/classified`,
+        expect.objectContaining({ body: file, method: "POST" }),
       );
       const request = fetchMock.mock.calls[0][1] as RequestInit;
-      expect(new Headers(request.headers).has("Content-Type")).toBe(false);
-      const form = request.body as FormData;
-      expect(form.getAll("files")).toEqual([file]);
+      expect(new Headers(request.headers).get("Content-Type")).toBe("application/vnd.openxmlformats-officedocument.presentationml.presentation");
     },
   );
+
+  it("treats an invalid saved-import acknowledgement as uncertain and never retries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({}, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(httpQuarryApi.importPptxTemplate(new File(["pptx"], "deck.pptx"), "batch"))
+      .rejects.toThrow("Template import could not be confirmed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it("saves the core deal and optional metadata through two separate requests", async () => {
     const input = testDealInput();

@@ -231,8 +231,62 @@ export type TemplatePreviewPage = {
 };
 
 export type PptxTemplateImportMode = "single" | "batch";
+export type TemplateProcessingStatus = "not_ready" | "pending" | "processing" | "ready" | "failed";
+
+export type TemplateRetrievalMetadata = {
+  subject: {
+    summary: string;
+    domains: Array<{ id: string; relevance: string; topics: string[] }>;
+    otherTopics: string[];
+    technologies: string[];
+    entities: string[];
+    claims: string[];
+    synonyms: string[];
+  };
+  communication: { intents: string[]; informationTypes: string[]; audience: string[] };
+  templateFit: {
+    archetype: string;
+    contentSlots: Array<{ elementId: string; role: string; capacity: string }>;
+  };
+  visual: {
+    layoutType: string;
+    visualElements: string[];
+    contentDensity: string;
+    structuralFeatures: string[];
+  };
+  retrievalKeywords: string[];
+};
+
+export type TemplateRetrieval = {
+  templateId: string;
+  retrievalStatus: TemplateProcessingStatus;
+  classification: TemplateProcessingProgress;
+  embedding: TemplateProcessingProgress;
+  metadata: TemplateRetrievalMetadata | null;
+  embeddings?: {
+    subjectVector: number[] | null;
+    capabilityVector: number[] | null;
+    dimensions: number | null;
+    model: string | null;
+    status: TemplateProcessingStatus;
+  };
+};
+
+export type TemplateProcessingProgress = {
+  status: TemplateProcessingStatus;
+  attemptCount: number;
+  nextAttemptAt: string | null;
+  lastErrorCode: string | null;
+};
+
+export type TemplateProcessingRetry = {
+  templateId: string;
+  stage: "classification" | "embedding";
+};
+
 export const MAX_PPTX_TEMPLATE_IMPORT_BYTES = 25 * 1024 * 1024;
 
+/** Confirms saved templates; classification and embeddings continue on the server. */
 export type PptxTemplateImportResult = {
   importMode: PptxTemplateImportMode;
   importedCount: number;
@@ -288,6 +342,8 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
     fileId: string,
   ): Promise<DealDocumentText>;
   getTemplate(templateId: string): Promise<DiligenceCanvasDocument>;
+  getTemplateRetrieval(templateId: string, includeEmbeddings?: boolean): Promise<TemplateRetrieval>;
+  retryTemplateProcessing(templateId: string): Promise<TemplateProcessingRetry>;
   importPptxTemplate(
     file: File,
     importMode: PptxTemplateImportMode,

@@ -245,7 +245,7 @@ impl SlideClassificationService {
         &self,
         job: &SlideClassificationJob,
     ) -> anyhow::Result<CompleteSlideProcessing> {
-        let classification = self.prepare_classification(job).await?;
+        let classification = self.prepare_classification(job.clone()).await?;
         let (subject_vector, capability_vector) = tokio::try_join!(
             self.options
                 .embedder
@@ -275,7 +275,7 @@ impl SlideClassificationService {
             .await?
             .map_err(Into::into)
     }
-    pub async fn classify(&self, job: &SlideClassificationJob) -> anyhow::Result<()> {
+    pub async fn classify(&self, job: SlideClassificationJob) -> anyhow::Result<()> {
         let result = self.prepare_classification(job).await?;
         let repository = self.options.repository.clone();
         tokio::task::spawn_blocking(move || repository.complete_slide_classification(&result))
@@ -309,15 +309,25 @@ impl SlideClassificationService {
     }
     async fn prepare_classification(
         &self,
-        job: &SlideClassificationJob,
+        job: SlideClassificationJob,
     ) -> anyhow::Result<CompleteSlideClassification> {
-        let input = build_slide_classification_input(
-            &job.template.template_json,
-            job.kind,
-            Some(&job.title),
-            job.preview.as_ref(),
-            &self.options.input_limits,
-        )?;
+        let limits = self.options.input_limits.clone();
+        let (job, input) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let input = build_slide_classification_input(
+                &job.template.template_json,
+                job.kind,
+                Some(&job.title),
+                job.preview.as_ref(),
+                &limits,
+            )?;
+            if job.preview.is_some() && input.preview.is_none() {
+                return Err(
+                    SlideProviderError::new("classification_preview_unavailable", false).into(),
+                );
+            }
+            Ok((job, input))
+        })
+        .await??;
         let metadata = self.options.classifier.classify(&input).await?;
         let element_ids = job.template.template_json.presentation.slides[0]
             .elements

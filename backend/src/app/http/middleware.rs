@@ -27,6 +27,9 @@ pub(super) fn apply(router: Router, config: &HttpConfig) -> Router {
             request_id_header.clone(),
             header::CONTENT_DISPOSITION,
             HeaderName::from_static("x-powerpoint-warning-count"),
+            HeaderName::from_static("x-template-id"),
+            HeaderName::from_static("x-template-preview-status"),
+            HeaderName::from_static("x-imported-template-count"),
         ]);
 
     router

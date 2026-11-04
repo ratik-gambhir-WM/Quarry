@@ -17,6 +17,27 @@ pub use vector::*;
 use super::{StoredTemplate, StoredTemplatePreview, TemplateKind};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SlideProcessingStage {
+    Classification,
+    Embedding,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetrySlideProcessingOutcome {
+    NotFound,
+    NotFailed,
+    Queued(SlideProcessingStage),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrySlideProcessingResponse {
+    pub template_id: String,
+    pub stage: SlideProcessingStage,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingSlideClassification {

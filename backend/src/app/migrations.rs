@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 15;
+const LATEST_SCHEMA_VERSION: i64 = 16;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -37,7 +37,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if ![12, 13, 14, LATEST_SCHEMA_VERSION].contains(&version) {
+        if ![12, 13, 14, 15, LATEST_SCHEMA_VERSION].contains(&version) {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
@@ -45,7 +45,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         }
         if version < 14 {
             validate_product_schema(&transaction)?;
-            validate_template_schema(&transaction)?;
+            validate_template_schema(&transaction, true)?;
             validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA])?;
         }
         check_foreign_keys(&transaction)?;
@@ -76,7 +76,22 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
     if version < 15 {
         transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
     }
-    validate_template_schema(&transaction)?;
+    if version < 16 {
+        // Validate marker 15 in full before renaming its canonical classification table.
+        validate_owned_schema(
+            &transaction,
+            &[
+                SCHEMA,
+                TEMPLATE_SCHEMA,
+                NOTEBOOK_SCHEMA,
+                MEMBERSHIP_SCHEMA,
+                DOCUMENT_SCOPE_UPGRADE,
+                IMAGE_RECOVERY_SCHEMA,
+            ],
+        )?;
+        transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
+    }
+    validate_template_schema(&transaction, false)?;
     validate_owned_schema(
         &transaction,
         &[
@@ -86,6 +101,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
             MEMBERSHIP_SCHEMA,
             DOCUMENT_SCOPE_UPGRADE,
             IMAGE_RECOVERY_SCHEMA,
+            CLASSIFICATION_STATUS_UPGRADE,
         ],
     )?;
     let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
@@ -130,7 +146,7 @@ fn validate_product_schema(connection: &Connection) -> rusqlite::Result<()> {
     ] { connection.prepare(sql)?; }
     Ok(())
 }
-fn validate_template_schema(connection: &Connection) -> rusqlite::Result<()> {
+fn validate_template_schema(connection: &Connection, legacy: bool) -> rusqlite::Result<()> {
     for sql in [
         "SELECT template_id, template_json FROM templates LIMIT 0",
         "SELECT asset_id, template_id, content_type, asset_data FROM template_assets LIMIT 0",
@@ -149,7 +165,8 @@ fn validate_template_schema(connection: &Connection) -> rusqlite::Result<()> {
                 intents, information_types, audience, archetype, content_slots, visual_structure, retrieval_keywords
                 FROM slide_classifications_fts WHERE slide_classifications_fts MATCH 'schema' LIMIT 0",
     ] {
-        connection.prepare(sql)?;
+        let sql = if legacy { sql.to_owned() } else { sql.replace("FROM slide_classifications LIMIT", "FROM template_classification_status LIMIT") };
+        connection.prepare(&sql)?;
     }
     Ok(())
 }
@@ -186,6 +203,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
              DROP TABLE IF EXISTS notebooks;
              DROP TABLE IF EXISTS slide_classifications_fts;
              DROP TABLE IF EXISTS slide_classifications;
+             DROP TABLE IF EXISTS template_classification_status;
              DROP TABLE IF EXISTS app_templates;
              DROP TABLE IF EXISTS apps;
              DROP TABLE IF EXISTS template_assets;
@@ -213,6 +231,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
         transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
         transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
+        transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -725,4 +744,12 @@ CREATE TABLE document_chunk_identities (
     chunk_sha256 TEXT NOT NULL,
     UNIQUE(version_id,index_generation,chunk_index)
 );
+"#;
+
+// Keep historical DDL intact so validated 12–15 stores can upgrade without rebuilding rows.
+const CLASSIFICATION_STATUS_UPGRADE: &str = r#"
+ALTER TABLE slide_classifications RENAME TO template_classification_status;
+UPDATE template_classification_status SET status = 'pending', attempt_count = 0,
+    last_error_code = 'classification_interrupted', next_attempt_at = NULL
+    WHERE status = 'processing' AND lease_expires_at IS NULL;
 "#;

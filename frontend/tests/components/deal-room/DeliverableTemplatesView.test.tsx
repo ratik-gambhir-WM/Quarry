@@ -275,6 +275,9 @@ describe("DeliverableTemplatesView", () => {
 
     expect(importPptxTemplate).toHaveBeenCalledWith(expect.any(File), "batch");
     expect(screen.getByText("Importing deck…")).not.toBeNull();
+    const progress = screen.getByRole("status", { name: "Importing deck" });
+    expect(progress.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Available slide templates" }).getAttribute("aria-busy")).toBe("true");
     expect(
       screen.getByRole("button", { name: "Import Slide Template" }),
     ).toHaveProperty("disabled", true);
@@ -289,9 +292,8 @@ describe("DeliverableTemplatesView", () => {
     expect(
       screen.getByText(/Imported 2 templates\..*completed with 1 warning/),
     ).not.toBeNull();
-    expect(
-      screen.getByText(/Templates without generated previews may not appear/),
-    ).not.toBeNull();
+    expect(screen.getByText(/Classification continues in the background/)).not.toBeNull();
+    expect(screen.queryByRole("status", { name: "Importing deck" })).toBeNull();
   });
 
   it("rejects an empty PowerPoint locally without calling the API", async () => {
@@ -344,6 +346,32 @@ describe("DeliverableTemplatesView", () => {
     },
   );
 
+  it.each(["single", "batch"] as const)("keeps a centered %s indicator through save and gallery refresh", async (mode) => {
+    const save = deferred<{importMode: typeof mode; importedCount: number; warningCount: number}>();
+    const refresh = deferred<TemplatePreviewPage>();
+    listTemplatePreviews.mockResolvedValueOnce(page(1, 1, 1, ["old-template"]))
+      .mockReturnValueOnce(refresh.promise);
+    importPptxTemplate.mockReturnValue(save.promise);
+    const view = renderHeaderAndView();
+    await screen.findByAltText("Template preview: old template");
+    const label = mode === "single" ? "Import Slide Template" : "Import Deck Template";
+    fireEvent.change(view.container.querySelectorAll<HTMLInputElement>('input[type="file"]')[mode === "single" ? 0 : 1], {
+      target: {files: [powerPointFile("fixture.pptx")]},
+    });
+    expect(screen.getByRole("status", {name: `Importing ${mode === "single" ? "slide" : "deck"}`})).not.toBeNull();
+    expect(screen.getByAltText("Template preview: old template")).not.toBeNull();
+    expect(screen.getByRole("button", {name: label}).getAttribute("aria-busy")).toBe("true");
+    save.resolve({ importMode: mode, importedCount: 1, warningCount: 0 });
+    expect(await screen.findByRole("status", {name: "Refreshing template gallery"})).not.toBeNull();
+    expect(screen.getByRole("button", {name: label})).toHaveProperty("disabled", true);
+    refresh.resolve(page(1, 1, 1, ["new-template"]));
+    await screen.findByAltText("Template preview: new template");
+    expect(screen.queryByRole("status", {name: "Refreshing template gallery"})).toBeNull();
+    expect(screen.getByText(/Classification continues in the background/)).not.toBeNull();
+    expect(screen.getByRole("button", {name: label})).toHaveProperty("disabled", false);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", {name: label})));
+  });
+
   it("keeps existing previews and offers reload-only recovery when refresh fails after import", async () => {
     listTemplatePreviews
       .mockResolvedValueOnce(page(1, 1, 1, ["old-template"]))
@@ -384,9 +412,7 @@ describe("DeliverableTemplatesView", () => {
   it("directs a rejected multi-slide single import to the deck action without retrying", async () => {
     listTemplatePreviews.mockResolvedValue(page(1, 1, 1, ["old-template"]));
     importPptxTemplate.mockRejectedValue(
-      new Error(
-        "This PowerPoint contains multiple slides. Use Import Deck Template instead.",
-      ),
+      new Error("Template PowerPoint files must contain exactly one slide."),
     );
     const view = renderHeaderAndView();
     await screen.findByAltText("Template preview: old template");

@@ -5,6 +5,7 @@ use thiserror::Error;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FailureKind {
     Invalid,
+    Conflict,
     TooLarge,
     Unsupported,
     NotFound,

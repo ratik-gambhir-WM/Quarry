@@ -1,10 +1,50 @@
 # Slide Templates Studio migration evidence
 
-Current rollout (2026-10-28): schema **13** adds personal notebooks/save jobs through a validated,
-additive **12 → 13** upgrade that preserves product and template records. See [notebook recovery](notebook-api.md).
+Current rollout (2026-11-04): schema **16** preserves validated **12/13/14/15** product and
+template records and enables asynchronous classified imports. See the rollout below.
 Schema 11 and older still require the deliberately selected, drained development reset described in
 [authentication](authentication.md#schema-15-and-development-reset), paired with a fresh isolated
 Helix store. Historical schema-9/10 upgrade instructions below do not authorize an older migration.
+
+## Asynchronous classified imports (schema 16)
+
+Drain HTTP imports and background writers, stop the old backend, and take a consistent SQLite
+backup (including committed WAL content) and matching Helix backup before deploying. Start the
+new backend to validate the complete schema and transactionally rename `slide_classifications`
+to `template_classification_status`; no template data, FTS, indexes or vectors are rebuilt or
+discarded. Old synchronous processing rows without leases are requeued with reset attempts and
+`classification_interrupted`. Pending rows and expired leases resume when classification is enabled.
+Unsupported or damaged layouts fail without advancing the marker or partially renaming tables.
+
+`POST /api/v1/templates/slide-templates/import/classified` requires configured classification and
+a generated preview. JSON, assets, metadata, PNG preview and pending work commit together before
+`201 Created` with `retrieval.status: pending`. Classification and both embeddings run separately
+from the request. Do not interpret 201 as completed retrieval. Poll the returned template's
+`/retrieval` resource for `classification` and `embedding` stage status, attempt count, next attempt
+and sanitized error code; metadata and vector inspection remain opt-in. Other template imports,
+the web/desktop adapters and explicit Diligence Studio mode retain their contracts.
+
+`POST /api/v1/templates/slide-templates/batch-import/classified` adds the same contract for raw
+PPTX decks (maximum 100 slides). Four workers prepare slides and previews concurrently, then one
+SQLite transaction saves all slides and pending jobs. A failure before commit leaves no partial
+deck or jobs. The 201 response returns ordered template IDs/documents/previews, `importedCount`
+and pending retrieval status. Background classification and embedding share four execution slots;
+retries, leases and restart recovery are unchanged. No schema change beyond marker 16 is required.
+Drain old writers before changing pipeline concurrency. The existing frontend and legacy import
+operations keep their contracts.
+
+Each stage allows three attempts with exponential delay (five-second base plus jitter). Permanent
+provider failures stop immediately. Failed classification preserves the slide/preview; failed
+embedding also preserves successful classification/FTS. Terminal failures remain inspectable;
+there is no public manual retry endpoint. Restart resumes pending jobs and reclaims expired leases,
+without redoing successful stages. With classification disabled, existing pending work stays saved
+until a configured worker starts. Helix projection failure is logged and repaired by startup
+reconciliation, independently of completed provider work. No live provider/Helix calls or real
+local databases are needed for the temporary-database verification suite.
+
+Rollback requires draining/stopping the new worker and restoring the pre-upgrade database and
+matching binary/Helix backup. An old binary cannot open schema 16; do not change the marker or
+rename a live table manually. Restoring a backup discards post-backup changes and must be planned.
 
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
 The supplied directory has no Git metadata. The checked-in

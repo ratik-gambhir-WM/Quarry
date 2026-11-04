@@ -1,5 +1,6 @@
 import { testDeal, testDealInput, testMetadata } from "@/test/fixtures/deals";
 import { dealStatusOptions } from "@/data/dealModel";
+import { testTemplateRetrieval } from "@/test/fixtures/templateRetrieval";
 import { describe, expect, it, vi } from "vitest";
 import {
   createTauriQuarryApi,
@@ -7,6 +8,20 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it("retries failed slide processing through the existing desktop POST relay", async () => {
+    const payload = { templateId: "template-one", stage: "classification" };
+    const post = vi.fn().mockResolvedValue(payload);
+    const api = createTauriQuarryApi({ delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post, postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
+    await expect(api.retryTemplateProcessing("template/one")).resolves.toEqual(payload);
+    expect(post).toHaveBeenCalledExactlyOnceWith("/api/v1/templates/slide-templates/catalog/template%2Fone/retrieval/retry", {});
+  });
+  it.each([false, true])("reads template metadata with embeddings=%s through the desktop relay", async (includeEmbeddings) => {
+    const payload = testTemplateRetrieval();
+    const get = vi.fn().mockResolvedValue(payload);
+    const api = createTauriQuarryApi({ delete: vi.fn(), get, getPdf: vi.fn(), post: vi.fn(), postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
+    await expect(api.getTemplateRetrieval("template/one", includeEmbeddings)).resolves.toEqual(payload);
+    expect(get).toHaveBeenCalledWith(`/api/v1/templates/slide-templates/catalog/template%2Fone/retrieval?metadata=true&embeddings=${includeEmbeddings}`);
+  });
   it.each(["analyst", "analyst@westmonroe.com"])("sends %s through desktop login", async (identifier) => {
     const post = vi.fn().mockResolvedValue({});
     const api = createTauriQuarryApi({
@@ -249,7 +264,7 @@ describe("createTauriQuarryApi", () => {
               "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           },
         ],
-        path: `/api/v1/templates/import?mode=${importMode}`,
+        path: `/api/v1/templates/slide-templates/${importMode === "single" ? "import" : "batch-import"}/classified`,
       });
     },
   );

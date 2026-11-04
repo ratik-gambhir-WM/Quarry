@@ -13,6 +13,7 @@ import {
   templateDisplayName,
   type DeliverableSlide,
 } from "@/data/deliverables";
+import { TemplateMetadataAction } from "./TemplateMetadataAction";
 
 type DeliverablesCarouselProps = {
   actionsDisabled?: boolean;
@@ -73,7 +74,7 @@ export function DeliverablesCarousel({
                     ? `Deleting ${templateDisplayName(slide.id)}`
                     : `Delete ${templateDisplayName(slide.id)}`
                 }
-                className="absolute right-3 top-3 z-10 rounded-full shadow-sm"
+                className="absolute right-14 top-3 z-10 rounded-full shadow-sm"
                 disabled={actionsDisabled || deletingSlideId !== null}
                 onClick={() => onDeleteSlide(slide)}
                 size="icon-sm"
@@ -83,6 +84,7 @@ export function DeliverablesCarousel({
               >
                 <Trash2 aria-hidden="true" />
               </Button>
+              <TemplateMetadataAction templateId={slide.id} disabled={actionsDisabled || deletingSlideId !== null} />
             </Card>
           </CarouselItem>
         ))}

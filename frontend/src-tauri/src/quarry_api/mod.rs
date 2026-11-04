@@ -4,6 +4,7 @@ mod models;
 mod notebooks;
 mod query_stream;
 mod service;
+mod templates;
 
 pub use commands::{
     cancel_query_stream, quarry_api_delete, quarry_api_get, quarry_api_get_pdf, quarry_api_patch,

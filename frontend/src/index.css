@@ -1196,3 +1196,15 @@
 [data-slot="query-composer"] textarea:focus-visible {
   outline: none;
 }
+
+/* Delay the import panel to avoid flashing on fast saves; leave feedback visible without motion. */
+.template-import-progress {
+  animation: template-import-appear 160ms ease-out 150ms both;
+}
+@keyframes template-import-appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .template-import-progress { animation: none; }
+}

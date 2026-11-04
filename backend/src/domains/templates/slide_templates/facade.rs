@@ -18,7 +18,7 @@ impl Drop for CancelOnDrop {
 pub struct SlideTemplates {
     pub(super) import: Arc<ImportService>,
     export: Arc<ExportService>,
-    classification: Option<Arc<SlideClassificationService>>,
+    worker: Option<Arc<SlideClassificationWorker>>,
     capacity: Arc<Semaphore>,
     admission: Arc<Semaphore>,
     mutations: Arc<Mutex<()>>,
@@ -35,22 +35,57 @@ impl SlideTemplates {
         projection: Option<Arc<super::graph::TemplateGraph>>,
         allow_embeddings: bool,
     ) -> Self {
+        let import = Arc::new(ImportService::with_preview_generator(
+            repository.clone(),
+            preview,
+        ));
+        let mutations = Arc::new(Mutex::new(()));
+        let worker = classification.map(|service| {
+            Arc::new(SlideClassificationWorker::new(
+                SlideClassificationWorkerOptions {
+                    classification_max_attempts: 3,
+                    classification_timeout: std::time::Duration::from_secs(150),
+                    concurrency: super::parallel::SLIDE_CONCURRENCY,
+                    embedding_max_attempts: 3,
+                    embedding_timeout: std::time::Duration::from_secs(150),
+                    lease_padding: std::time::Duration::from_secs(30),
+                    retry_base: std::time::Duration::from_secs(5),
+                    now: Arc::new(chrono::Utc::now),
+                    random: Arc::new(|| f64::from(uuid::Uuid::new_v4().as_bytes()[0]) / 255.0),
+                    repository: repository.clone(),
+                    service,
+                    import: import.clone(),
+                    projection: projection.clone(),
+                    mutations: mutations.clone(),
+                },
+            ))
+        });
         Self {
-            import: Arc::new(ImportService::with_preview_generator(
-                repository.clone(),
-                preview,
-            )),
+            import,
             export: Arc::new(ExportService::new(repository)),
-            classification,
+            worker,
             capacity: Arc::new(Semaphore::new(2)),
             admission: Arc::new(Semaphore::new(4)),
-            mutations: Arc::new(Mutex::new(())),
+            mutations,
             projection,
             allow_embeddings,
             stopping: Arc::new(AtomicBool::new(false)),
             active: Arc::new(StdMutex::new(Vec::new())),
         }
     }
+    /// Resume durable pending jobs, including expired leases from a prior process.
+    pub fn start_worker(&self) {
+        if let Some(worker) = &self.worker {
+            worker.start();
+        }
+    }
+    /// Drain classification work after stopping HTTP admission.
+    pub async fn stop_worker(&self) {
+        if let Some(worker) = &self.worker {
+            worker.stop(std::time::Duration::from_secs(5)).await;
+        }
+    }
+
     pub fn try_admit(&self) -> SlideResult<tokio::sync::OwnedSemaphorePermit> {
         if self.stopping.load(Ordering::Acquire) {
             return Err(unavailable(
@@ -114,6 +149,9 @@ impl SlideTemplates {
     /// Cancel owned blocking/browser work before the host drains HTTP requests.
     pub fn shutdown(&self) {
         self.stopping.store(true, Ordering::Release);
+        if let Some(worker) = &self.worker {
+            worker.request_stop();
+        }
         if let Ok(active) = self.active.lock() {
             for flag in active.iter().filter_map(Weak::upgrade) {
                 flag.store(true, Ordering::Release);
@@ -211,6 +249,26 @@ impl SlideTemplates {
         self.run(move |i, _, _| i.find_v2(&id, metadata, embeddings))
             .await
     }
+    pub async fn retry_processing(&self, id: String) -> SlideResult<RetrySlideProcessingResponse> {
+        let worker = self.worker.as_ref().ok_or_else(|| {
+            unavailable(
+                "slide_classification_unavailable",
+                "Slide classification is not configured.",
+            )
+        })?;
+        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
+            unavailable(
+                "template_busy",
+                "Template writes are busy. Try again shortly.",
+            )
+        })?;
+        let result = self
+            .run(move |import, _, _| import.retry_failed_processing(&id))
+            .await?;
+        // Durable pending state is committed before waking the existing bounded worker.
+        worker.start();
+        Ok(result)
+    }
     pub async fn export(&self, input: Value) -> SlideResult<ExportedPowerPoint> {
         self.run(move |_, e, _| e.export(input)).await
     }
@@ -269,10 +327,10 @@ impl SlideTemplates {
         bytes: Vec<u8>,
         kind: TemplateKind,
     ) -> SlideResult<ImportResponse> {
-        let classifier = self.classification.clone().ok_or_else(|| {
+        let worker = self.worker.as_ref().ok_or_else(|| {
             unavailable(
                 "slide_classification_unavailable",
-                "Synchronous slide classification is not configured.",
+                "Slide classification is not configured.",
             )
         })?;
         let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
@@ -281,49 +339,38 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        let cancellation = RequestCancellation::default();
-        let _guard = CancelOnDrop(cancellation.clone());
-        let (result, job) = self
-            .run_cancellable(cancellation.clone(), move |i, _, c| {
-                i.prepare_import_v2_cancellable(&bytes, kind, &c)
+        let result = self
+            .run(move |i, _, c| i.queue_classified_import(&bytes, kind, &c))
+            .await?;
+        // The transaction is committed. The worker reads the saved preview/JSON independently
+        // of the HTTP request lifetime; no provider or graph call delays this acknowledgement.
+        worker.start();
+        Ok(result)
+    }
+    pub async fn batch_classified(
+        &self,
+        bytes: Vec<u8>,
+        kind: TemplateKind,
+    ) -> SlideResult<BatchImportResponse> {
+        let worker = self.worker.as_ref().ok_or_else(|| {
+            unavailable(
+                "slide_classification_unavailable",
+                "Slide classification is not configured.",
+            )
+        })?;
+        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
+            unavailable(
+                "template_busy",
+                "Template writes are busy. Try again shortly.",
+            )
+        })?;
+        let result = self
+            .run(move |import, _, cancellation| {
+                import.queue_classified_batch_import(&bytes, kind, &cancellation)
             })
             .await?;
-        let mut failure = ClassificationFailure {
-            import: self.import.clone(),
-            id: result.template_id.clone(),
-            armed: true,
-        };
-        let processing = tokio::select! {
-            result=classifier.process(&job)=>result,
-            _=async {while !cancellation.is_cancelled() {tokio::time::sleep(std::time::Duration::from_millis(20)).await;}}=>return Err(unavailable("request_cancelled","Template processing was cancelled.")),
-        };
-        let processed = match processing {
-            Ok(processed) => processed,
-            Err(error) => {
-                let mapped = classification_failure(error);
-                let import = self.import.clone();
-                let id = result.template_id.clone();
-                let code = mapped.code.to_string();
-                tokio::task::spawn_blocking(move || import.fail_processing(&id, &code))
-                    .await
-                    .map_err(SlideTemplateError::internal)??;
-                failure.armed = false;
-                return Err(mapped);
-            }
-        };
-        let c = cancellation.clone();
-        self.run_cancellable(cancellation, move |i, _, _| {
-            if c.is_cancelled() {
-                return Err(unavailable(
-                    "request_cancelled",
-                    "Template processing was cancelled.",
-                ));
-            }
-            i.complete_processing_cancellable(&processed, &c)
-        })
-        .await?;
-        failure.armed = false;
-        self.project(&result.template_id).await?;
+        // Durable jobs survive the request and are also resumed by the startup worker.
+        worker.start();
         Ok(result)
     }
     pub async fn reconcile(&self) -> SlideResult<()> {
@@ -357,22 +404,6 @@ impl SlideTemplates {
             }
         }
         Ok(())
-    }
-}
-struct ClassificationFailure {
-    import: Arc<ImportService>,
-    id: String,
-    armed: bool,
-}
-impl Drop for ClassificationFailure {
-    fn drop(&mut self) {
-        if self.armed {
-            let import = self.import.clone();
-            let id = self.id.clone();
-            tokio::task::spawn_blocking(move || {
-                let _ = import.fail_processing(&id, "request_cancelled");
-            });
-        }
     }
 }
 fn projection_failure() -> SlideTemplateError {
@@ -411,25 +442,4 @@ pub(super) fn json_size(value: &Value) -> SlideResult<usize> {
 
 pub(super) fn bound_json(value: &Value) -> SlideResult<()> {
     json_size(value).map(|_| ())
-}
-
-fn classification_failure(error: anyhow::Error) -> SlideTemplateError {
-    if let Some(provider) = error.downcast_ref::<SlideProviderError>() {
-        let kind = if provider.code.ends_with("_timeout") {
-            FailureKind::Timeout
-        } else if provider.code.ends_with("_unavailable")
-            || provider.code.ends_with("_rate_limited")
-        {
-            FailureKind::Unavailable
-        } else {
-            FailureKind::Upstream
-        };
-        return SlideTemplateError::new(
-            kind,
-            provider.code.clone(),
-            "Slide retrieval processing failed.",
-        )
-        .with_source(error);
-    }
-    SlideTemplateError::internal(error)
 }
