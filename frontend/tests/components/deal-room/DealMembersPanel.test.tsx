@@ -107,7 +107,7 @@ it.each(["manager", "contributor", "viewer"] as const)(
   async (role) => {
     show(role);
     await screen.findByText("Shared Member");
-    expect(screen.queryByLabelText("Registered username")).toBeNull();
+    expect(screen.queryByLabelText("Email address")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Permissions for member" })).toBeNull();
     expect(screen.getByLabelText("Contributor permissions for member")).toBeTruthy();
     expect(
@@ -119,15 +119,16 @@ it.each(["manager", "contributor", "viewer"] as const)(
     );
   },
 );
-it("adds a registered user and refreshes authoritative access and roster", async () => {
+it("adds a registered user by email and refreshes authoritative access and roster", async () => {
+  const email = "new.member@westmonroe.com";
   const user = userEvent.setup();
   const deal = show();
   await screen.findByText("Shared Member");
-  await user.type(screen.getByLabelText("Registered username"), "new-member");
+  await user.type(screen.getByLabelText("Email address"), email);
   await user.click(screen.getByRole("button", { name: "Add member" }));
   await waitFor(() =>
     expect(mocks.api.addDealMember).toHaveBeenCalledWith(deal.dealId, {
-      username: "new-member",
+      email,
       role: "contributor",
     }),
   );

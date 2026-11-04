@@ -56,7 +56,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
   const pending = workflow.status === "pending";
   const error = workflow.status === "error" ? workflow.message : "";
   const message = workflow.status === "success" ? workflow.message : "";
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableDealRole>("contributor");
   const [teamName, setTeamName] = useState("");
   const [confirm, setConfirm] = useState<DealConfirmation | null>(null);
@@ -165,14 +165,14 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
             <p>Add a registered Quarry user to this deal.</p>
             <form className="mt-5 space-y-4" onSubmit={(event) => {
               event.preventDefault();
-              void mutate(() => runtime.api.addDealMember(deal.dealId, { username: username.trim(), role }), "Member added.");
+              void mutate(() => runtime.api.addDealMember(deal.dealId, { email: email.trim(), role }), "Member added.");
             }}>
               <Field disabled={pending}>
-                <FieldLabel htmlFor={`${formId}-username`}>Registered username</FieldLabel>
-                <Input id={`${formId}-username`} required maxLength={64} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" />
+                <FieldLabel htmlFor={`${formId}-email`}>Email address</FieldLabel>
+                <Input id={`${formId}-email`} type="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" />
               </Field>
               <RoleSelect label="New member role" value={role} onChange={setRole} disabled={pending} />
-              <Button className="w-full" variant="primary" type="submit" loading={pending} disabled={!username.trim()} leadingIcon={<UserPlus size={14} />}>Add member</Button>
+              <Button className="w-full" variant="primary" type="submit" loading={pending} disabled={!email.trim()} leadingIcon={<UserPlus size={14} />}>Add member</Button>
             </form>
           </section>
         ) : null}

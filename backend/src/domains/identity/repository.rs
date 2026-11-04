@@ -19,13 +19,18 @@ impl IdentityRepository {
     }
     pub async fn credentials(
         &self,
-        username: String,
+        identifier: String,
     ) -> Result<Option<(i64, String)>, RepositoryError> {
+        let column = if identifier.contains('@') {
+            "email"
+        } else {
+            "username"
+        };
         self.sqlite
             .read_one_with_async(
                 SqlBuilder::select("users")
                     .columns(["id", "password_hash"])
-                    .and_where(Condition::equal("username", username))
+                    .and_where(Condition::equal(column, identifier))
                     .build(),
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

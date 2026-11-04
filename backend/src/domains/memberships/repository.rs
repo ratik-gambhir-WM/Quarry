@@ -1,5 +1,5 @@
 //! Canonical deal policy and atomic roster/activity mutations.
-use super::model::*;
+use super::model::{Activity, Capability, DealAccess, DealRole, Member, Page, Team};
 use crate::{
     adapters::sqlite::{
         client::{SqliteClient, SqliteClientError, SqliteTransaction},
@@ -230,14 +230,352 @@ impl MembershipRepository {
             })
             .await
     }
-    pub async fn mutate(
+    pub async fn add_member(
         &self,
         deal: String,
         actor: i64,
-        mutation: Mutation,
+        email: String,
+        role: DealRole,
     ) -> Result<(), RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| mutate(tx, &deal, actor, mutation))
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                let access = require(tx, deal, actor, Capability::ManageMembers)?;
+                if role == DealRole::Owner {
+                    return Err(RepositoryError::invalid("use ownership transfer"));
+                }
+                let user = tx
+                    .read_one_with(
+                        SqlBuilder::select("users")
+                            .columns(["id"])
+                            .and_where(Condition::equal("email", email))
+                            .build(),
+                        |r| r.get::<_, i64>(0),
+                    )?
+                    .ok_or_else(|| RepositoryError::NotFound("registered user not found".into()))?;
+                if tx
+                    .read_one(
+                        SqlBuilder::select("deal_memberships")
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("user_id", user))
+                            .build(),
+                    )?
+                    .is_some()
+                {
+                    return Err(RepositoryError::Conflict("user is already a member".into()));
+                }
+                let count = tx
+                    .read_one_with(
+                        SqlBuilder::select("deal_memberships")
+                            .count_rows()
+                            .and_where(Condition::equal("deal_id", deal))
+                            .build(),
+                        |r| r.get::<_, i64>(0),
+                    )?
+                    .unwrap_or(0);
+                if count >= 500 {
+                    return Err(RepositoryError::Conflict("member limit reached".into()));
+                }
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.write(
+                    SqlBuilder::insert_into("deal_memberships")
+                        .value("deal_id", deal)
+                        .value("user_id", user)
+                        .value("role", role.code())
+                        .value("added_by_user_id", actor)
+                        .value("joined_at", &now)
+                        .value("updated_at", now)
+                        .build(),
+                )?;
+                bump(tx, deal, access.access_revision)?;
+                event(
+                    tx,
+                    deal,
+                    Some(actor),
+                    "member_added",
+                    Some(&user.to_string()),
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn change_role(
+        &self,
+        deal: String,
+        actor: i64,
+        user_id: i64,
+        role: DealRole,
+        revision: i64,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                let access = require(tx, deal, actor, Capability::ManageMembers)?;
+                let (old, actual) = member_role(tx, deal, user_id)?;
+                if old == DealRole::Owner || role == DealRole::Owner {
+                    return Err(RepositoryError::Forbidden);
+                }
+                if revision != actual {
+                    return Err(RepositoryError::Conflict(
+                        "member changed; refresh and retry".into(),
+                    ));
+                }
+                if old == role {
+                    return Ok(());
+                }
+                set_role(tx, deal, user_id, role, actual)?;
+                bump(tx, deal, access.access_revision)?;
+                event(
+                    tx,
+                    deal,
+                    Some(actor),
+                    "member_role_changed",
+                    Some(&user_id.to_string()),
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn remove_member(
+        &self,
+        deal: String,
+        actor: i64,
+        user_id: i64,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                let access = require(
+                    tx,
+                    deal,
+                    actor,
+                    if user_id == actor {
+                        Capability::Leave
+                    } else {
+                        Capability::RemoveMember
+                    },
+                )?;
+                if member_role(tx, deal, user_id)?.0 == DealRole::Owner {
+                    return Err(RepositoryError::Forbidden);
+                }
+                tx.write(
+                    SqlBuilder::delete_from("deal_memberships")
+                        .and_where(Condition::equal("deal_id", deal))
+                        .and_where(Condition::equal("user_id", user_id))
+                        .build(),
+                )?;
+                bump(tx, deal, access.access_revision)?;
+                event(
+                    tx,
+                    deal,
+                    Some(actor),
+                    "member_removed",
+                    Some(&user_id.to_string()),
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn transfer_ownership(
+        &self,
+        deal: String,
+        actor: i64,
+        user_id: i64,
+        revision: i64,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                let access = require(tx, deal, actor, Capability::Transfer)?;
+                if revision != access.access_revision {
+                    return Err(RepositoryError::Conflict(
+                        "access changed; refresh and retry".into(),
+                    ));
+                }
+                if user_id == actor {
+                    return Err(RepositoryError::invalid("choose another member"));
+                }
+                let (_, target_revision) = member_role(tx, deal, user_id)?;
+                let (_, actor_revision) = member_role(tx, deal, actor)?;
+                set_role(tx, deal, actor, DealRole::Manager, actor_revision)?;
+                set_role(tx, deal, user_id, DealRole::Owner, target_revision)?;
+                bump(tx, deal, access.access_revision)?;
+                event(
+                    tx,
+                    deal,
+                    Some(actor),
+                    "ownership_transferred",
+                    Some(&user_id.to_string()),
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn create_team(
+        &self,
+        deal: String,
+        actor: i64,
+        name: String,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                require(tx, deal, actor, Capability::ManageTeams)?;
+                unique_name(tx, deal, &name, "")?;
+                let count = tx
+                    .read_one_with(
+                        SqlBuilder::select("deal_teams")
+                            .count_rows()
+                            .and_where(Condition::equal("deal_id", deal))
+                            .build(),
+                        |r| r.get::<_, i64>(0),
+                    )?
+                    .unwrap_or(0);
+                if count >= 1 {
+                    return Err(RepositoryError::Conflict(
+                        "a deal can have only one team".into(),
+                    ));
+                }
+                let id = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.write(
+                    SqlBuilder::insert_into("deal_teams")
+                        .value("team_id", &id)
+                        .value("deal_id", deal)
+                        .value("name", &name)
+                        .value("normalized_name", name.to_lowercase())
+                        .value("created_by_user_id", actor)
+                        .value("created_at", &now)
+                        .value("updated_at", &now)
+                        .build(),
+                )?;
+                event(tx, deal, Some(actor), "team_created", Some(&id))?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn rename_team(
+        &self,
+        deal: String,
+        actor: i64,
+        team_id: String,
+        name: String,
+        revision: i64,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                require(tx, deal, actor, Capability::ManageTeams)?;
+                team_exists(tx, deal, &team_id)?;
+                unique_name(tx, deal, &name, &team_id)?;
+                if revision >= 9_007_199_254_740_991 {
+                    return Err(RepositoryError::Conflict("team revision exhausted".into()));
+                }
+                let changed = tx.write(
+                    SqlBuilder::update("deal_teams")
+                        .set("name", &name)
+                        .set("normalized_name", name.to_lowercase())
+                        .set("revision", revision + 1)
+                        .set("updated_at", chrono::Utc::now().to_rfc3339())
+                        .and_where(Condition::equal("deal_id", deal))
+                        .and_where(Condition::equal("team_id", &team_id))
+                        .and_where(Condition::equal("revision", revision))
+                        .build(),
+                )?;
+                if changed.rows_affected == 0 {
+                    return Err(RepositoryError::Conflict(
+                        "team changed; refresh and retry".into(),
+                    ));
+                }
+                event(tx, deal, Some(actor), "team_renamed", Some(&team_id))?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn delete_team(
+        &self,
+        deal: String,
+        actor: i64,
+        team_id: String,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                require(tx, deal, actor, Capability::ManageTeams)?;
+                team_exists(tx, deal, &team_id)?;
+                tx.write(
+                    SqlBuilder::delete_from("deal_teams")
+                        .and_where(Condition::equal("deal_id", deal))
+                        .and_where(Condition::equal("team_id", &team_id))
+                        .build(),
+                )?;
+                event(tx, deal, Some(actor), "team_deleted", Some(&team_id))?;
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn set_team_member(
+        &self,
+        deal: String,
+        actor: i64,
+        team_id: String,
+        user_id: i64,
+        add: bool,
+    ) -> Result<(), RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| {
+                let deal = deal.as_str();
+                require(tx, deal, actor, Capability::ManageTeams)?;
+                team_exists(tx, deal, &team_id)?;
+                member_role(tx, deal, user_id)?;
+                let query = || {
+                    SqlBuilder::select("deal_team_memberships")
+                        .and_where(Condition::equal("deal_id", deal))
+                        .and_where(Condition::equal("team_id", &team_id))
+                        .and_where(Condition::equal("user_id", user_id))
+                        .build()
+                };
+                if tx.read_one(query())?.is_some() == add {
+                    return Ok(());
+                }
+                if add {
+                    tx.write(
+                        SqlBuilder::insert_into("deal_team_memberships")
+                            .value("deal_id", deal)
+                            .value("team_id", &team_id)
+                            .value("user_id", user_id)
+                            .build(),
+                    )?;
+                } else {
+                    tx.write(
+                        SqlBuilder::delete_from("deal_team_memberships")
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("team_id", &team_id))
+                            .and_where(Condition::equal("user_id", user_id))
+                            .build(),
+                    )?;
+                }
+                let kind = if add {
+                    "team_member_added"
+                } else {
+                    "team_member_removed"
+                };
+                event(
+                    tx,
+                    deal,
+                    Some(actor),
+                    kind,
+                    Some(&format!("{team_id}/{user_id}")),
+                )?;
+                Ok(())
+            })
             .await
     }
 }
@@ -408,237 +746,6 @@ fn unique_name(
     {
         return Err(RepositoryError::Conflict("team name already exists".into()));
     }
-    Ok(())
-}
-fn mutate(
-    tx: &SqliteTransaction<'_>,
-    deal: &str,
-    actor: i64,
-    mutation: Mutation,
-) -> Result<(), RepositoryError> {
-    let capability = match &mutation {
-        Mutation::RemoveMember { user_id } if *user_id == actor => Capability::Leave,
-        Mutation::RemoveMember { .. } => Capability::RemoveMember,
-        Mutation::Transfer { .. } => Capability::Transfer,
-        Mutation::AddMember { .. } | Mutation::ChangeRole { .. } => Capability::ManageMembers,
-        _ => Capability::ManageTeams,
-    };
-    let access = require(tx, deal, actor, capability)?;
-    let (kind, target) = match mutation {
-        Mutation::AddMember { username, role } => {
-            if role == DealRole::Owner {
-                return Err(RepositoryError::invalid("use ownership transfer"));
-            }
-            let user = tx
-                .read_one_with(
-                    SqlBuilder::select("users")
-                        .columns(["id"])
-                        .and_where(Condition::equal("username", username))
-                        .build(),
-                    |r| r.get::<_, i64>(0),
-                )?
-                .ok_or_else(|| RepositoryError::NotFound("registered user not found".into()))?;
-            if tx
-                .read_one(
-                    SqlBuilder::select("deal_memberships")
-                        .and_where(Condition::equal("deal_id", deal))
-                        .and_where(Condition::equal("user_id", user))
-                        .build(),
-                )?
-                .is_some()
-            {
-                return Err(RepositoryError::Conflict("user is already a member".into()));
-            }
-            let count = tx
-                .read_one_with(
-                    SqlBuilder::select("deal_memberships")
-                        .count_rows()
-                        .and_where(Condition::equal("deal_id", deal))
-                        .build(),
-                    |r| r.get::<_, i64>(0),
-                )?
-                .unwrap_or(0);
-            if count >= 500 {
-                return Err(RepositoryError::Conflict("member limit reached".into()));
-            }
-            let now = chrono::Utc::now().to_rfc3339();
-            tx.write(
-                SqlBuilder::insert_into("deal_memberships")
-                    .value("deal_id", deal)
-                    .value("user_id", user)
-                    .value("role", role.code())
-                    .value("added_by_user_id", actor)
-                    .value("joined_at", &now)
-                    .value("updated_at", now)
-                    .build(),
-            )?;
-            bump(tx, deal, access.access_revision)?;
-            ("member_added", user.to_string())
-        }
-        Mutation::ChangeRole {
-            user_id,
-            role,
-            revision,
-        } => {
-            let (old, actual) = member_role(tx, deal, user_id)?;
-            if old == DealRole::Owner || role == DealRole::Owner {
-                return Err(RepositoryError::Forbidden);
-            }
-            if revision != actual {
-                return Err(RepositoryError::Conflict(
-                    "member changed; refresh and retry".into(),
-                ));
-            }
-            if old == role {
-                return Ok(());
-            }
-            set_role(tx, deal, user_id, role, actual)?;
-            bump(tx, deal, access.access_revision)?;
-            ("member_role_changed", user_id.to_string())
-        }
-        Mutation::RemoveMember { user_id } => {
-            if member_role(tx, deal, user_id)?.0 == DealRole::Owner {
-                return Err(RepositoryError::Forbidden);
-            }
-            tx.write(
-                SqlBuilder::delete_from("deal_memberships")
-                    .and_where(Condition::equal("deal_id", deal))
-                    .and_where(Condition::equal("user_id", user_id))
-                    .build(),
-            )?;
-            bump(tx, deal, access.access_revision)?;
-            ("member_removed", user_id.to_string())
-        }
-        Mutation::Transfer { user_id, revision } => {
-            if revision != access.access_revision {
-                return Err(RepositoryError::Conflict(
-                    "access changed; refresh and retry".into(),
-                ));
-            }
-            if user_id == actor {
-                return Err(RepositoryError::invalid("choose another member"));
-            }
-            let (_, target_revision) = member_role(tx, deal, user_id)?;
-            let (_, actor_revision) = member_role(tx, deal, actor)?;
-            set_role(tx, deal, actor, DealRole::Manager, actor_revision)?;
-            set_role(tx, deal, user_id, DealRole::Owner, target_revision)?;
-            bump(tx, deal, access.access_revision)?;
-            ("ownership_transferred", user_id.to_string())
-        }
-        Mutation::CreateTeam { name } => {
-            unique_name(tx, deal, &name, "")?;
-            let count = tx
-                .read_one_with(
-                    SqlBuilder::select("deal_teams")
-                        .count_rows()
-                        .and_where(Condition::equal("deal_id", deal))
-                        .build(),
-                    |r| r.get::<_, i64>(0),
-                )?
-                .unwrap_or(0);
-            if count >= 1 {
-                return Err(RepositoryError::Conflict(
-                    "a deal can have only one team".into(),
-                ));
-            }
-            let id = uuid::Uuid::new_v4().to_string();
-            let now = chrono::Utc::now().to_rfc3339();
-            tx.write(
-                SqlBuilder::insert_into("deal_teams")
-                    .value("team_id", &id)
-                    .value("deal_id", deal)
-                    .value("name", &name)
-                    .value("normalized_name", name.to_lowercase())
-                    .value("created_by_user_id", actor)
-                    .value("created_at", &now)
-                    .value("updated_at", &now)
-                    .build(),
-            )?;
-            ("team_created", id)
-        }
-        Mutation::RenameTeam {
-            team_id,
-            name,
-            revision,
-        } => {
-            team_exists(tx, deal, &team_id)?;
-            unique_name(tx, deal, &name, &team_id)?;
-            if revision >= 9_007_199_254_740_991 {
-                return Err(RepositoryError::Conflict("team revision exhausted".into()));
-            }
-            let changed = tx.write(
-                SqlBuilder::update("deal_teams")
-                    .set("name", &name)
-                    .set("normalized_name", name.to_lowercase())
-                    .set("revision", revision + 1)
-                    .set("updated_at", chrono::Utc::now().to_rfc3339())
-                    .and_where(Condition::equal("deal_id", deal))
-                    .and_where(Condition::equal("team_id", &team_id))
-                    .and_where(Condition::equal("revision", revision))
-                    .build(),
-            )?;
-            if changed.rows_affected == 0 {
-                return Err(RepositoryError::Conflict(
-                    "team changed; refresh and retry".into(),
-                ));
-            }
-            ("team_renamed", team_id)
-        }
-        Mutation::DeleteTeam { team_id } => {
-            team_exists(tx, deal, &team_id)?;
-            tx.write(
-                SqlBuilder::delete_from("deal_teams")
-                    .and_where(Condition::equal("deal_id", deal))
-                    .and_where(Condition::equal("team_id", &team_id))
-                    .build(),
-            )?;
-            ("team_deleted", team_id)
-        }
-        Mutation::Assign {
-            team_id,
-            user_id,
-            add,
-        } => {
-            team_exists(tx, deal, &team_id)?;
-            member_role(tx, deal, user_id)?;
-            let query = || {
-                SqlBuilder::select("deal_team_memberships")
-                    .and_where(Condition::equal("deal_id", deal))
-                    .and_where(Condition::equal("team_id", &team_id))
-                    .and_where(Condition::equal("user_id", user_id))
-                    .build()
-            };
-            if tx.read_one(query())?.is_some() == add {
-                return Ok(());
-            }
-            if add {
-                tx.write(
-                    SqlBuilder::insert_into("deal_team_memberships")
-                        .value("deal_id", deal)
-                        .value("team_id", &team_id)
-                        .value("user_id", user_id)
-                        .build(),
-                )?;
-            } else {
-                tx.write(
-                    SqlBuilder::delete_from("deal_team_memberships")
-                        .and_where(Condition::equal("deal_id", deal))
-                        .and_where(Condition::equal("team_id", &team_id))
-                        .and_where(Condition::equal("user_id", user_id))
-                        .build(),
-                )?;
-            }
-            (
-                if add {
-                    "team_member_added"
-                } else {
-                    "team_member_removed"
-                },
-                format!("{team_id}/{user_id}"),
-            )
-        }
-    };
-    event(tx, deal, Some(actor), kind, Some(&target))?;
     Ok(())
 }
 fn role_from_row(row: &rusqlite::Row<'_>, column: &str) -> rusqlite::Result<DealRole> {

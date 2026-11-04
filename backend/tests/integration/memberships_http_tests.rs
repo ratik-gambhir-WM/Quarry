@@ -87,7 +87,7 @@ async fn fixture() -> TestApplication {
                 1,
                 "POST",
                 "/api/v1/deals/DEAL-SHARED/members",
-                json!({"username":name,"role":role})
+                json!({"email":format!("{name}@example.test"),"role":role})
             )
             .await
             .0,
@@ -176,10 +176,10 @@ async fn membership_http_validation_conflicts_and_team_lifecycle() {
     let app = fixture().await;
     let root = "/api/v1/deals/DEAL-SHARED";
     for body in [
-        json!({"username":"owner","role":"owner"}),
-        json!({"username":"x@y.test","role":"viewer"}),
-        json!({"username":"viewer","role":"admin"}),
-        json!({"username":"viewer","role":"viewer","actorId":1}),
+        json!({"email":"owner@example.test","role":"owner"}),
+        json!({"email":"not-an-email","role":"viewer"}),
+        json!({"email":"viewer@example.test","role":"admin"}),
+        json!({"email":"viewer@example.test","role":"viewer","actorId":1}),
     ] {
         assert!(
             call(&app.router, 1, "POST", &format!("{root}/members"), body)
@@ -194,7 +194,7 @@ async fn membership_http_validation_conflicts_and_team_lifecycle() {
             1,
             "POST",
             &format!("{root}/members"),
-            json!({"username":"VIEWER","role":"viewer"})
+            json!({"email":"VIEWER@EXAMPLE.TEST","role":"viewer"})
         )
         .await
         .0,
@@ -206,7 +206,7 @@ async fn membership_http_validation_conflicts_and_team_lifecycle() {
             2,
             "POST",
             &format!("{root}/members"),
-            json!({"username":"outsider","role":"viewer"})
+            json!({"email":"outsider@example.test","role":"viewer"})
         )
         .await
         .0,
@@ -527,4 +527,84 @@ async fn transfer_removal_archive_and_private_resources_stay_isolated() {
         .0,
         StatusCode::FORBIDDEN
     );
+}
+
+#[tokio::test]
+async fn membership_email_only_lookup_preserves_authorization_and_conflicts() {
+    for mount in ["/api/v1", "/api"] {
+        let app = fixture().await;
+        let root = format!("{mount}/deals/DEAL-SHARED");
+        let members = format!("{root}/members");
+        for (actor, body, expected) in [
+            (
+                1,
+                json!({"username":"outsider","role":"viewer"}),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                1,
+                json!({"email":"outsider","role":"viewer"}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                1,
+                json!({"email":"unknown@example.test","role":"viewer"}),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                2,
+                json!({"email":"outsider@example.test","role":"viewer"}),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                1,
+                json!({"email":"  OUTSIDER@EXAMPLE.TEST  ","role":"contributor"}),
+                StatusCode::CREATED,
+            ),
+            (
+                1,
+                json!({"email":"outsider@example.test","role":"viewer"}),
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            assert_eq!(
+                call(&app.router, actor, "POST", &members, body).await.0,
+                expected
+            );
+        }
+        let (_, roster) = call(&app.router, 1, "GET", &members, Value::Null).await;
+        let added = roster["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|member| member["userId"] == 5)
+            .unwrap();
+        assert_eq!(added["username"], "outsider");
+        assert_eq!(added["role"], "contributor");
+        assert!(added.get("email").is_none());
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{root}/archive"),
+                Value::Null
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &members,
+                json!({"email":"unknown@example.test","role":"viewer"})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+    }
 }

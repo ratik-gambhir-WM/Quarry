@@ -11,10 +11,7 @@ use crate::{
             graph::repository::{DocumentGraphReader, DocumentGraphWriter},
             store::sqlite::DocumentStore,
         },
-        memberships::{
-            model::{DealRole, Mutation},
-            repository::MembershipRepository,
-        },
+        memberships::{model::DealRole, repository::MembershipRepository},
     },
 };
 
@@ -55,13 +52,11 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
         .unwrap();
     let memberships = MembershipRepository::new(db.clone());
     memberships
-        .mutate(
+        .add_member(
             "DEAL-JOBS".into(),
             1,
-            Mutation::AddMember {
-                username: "viewer".into(),
-                role: DealRole::Viewer,
-            },
+            "viewer@example.test".into(),
+            DealRole::Viewer,
         )
         .await
         .unwrap();
@@ -118,7 +113,7 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
             .contains("event: processing")
     );
     memberships
-        .mutate("DEAL-JOBS".into(), 1, Mutation::RemoveMember { user_id: 2 })
+        .remove_member("DEAL-JOBS".into(), 1, 2)
         .await
         .unwrap();
     sender.send_replace(DocumentJobEvent::completed(

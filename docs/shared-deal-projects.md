@@ -22,8 +22,9 @@ the prior owner to manager in the same transaction. `deals.user_id` is immutable
 not authorization. Removing the creator removes their access. Archived deals retain reads and
 block ordinary writes; owner revocation, non-owner leave and ownership transfer remain available.
 
-An owner adds an existing registered user by exact normalized username. There is no public user
-directory or email invitation flow. Minimal roster/actor identities exclude email and credentials.
+An owner adds an existing registered user by exact normalized email in the `email` request field;
+values are trimmed and ASCII-lowercased before lookup. The previous `username` field is rejected.
+There is no public user directory or email invitation flow. Minimal roster/actor identities exclude email and credentials.
 Notebooks, assistant threads and company directories remain personal; a deal link never shares
 those contents. Managers can retain attached company references and add their own company records.
 Shared responses redact local roots. No collaborator acquires another device's native authorization.
@@ -40,7 +41,7 @@ The following paths are relative to `/api/v1`; the compatibility `/api` mount ha
 | Method | Path | Contract |
 | --- | --- | --- |
 | GET | `/deals`, `/deals/{deal_id}` | Accessible aggregates; actor role, capabilities, access revision and creator ID |
-| GET, POST | `/deals/{deal_id}/members` | Cursor roster; add registered username and non-owner role |
+| GET, POST | `/deals/{deal_id}/members` | Cursor roster; add registered `email` and non-owner role |
 | PATCH, DELETE | `/deals/{deal_id}/members/{user_id}` | Expected member revision for role change; owner removal or self-leave |
 | POST | `/deals/{deal_id}/ownership-transfer` | Active target member and expected access revision |
 | GET, POST | `/deals/{deal_id}/teams` | Cursor roster; create named team |

@@ -700,21 +700,16 @@ fn rejects_partial_and_mismatched_document_responses() {
 
 #[tokio::test]
 async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry() {
-    use crate::domains::memberships::{
-        model::{DealRole, Mutation},
-        repository::MembershipRepository,
-    };
+    use crate::domains::memberships::{model::DealRole, repository::MembershipRepository};
     let db = test_state();
     seed_user_and_deals(&db, "2", &[("DEAL-SECOND", "Active")]);
     let members = MembershipRepository::new(db.clone());
     members
-        .mutate(
+        .add_member(
             DEAL_ID.into(),
             1,
-            Mutation::AddMember {
-                username: "analyst2@example.com".into(),
-                role: DealRole::Contributor,
-            },
+            "analyst2@example.com".into(),
+            DealRole::Contributor,
         )
         .await
         .unwrap();
@@ -754,25 +749,14 @@ async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry(
     store.authorize_upload(DEAL_ID, 2).await.unwrap();
     let prepared = input(2);
     members
-        .mutate(
-            DEAL_ID.into(),
-            1,
-            Mutation::ChangeRole {
-                user_id: 2,
-                role: DealRole::Viewer,
-                revision: 1,
-            },
-        )
+        .change_role(DEAL_ID.into(), 1, 2, DealRole::Viewer, 1)
         .await
         .unwrap();
     assert!(matches!(
         store.persist(prepared).await,
         Err(RepositoryError::Forbidden)
     ));
-    members
-        .mutate(DEAL_ID.into(), 1, Mutation::RemoveMember { user_id: 2 })
-        .await
-        .unwrap();
+    members.remove_member(DEAL_ID.into(), 1, 2).await.unwrap();
     assert!(matches!(
         store.persist(input(2)).await,
         Err(RepositoryError::NotFound(_))

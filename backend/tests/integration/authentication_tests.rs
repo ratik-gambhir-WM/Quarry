@@ -475,3 +475,128 @@ async fn authentication_registration_requires_the_exact_west_monroe_domain() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(response["user"]["email"], "analyst@westmonroe.com");
 }
+
+#[tokio::test]
+async fn authentication_login_accepts_username_or_email_and_keeps_both_unique() {
+    let app = test_application().unwrap();
+    let name = "a".repeat(32);
+    let owner = register(&app.router, &name).await;
+    for prefix in ["/api/v1", "/api"] {
+        for identifier in [
+            format!("  {}  ", name.to_uppercase()),
+            format!("  {}@WESTMONROE.COM  ", name.to_uppercase()),
+        ] {
+            let (status, session) = call(
+                &app.router,
+                "POST",
+                &format!("{prefix}/auth/login"),
+                json!({"username":identifier,"password":"a sufficiently long password"}),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(session["user"]["id"], owner["user"]["id"]);
+            assert_ne!(session["accessToken"], owner["accessToken"]);
+        }
+    }
+    for (username, email) in [
+        (
+            format!(" {} ", name.to_uppercase()),
+            "different@westmonroe.com".into(),
+        ),
+        (
+            "different".into(),
+            format!(" {}@WESTMONROE.COM ", name.to_uppercase()),
+        ),
+    ] {
+        assert_eq!(call(&app.router, "POST", "/api/v1/auth/register", json!({"username":username,"email":email,"password":"a sufficiently long password","firstName":"Test","lastName":"User"}), None).await.0, StatusCode::CONFLICT);
+    }
+    let mut failure = None;
+    for identifier in [
+        name,
+        format!("{}@westmonroe.com", "a".repeat(32)),
+        "unknown".into(),
+        "unknown@westmonroe.com".into(),
+        "user@@westmonroe.com".into(),
+        format!("{}@westmonroe.com", "a".repeat(306)),
+    ] {
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            "/api/v1/auth/login",
+            json!({"username":identifier,"password":"incorrect long password"}),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        if let Some(expected) = &failure {
+            assert_eq!(&body, expected);
+        } else {
+            failure = Some(body);
+        }
+    }
+}
+
+#[tokio::test]
+async fn authentication_login_limit_is_shared_by_username_and_email() {
+    let app = test_application().unwrap();
+    register(&app.router, "owner").await;
+    let path = "/api/v1/auth/login";
+    // Success through email clears failures accumulated through the username.
+    assert_eq!(
+        call(
+            &app.router,
+            "POST",
+            path,
+            json!({"username":"owner","password":"incorrect long password"}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(
+            &app.router,
+            "POST",
+            path,
+            json!({"username":"OWNER@WESTMONROE.COM","password":"a sufficiently long password"}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    for identifier in [
+        "owner",
+        "OWNER@WESTMONROE.COM",
+        " OWNER ",
+        "owner@westmonroe.com",
+        "owner",
+    ] {
+        assert_eq!(
+            call(
+                &app.router,
+                "POST",
+                path,
+                json!({"username":identifier,"password":"incorrect long password"}),
+                None
+            )
+            .await
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(
+        call(
+            &app.router,
+            "POST",
+            path,
+            json!({"username":"owner@westmonroe.com","password":"a sufficiently long password"}),
+            None
+        )
+        .await
+        .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}

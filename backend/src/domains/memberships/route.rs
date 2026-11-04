@@ -123,8 +123,23 @@ async fn activity(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AddMember {
-    username: String,
+    email: String,
     role: DealRole,
+}
+fn member_email(value: &str) -> AppResult<String> {
+    let value = value.trim().to_ascii_lowercase();
+    let (local, domain) = value
+        .split_once('@')
+        .ok_or_else(|| AppError::bad_request("invalid email"))?;
+    if value.chars().count() > 320
+        || local.is_empty()
+        || !domain.contains('.')
+        || domain.contains('@')
+        || value.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(AppError::bad_request("invalid email"));
+    }
+    Ok(value)
 }
 async fn add_member(
     Extension(a): Extension<AuthenticatedUser>,
@@ -132,20 +147,13 @@ async fn add_member(
     Path(d): Path<String>,
     Json(b): Json<AddMember>,
 ) -> AppResult<(StatusCode, Json<()>)> {
-    let username = b.username.trim().to_lowercase();
-    if !(3..=32).contains(&username.len())
-        || !username
-            .bytes()
-            .all(|v| v.is_ascii_alphanumeric() || matches!(v, b'.' | b'_' | b'-'))
-    {
-        return Err(AppError::bad_request("invalid username"));
-    }
+    let email = member_email(&b.email)?;
     non_owner(b.role)?;
     s.mutate(
         d,
         a.user.id,
         Mutation::AddMember {
-            username,
+            email,
             role: b.role,
         },
     )

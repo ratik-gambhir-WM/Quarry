@@ -45,3 +45,25 @@ fn bounded_transport_inputs_and_normalization_cover_edges() {
     assert!(non_owner(DealRole::Owner).is_err());
     assert!(non_owner(DealRole::Viewer).is_ok());
 }
+
+#[test]
+fn member_email_normalizes_and_rejects_usernames_and_malformed_inputs() {
+    assert_eq!(
+        member_email("  User+tag@WESTMONROE.COM  ").unwrap(),
+        "user+tag@westmonroe.com"
+    );
+    assert!(member_email(&format!("{}@westmonroe.com", "a".repeat(305))).is_ok());
+    for invalid in [
+        "",
+        "user",
+        "@westmonroe.com",
+        "user@localhost",
+        "user@@westmonroe.com",
+        "user name@westmonroe.com",
+        "user\0@westmonroe.com",
+        "user@westmonroe.\ncom",
+    ] {
+        assert!(member_email(invalid).is_err());
+    }
+    assert!(member_email(&format!("{}@westmonroe.com", "a".repeat(306))).is_err());
+}

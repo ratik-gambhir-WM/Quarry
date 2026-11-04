@@ -45,8 +45,11 @@ New clients use `/api/v1`; `/api` has identical authentication policy.
 | `POST /auth/logout` | 204 after revoking the current session |
 
 Registration accepts `{username,password,email,firstName,lastName,jobTitle?}`; login accepts
-`{username,password}`. Auth bodies are capped at 8 KiB, reject unknown fields, and normalize JSON
-rejections to a sanitized 400 envelope. Duplicate username/email returns 409. Responses use
+`{username,password}`, with `username` accepting either the registered username or email.
+Login trims and ASCII-lowercases either identity and selects the corresponding unique user column;
+usernames cannot contain `@`, so the two forms are unambiguous. Both columns already have SQLite
+unique constraints and registration normalizes them; no schema change is needed. Auth bodies are
+capped at 8 KiB, reject unknown fields, and normalize JSON rejections to a sanitized 400 envelope. Duplicate username/email returns 409. Responses use
 `Cache-Control: no-store`. Public user DTOs never contain password hashes or provider keys.
 
 Protected requests carry `Authorization: Bearer <token>` and `X-User-Id: <id>`. The token determines
@@ -57,8 +60,8 @@ are not followed by authenticated transports. Provider/template upstream clients
 end-user credentials.
 
 Register/login are limited to 20 attempts per peer per minute and login admission to five per
-normalized username per minute; a successful login clears that username bucket. Limits and
-active stream revocation notifications are process-local and bounded. They are not distributed
+account per minute across both username and email; unknown users have a normalized-identifier
+bucket. A successful login clears the account bucket. Limits and active stream revocation notifications are process-local and bounded. They are not distributed
 abuse protection. Real socket peer addresses are used; arbitrary forwarding headers are ignored.
 
 ## Resource and runtime boundaries

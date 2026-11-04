@@ -58,7 +58,7 @@ it("submits autofilled credentials, preserves them through visibility and retry,
     .mockRejectedValueOnce(new Error("Try again"))
     .mockResolvedValue(testSession);
   form();
-  const username = autofill("Username", "analyst");
+  const username = autofill("Username or email", "analyst");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   const password = autofill("Password", "  a sufficiently long password  ");
   const button = screen.getByRole("button", { name: "Sign in" });
@@ -92,17 +92,17 @@ it("keeps empty required fields from submitting without a misleading disabled bu
   expect(button).toHaveProperty("disabled", false);
   fireEvent.click(button);
   expect(login).not.toHaveBeenCalled();
-  expect(screen.getByLabelText("Username")).toBeTruthy();
+  expect(screen.getByLabelText("Username or email")).toBeTruthy();
 });
 it("moves focus between steps and preserves credentials when changing username", () => {
   form();
-  fill("Username", "analyst");
+  fill("Username or email", "analyst");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(document.activeElement).toBe(screen.getByLabelText("Password"));
   fill("Password", "a sufficiently long password");
   fireEvent.click(screen.getByRole("button", { name: /Use a different username/ }));
-  expect(document.activeElement).toBe(screen.getByLabelText("Username"));
-  expect((screen.getByLabelText("Username") as HTMLInputElement).value).toBe("analyst");
+  expect(document.activeElement).toBe(screen.getByLabelText("Username or email"));
+  expect((screen.getByLabelText("Username or email") as HTMLInputElement).value).toBe("analyst");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("a sufficiently long password");
 });
@@ -139,16 +139,16 @@ it("registers autofilled fields using the fixed email domain and excludes confir
     jobTitle: "Analyst",
   });
 });
-it("logs in with username/password and exposes a memory-only session", async () => {
+it.each(["analyst", "a.long.email.address.for.login@westmonroe.com"])("logs in with %s and establishes a session", async (identifier) => {
   login.mockResolvedValue(testSession);
   form();
-  fill("Username", "analyst");
+  fill("Username or email", identifier);
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fill("Password", "a sufficiently long password");
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   expect(await screen.findByText("Signed in workspace")).toBeTruthy();
   expect(login).toHaveBeenCalledWith({
-    username: "analyst",
+    username: identifier,
     password: "a sufficiently long password",
   });
   expect(credentials().auth?.userId).toBe(1);
@@ -182,7 +182,7 @@ it("validates confirmation and registers without sending confirmation or a provi
 it("shows login failure and allows a retry", async () => {
   login.mockRejectedValue(new Error("Invalid credentials"));
   form();
-  fill("Username", "analyst");
+  fill("Username or email", "analyst");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fill("Password", "incorrect long password");
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -242,10 +242,14 @@ it("expires sessions and aborts tracked work", () => {
   expect(sessionStore.getSnapshot().session).toBeNull();
   expect(controller.signal.aborted).toBe(true);
 });
-it("never records auth request or response credentials in the activity log", async () => {
+it.each(["analyst", "analyst@westmonroe.com"])("sends %s through HTTP login without recording credentials", async (identifier) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(testSession)));
   await httpQuarryApi.login({
-    username: "analyst",
+    username: identifier,
+    password: "a sufficiently long password",
+  });
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({
+    username: identifier,
     password: "a sufficiently long password",
   });
   const log = JSON.stringify(getActivityLogEntries());

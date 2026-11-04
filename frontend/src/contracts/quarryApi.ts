@@ -31,6 +31,7 @@ export type PersistedDeal = SavedDeal & {
   metadata: SavedDealMetadata | null;
 };
 
+/** `username` accepts either the registered username or email address. */
 export type LoginInput = { username: string; password: string };
 export type RegisterInput = LoginInput & {
   email: string;

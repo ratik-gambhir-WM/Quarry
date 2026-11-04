@@ -50,7 +50,7 @@ export interface DealMembershipApi {
   ): Promise<DealPage<DealMember>>;
   addDealMember(
     dealId: string,
-    input: { username: string; role: AssignableDealRole },
+    input: { email: string; role: AssignableDealRole },
   ): Promise<void>;
   changeDealMemberRole(
     dealId: string,

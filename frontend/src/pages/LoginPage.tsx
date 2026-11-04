@@ -115,8 +115,8 @@ export function LoginPage({ register = false }: { register?: boolean }) {
                   <FormField
                     className="py-sm"
                     icon={<Icon name="personSearch" className="h-5 w-5" />}
-                    id="username" name="username" label="Username"
-                    autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={32}
+                    id="username" name="username" label="Username or email"
+                    autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={320}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
@@ -155,7 +155,7 @@ export function LoginPage({ register = false }: { register?: boolean }) {
                   </QuarryButton>
                   <span className="sr-only" role="status">{pending ? "Signing in…" : ""}</span>
                   <button type="button" disabled={pending} onClick={backToUsername} className="text-sm text-primary underline focus-visible:outline-2 disabled:opacity-60">
-                    ← Use a different username
+                    ← Use a different username or email
                   </button>
                 </div>
               </div>

@@ -7,6 +7,17 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it.each(["analyst", "analyst@westmonroe.com"])("sends %s through desktop login", async (identifier) => {
+    const post = vi.fn().mockResolvedValue({});
+    const api = createTauriQuarryApi({
+      delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post,
+      postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn(),
+    });
+    const input = { username: identifier, password: "a sufficiently long password" };
+    await api.login(input);
+    expect(post).toHaveBeenCalledWith("/api/v1/auth/login", input);
+  });
+
   it.each(dealStatusOptions)(
     "preserves %s through create, update and read",
     async (status) => {

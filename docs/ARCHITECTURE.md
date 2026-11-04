@@ -302,7 +302,7 @@ shared `/hub/*` route tree:
 | --- | --- | --- |
 | `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
-| `/login` | Username/password `LoginPage` | eager |
+| `/login` | Username-or-email/password `LoginPage` | eager |
 | `/register` | Account registration `LoginPage` | eager |
 | `/hub` | `HubPage` | lazy workspace route and page |
 | `/hub/account` | `AccountPage` | lazy workspace route and page |
@@ -357,7 +357,7 @@ provided, otherwise “Your workspace,” rather than a fixture-backed deal name
 The product tree is wrapped in `UserProvider`, backed by one session store with an origin-scoped
 local-storage cache. Login and registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
 workspace state by its generation. Registration uses a responsive two-column card (900px max);
-small screens stack the fields. Login uses a compact card with a username step followed by a
+small screens stack the fields. Login uses a compact card with a username-or-email step followed by a
 password step, retaining the entered identity and allowing users to go back. The card and steps
 animate unless reduced motion is requested. Registration shows a fixed
 `@westmonroe.com` suffix and the backend enforces that exact email domain. Auth fields use native,
@@ -634,7 +634,7 @@ operational failures.
 
 | Feature | Implemented behavior | Current limitations |
 | --- | --- | --- |
-| Login/profile | Username/password registration and login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
+| Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
@@ -902,7 +902,7 @@ method allowlist.
 | GET | `/health` | Shallow process health | Returns `{ "ok": true }`; does not check dependencies |
 | GET | `/capabilities` | Static contract feature flags | Does not report actual optional-service availability |
 | POST | `/auth/register` | Register username/password and public profile | 201 user/token/expiry; unique normalized identity |
-| POST | `/auth/login` | Verify credentials and issue a session | 200; generic 401 failure |
+| POST | `/auth/login` | Verify username-or-email/password and issue a session | Existing `username` field accepts either; 200; generic 401 failure |
 | GET | `/auth/me` | Current verified profile and expiry | Protected; no credentials in DTO |
 | POST | `/auth/logout` | Revoke current session | Protected; 204 |
 
@@ -927,7 +927,11 @@ paths are redacted for everyone except the current owner who is also the creator
 team, transfer, activity and per-deal search endpoints are listed in
 [shared deal projects](shared-deal-projects.md#api-and-clients); both API mounts enforce the same
 role/archive policy and repeat write checks transactionally. Personal notebooks/chats/company
-directories remain private.
+directories remain private. Member creation requires an existing registered email in the `email`
+request field, trims and ASCII-lowercases it, and resolves the matching user in SQLite.
+Username-based member creation is rejected; clients must send `email` instead of the previous
+`username` field. Only active-deal owners may add members; this does not send email invitations.
+The shared Settings form accepts email only.
 
 ### 7.3 Stored documents, ingestion, jobs, and search
 
@@ -1219,6 +1223,12 @@ service, model, table, or product capability.
 | `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, Markdown/embedding/Helix projection; web/desktop transports and explicit-save editor implemented; folder UI deferred |
 | `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
+
+Membership mutation dispatch lives in `memberships/service.rs`: an exhaustive `Mutation` match
+calls the corresponding named repository operation and propagates its error. Each repository
+operation owns one offloaded SQLite transaction containing authorization, invariant checks,
+writes, access/member revisions where applicable, and activity recording. No-op role/assignment
+changes do not create activity or advance revisions.
 
 ### 8.3 Router and middleware
 

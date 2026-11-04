@@ -50,6 +50,50 @@ impl DealAccessService {
         Ok(self.repository.activity(deal, actor, after, limit).await?)
     }
     pub async fn mutate(&self, deal: String, actor: i64, mutation: Mutation) -> ServiceResult<()> {
-        Ok(self.repository.mutate(deal, actor, mutation).await?)
+        match mutation {
+            Mutation::AddMember { email, role } => {
+                self.repository.add_member(deal, actor, email, role).await?
+            }
+            Mutation::ChangeRole {
+                user_id,
+                role,
+                revision,
+            } => {
+                self.repository
+                    .change_role(deal, actor, user_id, role, revision)
+                    .await?
+            }
+            Mutation::RemoveMember { user_id } => {
+                self.repository.remove_member(deal, actor, user_id).await?
+            }
+            Mutation::Transfer { user_id, revision } => {
+                self.repository
+                    .transfer_ownership(deal, actor, user_id, revision)
+                    .await?
+            }
+            Mutation::CreateTeam { name } => self.repository.create_team(deal, actor, name).await?,
+            Mutation::RenameTeam {
+                team_id,
+                name,
+                revision,
+            } => {
+                self.repository
+                    .rename_team(deal, actor, team_id, name, revision)
+                    .await?
+            }
+            Mutation::DeleteTeam { team_id } => {
+                self.repository.delete_team(deal, actor, team_id).await?
+            }
+            Mutation::Assign {
+                team_id,
+                user_id,
+                add,
+            } => {
+                self.repository
+                    .set_team_member(deal, actor, team_id, user_id, add)
+                    .await?
+            }
+        }
+        Ok(())
     }
 }

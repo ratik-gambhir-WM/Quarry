@@ -134,7 +134,7 @@ pub struct Page<T> {
 #[derive(Debug, Clone)]
 pub enum Mutation {
     AddMember {
-        username: String,
+        email: String,
         role: DealRole,
     },
     ChangeRole {

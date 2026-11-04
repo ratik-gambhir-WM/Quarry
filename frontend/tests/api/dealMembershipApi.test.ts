@@ -8,7 +8,7 @@ describe("shared deal membership contracts", () => {
     const request = vi.fn().mockResolvedValue(undefined);
     const api = createDealMembershipApi(request);
     await api.listDealMembers("DEAL /one", { cursor: "a+b", limit: 30 });
-    await api.addDealMember("DEAL /one", { username: "alice", role: "viewer" });
+    await api.addDealMember("DEAL /one", { email: "alice@westmonroe.com", role: "viewer" });
     await api.changeDealMemberRole("DEAL /one", 2, {
       role: "contributor",
       expectedRevision: 4,
@@ -36,7 +36,7 @@ describe("shared deal membership contracts", () => {
       [
         "POST",
         "/api/v1/deals/DEAL%20%2Fone/members",
-        { username: "alice", role: "viewer" },
+        { email: "alice@westmonroe.com", role: "viewer" },
       ],
       [
         "PATCH",
@@ -68,6 +68,19 @@ describe("shared deal membership contracts", () => {
         "/api/v1/deals/DEAL%20%2Fone/activity?cursor=time_event&limit=100",
       ],
     ]);
+  });
+  it("sends email-only member additions through both adapters", async () => {
+    const input = { email: "member@westmonroe.com", role: "viewer" as const };
+    const fetch = vi.fn().mockResolvedValue(new Response("null", { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+    await httpQuarryApi.addDealMember("DEAL-1", input);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(input);
+    const transport = {
+      get: vi.fn(), post: vi.fn().mockResolvedValue(null), delete: vi.fn(), getPdf: vi.fn(),
+      postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn(),
+    };
+    await createTauriQuarryApi(transport).addDealMember("DEAL-1", input);
+    expect(transport.post).toHaveBeenCalledWith("/api/v1/deals/DEAL-1/members", input);
   });
   it("carries PATCH, empty DELETE and both search scopes through the HTTP adapter", async () => {
     const fetch = vi

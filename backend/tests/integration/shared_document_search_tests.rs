@@ -24,9 +24,7 @@ use crate::{
         },
         identity::access::ResourceAccess,
         memberships::{
-            model::{DealRole, Mutation},
-            repository::MembershipRepository,
-            service::DealAccessService,
+            model::DealRole, repository::MembershipRepository, service::DealAccessService,
         },
     },
 };
@@ -80,13 +78,11 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
     }
     let members = MembershipRepository::new(sqlite.clone());
     members
-        .mutate(
+        .add_member(
             "DEAL-SHARED-SEARCH".into(),
             1,
-            Mutation::AddMember {
-                username: "collaborator".into(),
-                role: DealRole::Contributor,
-            },
+            "collaborator@example.test".into(),
+            DealRole::Contributor,
         )
         .await
         .unwrap();
@@ -186,22 +182,11 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].chunk_id, scoped[0].chunk.chunk_id);
     members
-        .mutate(
-            "DEAL-SHARED-SEARCH".into(),
-            1,
-            Mutation::Transfer {
-                user_id: 2,
-                revision: 2,
-            },
-        )
+        .transfer_ownership("DEAL-SHARED-SEARCH".into(), 1, 2, 2)
         .await
         .unwrap();
     members
-        .mutate(
-            "DEAL-SHARED-SEARCH".into(),
-            2,
-            Mutation::RemoveMember { user_id: 1 },
-        )
+        .remove_member("DEAL-SHARED-SEARCH".into(), 2, 1)
         .await
         .unwrap();
     assert!(search

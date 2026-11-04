@@ -67,8 +67,12 @@ impl IdentityService {
         })
     }
     pub async fn login(&self, input: LoginInput) -> ServiceResult<SessionResponse> {
-        self.admit(format!("username:{}", input.username), 5)?;
         let record = self.repository.credentials(input.username.clone()).await?;
+        let limit_key = match &record {
+            Some((id, _)) => format!("account:{id}"),
+            None => format!("identifier:{}", input.username),
+        };
+        self.admit(limit_key.clone(), 5)?;
         // A valid fixed PHC record keeps unknown-user verification on the same expensive path.
         let dummy = "$argon2id$v=19$m=19456,t=2,p=1$cXVhcnJ5LWR1bW15LXNhbHQ$K4JfFRrPKf2cJ5a0WuD7Xlf8eMR6KbGCj5VLca0QesE";
         let hash = record
@@ -82,7 +86,7 @@ impl IdentityService {
             .map(|(id, _)| id)
             .ok_or(ServiceError::Unauthorized)?;
         if let Ok(mut limits) = self.limits.lock() {
-            limits.remove(&format!("username:{}", input.username));
+            limits.remove(&limit_key);
         }
         let (token, digest) = token()?;
         let now = now();
