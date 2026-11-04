@@ -8,6 +8,7 @@ import type { NormalizedTextElement } from "@/lib/diligence-canvas/internal/shar
 import { POINTS_TO_SLIDE_UNITS } from "@/lib/diligence-canvas/internal/shared/PowerpointConstants";
 import { getTextEditorContentScale } from "@/lib/diligence-canvas/internal/svg/textEditorLayout";
 import { SvgTextEditorOverlay } from "@/lib/diligence-canvas/internal/svg/SvgTextEditorOverlay";
+import { getSvgTextContent } from "@/lib/diligence-canvas/internal/svg/svgTextLayout";
 
 class TestResizeObserver implements ResizeObserver {
   disconnect() {}
@@ -22,6 +23,55 @@ afterEach(() => {
 });
 
 describe("SVG text editor overlay", () => {
+  it.each([
+    { valign: "top", lineSpacing: undefined },
+    { valign: "middle", lineSpacing: { unit: "points", value: 30 } },
+    { valign: "bottom", lineSpacing: { unit: "percent", value: 1.5 } },
+  ] as const)("counts paragraph spacing once with $valign alignment", async ({ valign, lineSpacing }) => {
+    const spacedElement: NormalizedTextElement = {
+      ...element,
+      valign,
+      runs: [{
+        ...element.runs[0],
+        paragraph: {
+          spaceBefore: { unit: "points", value: 6 },
+          spaceAfter: { unit: "points", value: 3 },
+          lineSpacing,
+        },
+      }],
+    };
+    const fontScale = 0.75;
+    const { layout } = getSvgTextContent(spacedElement, fontScale);
+    const containerNode = document.createElement("div");
+    const coordinateRoot = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    containerNode.getBoundingClientRect = () => makeRect(0, 0, 800, 600);
+    coordinateRoot.getScreenCTM = () => new DOMMatrix();
+    const containerRef = createRef<HTMLDivElement>();
+    const coordinateRootRef = createRef<SVGGElement>();
+    Object.assign(containerRef, { current: containerNode });
+    Object.assign(coordinateRootRef, { current: coordinateRoot });
+
+    const view = render(<SvgTextEditorOverlay
+      containerRef={containerRef}
+      coordinateRootRef={coordinateRootRef}
+      element={spacedElement}
+      fontScale={fontScale}
+      onCancel={vi.fn()}
+      onCommit={vi.fn()}
+      viewportTransform="translate(0 0) scale(1)"
+    />);
+    const editor = await screen.findByRole("textbox", { name: "Edit slide text" });
+    const paragraph = view.container.querySelector<HTMLElement>(".slate-p");
+    const content = editor.parentElement;
+    if (!paragraph || !content) throw new Error("Missing editor content");
+
+    const contentScale = getTextEditorContentScale(layout.fontScale);
+    const textTop = (Number.parseFloat(content.style.paddingTop)
+      + Number.parseFloat(paragraph.style.paddingTop)) * contentScale;
+    expect(Number.parseFloat(paragraph.style.paddingTop)).toBe(6);
+    expect(textTop).toBeCloseTo(layout.lines[0].baseline - layout.lines[0].ascent);
+  });
+
   it("converts PowerPoint point sizes to the same units used by SVG text", () => {
     const fontScale = 0.75;
     const contentScale = getTextEditorContentScale(fontScale);

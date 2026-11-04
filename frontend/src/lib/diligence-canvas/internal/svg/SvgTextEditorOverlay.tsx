@@ -91,8 +91,9 @@ export function SvgTextEditorOverlay({
     textContent.runs[0]?.color ?? textContent.fallbackRun.color,
   );
   const firstLine = textContent.layout.lines[0];
+  // Plate applies paragraph spacing itself; the overlay owns only the content offset.
   const firstRunTop = firstLine
-    ? firstLine.baseline - firstLine.height * 0.82
+    ? firstLine.baseline - firstLine.before - firstLine.ascent
     : element.padding;
   const contentStyle: CSSProperties = {
     height: element.h / effectiveContentScale,
