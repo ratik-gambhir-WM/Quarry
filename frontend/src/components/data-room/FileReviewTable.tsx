@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   ColumnDef,
   ColumnPinningState,
@@ -89,15 +89,16 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
     });
   }, [query, rows, statusFilter, typeFilter]);
 
-  useEffect(() => {
+  const resetPage = () =>
     setPagination((current) => ({ ...current, pageIndex: 0 }));
-  }, [query, statusFilter, typeFilter]);
-
-  useEffect(() => {
-    if (searchExpanded) {
-      searchInputRef.current?.focus();
-    }
-  }, [searchExpanded]);
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    resetPage();
+  };
+  const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
+    searchInputRef.current = node;
+    node?.focus();
+  }, []);
 
   const columns = useMemo<ColumnDef<DataGridFeatures, FileReviewRow>[]>(
     () => [
@@ -123,6 +124,9 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
             </button>
             <span className="block truncate text-[10px] text-muted-foreground">
               {row.original.folderLabel} · {row.original.fileType}
+              {row.original.source === "stored"
+                ? ` · Uploaded by ${row.original.node.uploadedByName ?? "Unknown"}`
+                : ""}
             </span>
           </div>
         ),
@@ -151,13 +155,13 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   });
 
   const resetFilters = () => {
-    setQuery("");
+    updateQuery("");
     setStatusFilter("All");
     setTypeFilter("All types");
   };
 
   const collapseSearch = () => {
-    setQuery("");
+    updateQuery("");
     setSearchExpanded(false);
     requestAnimationFrame(() => searchTriggerRef.current?.focus());
   };
@@ -186,14 +190,14 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
                   aria-label="Search file reviews"
                   className="h-full rounded-full border-0 bg-transparent pr-8 pl-8 text-xs shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-xs dark:bg-transparent"
                   id="file-review-search"
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => updateQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
                       collapseSearch();
                     }
                   }}
                   placeholder="Search files and findings"
-                  ref={searchInputRef}
+                  ref={attachSearchInput}
                   type="search"
                   value={query}
                 />
@@ -206,7 +210,7 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
                   className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-surface-container-high hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => {
                     if (query) {
-                      setQuery("");
+                      updateQuery("");
                       searchInputRef.current?.focus();
                     } else {
                       collapseSearch();
@@ -237,7 +241,10 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
                 aria-pressed={statusFilter === status}
                 className="text-xs"
                 key={status}
-                onClick={() => setStatusFilter(status)}
+                onClick={() => {
+                  setStatusFilter(status);
+                  resetPage();
+                }}
                 size="sm"
                 type="button"
                 variant={statusFilter === status ? "default" : "outline"}
@@ -255,9 +262,10 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
           <select
             className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground"
             id="file-review-type"
-            onChange={(event) =>
-              setTypeFilter(event.target.value as TypeFilter)
-            }
+            onChange={(event) => {
+              setTypeFilter(event.target.value as TypeFilter);
+              resetPage();
+            }}
             value={typeFilter}
           >
             {(["All types", "PDF", "Document", "Spreadsheet"] as const).map(

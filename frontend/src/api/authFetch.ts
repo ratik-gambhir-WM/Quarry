@@ -47,7 +47,9 @@ export async function authFetch(
       }
     }
     // Keep cancellation active while streaming or reading the response body.
-    if (!response.body) {
+    // Some fetch bridges expose an empty stream even for a bodyless status.
+    // Reconstructing those responses with a stream is forbidden by Response.
+    if (!response.body || [204, 205, 304].includes(response.status)) {
       cleanup();
       return response;
     }

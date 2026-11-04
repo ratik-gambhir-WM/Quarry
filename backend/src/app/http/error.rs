@@ -20,7 +20,7 @@ pub enum AppError {
     UnsupportedMediaType,
     #[error("invalid credentials or expired session")]
     Unauthorized,
-    #[error("user ID does not match session")]
+    #[error("operation is not permitted")]
     Forbidden,
     #[error("too many authentication attempts; retry later")]
     RateLimited,
@@ -54,6 +54,7 @@ impl From<crate::shared::error::ServiceError> for AppError {
     fn from(error: crate::shared::error::ServiceError) -> Self {
         use crate::shared::error::ServiceError;
         match error {
+            ServiceError::Forbidden => Self::Forbidden,
             ServiceError::Unauthorized => Self::Unauthorized,
             ServiceError::RateLimited => Self::RateLimited,
             ServiceError::Validation(message) => Self::BadRequest(message),
@@ -83,10 +84,7 @@ impl IntoResponse for AppError {
                 StatusCode::UNAUTHORIZED,
                 "invalid credentials or expired session".into(),
             ),
-            Self::Forbidden => (
-                StatusCode::FORBIDDEN,
-                "user ID does not match session".into(),
-            ),
+            Self::Forbidden => (StatusCode::FORBIDDEN, "operation is not permitted".into()),
             Self::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "too many authentication attempts; retry later".into(),

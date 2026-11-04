@@ -17,7 +17,7 @@ pub struct StartedDocumentJob {
     pub filename: String,
 }
 
-type OwnedJobs = HashMap<String, (String, watch::Sender<DocumentJobEvent>)>;
+type OwnedJobs = HashMap<String, (String, i64, watch::Sender<DocumentJobEvent>)>;
 
 #[derive(Clone)]
 pub struct DocumentJobService {
@@ -38,9 +38,10 @@ impl DocumentJobService {
     pub async fn start(
         &self,
         deal_id: String,
-        user_id: String,
+        user_id: i64,
         file: UploadedDocument,
     ) -> ServiceResult<StartedDocumentJob> {
+        self.ingestion.authorize_upload(&deal_id, user_id).await?;
         let filename = file.filename.clone();
         let job_id = Uuid::new_v4().to_string();
         let (sender, _) = watch::channel(DocumentJobEvent::processing(
@@ -50,7 +51,7 @@ impl DocumentJobService {
         self.jobs
             .write()
             .await
-            .insert(job_id.clone(), (user_id.clone(), sender));
+            .insert(job_id.clone(), (deal_id.clone(), user_id, sender));
 
         let service = self.clone();
         let worker_job_id = job_id.clone();
@@ -58,7 +59,7 @@ impl DocumentJobService {
         tokio::spawn(async move {
             let event = match service
                 .ingestion
-                .process(&deal_id, &user_id, vec![file])
+                .process(&deal_id, user_id, vec![file])
                 .await
             {
                 Ok(response) => match response.documents.into_iter().next() {
@@ -76,9 +77,9 @@ impl DocumentJobService {
                     Some(document) => DocumentJobEvent::failed(
                         worker_job_id.clone(),
                         worker_filename.clone(),
-                        document
-                            .error
-                            .unwrap_or_else(|| "document processing failed".to_string()),
+                        document.error.unwrap_or_else(|| {
+                            "Document processing failed. Refresh documents and retry.".into()
+                        }),
                     ),
                     None => DocumentJobEvent::failed(
                         worker_job_id.clone(),
@@ -86,13 +87,13 @@ impl DocumentJobService {
                         "document processing returned no result".to_string(),
                     ),
                 },
-                Err(error) => DocumentJobEvent::failed(
+                Err(_error) => DocumentJobEvent::failed(
                     worker_job_id.clone(),
                     worker_filename.clone(),
-                    error.to_string(),
+                    "Document processing failed. Refresh documents and retry.".into(),
                 ),
             };
-            if let Some((_, sender)) = service.jobs.read().await.get(&worker_job_id) {
+            if let Some((_, _, sender)) = service.jobs.read().await.get(&worker_job_id) {
                 sender.send_replace(event);
             }
             tokio::time::sleep(service.completed_retention).await;
@@ -105,17 +106,29 @@ impl DocumentJobService {
     pub async fn subscribe_owned(
         &self,
         job_id: &str,
-        owner: &str,
+        actor: i64,
     ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
-        self.jobs
+        let (deal, _, sender) = self
+            .jobs
             .read()
             .await
             .get(job_id)
-            .filter(|(id, _)| id == owner)
-            .map(|(_, sender)| sender.subscribe())
-            .ok_or_else(|| ServiceError::not_found("document job not found"))
+            .cloned()
+            .ok_or_else(|| ServiceError::not_found("document job not found"))?;
+        self.ingestion.authorize_read(&deal, actor).await?;
+        Ok(sender.subscribe())
     }
-
+    pub async fn authorize_job(&self, job_id: &str, actor: i64) -> ServiceResult<()> {
+        let deal = self
+            .jobs
+            .read()
+            .await
+            .get(job_id)
+            .map(|(d, _, _)| d.clone())
+            .ok_or_else(|| ServiceError::not_found("document job not found"))?;
+        self.ingestion.authorize_read(&deal, actor).await
+    }
+    #[cfg(test)]
     pub async fn subscribe(
         &self,
         job_id: &str,
@@ -124,9 +137,13 @@ impl DocumentJobService {
             .read()
             .await
             .get(job_id)
-            .map(|(_, sender)| sender.subscribe())
+            .map(|(_, _, sender)| sender.subscribe())
             .ok_or_else(|| {
                 ServiceError::not_found(format!("document job `{job_id}` was not found"))
             })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/domains/documents/ingestion/job_service_tests.rs"]
+mod tests;

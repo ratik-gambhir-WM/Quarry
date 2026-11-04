@@ -50,10 +50,10 @@ pub(super) async fn process_documents_handler(
 ) -> AppResult<Json<ProcessDocumentsResponse>> {
     let deal_id = normalize_required_request_value(deal_id, "dealId")?;
     let (_, files) = collect_document_upload(multipart).await?;
-    let user_id = actor.user.id.to_string();
+    let user_id = actor.user.id;
     state
         .document_ingestion
-        .process(&deal_id, &user_id, files)
+        .process(&deal_id, user_id, files)
         .await
         .map(Json)
         .map_err(AppError::from)
@@ -67,7 +67,7 @@ pub(super) async fn start_process_file_handler(
 ) -> AppResult<(StatusCode, Json<ProcessFileJobResponse>)> {
     let deal_id = normalize_required_request_value(deal_id, "dealId")?;
     let (_, mut files) = collect_document_upload(multipart).await?;
-    let user_id = actor.user.id.to_string();
+    let user_id = actor.user.id;
     if files.len() != 1 {
         return Err(AppError::bad_request(
             "process_file accepts exactly one file per job",
@@ -97,27 +97,50 @@ pub(super) async fn process_document_job_events_handler(
     let job_id = normalize_required_request_value(job_id, "jobId")?;
     let receiver = state
         .document_jobs
-        .subscribe_owned(&job_id, &actor.user.id.to_string())
+        .subscribe_owned(&job_id, actor.user.id)
         .await
         .map_err(AppError::from)?;
 
     let events = stream::unfold(
-        (receiver, true, false),
-        |(mut receiver, initial, finished)| async move {
+        (
+            receiver,
+            true,
+            false,
+            state.document_jobs,
+            job_id,
+            actor.user.id,
+        ),
+        |(mut receiver, initial, finished, jobs, job_id, actor)| async move {
             if finished {
                 return None;
             }
-            if !initial && receiver.changed().await.is_err() {
+            if !initial {
+                loop {
+                    tokio::select! {
+                        result = receiver.changed() => {
+                            if result.is_err() {
+                                return None;
+                            }
+                            break;
+                        }
+                        _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                            if jobs.authorize_job(&job_id, actor).await.is_err() {
+                                return None;
+                            }
+                        }
+                    }
+                }
+            }
+            if jobs.authorize_job(&job_id, actor).await.is_err() {
                 return None;
             }
-
             let status = receiver.borrow_and_update().clone();
             let finished = status.is_terminal();
             let event = Event::default()
                 .event(status.event_name())
                 .json_data(status)
                 .expect("document job events are JSON serializable");
-            Some((Ok(event), (receiver, false, finished)))
+            Some((Ok(event), (receiver, false, finished, jobs, job_id, actor)))
         },
     );
 

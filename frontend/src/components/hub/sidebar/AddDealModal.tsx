@@ -101,6 +101,10 @@ export function AddDealModal({
   const [localDataRoom, setLocalDataRoom] = useState<LocalDealDataRoom | null>(
     null,
   );
+  const [teamName, setTeamName] = useState("");
+  const teamSaved = useRef(false);
+  const teamCreationAttempted = useRef(false);
+  const submissionInFlight = useRef(false);
   const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] =
     useState(emptySourceFiles);
@@ -144,6 +148,8 @@ export function AddDealModal({
     } else if (step === "details") {
       changeStep("companies");
     } else if (step === "companies") {
+      changeStep("team");
+    } else if (step === "team") {
       changeStep("sources");
     } else {
       await saveDeal(true);
@@ -165,6 +171,7 @@ export function AddDealModal({
   }
 
   async function saveDeal(includeMetadata: boolean) {
+    if (submissionInFlight.current) return;
     if (!email) {
       setSubmitError("Sign in again before adding a deal.");
       return;
@@ -173,9 +180,11 @@ export function AddDealModal({
       setFieldError("Select a transaction type.");
       return;
     }
+    submissionInFlight.current = true;
     setIsSubmitting(true);
     setSubmitError("");
     let savedCore = createdDeal;
+    let savingTeam = false;
     try {
       if (!savedCore) {
         const input = buildSaveDealInput(form);
@@ -192,18 +201,50 @@ export function AddDealModal({
         onClose();
         return;
       }
+      if (teamName.trim() && !teamSaved.current) {
+        savingTeam = true;
+        // A failed response can follow a committed create. Reconcile before replaying it.
+        if (teamCreationAttempted.current) {
+          const teams = await runtime.api.listDealTeams(savedCore.deal.dealId, {
+            limit: 100,
+          });
+          const normalizedName = teamName
+            .trim()
+            .replace(/\p{White_Space}+/gu, " ")
+            .trim();
+          teamSaved.current = teams.items.some(
+            (team) => team.name === normalizedName,
+          );
+          if (!teamSaved.current && teams.items.length > 0) {
+            throw new Error(
+              "This deal already has a different team. Close this dialog and review it in Settings.",
+            );
+          }
+        }
+        if (!teamSaved.current) {
+          teamCreationAttempted.current = true;
+          await runtime.api.createDealTeam(savedCore.deal.dealId, {
+            name: teamName.trim(),
+          });
+          teamSaved.current = true;
+        }
+        savingTeam = false;
+      }
       if (includeMetadata) await saveSources(savedCore);
       else finishWithoutMetadata(savedCore);
     } catch (error) {
       if (savedCore && !initialDeal) {
         setSubmitError(
-          `Deal created, but metadata could not be saved. Retry Finish deal or skip metadata. ${errorMessage(error)}`,
+          savingTeam
+          ? `Deal created, but the team could not be saved. Retry Finish deal. ${errorMessage(error)}`
+          : `Deal created, but metadata could not be saved. Retry Finish deal or skip metadata. ${errorMessage(error)}`,
         );
       } else {
         if (!initialDeal) changeStep("companies");
         setSubmitError(errorMessage(error));
       }
     } finally {
+      submissionInFlight.current = false;
       setIsSubmitting(false);
     }
   }
@@ -293,7 +334,7 @@ export function AddDealModal({
             <DialogDescription className="order-first text-xs font-medium uppercase tracking-[0.12em] text-muted">
               {initialDeal
                 ? "Active Deals"
-                : `Step ${step === "details" ? 1 : step === "companies" ? 2 : 3} of 3`}
+                : `Step ${step === "details" ? 1 : step === "companies" ? 2 : step === "team" ? 3 : 4} of 4`}
             </DialogDescription>
             <DialogTitle
               ref={titleRef}
@@ -304,9 +345,11 @@ export function AddDealModal({
                 ? "Edit deal"
                 : step === "sources"
                   ? "Add deal metadata"
-                  : step === "companies"
-                    ? "Assign companies and roles"
-                    : "Add deal"}
+                  : step === "team"
+                    ? "Create team"
+                    : step === "companies"
+                      ? "Assign companies and roles"
+                      : "Add deal"}
             </DialogTitle>
           </DialogHeader>
 
@@ -400,6 +443,27 @@ export function AddDealModal({
                 </fieldset>
               </div>
             ) : null}
+            {step === "team" ? (
+              <fieldset className="space-y-4" disabled={isSubmitting}>
+                <p className="text-sm text-muted">
+                  Name the team for this deal. You can add members in deal Settings after creation.
+                  Each deal can have one team. Team assignments do not grant deal access.
+                </p>
+                <Field>
+                  <FieldLabel htmlFor="add-deal-team-name">Team name (optional)</FieldLabel>
+                  <Input
+                    id="add-deal-team-name"
+                    maxLength={100}
+                    value={teamName}
+                    onChange={(event) => setTeamName(event.target.value)}
+                    aria-describedby="add-deal-team-help"
+                  />
+                  <p id="add-deal-team-help" className="text-sm text-muted">
+                    Leave blank to set up a team later in Settings.
+                  </p>
+                </Field>
+              </fieldset>
+            ) : null}
             {step === "sources" ? (
               <fieldset disabled={isSubmitting}>
                 <SourceFilesStep
@@ -443,7 +507,7 @@ export function AddDealModal({
                   isSubmitting || companyFormOpen || Boolean(createdDeal)
                 }
                 onClick={() =>
-                  changeStep(step === "sources" ? "companies" : "details")
+                  changeStep(step === "sources" ? "team" : step === "team" ? "companies" : "details")
                 }
                 type="button"
                 variant="outline"

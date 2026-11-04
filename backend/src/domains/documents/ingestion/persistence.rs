@@ -35,27 +35,86 @@ pub(crate) async fn persist_document_and_chunks(
     files: &DocumentStore,
     graph_writer: &DocumentGraphWriter,
     deal_id: &str,
+    actor_id: i64,
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
 ) -> Result<DocumentPersistenceResult, String> {
-    let prepared =
-        prepare_document_persistence(graph_writer, deal_id, &document, &chunks, file_bytes)?;
+    let mut prepared = prepare_document_persistence(
+        graph_writer,
+        deal_id,
+        actor_id,
+        &document,
+        &chunks,
+        file_bytes,
+    )?;
+    if let Some(manifest) = files
+        .manifest(prepared.expected_identity.version_id.clone())
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        // Legacy versions keep exact IDs. A changed parser must never invent replacements.
+        let mut nodes = prepared.graph.chunk_nodes.clone();
+        let active = manifest
+            .chunks
+            .iter()
+            .filter(|c| c.index_generation == manifest.active_generation)
+            .collect::<Vec<_>>();
+        if nodes.len() != active.len() {
+            return Err("parser output differs from immutable identity manifest; maintenance recovery required".into());
+        }
+        for node in &mut nodes {
+            let identity = active
+                .iter()
+                .find(|c| c.chunk_index == node.chunk_index && c.chunk_sha256 == node.chunk_sha256)
+                .ok_or("parser chunk differs from immutable identity manifest")?;
+            node.chunk_id.clone_from(&identity.chunk_id);
+            node.index_generation.clone_from(&identity.index_generation);
+        }
+        let mut version = prepared.graph.version_node.clone();
+        version
+            .index_generation
+            .clone_from(&manifest.active_generation);
+        prepared.graph = graph_writer
+            .preflight_graph(prepared.graph.file_node.clone(), version, nodes)
+            .map_err(|e| e.to_string())?;
+        let mut metadata: Value = serde_json::from_str(&prepared.file_persistence.metadata_json)
+            .map_err(|e| e.to_string())?;
+        metadata["documentId"] = Value::String(manifest.document_id.clone());
+        prepared.file_persistence.metadata_json =
+            serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+        prepared.file_persistence.manifest = Some(manifest);
+    }
     persist_prepared_document_and_chunks(files, graph_writer, prepared).await
 }
 
 fn prepare_document_persistence(
     graph_writer: &DocumentGraphWriter,
     deal_id: &str,
+    actor_id: i64,
     document: &Document,
     chunks: &[DocumentChunk],
     file_bytes: Vec<u8>,
 ) -> Result<PreparedDocumentPersistence, String> {
     ensure_document_graph_invariants(document, chunks)?;
-    let file_persistence = build_file_persistence_input(deal_id, document, file_bytes)?;
+    let mut file_persistence =
+        build_file_persistence_input(deal_id, actor_id, document, file_bytes)?;
+    if infer_supported_image_mime_type(Path::new(&document.file_name)).is_some() {
+        let mut chunks = chunks.to_vec();
+        for chunk in &mut chunks {
+            chunk.embedding = None;
+        }
+        file_persistence.image_assembly_json = Some(
+            serde_json::to_string(&crate::domains::documents::formats::image::ImageAssembly {
+                document: document.clone(),
+                chunks,
+            })
+            .map_err(|e| e.to_string())?,
+        );
+    }
     let expected_identity = PersistedFileIdentity {
         file_id: file_persistence.file_id.clone(),
-        workspace_id: file_persistence.workspace_id.clone(),
+        deal_id: file_persistence.deal_id.clone(),
         display_name: file_persistence.display_name.clone(),
         version_id: file_persistence.version_id.clone(),
     };
@@ -65,6 +124,24 @@ fn prepare_document_persistence(
         chunks,
         &file_persistence.timestamp,
     )?;
+    file_persistence.manifest = Some(
+        crate::domains::documents::store::identity::IdentityManifest {
+            derivation_version: 2,
+            document_id: document.document_id.clone(),
+            active_generation: version_node.index_generation.clone(),
+            chunks: chunk_nodes
+                .iter()
+                .map(
+                    |c| crate::domains::documents::store::identity::ChunkIdentity {
+                        chunk_id: c.chunk_id.clone(),
+                        index_generation: c.index_generation.clone(),
+                        chunk_index: c.chunk_index,
+                        chunk_sha256: c.chunk_sha256.clone(),
+                    },
+                )
+                .collect(),
+        },
+    );
     let graph = graph_writer
         .preflight_graph(file_node, version_node, chunk_nodes)
         .map_err(|error| error.to_string())?;
@@ -90,7 +167,7 @@ async fn persist_prepared_document_and_chunks(
         );
     }
     if !prepared.graph.matches_identity(
-        &insert_blob_result.workspace_id,
+        &insert_blob_result.deal_id,
         &insert_blob_result.file_id,
         &insert_blob_result.display_name,
         &insert_blob_result.version_id,
@@ -120,12 +197,15 @@ async fn persist_prepared_document_and_chunks(
 // These are persistence invariants over parser-derived data, not HTTP request validation.
 pub(crate) fn build_file_persistence_input(
     deal_id: &str,
+    actor_id: i64,
     document: &Document,
     file_bytes: Vec<u8>,
 ) -> Result<FilePersistenceInput, String> {
     let deal_id = normalized_nonempty("deal_id", deal_id)?;
     let file_id = normalized_nonempty("file_id", &document.file_id)?;
-    let workspace_id = normalized_workspace_identity(&document.user_id)?;
+    if normalized_deal_identity(&document.deal_id)? != deal_id {
+        return Err("document deal does not match upload context".into());
+    }
     let display_name = normalized_nonempty("file_name", &document.file_name)?;
     let source_type = normalized_nonempty("source_type", &document.source_type)?;
     let source_uri = document
@@ -155,7 +235,7 @@ pub(crate) fn build_file_persistence_input(
             document.document_id
         ));
     }
-    let expected_document_id = document_id_from_content(&workspace_id, &content_sha256);
+    let expected_document_id = document_id_from_content(&deal_id, &content_sha256);
     if expected_document_id != document.document_id {
         return Err(format!(
             "file bytes do not match document id `{}`",
@@ -189,7 +269,7 @@ pub(crate) fn build_file_persistence_input(
     Ok(FilePersistenceInput {
         deal_id,
         file_id,
-        workspace_id,
+        actor_id,
         display_name,
         source_uri,
         metadata_json,
@@ -199,6 +279,8 @@ pub(crate) fn build_file_persistence_input(
         content_sha256,
         byte_size,
         file_bytes,
+        manifest: None,
+        image_assembly_json: None,
     })
 }
 
@@ -223,7 +305,7 @@ fn build_helix_graph_nodes_at(
     indexed_at: &str,
 ) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
     ensure_document_graph_invariants(document, chunks)?;
-    if insert_blob_result.workspace_id != document.user_id
+    if insert_blob_result.deal_id != document.deal_id
         || insert_blob_result.file_id != document.file_id
         || insert_blob_result.display_name != document.file_name
     {
@@ -249,7 +331,7 @@ fn build_helix_graph_nodes_at(
 
 fn build_file_node(insert_blob_result: &PersistedFileIdentity) -> FileNode {
     FileNode {
-        workspace_id: insert_blob_result.workspace_id.clone(),
+        deal_id: insert_blob_result.deal_id.clone(),
         file_id: insert_blob_result.file_id.clone(),
         display_name: insert_blob_result.display_name.clone(),
     }
@@ -279,7 +361,7 @@ fn build_file_version_node_at(
         .map_err(|_| "document byte size does not fit in i64".to_string())?;
 
     Ok(FileVersionNode {
-        workspace_id: insert_blob_result.workspace_id.clone(),
+        deal_id: insert_blob_result.deal_id.clone(),
         file_id: insert_blob_result.file_id.clone(),
         version_id: insert_blob_result.version_id.clone(),
         mime_type,
@@ -304,14 +386,14 @@ fn build_file_chunk_node(
 
     Ok(FileChunkNode {
         chunk_id: deterministic_file_chunk_id(
-            &insert_blob_result.workspace_id,
+            &insert_blob_result.deal_id,
             &insert_blob_result.file_id,
             &insert_blob_result.version_id,
             &version_node.index_generation,
             chunk_index,
             &chunk.content_hash,
         ),
-        workspace_id: insert_blob_result.workspace_id.clone(),
+        deal_id: insert_blob_result.deal_id.clone(),
         file_id: insert_blob_result.file_id.clone(),
         version_id: insert_blob_result.version_id.clone(),
         index_generation: version_node.index_generation.clone(),
@@ -333,7 +415,7 @@ fn build_file_chunk_node(
 }
 
 fn deterministic_file_chunk_id(
-    workspace_id: &str,
+    deal_id: &str,
     file_id: &str,
     version_id: &str,
     index_generation: &str,
@@ -342,7 +424,7 @@ fn deterministic_file_chunk_id(
 ) -> String {
     sha256_hex(
         format!(
-            "{workspace_id}\0{file_id}\0{version_id}\0{index_generation}\0{chunk_index}\0{chunk_sha256}"
+            "{deal_id}\0{file_id}\0{version_id}\0{index_generation}\0{chunk_index}\0{chunk_sha256}"
         )
         .as_bytes(),
     )
@@ -409,10 +491,10 @@ fn ensure_chunk_belongs_to_document(
             chunk.chunk_id, chunk.document_id, document.document_id
         ));
     }
-    if chunk.user_id != document.user_id {
+    if chunk.deal_id != document.deal_id {
         return Err(format!(
             "chunk `{}` belongs to user `{}`, not `{}`",
-            chunk.chunk_id, chunk.user_id, document.user_id
+            chunk.chunk_id, chunk.deal_id, document.deal_id
         ));
     }
     Ok(())
@@ -462,13 +544,13 @@ fn normalized_nonempty(field: &str, value: &str) -> Result<String, String> {
     Ok(normalized.to_string())
 }
 
-fn normalized_workspace_identity(value: &str) -> Result<String, String> {
-    let normalized = value.trim().to_lowercase();
+fn normalized_deal_identity(value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_string();
     if normalized.is_empty() {
-        return Err("user_id cannot be empty".to_string());
+        return Err("deal_id cannot be empty".to_string());
     }
     if normalized != value {
-        return Err("user_id must be trimmed and lowercase".to_string());
+        return Err("deal_id must be trimmed".to_string());
     }
     Ok(normalized)
 }

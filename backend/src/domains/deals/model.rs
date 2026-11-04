@@ -218,6 +218,8 @@ pub struct DealParty {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deal {
+    #[serde(flatten)]
+    pub access: Option<crate::domains::memberships::model::DealAccess>,
     pub deal_id: String,
     pub user_id: i64,
     pub deal_name: String,

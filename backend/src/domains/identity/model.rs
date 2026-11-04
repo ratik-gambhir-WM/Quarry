@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoginInput {
+    /// A username or email address; the field name preserves the existing login contract.
     pub username: String,
     pub password: String,
 }

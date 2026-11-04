@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type CSSProperties } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useTable } from "@tanstack/react-table";
 import type { DealResource, DealRoomData } from "../../data/workspace";
@@ -26,6 +26,20 @@ type DealSummaryCardProps = {
   onAddResources?: () => void;
 };
 
+const overviewCardStyle: CSSProperties = {
+  background: "linear-gradient(var(--theme-surface-muted), transparent)",
+  border: 0,
+  borderRadius: 8,
+  boxShadow: "none",
+};
+
+const keyQuestionsTableClassNames = {
+  ...quarryDataGridTableClassNames,
+  base: "bg-transparent text-[13px] text-on-surface [&_th]:border-outline-variant/70 [&_td]:border-outline-variant/70 [&_tbody_td]:px-4 [&_tbody_td]:py-3",
+  header: "bg-transparent",
+  headerRow: "border-outline-variant/70 bg-transparent",
+};
+
 export function DealSummaryCard({
   deal,
   onAddResources,
@@ -36,7 +50,7 @@ export function DealSummaryCard({
         aria-labelledby="deal-overview-heading"
         className="col-span-12 flex min-h-64 flex-col p-6 sm:p-7 lg:col-span-7"
         interactive={false}
-        surface="chrome"
+        style={overviewCardStyle}
       >
         <div className="flex flex-col gap-5">
           <div>
@@ -85,7 +99,7 @@ export function DealSummaryCard({
         aria-labelledby="deal-resources-heading"
         className="col-span-12 p-5 sm:p-6 lg:col-span-5"
         interactive={false}
-        surface="chrome"
+        style={overviewCardStyle}
       >
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -126,7 +140,7 @@ export function DealSummaryCard({
         aria-labelledby="key-questions-heading"
         className="col-span-12 overflow-hidden"
         interactive={false}
-        surface="chrome"
+        style={overviewCardStyle}
       >
         <div className="flex items-center px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
           <div>
@@ -287,7 +301,7 @@ function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
       emptyMessage="No key questions were extracted from the submitted source files."
       recordCount={rows.length}
       table={table}
-      tableClassNames={quarryDataGridTableClassNames}
+      tableClassNames={keyQuestionsTableClassNames}
       tableLayout={{
         cellBorder: true,
         dense: true,
@@ -297,7 +311,7 @@ function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
         width: "fixed",
       }}
     >
-      <DataGridContainer className="border-t border-outline-variant/70 bg-surface-container-lowest">
+      <DataGridContainer className="border-t border-outline-variant/70 bg-transparent">
         <DataGridScrollArea orientation="horizontal">
           <DataGridTable />
         </DataGridScrollArea>

@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 13;
+const LATEST_SCHEMA_VERSION: i64 = 15;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -16,7 +16,14 @@ pub(crate) fn migrate(sqlite: &SqliteClient) -> Result<(), MigrationError> {
     sqlite.with_connection_result(run_migrations)
 }
 pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
-    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = run_migrations_inner(connection);
+    let restore = connection.pragma_update(None, "foreign_keys", "ON");
+    result?;
+    restore?;
+    Ok(())
+}
+fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationError> {
     // Serialize inspection and DDL so concurrent startup cannot race schema creation.
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let version: i64 = transaction.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -30,23 +37,61 @@ pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), Migratio
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if version != LATEST_SCHEMA_VERSION && version != 12 {
+        if ![12, 13, 14, LATEST_SCHEMA_VERSION].contains(&version) {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
             });
         }
-        validate_product_schema(&transaction)?;
-        validate_template_schema(&transaction)?;
-        validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA])?;
+        if version < 14 {
+            validate_product_schema(&transaction)?;
+            validate_template_schema(&transaction)?;
+            validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA])?;
+        }
         check_foreign_keys(&transaction)?;
         if version == 12 {
             transaction.execute_batch(NOTEBOOK_SCHEMA)?;
         }
     }
-    validate_product_schema(&transaction)?;
+    if version < 14 {
+        transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
+        transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
+        transaction.execute_batch("INSERT INTO deal_memberships(deal_id,user_id,role,added_by_user_id,joined_at,updated_at) SELECT deal_id,user_id,'owner',NULL,created_at,updated_at FROM deals;
+            INSERT INTO deal_access_revisions(deal_id) SELECT deal_id FROM deals;
+            INSERT INTO deal_activity_events(event_id,deal_id,kind,created_at) SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now') || '_backfill-' || deal_id,deal_id,'membership_backfilled',strftime('%Y-%m-%dT%H:%M:%f000Z','now') FROM deals;")?;
+    }
+    // Validate the previous complete layout before accepting the additive upgrade.
+    if version == 14 {
+        validate_owned_schema(
+            &transaction,
+            &[
+                SCHEMA,
+                TEMPLATE_SCHEMA,
+                NOTEBOOK_SCHEMA,
+                MEMBERSHIP_SCHEMA,
+                DOCUMENT_SCOPE_UPGRADE,
+            ],
+        )?;
+    }
+    if version < 15 {
+        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
+    }
     validate_template_schema(&transaction)?;
-    validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA, NOTEBOOK_SCHEMA])?;
+    validate_owned_schema(
+        &transaction,
+        &[
+            SCHEMA,
+            TEMPLATE_SCHEMA,
+            NOTEBOOK_SCHEMA,
+            MEMBERSHIP_SCHEMA,
+            DOCUMENT_SCOPE_UPGRADE,
+            IMAGE_RECOVERY_SCHEMA,
+        ],
+    )?;
+    let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
+    if invalid_owners != 0 {
+        return Err(rusqlite::Error::InvalidQuery.into());
+    }
     check_foreign_keys(&transaction)?;
     transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
     transaction.commit()?;
@@ -125,7 +170,16 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
     let result = (|| -> Result<(), MigrationError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
-            "DROP TABLE IF EXISTS notebook_cleanup;
+            "DROP TABLE IF EXISTS document_image_recovery;
+             DROP TABLE IF EXISTS quarry_current_content;
+             DROP TABLE IF EXISTS document_chunk_identities;
+             DROP TABLE IF EXISTS document_identity_manifests;
+             DROP TABLE IF EXISTS deal_team_memberships;
+             DROP TABLE IF EXISTS deal_teams;
+             DROP TABLE IF EXISTS deal_activity_events;
+             DROP TABLE IF EXISTS deal_memberships;
+             DROP TABLE IF EXISTS deal_access_revisions;
+             DROP TABLE IF EXISTS notebook_cleanup;
              DROP TABLE IF EXISTS notebook_save_jobs;
              DROP TABLE IF EXISTS notebook_notes;
              DROP TABLE IF EXISTS notebook_folders;
@@ -156,6 +210,9 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         transaction.execute_batch(SCHEMA)?;
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
+        transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
+        transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
+        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -569,3 +626,103 @@ fn validate_owned_schema(connection: &Connection, schemas: &[&str]) -> rusqlite:
     }
     Ok(())
 }
+
+const IMAGE_RECOVERY_SCHEMA: &str = r#"
+CREATE TABLE document_image_recovery (
+    version_id TEXT PRIMARY KEY NOT NULL REFERENCES document_identity_manifests(version_id) ON DELETE CASCADE,
+    assembly_json TEXT NOT NULL CHECK(json_valid(assembly_json) AND json_type(assembly_json) = 'object')
+);
+"#;
+
+const MEMBERSHIP_SCHEMA: &str = r#"
+CREATE TABLE deal_memberships (
+    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    role TEXT NOT NULL CHECK(role IN ('owner','manager','contributor','viewer')),
+    added_by_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+    joined_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
+    PRIMARY KEY(deal_id, user_id)
+);
+CREATE UNIQUE INDEX idx_deal_single_owner ON deal_memberships(deal_id) WHERE role = 'owner';
+CREATE INDEX idx_deal_memberships_user ON deal_memberships(user_id, deal_id);
+CREATE TABLE deal_access_revisions (
+    deal_id TEXT PRIMARY KEY NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991)
+);
+CREATE TABLE deal_teams (
+    team_id TEXT PRIMARY KEY NOT NULL,
+    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) BETWEEN 1 AND 300),
+    created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
+    UNIQUE(deal_id, normalized_name),
+    UNIQUE(deal_id, team_id)
+);
+CREATE TABLE deal_team_memberships (
+    deal_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY(deal_id, team_id, user_id),
+    FOREIGN KEY(deal_id, team_id) REFERENCES deal_teams(deal_id, team_id) ON DELETE CASCADE,
+    FOREIGN KEY(deal_id, user_id) REFERENCES deal_memberships(deal_id, user_id) ON DELETE CASCADE
+);
+CREATE TABLE deal_activity_events (
+    event_id TEXT PRIMARY KEY NOT NULL,
+    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+    kind TEXT NOT NULL CHECK(kind IN ('membership_backfilled','project_created','member_added','member_role_changed','member_removed','ownership_transferred','team_created','team_renamed','team_deleted','team_member_added','team_member_removed','deal_archived','deal_updated','metadata_updated','document_uploaded')),
+    target_id TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_deal_activity_cursor ON deal_activity_events(deal_id, created_at, event_id);
+"#;
+
+const DOCUMENT_SCOPE_UPGRADE: &str = r#"
+CREATE TABLE quarry_files_deal_scope (
+    file_id TEXT PRIMARY KEY NOT NULL,
+    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    display_name TEXT NOT NULL,
+    source_uri TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    CHECK(length(trim(file_id)) > 0), CHECK(length(trim(deal_id)) > 0),
+    CHECK(length(trim(display_name)) > 0), CHECK(source_uri IS NULL OR length(trim(source_uri)) > 0)
+);
+INSERT INTO quarry_files_deal_scope SELECT file_id,deal_id,display_name,source_uri,metadata_json,created_at,updated_at,deleted_at FROM quarry_files;
+DROP TABLE quarry_files;
+ALTER TABLE quarry_files_deal_scope RENAME TO quarry_files;
+CREATE INDEX idx_quarry_files_deal ON quarry_files(deal_id, display_name, file_id);
+ALTER TABLE quarry_file_versions ADD COLUMN uploaded_by_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
+CREATE TABLE quarry_current_content (
+    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    content_sha256 TEXT NOT NULL,
+    file_id TEXT NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
+    version_id TEXT NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
+    PRIMARY KEY(deal_id,content_sha256),
+    UNIQUE(file_id)
+);
+INSERT INTO quarry_current_content SELECT f.deal_id,v.content_sha256,f.file_id,v.version_id FROM quarry_files f JOIN quarry_file_versions v ON f.file_id=v.file_id WHERE f.deleted_at IS NULL AND v.is_current=1;
+CREATE TABLE document_identity_manifests (
+    version_id TEXT PRIMARY KEY NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
+    derivation_version INTEGER NOT NULL CHECK(derivation_version IN (1,2)),
+    document_id TEXT NOT NULL,
+    active_generation TEXT NOT NULL CHECK(length(active_generation) > 0),
+    chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
+    graph_migrated INTEGER NOT NULL DEFAULT 0 CHECK(graph_migrated IN (0,1))
+);
+CREATE TABLE document_chunk_identities (
+    chunk_id TEXT PRIMARY KEY NOT NULL,
+    version_id TEXT NOT NULL REFERENCES document_identity_manifests(version_id) ON DELETE CASCADE,
+    index_generation TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+    chunk_sha256 TEXT NOT NULL,
+    UNIQUE(version_id,index_generation,chunk_index)
+);
+"#;

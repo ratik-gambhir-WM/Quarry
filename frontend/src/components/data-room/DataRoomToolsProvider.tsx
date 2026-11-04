@@ -4,6 +4,7 @@ import {
   Suspense,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -49,37 +50,45 @@ const ToolsContext = createContext<{
   registry: ReturnType<typeof createSearchRegistry>;
 } | null>(null);
 
-export function DataRoomToolsProvider({ children, dealId, email }: {
+export function DataRoomToolsProvider({ active = true, children, dealId, email }: {
+  active?: boolean;
   children: ReactNode;
   dealId: string;
   email?: string;
 }) {
-  const [registry] = useState(createSearchRegistry);
+  // A new route session discards tool state without remounting the workspace shell.
+  const session = useMemo(() => ({}), [active]);
+  const registry = useMemo(createSearchRegistry, [session]);
   const search = useSyncExternalStore(
     registry.subscribe, registry.getSnapshot, registry.getSnapshot,
   );
-  const [panel, setPanel] = useState<Tool | null>(null);
-  const [hasOpened, setHasOpened] = useState(false);
+  const [panelState, setPanelState] = useState<{
+    session: object;
+    panel: Tool | null;
+  } | null>(null);
+  const hasOpened = active && panelState?.session === session;
+  const panel = hasOpened ? panelState.panel : null;
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   function launch(tool: Tool, trigger: HTMLButtonElement | null) {
     triggerRef.current = trigger;
-    setHasOpened(true);
-    setPanel(tool);
+    setPanelState({ session, panel: tool });
   }
   return (
-    <ToolsContext.Provider value={{ launch, registry }}>
+    <ToolsContext.Provider value={active ? { launch, registry } : null}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 lg:hidden">
-        <DataRoomToolsDial />
-      </div>
+      {active ? (
+        <div className="fixed bottom-4 right-4 z-50 lg:hidden">
+          <DataRoomToolsDial />
+        </div>
+      ) : null}
       {hasOpened ? (
         <Suspense fallback={<span className="sr-only" role="status">Loading Data Room tools…</span>}>
           <DataRoomToolPanels
             dealId={dealId}
             email={email}
             finalFocusEl={() => triggerRef.current?.isConnected ? triggerRef.current : null}
-            onAssistantOpenChange={(open) => setPanel(open ? "assistant" : null)}
-            onSearchOpenChange={(open) => setPanel(open ? "search" : null)}
+            onAssistantOpenChange={(open) => setPanelState({ session, panel: open ? "assistant" : null })}
+            onSearchOpenChange={(open) => setPanelState({ session, panel: open ? "search" : null })}
             panel={panel}
             search={search}
           />

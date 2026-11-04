@@ -1,6 +1,5 @@
 import type { Company } from "../data/dealModel";
-import type { PersistedDeal } from "../contracts/quarryApi";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import {
   buildWorkspaceDealFromExtractionResult,
@@ -37,6 +36,9 @@ export function getWorkspaceDataSource(
 function createDealsStore(dataSourceValue: string | undefined) {
   let resource: WorkspaceDealsResource = { status: "loading" };
   let generation = 0;
+  const revoked = new Map<string, number>();
+  const forgotten = new Set<string>();
+  let revocationRevision = 0;
   const writesDuringLoad = new Map<string, WorkspaceDeal>();
   const companiesDuringLoad = new Map<string, Company>();
   let pendingLoad = false;
@@ -46,8 +48,24 @@ function createDealsStore(dataSourceValue: string | undefined) {
     for (const listener of listeners) listener();
   };
   const cache = (deal: WorkspaceDeal) => {
+    if (forgotten.has(deal.room.id)) return;
     if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
     const existing = resource.status === "success" ? resource.deals : [];
+    const previous = existing.find((d) => d.room.id === deal.room.id);
+    if (
+      previous &&
+      previous.persisted?.accessRevision === deal.persisted?.accessRevision &&
+      previous.persistedMetadata?.sowLink === deal.persistedMetadata?.sowLink
+    ) {
+      deal.room.resources = deal.room.resources.map((item) => {
+        const sourceName = previous.room.resources.find(
+          (old) => old.id === item.id,
+        )?.sourceName;
+        return !item.sourceName && sourceName
+          ? { ...item, sourceName, availability: "available" }
+          : item;
+      });
+    }
     publish({
       status: "success",
       source: "server",
@@ -56,6 +74,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
   };
   const load = () => {
     const request = ++generation;
+    const revokedAtStart = new Map(revoked);
     pendingLoad = true;
     writesDuringLoad.clear();
     companiesDuringLoad.clear();
@@ -90,9 +109,19 @@ function createDealsStore(dataSourceValue: string | undefined) {
       .then((next) => {
         if (request !== generation) return;
         pendingLoad = false;
+        const authorized = next.deals.filter((deal) => {
+          const revision = revoked.get(deal.room.id);
+          if (
+            revision !== undefined &&
+            revokedAtStart.get(deal.room.id) !== revision
+          )
+            return false;
+          forgotten.delete(deal.room.id);
+          return true;
+        });
         const merged = [
           ...writesDuringLoad.values(),
-          ...next.deals.filter((deal) => !writesDuringLoad.has(deal.room.id)),
+          ...authorized.filter((deal) => !writesDuringLoad.has(deal.room.id)),
         ];
         const deals = merged.map((deal) => {
           for (const company of companiesDuringLoad.values())
@@ -112,15 +141,24 @@ function createDealsStore(dataSourceValue: string | undefined) {
       });
   };
   return {
-    load,
-    cancel: () => {
-      generation++;
+    forget: (id: string) => {
+      revoked.set(id, ++revocationRevision);
+      forgotten.add(id);
+      writesDuringLoad.delete(id);
+      if (resource.status === "success")
+        publish({
+          ...resource,
+          deals: resource.deals.filter((d) => d.room.id !== id),
+        });
     },
+    load,
     getSnapshot: () => resource,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
+      if (listeners.size === 1) load();
       return () => {
         listeners.delete(listener);
+        if (listeners.size === 0) generation++;
       };
     },
     saveCompany: (company: Company) => {
@@ -129,8 +167,18 @@ function createDealsStore(dataSourceValue: string | undefined) {
       const updated = resource.deals.map((deal) => withCompany(deal, company));
       publish({ ...resource, deals: updated });
     },
-    cache: (aggregate: PersistedDeal) =>
-      cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata)),
+    loadDeal: async (id: string) => {
+      const revision = revoked.get(id);
+      const aggregate = await runtime.api.getDeal(id);
+      if (revoked.get(id) !== revision) {
+        throw new Error("Deal access changed. Try again.");
+      }
+      // Keep revocation revisions even after access is restored so older requests
+      // cannot repopulate the cache after this fresh authorized response.
+      forgotten.delete(id);
+      cache(buildWorkspaceDealFromPersisted(aggregate, aggregate.metadata));
+      return aggregate;
+    },
     save: (
       result: SaveDealResponse | SaveDealMetadataResponse,
       sowSourceName?: string,
@@ -211,14 +259,11 @@ export function useWorkspaceDeals(
     store.getSnapshot,
     store.getSnapshot,
   );
-  useEffect(() => {
-    store.load();
-    return store.cancel;
-  }, [store]);
   return {
     resource,
     retry: store.load,
-    cacheDealResult: store.cache,
+    forgetDeal: store.forget,
+    loadDeal: store.loadDeal,
     saveDealResult: store.save,
     saveCompanyResult: store.saveCompany,
   };

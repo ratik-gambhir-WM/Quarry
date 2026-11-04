@@ -65,12 +65,12 @@ service locator.
 
 SQLite is the canonical store for users, deals, logical files, immutable file versions, and
 file bytes. Helix is the versioned document graph and search projection. Document ingestion
-persists SQLite first and then indexes Helix, so cross-store writes are intentionally recoverable
+persists bytes, attribution, immutable identities and activity in SQLite first and then indexes Helix, so cross-store writes are intentionally recoverable
 through an exact-content re-upload today rather than transactionally atomic. A general reindex
 utility is not implemented.
 
 Quarry is a tested development foundation, not a production-secure deployment. Username/password
-authentication, revocable sessions, per-user access checks and bounded local auth throttling are
+authentication, revocable sessions, private-resource ownership, deal membership capabilities and bounded local auth throttling are
 implemented. Organization tenancy, distributed abuse protection, durable job queues, production
 storage, CI and deployment manifests remain absent. See [authentication](authentication.md).
 
@@ -302,7 +302,7 @@ shared `/hub/*` route tree:
 | --- | --- | --- |
 | `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
-| `/login` | Username/password `LoginPage` | eager |
+| `/login` | Username-or-email/password `LoginPage` | eager |
 | `/register` | Account registration `LoginPage` | eager |
 | `/hub` | `HubPage` | lazy workspace route and page |
 | `/hub/account` | `AccountPage` | lazy workspace route and page |
@@ -326,7 +326,8 @@ Both router targets opt into React transitions. `App.tsx` keeps Login eager and 
 `WorkspaceRoutes` boundary for `/hub/*`; the workspace provider remains mounted while nested routes
 change. Deal Room is a parent route whose shared sidebar and deal-scoped state wrap lazy child
 routes, so a URL, refresh, Back, or Forward action selects the same view without a second local
-view router. Lazy boundaries commit an accessible workspace or in-content skeleton while their
+view router. For an already authorized deal, navigation revalidates access without replacing the
+workspace; a denied check removes the protected content. Lazy boundaries commit an accessible workspace or in-content skeleton while their
 module loads. Reduced-motion CSS disables transition animation.
 
 The product root supplies route-specific browser titles, including the deal activity query tab,
@@ -343,8 +344,9 @@ The saved-work samples expose no file-opening or deal-filter actions because the
 by those integrations. The profile menu uses the shared Radix dropdown primitive for keyboard
 navigation, outside dismissal, Escape, positioning, and trigger focus restoration, including when
 the sidebar is collapsed. Shared auth fields and their email-domain composite use consistent
-48-pixel controls; workspace panels use a flat surface, and cards are static unless explicitly
-marked interactive. Deals keeps portfolio metrics out of the phone header so search and creation
+48-pixel controls; workspace panels generally use a flat surface, and cards are static unless explicitly
+marked interactive. Deal Room overview cards use the Kanban lanes' muted-to-transparent surface
+and compact corners, with a transparent Key Questions grid. Deals keeps portfolio metrics out of the phone header so search and creation
 remain reachable. Search opens a collision-aware popover with a full-width field, and Escape or
 Close clears the filter and restores trigger focus. It distinguishes initial loading, request failure,
 an empty portfolio, and a filtered-to-empty result; table text and headers align left for easier comparison. Dialog, empty,
@@ -355,7 +357,7 @@ provided, otherwise “Your workspace,” rather than a fixture-backed deal name
 The product tree is wrapped in `UserProvider`, backed by one session store with an origin-scoped
 local-storage cache. Login and registration establish a verified user, token and expiry; `/hub/*` requires that session and keys
 workspace state by its generation. Registration uses a responsive two-column card (900px max);
-small screens stack the fields. Login uses a compact card with a username step followed by a
+small screens stack the fields. Login uses a compact card with a username-or-email step followed by a
 password step, retaining the entered identity and allowing users to go back. The card and steps
 animate unless reduced motion is requested. Registration shows a fixed
 `@westmonroe.com` suffix and the backend enforces that exact email domain. Auth fields use native,
@@ -375,7 +377,7 @@ session without extending its server expiry. Router state and the removed `quarr
 | `components/ui/` | Reusable primitives and interaction foundations | button, dialog, field/input/select, popover, view transition, floating panel |
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
-| `data/` | UI domain types, mapping, and pure selectors | workspace, deal extraction, deals view |
+| `data/` | UI domain types, mapping, selectors and lifecycle-owned request stores | workspace, deal extraction, deals view |
 | `fixtures/` | Explicit shipped mock/demo/placeholder records, grouped by consuming feature | workspace portfolio, hub activity, Data Room search/report data |
 | `contracts/` | Transport-neutral application contract | `QuarryApi`, runtime and platform capabilities |
 | `api/` | Browser and Tauri transport adapters | HTTP, multipart, binary, SSE, IPC mapping |
@@ -399,6 +401,12 @@ global state or query-cache library.
   by origin JavaScript, as detailed in [authentication](authentication.md).
 - `UserProvider` owns verified identity/session state for the product tree; `WorkspaceProvider`
   owns deal-resource state for `/hub/*` and reads the verified profile through its session hook.
+  Its `loadDeal` operation captures the deal’s local revocation revision before each API request;
+  eviction rejects older responses while a fresh authorized lookup can restore membership access.
+  Revisions survive restoration so late pre-eviction list/lookup responses stay excluded.
+  `DealAccessBoundary` reports denied requests to `DealRoomPage`, which owns the redirect state
+  and cache eviction. The parent keeps rendering the deal-list redirect and access-loss notice
+  after eviction unmounts the boundary, without starting a replacement lookup.
   `WorkspaceHomeShell` is a layout consumer and fails fast if rendered outside that provider.
 - Workspace shells render their route-specific sidebar navigation directly. The normal home
   sidebar starts with Home (`/hub`), Vault, and Assistant (`/hub/assistant`), followed by the
@@ -446,7 +454,7 @@ global state or query-cache library.
   reload. Editor content/undo stays mounted across the first save/server-ID URL change. Saved note
   deletion calls the API and keeps the local buffer on failure; unresolved saves prevent deletion.
   The independently lazy editor uses BlockNote's shadcn controls with Quarry semantic tokens,
-  Inter, and reduced-motion handling. Both block controls appear when hovering anywhere across
+  Geist Serif, and reduced-motion handling. Both block controls appear when hovering anywhere across
   a block's row, including the document's responsive side padding. Its dedicated six-dot handle
   has no click menu. An adjacent plus button opens the same block options as typing `/`, reusing
   an empty block or inserting a paragraph after a nonempty block. Both insertion paths remain
@@ -528,7 +536,8 @@ global state or query-cache library.
   page-count, requested-page, boundary, and focus capabilities with the Data Room tools registry;
   unmounting the viewer removes those capabilities. This preserves page jumps without coupling
   the reusable search UI to the editor implementation.
-- `DealRoomPage` mounts `DataRoomToolsProvider` only for its Data Room route. The West Monroe logo
+- `DealRoomPage` keeps `DataRoomToolsProvider` around the persistent shell and activates its tools
+  only for the Data Room route. The West Monroe logo
   opens a Stealth speed dial with Assistant and Workspace Search; outside that route the logo is
   non-interactive. The shared shell and replacement explorer use the same provider. A floating
   logo trigger keeps the tools reachable below the desktop sidebar breakpoint.
@@ -570,12 +579,14 @@ global state or query-cache library.
   preference.
   Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
-  section enables Overview, Deal Activity, File Summary, and Settings today. Deal Activity sits
-  immediately after Overview, followed by the disabled Site Visits tab, and renders its calendar, timeline, and tasks inside the same inset
-  beneath the persistent tab header. Enabled tabs use the `section` query parameter, with Overview
+  section enables Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents.
+  Deal Activity shows persisted activity for saved deals. Site Visits follows it and restores the
+  existing editable calendar, timeline, and tasks beneath the persistent tab header; demo Deal
+  Activity retains its fixture timeline. Site Visits calendar edits remain session-only and do not
+  create persisted activity events or durable visit records. Enabled tabs use the `section` query parameter, with Overview
   as the default; tab navigation preserves router state and supports refresh, Back, and Forward.
   The former `/activity` route redirects to `?section=activity`. Timeline edits remain deal-scoped
-  in-memory state. Evidence, Findings, Site Visits, Open Items,
+  in-memory state. Evidence, Findings, Open Items,
   and History remain explicitly disabled until typed backing data and view behavior exist. The
   page consumes already extracted/persisted key questions and does not trigger extraction. A
   freshly submitted SOW name
@@ -623,11 +634,11 @@ operational failures.
 
 | Feature | Implemented behavior | Current limitations |
 | --- | --- | --- |
-| Login/profile | Username/password registration and login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
+| Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/resizable/pinnable ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, File Summary, and Settings tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Site Visits, Open Items, and History tabs are disabled pending backing contracts; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
@@ -641,6 +652,17 @@ operational failures.
 [`frontend/src/index.css`](../frontend/src/index.css) is the styling source of truth. It imports
 Tailwind 4, animation utilities, and shadcn CSS, then defines semantic tokens for canvas, surfaces,
 content, borders, interaction, sidebar, status, typography, spacing, radii, and shared panels.
+The shared heading, body, sidebar, sans, and mono compatibility tokens all use locally bundled
+Geist Serif, including code, logs, PDF controls, and technical labels. Existing `font-mono` classes
+remain semantic compatibility hooks but render proportional Serif by product choice. The official
+Geist 1.9.0 Serif regular WOFF2 face is weight 400; browsers synthesize the existing bold and italic
+UI styles. It lives under `frontend/public/fonts/geist/` with its SIL OFL 1.1 license and source notes.
+CSS declares `font-display: swap`; the main HTML preloads the Serif face. Serif system fallbacks
+remain available. The font is served from the application origin and packaged into both builds,
+requiring no Google Fonts requests or desktop CSP changes for UI text. Previously bundled Sans
+and Mono files remain retained assets but are not registered or preloaded by the UI.
+Existing type sizes, weights, tabular-number usage, and document/template-specific font choices
+remain intact; PDF signature font configuration is separate.
 The active light palette uses neutral gray surface/hover/border tokens, preserves the slate text
 tokens, and separates deep-navy action fills from text/link interaction colors. Enabled neutral
 buttons share the light-gray hover surface; filled primary actions share the deep-navy action
@@ -682,9 +704,40 @@ and primitives instead of adding hard-coded parallel color/spacing systems.
 Shared text, search, password, textarea, and checkbox controls adapt Stealth interactions to
 Quarry's theme and retain native form values and event contracts. Search fields with a clear action
 return focus to the input, and textareas retain their feature-specific keyboard behavior. Native
-file inputs remain behind their existing upload controls. The Deals add-deal flow composes the
+file inputs remain behind their existing upload controls. Deal Room settings/membership and document
+search compose the Stealth registry adaptations under `components/ui/stealth/`: Base UI fields,
+selects, buttons, team disclosures, confirmation dialogs, and motion-aware empty states. They reuse
+the existing Stealth text/search inputs, Lucide icons, motion tokens, and Quarry light/dark colors;
+no registry-wide CSS or dependency changes override other screens. Feature reducers/subscriptions
+still own API requests, permissions, pending state, conflicts and cancellation. Confirmation starts
+on Cancel, blocks dismissal while pending, shows failures in place and restores trigger focus.
+Selects retain native form behavior and support keyboard selection; search clearing restores input
+focus. The Deals add-deal flow composes the
 shared ReUI/shadcn dialog, field, input, select, and button primitives. Its portal overlay remains separate from the legacy named modal view transition so
 opening the dialog does not capture the page chrome as part of that transition.
+Deal creation has four draft steps: details, companies, an optional team name, and metadata.
+Finish (including Skip metadata) creates the deal, then its named team through the existing
+membership API. These are separate requests; a team or metadata failure retains the created deal
+for retry, and metadata retries reuse a successfully created team. After an unsuccessful team
+creation response, a retry first reads the deal's teams and reuses the matching normalized name
+if creation already committed. An unavailable roster prevents replay; a different existing team
+requires review in Settings.
+Settings uses a bounded, responsive workspace with a team header, avatar-based member roster,
+and add-member/access-guide rail. Settings cards match the Overview cards' muted-to-transparent
+surface, 8-pixel corners, and borderless, shadowless treatment. Each member's controlled permissions
+picker adapts Stealth's FollowButton label reservation, animated check and label transition to
+the existing deal roles;
+permissions remain server-owned, and owner permissions and roles viewed by non-owners stay
+read-only. Row action menus
+assign or remove team membership and expose permitted transfer/removal actions. Team rename and
+delete live in a collapsed management panel; deletion, ownership transfer, and membership removal
+use explicit confirmations and focus restoration. Edit deal sits in the page header. Role transitions
+and layout motion respect
+reduced motion, and the roster layout responds to available content width as well as viewport size.
+Deals without a team can create one in Settings; creation is hidden once one exists. The repository checks the one-team
+limit inside the mutation transaction and returns HTTP 409 for a second team, including a different
+name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
+but cannot add more. The paginated team API and schema are unchanged.
 
 The live working tree includes React canary View Transition wrappers and CSS transition recipes.
 Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
@@ -740,7 +793,8 @@ The contract covers:
 - typed deal aggregate create/update/list/get/archive and metadata extraction
 - owner-scoped company directory create/search/update
 - deal data-room listing and preview
-- stored document list/PDF/text
+- shared-deal memberships/teams/activity and operation capabilities
+- stored document list/PDF/text with uploader attribution
 - synchronous and job-based document processing
 - document job subscriptions
 - persisted assistant threads/messages and thread-scoped streaming, plus legacy ephemeral queries
@@ -851,7 +905,7 @@ method allowlist.
 | GET | `/health` | Shallow process health | Returns `{ "ok": true }`; does not check dependencies |
 | GET | `/capabilities` | Static contract feature flags | Does not report actual optional-service availability |
 | POST | `/auth/register` | Register username/password and public profile | 201 user/token/expiry; unique normalized identity |
-| POST | `/auth/login` | Verify credentials and issue a session | 200; generic 401 failure |
+| POST | `/auth/login` | Verify username-or-email/password and issue a session | Existing `username` field accepts either; 200; generic 401 failure |
 | GET | `/auth/me` | Current verified profile and expiry | Protected; no credentials in DTO |
 | POST | `/auth/logout` | Revoke current session | Protected; 204 |
 
@@ -861,7 +915,7 @@ method allowlist.
 | --- | --- | --- | --- |
 | GET | `/deals` | List nonarchived aggregates | Metadata, parties/current companies, scopes; actual then expected close sort key; unknown dates last |
 | POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Typed codes; optional dates/parties; same-owner company references |
-| POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Owner/ID immutable; metadata preserved; unchanged assignments retain row IDs |
+| POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Creator/ID immutable; owner/manager capability; metadata preserved; unchanged assignments retain row IDs |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
 | POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
@@ -870,6 +924,17 @@ method allowlist.
 | POST | `/companies/{company_id}/update` | Edit shared company details | Same-owner lookup; reflected in every linked deal; no delete/merge |
 | GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
 | POST | `/deals/{deal_id}/data-room/preview` | Parse/convert a selected relative document | Canonical containment; PDF/DOCX/XLSX/PPTX |
+
+Deal aggregates include actor role/capabilities, `createdByUserId` and `accessRevision`. Local
+paths are redacted for everyone except the current owner who is also the creator. The membership,
+team, transfer, activity and per-deal search endpoints are listed in
+[shared deal projects](shared-deal-projects.md#api-and-clients); both API mounts enforce the same
+role/archive policy and repeat write checks transactionally. Personal notebooks/chats/company
+directories remain private. Member creation requires an existing registered email in the `email`
+request field, trims and ASCII-lowercases it, and resolves the matching user in SQLite.
+Username-based member creation is rejected; clients must send `email` instead of the previous
+`username` field. Only active-deal owners may add members; this does not send email invitations.
+The shared Settings form accepts email only.
 
 ### 7.3 Stored documents, ingestion, jobs, and search
 
@@ -881,8 +946,8 @@ method allowlist.
 | POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
 | POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Authenticated owner; same supported formats; returns 202 `{jobId, filename}` |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
-| POST | `/documents/search/vector` | Vector search Helix chunks | Session determines workspace; vector and limit supplied by client |
-| POST | `/documents/search/keyword` | Keyword search Helix chunks | Session determines workspace; text and limit supplied by client |
+| POST | `/documents/search/vector` | Vector search Helix chunks | Server derives accessible deals; canonical candidates precede cosine ranking |
+| POST | `/documents/search/keyword` | Keyword search Helix chunks | Server derives accessible deals; bounded lexical ranking and rank fusion |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
@@ -927,7 +992,7 @@ remains mounted under both API prefixes for compatibility. When a client does no
 prompt; a validated client instruction still overrides it to support future user-created prompts.
 
 Threads return `dealId: string | null`. Creation accepts omitted/null for freeform or an existing
-same-owner deal; association is immutable. Lists default to `scope=all`; `scope=freeform` requires
+deal the actor currently belongs to; association is immutable and thread content remains private. Lists default to `scope=all`; `scope=freeform` requires
 no deal ID, and `scope=deal` requires one. Owner/status/association/cursor filters precede the page
 limit. New linked runs load bounded current reference data through the injected public
 `DealContextReader`, separate from policy and user instructions. It includes names, typed roles,
@@ -1023,8 +1088,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 13. Startup creates a fresh schema, additively upgrades validated marker 12,
-or validates/reuses marker 13; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 15. Startup creates a fresh schema, upgrades validated markers 12/13/14,
+or validates/reuses marker 15; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -1060,7 +1125,7 @@ Authenticated CRUD lives under `/notebooks`, `/notebooks/{notebook_id}/folders` 
 creates return 201; note POST/PATCH durably admit a save job and return 202 with status/events URLs.
 Jobs expose GET status, POST retry and GET events below
 `/notebooks/{notebook_id}/save-jobs/{job_id}`. Every access proves owner and full parent membership.
-Optional deal links require same-owner deals. Folder deletion relocates notes to root and bumps
+Optional deal links require current membership in the linked deal; notebook contents remain private. Folder deletion relocates notes to root and bumps
 revisions atomically; notebook deletion cascades; deletions fence jobs and enqueue durable cleanup.
 
 `notebooks` owns concrete SQLite persistence, native BlockNote validation, deterministic Markdown,
@@ -1154,12 +1219,19 @@ service, model, table, or product capability.
 | `assistant::chat` | Implemented SQLite-backed OpenAI text threads when configured, plus the legacy client-context stream contract |
 | `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
 | `identity` | Implemented password verification, sessions and resource-access boundary |
-| `workspaces`, `memberships` | Organization membership policy remains unimplemented |
+| `memberships` | Canonical deal roles, capabilities, registered-user access management, teams, revisions and transactional activity |
+| `workspaces` | Organization tenancy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
 | `templates::{slide_templates}` | Five stable facade operations dispatch to legacy or embedded execution; embedded mode adds native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared SQLite canonical store, and Helix template/metadata/dual-vector projection |
 | `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, Markdown/embedding/Helix projection; web/desktop transports and explicit-save editor implemented; folder UI deferred |
 | `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
+
+Membership mutation dispatch lives in `memberships/service.rs`: an exhaustive `Mutation` match
+calls the corresponding named repository operation and propagates its error. Each repository
+operation owns one offloaded SQLite transaction containing authorization, invariant checks,
+writes, access/member revisions where applicable, and activity recording. No-op role/assignment
+changes do not create activity or advance revisions.
 
 ### 8.3 Router and middleware
 
@@ -1239,33 +1311,39 @@ deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses
 Stop old clients and writers before the explicit schema-12 development reset, pair SQLite with a
 fresh isolated Helix store, rebuild/reload matching clients, sign up again, and recreate data
 manually. No status conversion or automatic downgrade is provided. See
-[development reset and recovery](authentication.md#schema-13-and-development-reset).
+[development reset and recovery](authentication.md#schema-15-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 13
+### 9.1 Shared SQLite schema marker 15
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
 
 | Table | Purpose | Active consumer status |
 | --- | --- | --- |
-| `app_metadata` | Application metadata key/value | No current service/route consumer |
+| `app_metadata` | Application metadata and completed document scope/index migration checkpoint | Explicit drained maintenance |
 | `users` | Public profile, unique username/email, private Argon2id hash | Identity and owner-scoped services |
 | `auth_sessions` | Token digests, owner, expiry/revocation | Durable eight-hour bearer sessions |
 | `assistant_threads` | User-owned thread metadata, nullable immutable deal association, archive state, and recency | Used by Assistant thread list |
 | `assistant_messages` | Ordered normalized user/assistant messages and terminal run state | Used by Assistant history and canonical context |
-| `notebooks` | Authenticated-owner metadata and optional same-owner deal link | API and explicit-save editor implemented |
+| `notebooks` | Authenticated-owner metadata and optional member-authorized deal link; content stays private | API and explicit-save editor implemented |
 | `notebook_folders` | Single-level notebook folders | API implemented |
 | `notebook_notes` | Native blocks, schema version and optimistic revision | API implemented |
 | `notebook_save_jobs` | Immutable accepted snapshots, idempotency, leases, checkpoints and terminal results | Durable save worker and SSE/status/retry |
 | `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
 | `reminders` | Reminder records | No current service/route consumer |
-| `deals` | Engagement/transaction/status codes, optional deal code/dates, owner and audit/archive timestamps | Used |
+| `deals` | Engagement/transaction/status codes, optional deal code/dates, immutable creator and audit/archive timestamps | Used |
+| `deal_memberships`, `deal_access_revisions` | One owner, actor roles and monotonic access revision | Canonical authorization |
+| `deal_teams`, `deal_team_memberships` | Same-deal team organization and cascading assignments | API and Settings |
+| `deal_activity_events` | Append-only typed project/member/team/metadata/upload history with minimal actor identity | Transactional mutations and cursor activity API |
 | `companies` | Reusable owner-scoped company details; names need not be unique | Used |
 | `deal_parties` | Company roles/notes per deal; unique `(deal_id, company_id, role)` | Used |
 | `deal_scopes` | Typed diligence disciplines per deal | Used |
 | `deal_metadata` | One row per deal with no duplicated owner; string-array key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
-| `quarry_files` | Logical file identity, deal/workspace, soft-delete metadata | Used |
-| `quarry_file_versions` | Immutable version identity/hash/current marker | Used |
+| `quarry_files` | Logical file identity, canonical deal scope, soft-delete metadata | Used |
+| `quarry_current_content` | Unique current/live content claims per deal | Serializes upload deduplication |
+| `document_identity_manifests`, `document_chunk_identities` | Derivation version, content ID, active generation and exact chunk IDs/order/hashes | Durable pre-graph checkpoints and legacy retry recovery |
+| `document_image_recovery` | Immutable accepted image document/chunk JSON, without embeddings, keyed by version | Exact-byte recovery before vision or embedding calls |
+| `quarry_file_versions` | Immutable version identity/hash/current marker and nullable authenticated uploader | Legacy attribution remains unknown |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
 | `template_assets`, `template_previews` | Image and PNG preview BLOBs with dimensions | Embedded templates |
@@ -1276,7 +1354,7 @@ schema currently contains:
 Key invariants include:
 
 - deals and companies reference an existing authenticated user with delete restriction
-- atomic deal create/update checks company ownership inside the transaction; cross-owner assignments fail
+- atomic creation checks actor-owned companies; shared updates retain attached references or add actor-owned companies
 - company records have no fixed target/buyer/sponsor flags; one company can have several roles
 - working-stage/Closed platform, add-on, or strategic acquisitions require exactly one target at the service boundary;
   Pipeline and Pencils Down drafts can have none, and other transaction structures may have multiple targets
@@ -1287,24 +1365,29 @@ Key invariants include:
 - assistant message order and run request IDs are unique within a thread
 - deal metadata has at most one of local path or SharePoint link; both may be absent
 - SOW, fact-sheet, and RL links in deal metadata are nullable and reject non-null blank values
-- logical files belong to one deal/workspace
-- document uploads use the authenticated numeric user ID, serialized as a string, as their
-  workspace identity in SQLite and Helix; the file transaction compares it with `deals.user_id`,
-  rejects archived or differently owned deals, and never uses the owner's email as identity
+- logical files belong to one deal; `deals.user_id` retains creator provenance, not access
+- memberships authorize reads and operation-specific writes; the file transaction rechecks active
+  contributor/manager/owner access and archive state, independently of uploader attribution
+- deal creation, owner membership and creation activity are atomic; ownership transfer never changes
+  document scope or identities; team membership does not independently grant access
+- team creation permits at most one team per deal, checked transactionally without deleting legacy teams
 - versions are unique by `(file_id, version_number)` and `(file_id, content_sha256)`
 - at most one current version exists per logical file
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 13` is the shared compatibility marker. Empty marker-0 databases receive
-all product/auth/template/notebook tables in one immediate transaction. Validated marker-12 layouts
-receive the additive notebook tables/indexes without resetting accounts, sessions, documents or
-templates; marker 13 is validated and reused. Missing tables are not silently recreated. Older,
-newer or malformed layouts fail without deletion. There is no profile/password backfill or
-automatic downgrade. DDL, foreign-key checks and marker advancement commit together. Rollback
-requires the drained pre-upgrade backup and matching binary; preserve later writes first. See
-[notebook schema rollout and recovery](notebook-api.md#additive-schema-12--13-and-recovery).
-See [authentication](authentication.md) and [migration recovery](slide-templates-migration.md).
+`PRAGMA user_version = 15` is the shared marker. Empty databases receive the complete schema.
+Validated marker 12 receives notebooks first; validated 12/13 then receives the data-preserving
+membership/file-scope upgrade. Memberships backfill the creator as owner, including archived deals;
+legacy uploader attribution remains null. Validated 12/13/14 layouts also receive the additive
+image-recovery table before marker 15 is committed; no existing image text is fabricated or
+backfilled. Schema/layout, foreign keys and exactly-one-owner
+invariants are checked before advancing the marker and on restart. Malformed/unsupported layouts
+fail without deletion or silent repairs. The file rebuild restores foreign-key enforcement even
+on failure. Startup refuses incomplete document identity/graph-scope migration. The required
+coordinated drain, consistent backups, offline graph maintenance, readiness and rollback procedure
+are in [shared deal projects](shared-deal-projects.md#schema-14-rollout-and-recovery). The additive
+image checkpoint rollout is described in [schema 15 image recovery](shared-deal-projects.md#schema-15-image-recovery).
 
 All aggregate reads use one transaction snapshot: deals `LEFT JOIN` their optional metadata, then
 bounded batches fetch parties joined to companies and scopes separately. These reads run sequentially on the same transaction connection
@@ -1336,22 +1419,22 @@ FileVersion
   └── HAS_CHUNK ─────────> FileChunk
 ```
 
-The graph carries workspace, file, version, content hash, byte size, index generation, chunk
+The graph carries canonical deal, file, version, content hash, byte size, index generation, chunk
 hash/order, character/page ranges, section path, text, embedding, and timestamps. Image description
 text is stored as ordinary chunk text with section path `Image description`, and its OpenAI-generated
 embedding is stored on the same chunk. Identity behavior
 in the current upload path is narrower than the versioned graph shape suggests:
 
 - PDF, DOCX, XLSX, PPTX, and image parsers assign a new random `file_id` on each parse.
-- `document_id` is deterministic from workspace/user identity plus content hash.
-- Ingestion looks up the current SQLite version by deal, workspace, and exact content hash. A match
+- New `document_id` values derive from deal ID plus content hash; migrated versions retain their original content IDs through identity manifests.
+- Ingestion looks up the current SQLite version by deal and exact content hash. A match
   reuses its `file_id`; otherwise the parsed random `file_id` becomes a new logical file.
 - `version_id` is deterministic from the selected `file_id` plus content hash. Final graph chunk IDs
-  are deterministic from workspace, file, version/index generation, chunk order, and chunk hash.
+  derive from deal, file, version/index generation, chunk order, and chunk hash; migrated chunk IDs are preserved exactly.
 - The repository and schema support later versions when the caller explicitly reuses a `file_id`,
   but ordinary changed-content upload does not currently identify the earlier logical file and
   therefore does not create version 2.
-- Helix setup can create the immutable version node and replace its chunks, but adds its
+- Helix setup can create the immutable version node and replace the active generation’s chunks, preserving historical generations, but adds its
   `HAS_VERSION` and `CURRENT_VERSION` edges only in a final publication write after every bounded
   chunk batch succeeds. A failed graph write therefore leaves the incomplete version unreferenced
   and preserves an older published version when one exists.
@@ -1370,9 +1453,9 @@ waits for every required index operation to report usable before Axum starts.
 SQLite is intended to remain the recovery source. An incompatible graph rollout must drain
 ingestion, back up SQLite and Helix, explicitly authorize and run the destructive `clear_helix`
 utility against the selected environment, recreate indexes, reindex from canonical SQLite data,
-and verify graph identities and search before restoring traffic. The repository currently contains
-only `clear_helix`, not a bulk SQLite-to-Helix reindex command, so this procedure cannot yet be
-completed entirely with repository tooling. `clear_helix` is not part of normal startup.
+and verify graph identities and search before restoring traffic. The one-time deal-scope maintenance tool was removed after the selected local cutover. Its matching
+artifact is retained with the local backups; no scope migration or general bulk SQLite-to-Helix
+reindex command is shipped, so another unconverted store requires reviewed offline maintenance. `clear_helix` is not part of normal startup.
 
 ### 9.3 Cross-store consistency
 
@@ -1380,13 +1463,22 @@ Document persistence is not a distributed transaction:
 
 1. Validate parser-derived identities and chunk invariants.
 2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence only when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
-3. Commit the logical file/version/blob aggregate in SQLite and confirm the returned identity matches the prepared plan.
+3. Commit the logical file/version/blob aggregate, identity manifest, and accepted image document/chunks (for image inputs) in SQLite and confirm the returned identity matches the prepared plan.
 4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
 5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
 
 The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
-the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert. Once a
-`file_id` is selected, version and graph-chunk identities are reproducible. General recovery from
+the committed SQLite version, reuses its `file_id`, and can retry the missing Helix insert.
+An already-published version skips only when its active generation and every canonical chunk
+header match the identity manifest, using the same bounded header check as search. Missing or
+mismatched chunks enter the normal repair path; a failed verification read does not trigger graph
+writes. Once a `file_id` is selected, version and graph-chunk identities are reproducible. Image retries load the
+accepted document/chunk snapshot from `document_image_recovery` before parsing or calling vision,
+then embed that exact text and enforce the existing immutable manifest. The checkpoint commits
+with the file/version/blob and contains no vectors; changed descriptions cannot replace it.
+Images accepted before schema 15 have no checkpoint: already-published images still skip normally,
+but a missing projection requires reviewed maintenance using the original accepted text. A new
+AI description cannot recover a lost original. General recovery from
 SQLite without the original bytes remains an operational design, not implemented tooling; deleting
 the SQLite record to conceal a Helix failure would violate source ownership. A single oversized
 chunk is rejected before canonical persistence; documents whose individual chunks fit are split
@@ -1473,20 +1565,23 @@ sequenceDiagram
     API->>Ingestion: process upload/job
     Ingestion->>Parser: parse PDF/DOCX/XLSX/PPTX or validate image bytes
     Parser-->>Ingestion: normalized chunks or validated image
-    Ingestion->>AI: describe validated image bytes (image inputs only)
+    Ingestion->>AI: describe validated image bytes (new image inputs only)
     AI-->>Ingestion: image description
     Ingestion->>Parser: build image description chunks (image inputs only)
     Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
     Ingestion->>AI: embed chunk text
     AI-->>Ingestion: embeddings
     Ingestion->>H: preflight setup, chunk-batch, and publication graph requests
-    Ingestion->>SQL: transactionally persist file/version/blob
+    Ingestion->>SQL: transactionally persist file/version/blob, manifest, image checkpoint
     SQL-->>Ingestion: committed file/version identities
     Ingestion->>H: insert version graph, bounded chunks, then publish it
     H-->>Ingestion: indexed or recoverable error
     Ingestion-->>API: processing result
     API-->>UI: SSE completed/skipped/failed
 ```
+
+For an existing image awaiting graph recovery, ingestion loads the accepted SQLite image snapshot
+instead of repeating the parse/vision steps above.
 
 PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path.
 Image decoding and document parsing run on blocking workers. XLSX preflights every worksheet's
@@ -1528,10 +1623,16 @@ therefore require LibreOffice.
 
 ### 10.4 Search
 
-Keyword and vector requests carry a caller-supplied workspace identity and limit. Handlers validate
-common request constraints before services delegate to the Helix index repository. There is currently
-no server-side identity binding to prove that the caller owns the requested workspace.
+Global keyword/vector requests derive all accessible deals from the bearer actor. Deal-scoped
+routes authorize the deal path. Both select canonical current/live chunk identities before ranking,
+verify complete projection headers and batch-check canonical identities again before exposing text.
+Vector search uses within-stream cosine ranking. Keyword search uses bounded lexical ranking and
+reciprocal-rank fusion across deals because the pinned SDK lacks within-stream text ranking.
+Oversized searches and incomplete projections fail explicitly; they do not return silent partial
+results. The limits, algorithms and migration contract are in [shared deal projects](shared-deal-projects.md).
 
+The Deal Room Search documents tab calls these APIs and exposes “This deal” and “All accessible
+deals” scopes. Results link to the authorized data room.
 The Data Room document-search overlay does not consume these endpoints. Its reusable frontend
 component currently filters deterministic fixture excerpts, while `DataRoomPage` maps activated
 results to the selected preview's generic requested-page contract. It can navigate only valid page
@@ -1755,6 +1856,8 @@ The following are current facts, not merely future enhancements:
 - Username/password authentication and per-user resource checks exist; organization tenancy,
   verification, recovery and MFA do not. Open registration and shared template mutation are
   development choices. Unexpired bearer sessions are restored from local storage; server-side validation remains authoritative.
+  The authenticated web fetch wrapper preserves bodyless 204/205/304 responses without
+  reconstructing a streamed body, and releases their cancellation tracking immediately.
 - User API-key collection/storage and public profile lookup were removed; AI still uses only
   server provider keys. Database diagnostics and arbitrary server-path summary routes are removed.
 - Data-room responses can expose absolute server roots.
@@ -1952,12 +2055,12 @@ configuration. Never use `clear_helix` as verification.
 | Area | Current condition | Consequence |
 | --- | --- | --- |
 | Identity | Password authentication, durable revocable sessions, per-user checks | No organization tenancy, recovery, MFA or persistent client login |
-| Tenancy | Caller-supplied user/workspace IDs | No server proof of data ownership |
+| Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 13 SQLite, additive 12 → 13 upgrade and explicit offline development reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 15 SQLite, preserving 12/13/14 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
-| Reindex tooling | Clear/reindex recovery is documented, but only `clear_helix` exists | No general rebuild from canonical SQLite data |
+| Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
 | Template catalog | Embedded mode uses the shared durable product SQLite database; the legacy Node catalog remains in memory | Embedded imports survive restart and startup reconciles Helix from canonical SQLite; legacy imports are lost on restart; changing backend does not transfer imports |

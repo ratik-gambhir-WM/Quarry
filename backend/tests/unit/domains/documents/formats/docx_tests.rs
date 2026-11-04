@@ -40,7 +40,7 @@ fn chunks_reconstruct_text_and_have_contiguous_offsets() {
         assert_eq!(&text[chunk.start_offset..chunk.end_offset], chunk.text);
         assert!(chunk.token_count as usize <= MAX_TOKEN_CHUNK);
         assert_eq!(chunk.document_id, "document-1");
-        assert_eq!(chunk.user_id, "user-1");
+        assert_eq!(chunk.deal_id, "user-1");
         assert!(chunk.page_numbers.is_none());
         assert_eq!(
             chunk.start_offset,
@@ -67,7 +67,7 @@ fn chunk_metadata_is_stable_and_embedding_serializes_as_null() {
     assert_eq!(chunk.chunk_id, repeated[0].chunk_id);
     assert!(json["embedding"].is_null());
     assert!(json["page_numbers"].is_null());
-    assert_eq!(json["user_id"], "user-1");
+    assert_eq!(json["deal_id"], "user-1");
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn docx_assembly_contains_document_and_chunk_nodes() {
         "file-content-hash".to_string(),
     );
 
-    assert_eq!(assembly.document.user_id, "user-1");
+    assert_eq!(assembly.document.deal_id, "user-1");
     assert_eq!(assembly.document.file_name, "report.docx");
     assert_eq!(assembly.document.source_type, "docx");
     assert_eq!(

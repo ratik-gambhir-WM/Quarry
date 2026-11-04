@@ -1,23 +1,23 @@
 use super::*;
 
 #[test]
-fn vector_search_is_workspace_partitioned_and_validated() {
+fn vector_search_is_deal_id_partitioned_and_validated() {
     let query = search_document_chunks_by_vector(FileChunkVectorSearch {
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         query_embedding: vec![0.25, 0.5],
         limit: 10,
     })
     .unwrap();
     let json = query.to_json_string().unwrap();
     assert!(json.contains(FILE_CHUNK_LABEL));
-    assert!(json.contains("workspace_id"));
+    assert!(json.contains("deal_id"));
     assert!(json.contains("$distance"));
     assert!(!json.contains("user_id"));
     assert!(!json.contains("\"embedding\",\"alias\":null"));
 
     assert_eq!(
         search_document_chunks_by_vector(FileChunkVectorSearch {
-            workspace_id: "workspace-1".to_string(),
+            deal_id: "deal_id-1".to_string(),
             query_embedding: Vec::new(),
             limit: 10,
         })
@@ -25,7 +25,7 @@ fn vector_search_is_workspace_partitioned_and_validated() {
         "query embedding cannot be empty"
     );
     assert!(search_document_chunks_by_vector(FileChunkVectorSearch {
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         query_embedding: vec![f32::NAN],
         limit: 10,
     })
@@ -37,7 +37,7 @@ fn vector_search_is_workspace_partitioned_and_validated() {
 fn keyword_search_requires_a_bounded_positive_limit() {
     assert_eq!(
         search_document_chunks_by_keyword(FileChunkKeywordSearch {
-            workspace_id: "workspace-1".to_string(),
+            deal_id: "deal_id-1".to_string(),
             query_text: "revenue growth".to_string(),
             limit: 0,
         })
@@ -45,7 +45,7 @@ fn keyword_search_requires_a_bounded_positive_limit() {
         "search limit must be greater than zero"
     );
     assert!(search_document_chunks_by_keyword(FileChunkKeywordSearch {
-        workspace_id: "workspace-1".to_string(),
+        deal_id: "deal_id-1".to_string(),
         query_text: "revenue growth".to_string(),
         limit: MAX_FILE_CHUNK_SEARCH_LIMIT + 1,
     })
@@ -55,7 +55,7 @@ fn keyword_search_requires_a_bounded_positive_limit() {
 
 #[test]
 fn current_and_historical_queries_use_the_correct_edges() {
-    let current = get_current_helix_document("workspace-1".to_string(), "file-1".to_string())
+    let current = get_current_helix_document("deal_id-1".to_string(), "file-1".to_string())
         .unwrap()
         .to_json_string()
         .unwrap();
@@ -63,7 +63,7 @@ fn current_and_historical_queries_use_the_correct_edges() {
     assert!(!current.contains(HAS_VERSION_LABEL));
 
     let historical = get_helix_document_version(
-        "workspace-1".to_string(),
+        "deal_id-1".to_string(),
         "file-1".to_string(),
         "version-1".to_string(),
     )
@@ -77,7 +77,7 @@ fn current_and_historical_queries_use_the_correct_edges() {
 #[test]
 fn content_lookup_uses_current_version_and_content_hash() {
     let query = find_current_helix_document_by_content_hash(
-        "workspace-1".to_string(),
+        "deal_id-1".to_string(),
         "content-hash".to_string(),
     )
     .unwrap();
@@ -90,7 +90,7 @@ fn content_lookup_uses_current_version_and_content_hash() {
 #[test]
 fn version_chunks_are_scoped_and_ordered() {
     let query = get_helix_document_version_chunks(
-        "workspace-1".to_string(),
+        "deal_id-1".to_string(),
         "file-1".to_string(),
         "version-1".to_string(),
     )

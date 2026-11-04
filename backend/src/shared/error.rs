@@ -2,6 +2,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {
+    #[error("{0}")]
+    Unavailable(String),
+    #[error("operation is not permitted")]
+    Forbidden,
     #[error("save queue capacity exhausted")]
     Capacity,
     #[error("{0}")]
@@ -30,6 +34,8 @@ impl RepositoryError {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ServiceError {
+    #[error("operation is not permitted")]
+    Forbidden,
     #[error("invalid credentials or expired session")]
     Unauthorized,
     #[error("too many authentication attempts; retry later")]
@@ -67,6 +73,8 @@ impl ServiceError {
 impl From<RepositoryError> for ServiceError {
     fn from(error: RepositoryError) -> Self {
         match error {
+            RepositoryError::Unavailable(message) => Self::Unavailable(message),
+            RepositoryError::Forbidden => Self::Forbidden,
             RepositoryError::Capacity => Self::Unavailable("save queue capacity exhausted".into()),
             RepositoryError::NotFound(message) => Self::NotFound(message),
             RepositoryError::Conflict(message) => Self::Conflict(message),

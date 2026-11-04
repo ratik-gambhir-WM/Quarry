@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
 import {
@@ -10,12 +10,10 @@ import {
   type DataRoomTreeNode,
 } from "../data/dataRoom";
 import type { DealDataRoom } from "../data/dataRoomPreview";
-
-type DataRoomResource<T> =
+type Resource<T> =
   | { status: "loading"; previous?: T }
   | { status: "ready"; value: T }
-  | { message: string; status: "error"; previous?: T };
-
+  | { status: "error"; message: string; previous?: T };
 export type DataRoomContents = {
   errorMessage: string;
   explorerNodes: DataRoomTreeNode[];
@@ -28,102 +26,113 @@ export type DataRoomContents = {
   reviewFiles: DataRoomFileEntry[];
   rootPath?: string;
 };
-
-export function useDataRoomContents(dealId: string): DataRoomContents {
-  const [local, setLocal] = useState<DataRoomResource<DealDataRoom>>({
-    status: "loading",
-  });
-  const [stored, setStored] = useState<DataRoomResource<DealDocumentSummary[]>>(
-    { status: "loading" },
+function value<T>(resource: Resource<T>) {
+  return resource.status === "ready" ? resource.value : resource.previous;
+}
+function createContentsStore(dealId: string, localAllowed: boolean) {
+  let local: Resource<DealDataRoom> = localAllowed
+    ? { status: "loading" }
+    : {
+        status: "ready",
+        value: { dealId, rootName: "Data Room", rootPath: "", tree: [] },
+      };
+  let stored: Resource<DealDocumentSummary[]> = { status: "loading" };
+  let localRequest = 0;
+  let storedRequest = 0;
+  const listeners = new Set<() => void>();
+  let snapshot: {
+    local: Resource<DealDataRoom>;
+    stored: Resource<DealDocumentSummary[]>;
+  } = { local, stored };
+  const publish = () => {
+    snapshot = { local, stored };
+    for (const listener of listeners) listener();
+  };
+  const loadLocal = () => {
+    if (!localAllowed) return;
+    const request = ++localRequest;
+    local = { status: "loading", previous: value(local) };
+    publish();
+    void runtime.api
+      .listDealDataRoom(dealId)
+      .then((next) => {
+        if (request !== localRequest) return;
+        local = { status: "ready", value: next };
+        publish();
+      })
+      .catch((error: unknown) => {
+        if (request !== localRequest) return;
+        local = isUnconfiguredDataRoomError(error)
+          ? {
+              status: "ready",
+              value: { dealId, rootName: "Data Room", rootPath: "", tree: [] },
+            }
+          : {
+              status: "error",
+              message: error instanceof Error ? error.message : String(error),
+            };
+        publish();
+      });
+  };
+  const loadStored = () => {
+    const request = ++storedRequest;
+    stored = { status: "loading", previous: value(stored) };
+    publish();
+    void runtime.api
+      .listDealDocuments(dealId)
+      .then((next) => {
+        if (request !== storedRequest) return;
+        stored = { status: "ready", value: next };
+        publish();
+      })
+      .catch((error: unknown) => {
+        if (request !== storedRequest) return;
+        stored = {
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        };
+        publish();
+      });
+  };
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      if (listeners.size === 1) {
+        loadLocal();
+        loadStored();
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          localRequest++;
+          storedRequest++;
+        }
+      };
+    },
+    loadAll: () => {
+      loadLocal();
+      loadStored();
+    },
+    loadStored,
+  };
+}
+export function useDataRoomContents(
+  dealId: string,
+  localAllowed = true,
+): DataRoomContents {
+  const store = useMemo(
+    () => createContentsStore(dealId, localAllowed),
+    [dealId, localAllowed],
   );
-  const localRequestId = useRef(0);
-  const storedRequestId = useRef(0);
-  const activeDealId = useRef(dealId);
-  activeDealId.current = dealId;
-
-  const loadLocal = useCallback(async () => {
-    const requestId = ++localRequestId.current;
-    setLocal((current) => ({
-      status: "loading",
-      previous: getResourceValue(current),
-    }));
-    try {
-      const value = await runtime.api.listDealDataRoom(dealId);
-      if (
-        activeDealId.current === dealId &&
-        localRequestId.current === requestId
-      ) {
-        setLocal({ status: "ready", value });
-      }
-    } catch (error) {
-      if (
-        activeDealId.current !== dealId ||
-        localRequestId.current !== requestId
-      )
-        return;
-      if (isUnconfiguredDataRoomError(error)) {
-        setLocal({
-          status: "ready",
-          value: { dealId, rootName: "Data Room", rootPath: "", tree: [] },
-        });
-      } else {
-        setLocal((current) => ({
-          message: toErrorMessage(error),
-          previous: getResourceValue(current),
-          status: "error",
-        }));
-      }
-    }
-  }, [dealId]);
-
-  const loadStored = useCallback(async () => {
-    const requestId = ++storedRequestId.current;
-    setStored((current) => ({
-      status: "loading",
-      previous: getResourceValue(current),
-    }));
-    try {
-      const value = await runtime.api.listDealDocuments(dealId);
-      if (
-        activeDealId.current === dealId &&
-        storedRequestId.current === requestId
-      ) {
-        setStored({ status: "ready", value });
-      }
-    } catch (error) {
-      if (
-        activeDealId.current === dealId &&
-        storedRequestId.current === requestId
-      ) {
-        setStored((current) => ({
-          message: toErrorMessage(error),
-          previous: getResourceValue(current),
-          status: "error",
-        }));
-      }
-    }
-  }, [dealId]);
-
-  useEffect(() => {
-    void loadLocal();
-    void loadStored();
-    return () => {
-      localRequestId.current += 1;
-      storedRequestId.current += 1;
-    };
-  }, [loadLocal, loadStored]);
-
-  const reloadAll = useCallback(() => {
-    void loadLocal();
-    void loadStored();
-  }, [loadLocal, loadStored]);
-  const reloadStored = useCallback(() => {
-    void loadStored();
-  }, [loadStored]);
-
+  const { local, stored } = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
   return useMemo(() => {
-    const localValue = getResourceValue(local);
-    const storedValue = getResourceValue(stored);
+    const localValue = value(local);
+    const storedValue = value(stored);
     const explorerNodes = [
       ...buildStoredDocumentNodes(storedValue ?? []),
       ...(localValue?.tree ?? []),
@@ -136,27 +145,17 @@ export function useDataRoomContents(dealId: string): DataRoomContents {
       .join(" ");
     const isLoading = local.status === "loading" || stored.status === "loading";
     const hasFiles = hasDataRoomFiles(explorerNodes);
-
     return {
       errorMessage,
       explorerNodes,
       hasFiles,
-      isEmpty:
-        localValue !== undefined && !isLoading && !errorMessage && !hasFiles,
+      isEmpty: !isLoading && !errorMessage && !hasFiles,
       isLoading,
       isUnavailable: !isLoading && Boolean(errorMessage),
-      reloadAll,
-      reloadStored,
+      reloadAll: store.loadAll,
+      reloadStored: store.loadStored,
       reviewFiles: flattenDataRoomFiles(explorerNodes),
       rootPath: localValue?.rootPath || undefined,
     };
-  }, [local, reloadAll, reloadStored, stored]);
-}
-
-function getResourceValue<T>(resource: DataRoomResource<T>) {
-  return resource.status === "ready" ? resource.value : resource.previous;
-}
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  }, [local, stored, store]);
 }

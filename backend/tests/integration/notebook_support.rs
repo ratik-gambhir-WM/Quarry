@@ -135,7 +135,16 @@ pub(crate) fn application() -> App {
         .route_layer(axum::middleware::from_fn_with_state(
             AuthBoundary {
                 identity: identity.clone(),
-                access: ResourceAccess::new(sqlite.clone()),
+                access: ResourceAccess::new(
+                    sqlite.clone(),
+                    std::sync::Arc::new(
+                        crate::domains::memberships::service::DealAccessService::new(
+                            crate::domains::memberships::repository::MembershipRepository::new(
+                                sqlite.clone(),
+                            ),
+                        ),
+                    ),
+                ),
             },
             authenticate,
         ));

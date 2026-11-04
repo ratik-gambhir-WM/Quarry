@@ -42,7 +42,11 @@ pub(super) fn validate_body(body: &Value) -> Result<(), String> {
 }
 impl QuarryApiService {
     pub async fn patch(&self, path: &str, body: Value) -> Result<Value, String> {
-        validate_patch(path, &body)?;
+        if path.starts_with("/api/v1/deals/") {
+            super::memberships::validate_patch(path, &body)?;
+        } else {
+            validate_patch(path, &body)?;
+        }
         self.client.patch(path, body).await
     }
     pub async fn notebook_job_events(

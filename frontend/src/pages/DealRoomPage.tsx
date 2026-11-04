@@ -1,5 +1,6 @@
-import { runtime } from "@quarry/runtime";
-import { useEffect, useState } from "react";
+import { DealAccessBoundary } from "../components/deal-room/DealAccessBoundary";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { createRequestResource } from "../data/requests/requestResource";
 import {
   Navigate,
   Outlet,
@@ -50,7 +51,14 @@ export function DealRoomPage() {
     email,
     navigationState,
     retryDeals,
+    forgetDeal,
   } = useWorkspace();
+  const [deniedDealId, setDeniedDealId] = useState<string>();
+  const denyAccess = useCallback(() => {
+    if (!dealId) return;
+    setDeniedDealId(dealId);
+    forgetDeal(dealId);
+  }, [dealId, forgetDeal]);
   const extractionState = location.state as DealExtractionLocationState | null;
   const extractionResult = extractionState?.result;
   const extractedDeal =
@@ -81,6 +89,16 @@ export function DealRoomPage() {
         sowSourceName: extractionState?.sowSourceName,
       } satisfies DealExtractionLocationState)
     : navigationState;
+
+  if (dealId && deniedDealId === dealId) {
+    return (
+      <Navigate
+        replace
+        to="/hub/deals"
+        state={{ notice: "You no longer have access to this deal." }}
+      />
+    );
+  }
 
   if (!deal && dealsResource.status === "error") {
     return (
@@ -117,6 +135,28 @@ export function DealRoomPage() {
     return <WorkspacePageSkeleton label="Loading deal" />;
   }
 
+  if (
+    deal.persisted &&
+    dealsResource.status === "success" &&
+    dealsResource.source === "server"
+  ) {
+    return (
+      <DealAccessBoundary
+        key={`${email ?? ""}:${deal.room.id}`}
+        deal={deal}
+        onAccessDenied={denyAccess}
+      >
+        {(current) => (
+          <DealRoomWorkspace
+            deal={current}
+            deals={deals}
+            email={email}
+            navigationState={dealNavigationState}
+          />
+        )}
+      </DealAccessBoundary>
+    );
+  }
   return (
     <DealRoomWorkspace
       deal={deal}
@@ -129,42 +169,27 @@ export function DealRoomPage() {
 }
 
 function DealRoomLookup({ id }: { id: string }) {
-  const { cacheDealResult } = useWorkspace();
-  const [result, setResult] = useState<{ error?: string }>({});
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let active = true;
-    void runtime.api
-      .getDeal(id)
-      .then((aggregate) => {
-        if (active) cacheDealResult(aggregate);
-      })
-      .catch((error: unknown) => {
-        if (active)
-          setResult({
-            error: error instanceof Error ? error.message : String(error),
-          });
-      });
-    return () => {
-      active = false;
-    };
-  }, [attempt, cacheDealResult, id]);
-  if (result.error)
+  const { loadDeal } = useWorkspace();
+  const resource = useMemo(
+    () => createRequestResource(() => loadDeal(id)),
+    [loadDeal, id],
+  );
+  const result = useSyncExternalStore(
+    resource.subscribe,
+    resource.getSnapshot,
+    resource.getSnapshot,
+  );
+  if (result.status === "error")
     return (
       <section role="alert" className="p-8">
         <h1>Deal unavailable</h1>
-        <p>{result.error}</p>
-        <button
-          type="button"
-          onClick={() => {
-            setResult({});
-            setAttempt((n) => n + 1);
-          }}
-        >
+        <p>{result.message}</p>
+        <button type="button" onClick={resource.refresh}>
           Retry deal
         </button>
       </section>
     );
+
   return <WorkspacePageSkeleton label="Loading deal" />;
 }
 
@@ -225,11 +250,16 @@ function DealRoomWorkspace({
       <Outlet context={context} />
     </WorkspaceShell>
   );
-  return activeSection === "data-room" ? (
-    <DataRoomToolsProvider dealId={deal.room.id} email={email} key={`${email ?? ""}:${deal.room.id}`}>
+  return (
+    <DataRoomToolsProvider
+      active={activeSection === "data-room"}
+      dealId={deal.room.id}
+      email={email}
+      key={`${email ?? ""}:${deal.room.id}`}
+    >
       {shell}
     </DataRoomToolsProvider>
-  ) : shell;
+  );
 }
 
 function getDealRoomChildPath(pathname: string, dealId: string) {

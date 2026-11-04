@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { BackendApiError, httpQuarryApi } from "@/api/httpQuarryApi";
 import { sessionStore } from "@/auth/sessionStore";
+import { authFetch } from "@/api/authFetch";
 import { testSession } from "@/test/fixtures/auth";
 
 afterEach(() => {
@@ -50,5 +51,36 @@ it.each([
     await expect(request).rejects.toMatchObject({ status: 401, message });
     expect(sessionStore.getSnapshot().session).toBeNull();
     expect(otherRequest.signal.aborted).toBe(true);
+  },
+);
+
+it.each([204, 205, 304])(
+  "preserves bodyless status %s from a fetch bridge and releases cancellation tracking",
+  async (status) => {
+    sessionStore.set(testSession);
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      }),
+    );
+    // Model a bridge that represents the empty body as a stream.
+    Object.defineProperty(response, "status", { value: status });
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) => {
+        signal = init.signal;
+        return Promise.resolve(response);
+      }),
+    );
+    expect(
+      await authFetch("/api/v1/deals/DEAL-1/teams/team/members", {
+        method: "POST",
+      }),
+    ).toBe(response);
+    sessionStore.set(null);
+    expect(signal?.aborted).toBe(false);
   },
 );

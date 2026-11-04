@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileNode {
-    pub workspace_id: String,
+    pub deal_id: String,
     pub file_id: String,
     pub display_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileVersionNode {
-    pub workspace_id: String,
+    pub deal_id: String,
     pub file_id: String,
     pub version_id: String,
     pub mime_type: String,
@@ -22,7 +22,7 @@ pub struct FileVersionNode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileChunkNode {
     pub chunk_id: String,
-    pub workspace_id: String,
+    pub deal_id: String,
     pub file_id: String,
     pub version_id: String,
     pub index_generation: String,

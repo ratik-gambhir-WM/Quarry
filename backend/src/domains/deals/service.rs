@@ -111,19 +111,32 @@ impl DealService {
     }
 
     pub async fn list_owned(&self, owner: i64) -> ServiceResult<Vec<DealWithMetadata>> {
-        self.deals.list_owned(owner).await.map_err(Into::into)
+        Ok(self.deals.list_owned(owner).await?)
+    }
+    async fn attach_access(&self, deal: &mut DealWithMetadata, actor: i64) -> ServiceResult<()> {
+        let access = self.deals.access(deal.deal.deal_id.clone(), actor).await?;
+        if !access.capabilities.local_source {
+            if let Some(metadata) = &mut deal.metadata {
+                metadata.local_path = None;
+            }
+        }
+        deal.deal.access = Some(access);
+        Ok(())
     }
 
-    pub async fn get(&self, deal_id: &str) -> ServiceResult<DealWithMetadata> {
-        self.deals
+    pub async fn get(&self, deal_id: &str, actor: i64) -> ServiceResult<DealWithMetadata> {
+        let mut deal = self
+            .deals
             .with_metadata(deal_id.to_string())
             .await?
-            .ok_or_else(|| ServiceError::not_found(format!("deal not found for id `{deal_id}`")))
+            .ok_or_else(|| ServiceError::not_found("deal not found"))?;
+        self.attach_access(&mut deal, actor).await?;
+        Ok(deal)
     }
 
-    pub async fn archive(&self, deal_id: &str) -> ServiceResult<Deal> {
+    pub async fn archive(&self, deal_id: &str, actor: i64) -> ServiceResult<Deal> {
         self.deals
-            .archive(deal_id.to_string())
+            .archive(deal_id.to_string(), actor)
             .await?
             .ok_or_else(|| ServiceError::not_found(format!("deal not found for id `{deal_id}`")))
     }
@@ -136,7 +149,7 @@ impl DealService {
             .await?
             .ok_or_else(|| ServiceError::not_found("user not found"))?;
         validate_target_rule(&input.fields)?;
-        let aggregate = self
+        let mut aggregate = self
             .deals
             .create(CreateDealRecord {
                 deal_id: input.deal_id,
@@ -146,6 +159,7 @@ impl DealService {
                 sharepoint_link: trim_optional_owned(input.sharepoint_link),
             })
             .await?;
+        self.attach_access(&mut aggregate, user.id).await?;
         let deal = aggregate.deal;
         let metadata = aggregate
             .metadata
@@ -153,9 +167,15 @@ impl DealService {
         Ok(SaveDealResponse { deal, metadata })
     }
 
-    pub async fn update(&self, id: &str, fields: DealFields) -> ServiceResult<SaveDealResponse> {
+    pub async fn update(
+        &self,
+        id: &str,
+        actor: i64,
+        fields: DealFields,
+    ) -> ServiceResult<SaveDealResponse> {
         validate_target_rule(&fields)?;
-        let aggregate = self.deals.update(id.to_string(), fields).await?;
+        let mut aggregate = self.deals.update(id.to_string(), actor, fields).await?;
+        self.attach_access(&mut aggregate, actor).await?;
         let metadata = aggregate
             .metadata
             .ok_or_else(|| ServiceError::internal("deal metadata missing"))?;
@@ -169,12 +189,9 @@ impl DealService {
         &self,
         deal_id: &str,
         input: SaveDealMetadataInput,
+        actor: i64,
     ) -> ServiceResult<SaveDealMetadataResponse> {
-        let deal = self
-            .deals
-            .by_id(deal_id.to_string())
-            .await?
-            .ok_or_else(|| ServiceError::not_found(format!("deal not found for id `{deal_id}`")))?;
+        let deal = self.get(deal_id, actor).await?.deal;
         let existing_metadata =
             self.deals
                 .metadata(deal_id.to_string())
@@ -193,17 +210,20 @@ impl DealService {
                 "localPath and sharepointLink cannot both be provided",
             ));
         }
-        let metadata = self
+        let mut metadata = self
             .deals
-            .upsert_metadata(UpsertDealMetadataRecord {
-                deal_id: deal.deal_id.clone(),
-                key_questions_json: existing_metadata.key_questions_json,
-                local_path: existing_metadata.local_path,
-                sharepoint_link,
-                sow_link,
-                fact_sheet_link,
-                rl_link,
-            })
+            .upsert_metadata(
+                UpsertDealMetadataRecord {
+                    deal_id: deal.deal_id.clone(),
+                    key_questions_json: existing_metadata.key_questions_json,
+                    local_path: existing_metadata.local_path,
+                    sharepoint_link,
+                    sow_link,
+                    fact_sheet_link,
+                    rl_link,
+                },
+                actor,
+            )
             .await?;
         let files = input
             .uploaded_files
@@ -220,6 +240,13 @@ impl DealService {
             })
             .collect::<Vec<_>>();
         if files.is_empty() {
+            if !deal
+                .access
+                .as_ref()
+                .is_some_and(|a| a.capabilities.local_source)
+            {
+                metadata.local_path = None;
+            }
             return Ok(SaveDealMetadataResponse {
                 deal,
                 files: Vec::new(),
@@ -234,18 +261,28 @@ impl DealService {
             serde_json::to_string(&extraction.key_questions).map_err(|error| {
                 ServiceError::internal(format!("failed to serialize deal key questions: {error}"))
             })?;
-        let metadata = self
+        let mut metadata = self
             .deals
-            .upsert_metadata(UpsertDealMetadataRecord {
-                deal_id: deal.deal_id.clone(),
-                key_questions_json,
-                local_path: metadata.local_path,
-                sharepoint_link: metadata.sharepoint_link,
-                sow_link: metadata.sow_link,
-                fact_sheet_link: metadata.fact_sheet_link,
-                rl_link: metadata.rl_link,
-            })
+            .upsert_metadata(
+                UpsertDealMetadataRecord {
+                    deal_id: deal.deal_id.clone(),
+                    key_questions_json,
+                    local_path: metadata.local_path,
+                    sharepoint_link: metadata.sharepoint_link,
+                    sow_link: metadata.sow_link,
+                    fact_sheet_link: metadata.fact_sheet_link,
+                    rl_link: metadata.rl_link,
+                },
+                actor,
+            )
             .await?;
+        if !deal
+            .access
+            .as_ref()
+            .is_some_and(|a| a.capabilities.local_source)
+        {
+            metadata.local_path = None;
+        }
         Ok(SaveDealMetadataResponse {
             deal,
             files: files.into_iter().map(|file| file.source_file).collect(),

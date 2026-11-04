@@ -24,6 +24,21 @@ fn username(value: &mut String) -> AppResult<()> {
     }
     Ok(())
 }
+fn email(value: &mut String) -> AppResult<()> {
+    *value = value.trim().to_ascii_lowercase();
+    text(value, 320)?;
+    let (local, domain) = value
+        .split_once('@')
+        .ok_or_else(|| AppError::bad_request("invalid email"))?;
+    if local.is_empty()
+        || !domain.contains('.')
+        || domain.contains('@')
+        || value.chars().any(char::is_whitespace)
+    {
+        return Err(AppError::bad_request("invalid email"));
+    }
+    Ok(())
+}
 fn password(value: &str) -> AppResult<()> {
     if !(15..=128).contains(&value.chars().count()) || value.len() > 512 {
         return Err(AppError::bad_request(
@@ -69,20 +84,8 @@ pub(super) async fn register(
         input.map_err(|_| AppError::bad_request("invalid registration request"))?;
     username(&mut input.username)?;
     password(&input.password)?;
-    input.email = input.email.trim().to_ascii_lowercase();
-    text(&input.email, 320)?;
-    let (local, domain) = input
-        .email
-        .split_once('@')
-        .ok_or_else(|| AppError::bad_request("invalid email"))?;
-    if local.is_empty()
-        || !domain.contains('.')
-        || domain.contains('@')
-        || input.email.chars().any(char::is_whitespace)
-    {
-        return Err(AppError::bad_request("invalid email"));
-    }
-    if domain != "westmonroe.com" {
+    email(&mut input.email)?;
+    if !input.email.ends_with("@westmonroe.com") {
         return Err(AppError::bad_request(
             "use your @westmonroe.com email address",
         ));
@@ -109,7 +112,12 @@ pub(super) async fn login(
     peer(&identity, peer_info)?;
     let Json(mut input) = input.map_err(|_| AppError::bad_request("invalid login request"))?;
     // Login policy failures deliberately share the invalid-credentials response.
-    username(&mut input.username).map_err(|_| AppError::Unauthorized)?;
+    if input.username.contains('@') {
+        email(&mut input.username)
+    } else {
+        username(&mut input.username)
+    }
+    .map_err(|_| AppError::Unauthorized)?;
     password(&input.password).map_err(|_| AppError::Unauthorized)?;
     Ok((no_store(), Json(identity.login(input).await?)))
 }

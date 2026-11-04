@@ -1,11 +1,12 @@
 import { Icon } from "../../ui/Icon";
 
-export type DealStep = "details" | "companies" | "sources";
+export type DealStep = "details" | "companies" | "team" | "sources";
 export type StepperOrientation = "horizontal" | "vertical";
 
 const steps: { id: DealStep; label: string }[] = [
   { id: "details", label: "Deal details" },
   { id: "companies", label: "Companies" },
+  { id: "team", label: "Team" },
   { id: "sources", label: "Metadata" },
 ];
 

@@ -9,14 +9,49 @@ import {
 import type { PersistedDeal } from "@/contracts/quarryApi";
 import { testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
 
-const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
+const { listDeals, getDeal } = vi.hoisted(() => ({
+  listDeals: vi.fn(),
+  getDeal: vi.fn(),
+}));
 
-vi.mock("@quarry/runtime", () => ({ runtime: { api: { listDeals } } }));
+vi.mock("@quarry/runtime", () => ({ runtime: { api: { listDeals, getDeal } } }));
 
 afterEach(cleanup);
 
 describe("useWorkspaceDeals", () => {
-  beforeEach(() => listDeals.mockReset());
+  beforeEach(() => {
+    listDeals.mockReset();
+    getDeal.mockReset();
+  });
+
+  it("accepts a fresh authorized lookup after eviction without accepting pre-eviction requests", async () => {
+    const aggregate = { ...testDeal(), metadata: null };
+    const stale = deferred<PersistedDeal>();
+    const staleList = deferred<PersistedDeal[]>();
+    listDeals.mockReturnValueOnce(staleList.promise);
+    getDeal.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(aggregate);
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    const oldLookup = result.current.loadDeal(aggregate.dealId);
+    const rejection = expect(oldLookup).rejects.toThrow("Deal access changed");
+    act(() => result.current.forgetDeal(aggregate.dealId));
+    await act(async () => {
+      await result.current.loadDeal(aggregate.dealId);
+    });
+    expect(result.current.resource).toMatchObject({
+      status: "success",
+      deals: [expect.anything()],
+    });
+    stale.resolve({ ...aggregate, dealName: "Stale name" });
+    await act(async () => { await rejection; });
+    await act(async () => {
+      staleList.resolve([{ ...aggregate, dealName: "Stale list name" }]);
+      await staleList.promise;
+    });
+    const resource = result.current.resource;
+    expect(
+      resource.status === "success" && resource.deals.map((d) => d.room.name),
+    ).toEqual([aggregate.dealName]);
+  });
 
   it("keeps API failures distinct from successful demo data and retries", async () => {
     listDeals
@@ -38,6 +73,40 @@ describe("useWorkspaceDeals", () => {
       status: "success",
     });
     expect(listDeals).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks a late list and lookup from restoring revoked deal data, then accepts a fresh authorized list", async () => {
+    const pending = deferred<PersistedDeal[]>();
+    const lookup = deferred<PersistedDeal>();
+    listDeals.mockReturnValueOnce(pending.promise);
+    getDeal.mockReturnValueOnce(lookup.promise);
+    const aggregate = { ...testDeal(), metadata: null };
+    const { result } = renderHook(() => useWorkspaceDeals("api"));
+    const stale = result.current.loadDeal(aggregate.dealId);
+    const rejection = expect(stale).rejects.toThrow("Deal access changed");
+    act(() => result.current.forgetDeal(aggregate.dealId));
+    await act(async () => {
+      pending.resolve([aggregate]);
+      await pending.promise;
+    });
+    expect(result.current.resource).toMatchObject({
+      status: "success",
+      deals: [],
+    });
+    await act(async () => {
+      lookup.resolve(aggregate);
+      await rejection;
+    });
+    expect(result.current.resource).toMatchObject({
+      status: "success",
+      deals: [],
+    });
+    listDeals.mockResolvedValueOnce([aggregate]);
+    act(() => result.current.retry());
+    await waitFor(() => {
+      const resource = result.current.resource;
+      expect(resource.status === "success" && resource.deals.length).toBe(1);
+    });
   });
 
   it("loads fixtures only in explicit demo mode", async () => {

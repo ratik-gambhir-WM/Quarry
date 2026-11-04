@@ -16,7 +16,7 @@ use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::documents::{
         formats::{
-            image::{build_image_assembly, validate_image_by_bytes},
+            image::{build_image_assembly, validate_image_by_bytes, ImageAssembly},
             ParsedQuarryFile, QuarryFile,
         },
         graph::repository::{DocumentGraphReader, DocumentGraphWriter},
@@ -69,6 +69,7 @@ pub struct ProcessedDocument {
     pub document_id: Option<String>,
     pub chunk_count: usize,
     pub success: bool,
+    pub sqlite_committed: bool,
     pub skipped: bool,
     pub error: Option<String>,
 }
@@ -123,12 +124,26 @@ impl DocumentIngestionService {
         }
     }
 
+    pub async fn authorize_upload(&self, deal: &str, actor: i64) -> ServiceResult<()> {
+        self.files
+            .authorize_upload(deal, actor)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn authorize_read(&self, deal: &str, actor: i64) -> ServiceResult<()> {
+        self.files
+            .authorize_read(deal, actor)
+            .await
+            .map_err(Into::into)
+    }
     pub async fn process(
         &self,
         deal_id: &str,
-        user_id: &str,
+        actor_id: i64,
         files: Vec<UploadedDocument>,
     ) -> ServiceResult<ProcessDocumentsResponse> {
+        self.files.authorize_upload(deal_id, actor_id).await?;
         if self.openai.is_none() {
             return Err(ServiceError::unavailable(
                 "OpenAI capability is not configured",
@@ -137,17 +152,17 @@ impl DocumentIngestionService {
         let total = files.len();
         let worker_service = self.clone();
         let worker_deal_id = deal_id.to_string();
-        let worker_user_id = user_id.to_string();
+        let worker_actor_id = actor_id;
         let mut indexed_documents = stream::iter(files.into_iter().enumerate())
             .map(|(index, file)| {
                 let service = worker_service.clone();
                 let deal_id = worker_deal_id.clone();
-                let user_id = worker_user_id.clone();
+                let actor_id = worker_actor_id;
                 let filename = file.filename.clone();
                 async move {
                     let worker = tokio::spawn(async move {
                         service
-                            .process_uploaded_document(file, deal_id, user_id)
+                            .process_uploaded_document(file, deal_id, actor_id)
                             .await
                     });
                     let document = match worker.await {
@@ -184,16 +199,16 @@ impl DocumentIngestionService {
         &self,
         file: UploadedDocument,
         deal_id: String,
-        user_id: String,
+        actor_id: i64,
     ) -> ServiceResult<ProcessedDocument> {
         let filename = file.filename.clone();
         let content_hash = uploaded_document_content_hash(&file);
-        let document_id = document_id_from_content(&user_id, &content_hash);
+        let document_id = document_id_from_content(&deal_id, &content_hash);
         let attachment_lock_id = format!("{deal_id}\0{document_id}");
         let _processing_guard = self.lock_processing(&attachment_lock_id).await;
         let existing_attachment = match self
             .files
-            .find_current_by_hash(&deal_id, &user_id, &content_hash)
+            .find_current_by_hash(&deal_id, &content_hash)
             .await
         {
             Ok(attachment) => attachment,
@@ -207,21 +222,52 @@ impl DocumentIngestionService {
         if let Some(existing) = &existing_attachment {
             match self
                 .graph_reader
-                .current_document(&user_id, &existing.file_id)
+                .current_document(&deal_id, &existing.file_id)
                 .await
             {
                 Ok(Some(indexed))
                     if indexed.version.version_id == existing.version_id
                         && indexed.version.content_sha256 == content_hash =>
                 {
-                    return Ok(ProcessedDocument {
-                        filename,
-                        document_id: Some(document_id),
-                        chunk_count: 0,
-                        success: true,
-                        skipped: true,
-                        error: None,
-                    });
+                    let manifest = self
+                        .files
+                        .manifest(existing.version_id.clone())
+                        .await?
+                        .ok_or_else(|| ServiceError::internal("identity manifest missing"))?;
+                    let active = manifest
+                        .chunks
+                        .iter()
+                        .filter(|c| c.index_generation == manifest.active_generation)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    match self
+                        .graph_reader
+                        .has_complete_chunks(&deal_id, &active)
+                        .await
+                    {
+                        Ok(true)
+                            if indexed.version.index_generation == manifest.active_generation =>
+                        {
+                            return Ok(ProcessedDocument {
+                                filename,
+                                document_id: Some(manifest.document_id),
+                                chunk_count: 0,
+                                success: true,
+                                sqlite_committed: true,
+                                skipped: true,
+                                error: None,
+                            });
+                        }
+                        Ok(_) => {} // Repair the existing immutable version through the normal retry path.
+                        Err(error) => {
+                            return Ok(failed_document(
+                                filename,
+                                format!(
+                                    "failed to verify the existing deal attachment index: {error}"
+                                ),
+                            ))
+                        }
+                    }
                 }
                 Ok(Some(_)) | Ok(None) => {}
                 Err(error) => {
@@ -239,7 +285,13 @@ impl DocumentIngestionService {
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
         Ok(
             match self
-                .process_document(file, deal_id, user_id, existing_attachment.as_ref(), openai)
+                .process_document(
+                    file,
+                    deal_id,
+                    actor_id,
+                    existing_attachment.as_ref(),
+                    openai,
+                )
                 .await
             {
                 Ok((document_id, chunk_count)) => ProcessedDocument {
@@ -247,6 +299,7 @@ impl DocumentIngestionService {
                     document_id: Some(document_id),
                     chunk_count,
                     success: true,
+                    sqlite_committed: true,
                     skipped: false,
                     error: None,
                 },
@@ -259,23 +312,51 @@ impl DocumentIngestionService {
         &self,
         file: UploadedDocument,
         deal_id: String,
-        user_id: String,
+        actor_id: i64,
         existing_attachment: Option<&PersistedFileIdentity>,
         openai: &OpenAiClient,
     ) -> Result<(String, usize), String> {
         let filename = file.filename.clone();
+        let recovery = match existing_attachment {
+            Some(existing)
+                if infer_supported_image_mime_type(Path::new(&existing.display_name)).is_some() =>
+            {
+                Some(
+                    self.files
+                        .image_assembly(&existing.version_id)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .ok_or(
+                            "accepted image text is unavailable; maintenance recovery required",
+                        )?,
+                )
+            }
+            _ => None,
+        };
         let mut graph = parse_document(
             file,
-            user_id,
+            deal_id.clone(),
             openai,
             &self.image_description_model,
             Arc::clone(&self.office_parse_semaphore),
+            recovery,
         )
         .await?;
         if let Some(existing) = existing_attachment {
             graph.document.file_id.clone_from(&existing.file_id);
+            graph.document.file_name.clone_from(&existing.display_name);
         }
-        let document_id = graph.document.document_id.clone();
+        let manifest_key = crate::shared::ids::file_version_id(
+            &graph.document.file_id,
+            &graph.document.content_hash,
+        );
+        let document_id = self
+            .files
+            .manifest(manifest_key)
+            .await
+            .map_err(|e| e.to_string())?
+            .map(|m| m.document_id)
+            .unwrap_or_else(|| graph.document.document_id.clone());
         let chunk_count = graph.chunks.len();
         self.embed_chunks(
             &filename,
@@ -288,6 +369,7 @@ impl DocumentIngestionService {
             &self.files,
             &self.graph_writer,
             &deal_id,
+            actor_id,
             graph.document,
             graph.chunks,
             graph.file_bytes,
@@ -436,23 +518,43 @@ fn embedding_batches(chunks: &[DocumentChunk]) -> Result<Vec<EmbeddingBatch>, St
 }
 
 fn failed_document(filename: String, error: String) -> ProcessedDocument {
+    let sqlite_committed = error.contains("after SQLite committed");
+    let message = if sqlite_committed {
+        "Document was stored, but indexing failed. Refresh documents and retry the same file to recover indexing."
+    } else {
+        "Document processing failed. Check the file and your deal access, then retry."
+    };
     ProcessedDocument {
         filename,
         document_id: None,
         chunk_count: 0,
         success: false,
         skipped: false,
-        error: Some(error),
+        sqlite_committed,
+        error: Some(message.into()),
     }
 }
 
 async fn parse_document(
     file: UploadedDocument,
-    user_id: String,
+    deal_id: String,
     openai: &OpenAiClient,
     image_description_model: &str,
     office_parse_semaphore: Arc<Semaphore>,
+    recovery: Option<ImageAssembly>,
 ) -> Result<ParsedDocumentGraph, String> {
+    if let Some(assembly) = recovery {
+        if assembly.document.deal_id != deal_id
+            || assembly.document.content_hash != uploaded_document_content_hash(&file)
+        {
+            return Err("stored image recovery does not match upload".into());
+        }
+        return Ok(ParsedDocumentGraph {
+            document: assembly.document,
+            chunks: assembly.chunks,
+            file_bytes: file.bytes,
+        });
+    }
     let filename = file.filename.clone();
     let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
@@ -471,7 +573,7 @@ async fn parse_document(
             )
             .await?;
             let assembly =
-                build_image_assembly(validated.bytes, None, file.filename, &user_id, &description)?;
+                build_image_assembly(validated.bytes, None, file.filename, &deal_id, &description)?;
             (assembly.document, assembly.chunks)
         } else {
             let requires_office_permit = matches!(
@@ -493,10 +595,10 @@ async fn parse_document(
                 None
             };
             let parser_filename = file.filename;
-            let parser_user_id = user_id.clone();
+            let parser_deal_id = deal_id.clone();
             let parsed = tokio::task::spawn_blocking(move || {
                 let _office_permit = office_permit;
-                QuarryFile::from_bytes(parser_filename, file.bytes)?.parse(&parser_user_id)
+                QuarryFile::from_bytes(parser_filename, file.bytes)?.parse(&parser_deal_id)
             })
             .await
             .map_err(|_| "document parsing worker failed".to_string())??;

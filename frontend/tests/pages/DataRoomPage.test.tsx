@@ -1,3 +1,4 @@
+import { testDeal } from "@/test/fixtures/deals";
 // @vitest-environment happy-dom
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -30,7 +31,7 @@ vi.mock("@quarry/runtime", () => ({
 
 vi.mock("@/pages/DealRoomPage", () => ({
   useDealRoom: () => ({
-    deal: workspaceDeals[0],
+    deal: { ...workspaceDeals[0], persisted: testDeal() },
     deals: workspaceDeals,
     email: "analyst@example.com",
     navigationState: { email: "analyst@example.com" },
@@ -169,9 +170,9 @@ describe("DataRoomPage", () => {
       (await screen.findByRole("dialog", { name: "Upload files" })).dataset
         .slot,
     ).toBe("dialog-content");
-    expect(
-      screen.getByRole("button", { name: "Browse files to upload" }),
-    ).toBe(document.activeElement);
+    expect(screen.getByRole("button", { name: "Browse files to upload" })).toBe(
+      document.activeElement,
+    );
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

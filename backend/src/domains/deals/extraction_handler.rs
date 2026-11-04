@@ -11,6 +11,7 @@ use super::{
 use crate::app::http::error::{AppError, AppResult};
 
 pub(super) async fn save_deal_metadata_handler(
+    axum::Extension(actor): axum::Extension<crate::domains::identity::model::AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(deal_id): Path<String>,
     multipart: Multipart,
@@ -22,7 +23,7 @@ pub(super) async fn save_deal_metadata_handler(
     validate_https_link("rlLink", input.rl_link.as_deref())?;
     state
         .deals
-        .save_metadata(&deal_id, input)
+        .save_metadata(&deal_id, input, actor.user.id)
         .await
         .map(Json)
         .map_err(AppError::from)

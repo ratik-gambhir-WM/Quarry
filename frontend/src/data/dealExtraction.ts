@@ -46,14 +46,15 @@ export type ReadDealSourceFilesInput = {
   rootPath: string;
 };
 
-export type SavedDeal = Omit<DealFields, "parties"> & {
-  dealId: string;
-  userId: number;
-  archivedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  parties: DealParty[];
-};
+export type SavedDeal = Omit<DealFields, "parties"> &
+  Partial<import("../contracts/dealMemberships").DealAccess> & {
+    dealId: string;
+    userId: number;
+    archivedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+    parties: DealParty[];
+  };
 
 export type SavedDealMetadata = {
   dealId: string;

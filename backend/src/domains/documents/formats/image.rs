@@ -28,7 +28,7 @@ const MAX_IMAGE_DIMENSION: u32 = 20_000;
 const MAX_IMAGE_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImageAssembly {
     pub document: Document,
     pub chunks: Vec<DocumentChunk>,
@@ -103,7 +103,7 @@ pub(crate) fn build_image_assembly(
     bytes: Vec<u8>,
     path: Option<&Path>,
     file_name: String,
-    user_id: &str,
+    deal_id: &str,
     description: &str,
 ) -> Result<ImageAssembly, String> {
     let description = description.trim();
@@ -113,13 +113,13 @@ pub(crate) fn build_image_assembly(
     let file_size_bytes = u64::try_from(bytes.len())
         .map_err(|_| format!("image byte length `{}` does not fit in u64", bytes.len()))?;
     let content_hash = sha256_hex(&bytes);
-    let document_id = document_id_from_content(user_id, &content_hash);
+    let document_id = document_id_from_content(deal_id, &content_hash);
     let source_type = Path::new(&file_name)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| format!("could not infer image type for `{file_name}`"))?;
-    let chunks = image_description_chunks(description, &document_id, user_id);
+    let chunks = image_description_chunks(description, &document_id, deal_id);
     let token_count = chunks
         .iter()
         .map(|chunk| u64::from(chunk.token_count))
@@ -130,7 +130,7 @@ pub(crate) fn build_image_assembly(
     let document = Document {
         file_id: Uuid::new_v4().to_string(),
         document_id,
-        user_id: user_id.to_string(),
+        deal_id: deal_id.to_string(),
         file_name,
         source_type,
         local_path,
@@ -146,7 +146,7 @@ pub(crate) fn build_image_assembly(
 fn image_description_chunks(
     description: &str,
     document_id: &str,
-    user_id: &str,
+    deal_id: &str,
 ) -> Vec<DocumentChunk> {
     token_bounded_ranges(description)
         .into_iter()
@@ -157,12 +157,12 @@ fn image_description_chunks(
             let text = &description[range.start_offset..range.end_offset];
             let content_hash = sha256_hex(text.as_bytes());
             let chunk_id = sha256_hex(
-                format!("{user_id}\0{document_id}\0{sequence_number}\0{content_hash}").as_bytes(),
+                format!("{deal_id}\0{document_id}\0{sequence_number}\0{content_hash}").as_bytes(),
             );
             DocumentChunk {
                 chunk_id,
                 document_id: document_id.to_string(),
-                user_id: user_id.to_string(),
+                deal_id: deal_id.to_string(),
                 text: text.to_string(),
                 embedding: None,
                 sequence_number,

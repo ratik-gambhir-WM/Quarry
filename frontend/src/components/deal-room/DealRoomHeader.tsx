@@ -9,7 +9,8 @@ export type DealRoomOverviewSection =
   | "findings"
   | "site-visits"
   | "open-items"
-  | "settings";
+  | "settings"
+  | "search";
 
 type DealRoomHeaderProps = {
   activeSection: DealRoomOverviewSection;
@@ -23,12 +24,13 @@ const sections: ReadonlyArray<{
 }> = [
   { enabled: true, label: "Overview", value: "overview" },
   { enabled: true, label: "Deal Activity", value: "activity" },
-  { enabled: false, label: "Site Visits", value: "site-visits" },
+  { enabled: true, label: "Site Visits", value: "site-visits" },
   { enabled: true, label: "File Summary", value: "file-summary" },
   { enabled: false, label: "Evidence", value: "evidence" },
   { enabled: false, label: "Findings", value: "findings" },
   { enabled: false, label: "Open Items", value: "open-items" },
   { enabled: true, label: "Settings", value: "settings" },
+  { enabled: true, label: "Search documents", value: "search" },
 ];
 
 export function getDealRoomSection(

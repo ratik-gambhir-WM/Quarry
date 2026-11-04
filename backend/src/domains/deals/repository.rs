@@ -1,5 +1,8 @@
 pub use super::model::{Deal, DealFields};
 use super::model::{DealParty, DiligenceScope, PartyRole};
+use crate::domains::memberships::{
+    model::Capability, record_activity as event, require_deal as require,
+};
 use crate::{
     adapters::sqlite::{
         client::{SqliteClient, SqliteClientError, SqliteTransaction},
@@ -79,6 +82,15 @@ impl DealRepository {
     pub fn new(sqlite: SqliteClient) -> Self {
         Self { sqlite }
     }
+    pub async fn access(
+        &self,
+        id: String,
+        actor: i64,
+    ) -> Result<crate::domains::memberships::model::DealAccess, RepositoryError> {
+        self.sqlite
+            .transaction_result_async(move |tx| require(tx, &id, actor, Capability::Read))
+            .await
+    }
     pub async fn create(
         &self,
         record: CreateDealRecord,
@@ -134,6 +146,12 @@ impl DealRepository {
                         .build(),
                 )?;
                 replace_children(tx, &record.deal_id, &record.fields)?;
+                crate::domains::memberships::initialize_deal(
+                    tx,
+                    &record.deal_id,
+                    record.user_id,
+                    &now,
+                )?;
                 Ok(Ok(load_one(tx, &record.deal_id)?.ok_or_else(|| {
                     SqliteClientError::transaction_aborted("created deal missing")
                 })?))
@@ -144,14 +162,18 @@ impl DealRepository {
     pub async fn update(
         &self,
         id: String,
+        actor: i64,
         fields: DealFields,
     ) -> Result<DealWithMetadata, RepositoryError> {
         self.sqlite
             .transaction_async(move |tx| {
-                let Some(existing) = load_one(tx, &id)? else {
+                if let Err(error) = require(tx, &id, actor, Capability::Edit) {
+                    return Ok(Err(error));
+                }
+                let Some(_existing) = load_one(tx, &id)? else {
                     return Ok(Err(RepositoryError::NotFound("deal not found".into())));
                 };
-                if let Err(error) = validate_companies(tx, existing.deal.user_id, &fields)? {
+                if let Err(error) = validate_companies_for_update(tx, &id, actor, &fields)? {
                     return Ok(Err(error));
                 }
                 tx.write(
@@ -173,6 +195,7 @@ impl DealRepository {
                         .build(),
                 )?;
                 replace_children(tx, &id, &fields)?;
+                event(tx, &id, Some(actor), "deal_updated", Some(&id))?;
                 Ok(Ok(load_one(tx, &id)?.ok_or_else(|| {
                     SqliteClientError::transaction_aborted("updated deal missing")
                 })?))
@@ -220,10 +243,15 @@ impl DealRepository {
             .await
             .map_err(storage)
     }
-    pub async fn archive(&self, id: String) -> Result<Option<Deal>, RepositoryError> {
+    pub async fn archive(&self, id: String, actor: i64) -> Result<Option<Deal>, RepositoryError> {
         self.sqlite
-            .transaction_async(move |tx| {
+            .transaction_result_async(move |tx| {
+                let access = require(tx, &id, actor, Capability::Transfer)?;
+                if access.archived {
+                    return Ok(load_one(tx, &id)?.map(|a| a.deal));
+                }
                 let now = chrono::Utc::now().to_rfc3339();
+                event(tx, &id, Some(actor), "deal_archived", Some(&id))?;
                 tx.write(
                     SqlBuilder::update("deals")
                         .set("archived_at", &now)
@@ -235,16 +263,36 @@ impl DealRepository {
                 Ok(load_one(tx, &id)?.map(|a| a.deal))
             })
             .await
-            .map_err(storage)
     }
     pub async fn upsert_metadata(
         &self,
         record: UpsertDealMetadataRecord,
+        actor: i64,
     ) -> Result<DealMetadata, RepositoryError> {
         serde_json::from_str::<Vec<String>>(&record.key_questions_json)
             .map_err(|_| RepositoryError::invalid("key questions must be an array of strings"))?;
         self.sqlite
-            .transaction_async(move |tx| {
+            .transaction_result_async(move |tx| {
+                require(tx, &record.deal_id, actor, Capability::Edit)?;
+                let local_path = tx
+                    .read_one_with(
+                        SqlBuilder::select("deal_metadata")
+                            .columns(["local_path"])
+                            .and_where(Condition::equal("deal_id", &record.deal_id))
+                            .build(),
+                        |r| r.get::<_, Option<String>>(0),
+                    )?
+                    .flatten();
+                if local_path != record.local_path {
+                    require(tx, &record.deal_id, actor, Capability::LocalSource)?;
+                }
+                event(
+                    tx,
+                    &record.deal_id,
+                    Some(actor),
+                    "metadata_updated",
+                    Some(&record.deal_id),
+                )?;
                 tx.write(
                     SqlBuilder::insert_into("deal_metadata")
                         .value("deal_id", &record.deal_id)
@@ -273,10 +321,9 @@ impl DealRepository {
                     metadata_from_row,
                 )?
                 .pop()
-                .ok_or_else(|| SqliteClientError::transaction_aborted("metadata missing"))
+                .ok_or_else(|| RepositoryError::storage("metadata missing"))
             })
             .await
-            .map_err(storage)
     }
 }
 fn validate_companies(
@@ -312,6 +359,28 @@ fn validate_companies(
         )));
     }
     Ok(Ok(()))
+}
+fn validate_companies_for_update(
+    tx: &SqliteTransaction<'_>,
+    deal: &str,
+    actor: i64,
+    fields: &DealFields,
+) -> Result<Result<(), RepositoryError>, SqliteClientError> {
+    let existing = tx
+        .read_with(
+            SqlBuilder::select("deal_parties")
+                .columns(["company_id"])
+                .and_where(Condition::equal("deal_id", deal))
+                .build(),
+            |r| r.get::<_, String>(0),
+        )?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut new_fields = fields.clone();
+    new_fields
+        .parties
+        .retain(|p| !existing.contains(&p.company_id));
+    validate_companies(tx, actor, &new_fields)
 }
 fn replace_children(
     tx: &SqliteTransaction<'_>,
@@ -393,7 +462,19 @@ fn load(
         builder.and_where(Condition::is_null("deals.archived_at"))
     };
     if let Some(owner) = owner {
-        builder = builder.and_where(Condition::equal("deals.user_id", owner));
+        builder = builder
+            .inner_join(
+                "deal_memberships",
+                "deals.deal_id",
+                "deal_memberships.deal_id",
+            )
+            .inner_join(
+                "deal_access_revisions",
+                "deals.deal_id",
+                "deal_access_revisions.deal_id",
+            )
+            .columns(["deal_memberships.role", "deal_access_revisions.revision"])
+            .and_where(Condition::equal("deal_memberships.user_id", owner));
     }
     let mut deals = tx.read_with(builder.build(), |row| {
         // key_questions_json is NOT NULL on a metadata row, but nullable after the LEFT JOIN.
@@ -405,10 +486,26 @@ fn load(
         } else {
             None
         };
-        Ok(DealWithMetadata {
+        let mut aggregate = DealWithMetadata {
             deal: deal_from_row(row)?,
             metadata,
-        })
+        };
+        if let Some(actor) = owner {
+            let access = crate::domains::memberships::model::DealAccess::for_actor(
+                enum_from_row(row, "role")?,
+                aggregate.deal.user_id,
+                aggregate.deal.archived_at.is_some(),
+                row.get("revision")?,
+                actor,
+            );
+            if !access.capabilities.local_source {
+                if let Some(metadata) = &mut aggregate.metadata {
+                    metadata.local_path = None;
+                }
+            }
+            aggregate.deal.access = Some(access);
+        }
+        Ok(aggregate)
     })?;
     if deals.is_empty() {
         return Ok(Vec::new());
@@ -523,6 +620,7 @@ fn enum_from_row<T: serde::de::DeserializeOwned>(
 }
 fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
     Ok(Deal {
+        access: None,
         deal_id: row.get("deal_id")?,
         user_id: row.get("user_id")?,
         deal_name: row.get("deal_name")?,

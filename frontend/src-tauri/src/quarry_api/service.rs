@@ -338,7 +338,7 @@ fn parse_powerpoint_warning_count(value: Option<&str>) -> Result<usize, String> 
     Ok(count)
 }
 
-fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
+pub(super) fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > 128
         || !value

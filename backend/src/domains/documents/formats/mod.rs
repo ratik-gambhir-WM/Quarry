@@ -77,10 +77,10 @@ impl QuarryFile {
 
     /// Parses the file into Quarry's graph-ready document/chunk assembly.
     /// User identity is explicit so graph nodes are never written unscoped.
-    pub fn parse(self, user_id: &str) -> Result<ParsedQuarryFile, String> {
-        let user_id = user_id.trim();
-        if user_id.is_empty() {
-            return Err("user_id cannot be empty".to_string());
+    pub fn parse(self, deal_id: &str) -> Result<ParsedQuarryFile, String> {
+        let deal_id = deal_id.trim();
+        if deal_id.is_empty() {
+            return Err("deal_id cannot be empty".to_string());
         }
 
         match self {
@@ -89,7 +89,7 @@ impl QuarryFile {
                 path,
                 file_name,
             } => {
-                let mut assembly = parse_pdf_by_bytes(bytes, path.as_deref(), user_id)?;
+                let mut assembly = parse_pdf_by_bytes(bytes, path.as_deref(), deal_id)?;
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Pdf(assembly))
             }
@@ -98,7 +98,7 @@ impl QuarryFile {
                 path,
                 file_name,
             } => {
-                let mut assembly = parse_docx_chunks_from_bytes(bytes, path.as_deref(), user_id)?;
+                let mut assembly = parse_docx_chunks_from_bytes(bytes, path.as_deref(), deal_id)?;
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Docx(assembly))
             }
@@ -108,7 +108,7 @@ impl QuarryFile {
                 file_name,
             } => {
                 let mut assembly =
-                    parse_powerpoint_chunks_from_bytes(&bytes, path.as_deref(), user_id)?;
+                    parse_powerpoint_chunks_from_bytes(&bytes, path.as_deref(), deal_id)?;
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Powerpoint(assembly))
             }
@@ -118,7 +118,7 @@ impl QuarryFile {
                 file_name,
             } => {
                 let mut assembly =
-                    parse_spreadsheet_chunks_from_bytes(&bytes, path.as_deref(), user_id)?;
+                    parse_spreadsheet_chunks_from_bytes(&bytes, path.as_deref(), deal_id)?;
                 assembly.document.file_name = file_name;
                 Ok(ParsedQuarryFile::Spreadsheet(assembly))
             }

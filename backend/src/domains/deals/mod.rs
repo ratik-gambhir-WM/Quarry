@@ -46,13 +46,16 @@ impl DealContextReader {
             .by_id(id.to_string())
             .await?
             .ok_or_else(|| ServiceError::not_found("deal not found"))?;
-        if deal.user_id != owner {
-            return Err(ServiceError::Conflict(
-                "deal and thread must have the same owner".into(),
-            ));
-        }
+        self.repository.access(id.to_string(), owner).await?;
         // Serialize reference values so names cannot escape their data fields. Never include source paths or documents.
         let parties = deal.parties.iter().take(100).map(|p| serde_json::json!({"role": p.role, "name": p.company.name.chars().take(300).collect::<String>()})).collect::<Vec<_>>();
-        Ok(serde_json::json!({"dealName": deal.deal_name.chars().take(300).collect::<String>(), "engagementType": deal.engagement_type, "transactionType": deal.transaction_type, "parties": parties, "scopes": deal.scopes}).to_string())
+        Ok(serde_json::json!({
+            "dealName": deal.deal_name.chars().take(300).collect::<String>(),
+            "engagementType": deal.engagement_type,
+            "transactionType": deal.transaction_type,
+            "parties": parties,
+            "scopes": deal.scopes,
+        })
+        .to_string())
     }
 }

@@ -105,7 +105,7 @@ pub fn parse_spreadsheet(path: impl AsRef<Path>) -> Result<String, String> {
 pub fn parse_spreadsheet_chunks_from_bytes(
     bytes: &[u8],
     path: Option<&Path>,
-    user_id: impl Into<String>,
+    deal_id: impl Into<String>,
 ) -> Result<SpreadsheetAssembly, String> {
     let file_size_bytes = u64::try_from(bytes.len())
         .map_err(|_| "XLSX byte length does not fit in u64".to_string())?;
@@ -118,9 +118,9 @@ pub fn parse_spreadsheet_chunks_from_bytes(
         return Err("XLSX did not contain readable text".to_string());
     }
     let source_path = path.map(|path| path.canonicalize().unwrap_or_else(|_| PathBuf::from(path)));
-    let user_id = user_id.into();
-    let document_id = document_id_from_content(&user_id, &content_hash);
-    let chunks = chunk_nodes_from_text(&text, &sheet_ranges, &document_id, &user_id);
+    let deal_id = deal_id.into();
+    let document_id = document_id_from_content(&deal_id, &content_hash);
+    let chunks = chunk_nodes_from_text(&text, &sheet_ranges, &document_id, &deal_id);
     let token_count = chunks
         .iter()
         .map(|chunk| u64::from(chunk.token_count))
@@ -130,7 +130,7 @@ pub fn parse_spreadsheet_chunks_from_bytes(
         document: Document {
             file_id: Uuid::new_v4().to_string(),
             document_id,
-            user_id,
+            deal_id,
             file_name: source_path
                 .as_deref()
                 .and_then(Path::file_name)
@@ -323,7 +323,7 @@ fn chunk_nodes_from_text(
     text: &str,
     sheet_ranges: &[SheetTextRange],
     document_id: &str,
-    user_id: &str,
+    deal_id: &str,
 ) -> Vec<DocumentChunk> {
     token_bounded_ranges(text)
         .into_iter()
@@ -334,7 +334,7 @@ fn chunk_nodes_from_text(
             let chunk_text = &text[range.start_offset..range.end_offset];
             let content_hash = sha256_bytes(chunk_text.as_bytes());
             let chunk_id = sha256_bytes(
-                format!("{user_id}\0{document_id}\0{sequence_number}\0{content_hash}").as_bytes(),
+                format!("{deal_id}\0{document_id}\0{sequence_number}\0{content_hash}").as_bytes(),
             );
             let section_title = sheet_ranges
                 .iter()
@@ -346,7 +346,7 @@ fn chunk_nodes_from_text(
             DocumentChunk {
                 chunk_id,
                 document_id: document_id.to_string(),
-                user_id: user_id.to_string(),
+                deal_id: deal_id.to_string(),
                 text: chunk_text.to_string(),
                 embedding: None,
                 sequence_number,

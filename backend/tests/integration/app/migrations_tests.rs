@@ -19,19 +19,29 @@ fn seed_deal(connection: &Connection, deal_id: &str, status: &str) {
             rusqlite::params![deal_id, user_id, status],
         )
         .unwrap();
+    if table_columns(connection, "quarry_files")
+        .iter()
+        .all(|c| c != "workspace_id")
+    {
+        connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",rusqlite::params![deal_id,user_id]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",
+                [deal_id],
+            )
+            .unwrap();
+    }
 }
 
 fn insert_file_aggregate(connection: &Connection, deal_id: &str, file_id: &str, version_id: &str) {
-    connection
-        .execute(
-            r#"
-            INSERT INTO quarry_files (
-                file_id, deal_id, workspace_id, display_name, metadata_json, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, 'report.pdf', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
-            "#,
-            rusqlite::params![file_id, deal_id, format!("{deal_id}@example.com")],
-        )
-        .unwrap();
+    if table_columns(connection, "quarry_files")
+        .iter()
+        .any(|c| c == "workspace_id")
+    {
+        connection.execute("INSERT INTO quarry_files(file_id,deal_id,workspace_id,display_name,metadata_json,created_at,updated_at) VALUES(?1,?2,'1','report.pdf','{}','now','now')",rusqlite::params![file_id,deal_id]).unwrap();
+    } else {
+        connection.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at) VALUES(?1,?2,'report.pdf','{}','now','now')",rusqlite::params![file_id,deal_id]).unwrap();
+    }
     connection
         .execute(
             r#"
@@ -100,7 +110,6 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
         [
             "file_id",
             "deal_id",
-            "workspace_id",
             "display_name",
             "source_uri",
             "metadata_json",
@@ -121,6 +130,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
             "byte_size",
             "is_current",
             "created_at",
+            "uploaded_by_user_id",
         ]
     );
     assert_eq!(
@@ -141,7 +151,7 @@ fn migrations_create_the_versioned_file_schema_and_are_idempotent() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(index_count, 5);
+    assert_eq!(index_count, 4);
 }
 
 #[test]
@@ -488,7 +498,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 13
+            supported: 15
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -635,7 +645,7 @@ fn notebook_schema_upgrade_preserves_existing_product_records_and_reopens() {
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        13
+        LATEST_SCHEMA_VERSION
     );
     check_foreign_keys(&connection).unwrap();
 }
@@ -697,4 +707,189 @@ fn notebook_upgrade_rejects_forged_marker_twelve_indexes_without_altering_data()
         12
     );
     assert!(connection.prepare("SELECT * FROM notebooks").is_err());
+}
+
+fn membership_schema_thirteen() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection.execute_batch(TEMPLATE_SCHEMA).unwrap();
+    connection.execute_batch(NOTEBOOK_SCHEMA).unwrap();
+    connection.pragma_update(None, "user_version", 13).unwrap();
+    connection
+}
+#[test]
+fn shared_upgrade_preserves_ids_blobs_and_unknown_attribution_and_backfills_exactly_one_owner() {
+    let mut c = membership_schema_thirteen();
+    seed_deal(&c, "DEAL-SHARED-LEGACY", "pipeline");
+    insert_file_aggregate(
+        &c,
+        "DEAL-SHARED-LEGACY",
+        "unchanged-file",
+        "unchanged-version",
+    );
+    c.execute("UPDATE deals SET archived_at='archived'", [])
+        .unwrap();
+    let before: Vec<u8> = c
+        .query_row("SELECT file_bytes FROM quarry_file_blobs", [], |r| r.get(0))
+        .unwrap();
+    run_migrations(&mut c).unwrap();
+    run_migrations(&mut c).unwrap();
+    assert!(!table_columns(&c, "quarry_files").contains(&"workspace_id".into()));
+    assert_eq!(
+        c.query_row("SELECT file_id FROM quarry_files", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "unchanged-file"
+    );
+    assert_eq!(
+        c.query_row("SELECT version_id FROM quarry_file_versions", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+        "unchanged-version"
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT uploaded_by_user_id FROM quarry_file_versions",
+            [],
+            |r| r.get::<_, Option<i64>>(0)
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        c.query_row("SELECT file_bytes FROM quarry_file_blobs", [], |r| r
+            .get::<_, Vec<u8>>(0))
+            .unwrap(),
+        before
+    );
+    assert_eq!(table_count(&c, "deal_memberships"), 1);
+    assert_eq!(table_count(&c, "deal_activity_events"), 1);
+    assert_eq!(
+        c.query_row("SELECT role FROM deal_memberships", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "owner"
+    );
+    assert_eq!(
+        c.query_row("SELECT actor_user_id FROM deal_activity_events", [], |r| {
+            r.get::<_, Option<i64>>(0)
+        })
+        .unwrap(),
+        None
+    );
+    assert_eq!(table_count(&c, "document_identity_manifests"), 0);
+    assert_eq!(
+        c.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+#[test]
+fn shared_upgrade_failure_rolls_back_and_restart_rejects_missing_owner_without_repair() {
+    let mut old = membership_schema_thirteen();
+    seed_deal(&old, "DEAL-RETAIN", "pipeline");
+    old.execute_batch("CREATE VIEW deal_teams AS SELECT deal_id FROM deals;")
+        .unwrap();
+    assert!(run_migrations(&mut old).is_err());
+    assert_eq!(table_count(&old, "deals"), 1);
+    assert_eq!(
+        old.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        13
+    );
+    assert!(old.prepare("SELECT * FROM deal_memberships").is_err());
+    assert!(table_columns(&old, "quarry_files").contains(&"workspace_id".into()));
+    assert_eq!(
+        old.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let mut current = Connection::open_in_memory().unwrap();
+    run_migrations(&mut current).unwrap();
+    seed_deal(&current, "DEAL-BROKEN", "pipeline");
+    current.execute("DELETE FROM deal_memberships", []).unwrap();
+    assert!(run_migrations(&mut current).is_err());
+    assert_eq!(table_count(&current, "deal_memberships"), 0);
+}
+#[test]
+fn shared_fresh_and_upgraded_owned_layouts_are_identical() {
+    let mut fresh = Connection::open_in_memory().unwrap();
+    run_migrations(&mut fresh).unwrap();
+    let mut upgraded = membership_schema_thirteen();
+    run_migrations(&mut upgraded).unwrap();
+    fn ddl(c: &Connection) -> Vec<(String, String)> {
+        c.prepare("SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    }
+    assert_eq!(ddl(&fresh), ddl(&upgraded));
+}
+
+fn image_schema_fourteen() -> Connection {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    seed_deal(&connection, "DEAL-IMAGE", "prepare");
+    insert_file_aggregate(&connection, "DEAL-IMAGE", "image-file", "image-version");
+    connection
+        .execute_batch("DROP TABLE document_image_recovery; PRAGMA user_version = 14;")
+        .unwrap();
+    connection
+}
+
+#[test]
+fn image_recovery_upgrade_preserves_schema_fourteen_records_and_reopens() {
+    let mut connection = image_schema_fourteen();
+    let before = product_snapshot(&connection);
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(table_count(&connection, "document_image_recovery"), 0);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        15
+    );
+    check_foreign_keys(&connection).unwrap();
+}
+
+#[test]
+fn image_recovery_upgrade_rejects_forged_layout_without_changing_records_or_marker() {
+    let mut connection = image_schema_fourteen();
+    connection
+        .execute_batch("DROP INDEX uq_quarry_file_versions_current;")
+        .unwrap();
+    let before = product_snapshot(&connection);
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        14
+    );
+    assert!(table_columns(&connection, "document_image_recovery").is_empty());
+}
+
+#[test]
+fn image_recovery_upgrade_rolls_back_new_table_and_marker_when_owner_validation_fails() {
+    let mut connection = image_schema_fourteen();
+    connection
+        .execute("DELETE FROM deal_memberships", [])
+        .unwrap();
+    let before = product_snapshot(&connection);
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        14
+    );
+    assert!(table_columns(&connection, "document_image_recovery").is_empty());
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

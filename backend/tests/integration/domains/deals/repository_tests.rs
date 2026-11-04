@@ -130,7 +130,7 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
         );
     }
     input.parties[0].notes = Some("Deal-specific".into());
-    let updated = repo.update("DEAL-1".into(), input).await.unwrap();
+    let updated = repo.update("DEAL-1".into(), owner, input).await.unwrap();
     for party in &updated.deal.parties {
         assert_eq!(
             first
@@ -169,15 +169,18 @@ async fn joined_reads_keep_deals_without_metadata_or_children() {
     input.scopes = vec![DiligenceScope::CorporateIt, DiligenceScope::Sdlc];
     create(&repo, owner, "DEAL-FULL", input).await.unwrap();
     let metadata = repo
-        .upsert_metadata(UpsertDealMetadataRecord {
-            deal_id: "DEAL-FULL".into(),
-            key_questions_json: "[\"Question?\"]".into(),
-            local_path: None,
-            sharepoint_link: Some("https://example.sharepoint.com/sites/test".into()),
-            sow_link: Some("https://example.com/sow".into()),
-            fact_sheet_link: None,
-            rl_link: Some("https://example.com/request-list".into()),
-        })
+        .upsert_metadata(
+            UpsertDealMetadataRecord {
+                deal_id: "DEAL-FULL".into(),
+                key_questions_json: "[\"Question?\"]".into(),
+                local_path: None,
+                sharepoint_link: Some("https://example.sharepoint.com/sites/test".into()),
+                sow_link: Some("https://example.com/sow".into()),
+                fact_sheet_link: None,
+                rl_link: Some("https://example.com/request-list".into()),
+            },
+            owner,
+        )
         .await
         .unwrap();
     let listed = repo.list().await.unwrap();
@@ -262,7 +265,10 @@ async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {
     input.deal_name = "Changed".into();
     input.parties.clear();
     input.scopes.push(DiligenceScope::Sdlc);
-    assert!(repo.update("DEAL-1".into(), input.clone()).await.is_err());
+    assert!(repo
+        .update("DEAL-1".into(), owner, input.clone())
+        .await
+        .is_err());
     let after = repo.by_id("DEAL-1".into()).await.unwrap().unwrap();
     assert_eq!(after.deal_name, before.deal_name);
     assert_eq!(
@@ -323,14 +329,14 @@ async fn archive_is_idempotent_retains_status_and_nullable_dates_sort_last() {
     input.actual_close_date = Some("2025-01-01".into());
     create(&repo, owner, "DEAL-A", input).await.unwrap();
     assert_eq!(repo.list().await.unwrap()[0].deal.deal_id, "DEAL-A");
-    let archived = repo.archive("DEAL-A".into()).await.unwrap().unwrap();
+    let archived = repo.archive("DEAL-A".into(), owner).await.unwrap().unwrap();
     assert_eq!(
         archived.status,
         crate::domains::deals::model::DealStatus::Pipeline
     );
     assert_eq!(
         archived.archived_at,
-        repo.archive("DEAL-A".into())
+        repo.archive("DEAL-A".into(), owner)
             .await
             .unwrap()
             .unwrap()

@@ -206,7 +206,7 @@ async fn notebook_folder_delete_rolls_back_typed_domain_failure_and_overflow() {
 #[tokio::test]
 async fn notebook_constraints_parent_membership_deal_ownership_and_literal_search() {
     let repo = repository();
-    repo.sqlite.with_connection(|c| { c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-A',1,'Deal','buy_side','unknown','pipeline','now','now')",[])?; Ok(()) }).unwrap();
+    repo.sqlite.with_connection(|c| { c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-A',1,'Deal','buy_side','unknown','pipeline','now','now')",[])?; c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',1,'owner','now','now')",[])?; c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",[])?; Ok(()) }).unwrap();
     assert!(repo
         .create(2, "Foreign".into(), Some("DEAL-A".into()))
         .await

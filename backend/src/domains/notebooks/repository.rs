@@ -42,16 +42,15 @@ pub(super) fn owned(tx: &SqliteTransaction<'_>, owner: i64, notebook: &str) -> R
     .ok_or_else(missing)
 }
 pub(super) fn deal_owned(tx: &SqliteTransaction<'_>, owner: i64, deal: &str) -> Result<()> {
-    tx.read_one(
-        Q::select("deals")
-            .columns(["deal_id"])
-            .and_where(C::equal("deal_id", deal))
-            .and_where(C::equal("user_id", owner))
-            .build(),
-    )?
-    .ok_or_else(missing)?;
+    crate::domains::memberships::require_deal(
+        tx,
+        deal,
+        owner,
+        crate::domains::memberships::model::Capability::Read,
+    )?;
     Ok(())
 }
+
 pub(super) fn folder(tx: &SqliteTransaction<'_>, notebook: &str, id: &str) -> Result<Folder> {
     tx.read_one_with(
         Q::select("notebook_folders")

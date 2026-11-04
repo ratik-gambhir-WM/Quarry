@@ -150,6 +150,15 @@ fn quicklook_enforces_independent_stdout_and_stderr_buffer_limits() {
         "each stream may reach exactly 32 KiB independently"
     );
 
+    // Leave room for process startup under a parallel suite while keeping overflow
+    // termination clearly separated from the configured 30-second timeout.
+    let overflow_generator = QuickLookTemplatePreviewGenerator::new(
+        generator.executable_path.clone(),
+        1024,
+        100,
+        100,
+        Duration::from_secs(30),
+    );
     for stream in ["", ">&2"] {
         let pid_path = directory.path().join("overflow-pid");
         executable(
@@ -162,12 +171,13 @@ fn quicklook_enforces_independent_stdout_and_stderr_buffer_limits() {
             );
         let started = Instant::now();
         assert!(
-            generator.generate(b"pptx").unwrap().is_none(),
+            overflow_generator.generate(b"pptx").unwrap().is_none(),
             "overflow must reject even an otherwise valid preview"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "overflow must stop the running process before its timeout"
+            started.elapsed() < Duration::from_secs(10),
+            "overflow must stop the running process before its 30-second timeout; elapsed: {:?}",
+            started.elapsed()
         );
         let pid = fs::read_to_string(pid_path).unwrap();
         assert!(

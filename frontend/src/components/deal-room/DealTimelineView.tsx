@@ -25,6 +25,7 @@ import { Icon } from "../ui/Icon";
 import { ActivityTimelineCard } from "./ActivityTimelineCard";
 
 type DealTimelineViewProps = {
+  title?: string;
   deal: DealRoomData;
   events: DealTimelineItem[];
   onEventsChange: (events: DealTimelineItem[]) => void;
@@ -90,6 +91,7 @@ const categoryStyles: Record<
 const calendarWeeks = createCalendarWeeks("2026-09-28", 5);
 
 export function DealTimelineView({
+  title = "Deal Activity",
   deal,
   events,
   onEventsChange,
@@ -176,7 +178,7 @@ export function DealTimelineView({
       <div className="flex flex-col gap-10">
         <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="space-y-1">
-            <h1 className="type-display text-text-main">Deal Activity</h1>
+            <h1 className="type-display text-text-main">{title}</h1>
             <p className="text-[13px] text-text-main/78">
               {deal.overviewSubtitle}
             </p>

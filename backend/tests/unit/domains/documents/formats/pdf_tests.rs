@@ -14,12 +14,12 @@ use pdf_extract::{
     EncryptionState, EncryptionVersion, Object, Permissions, StringFormat,
 };
 
-fn assemble_pdf_pages(path: &Path, user_id: &str, pages: &[PdfPage]) -> PdfDocumentAssembly {
+fn assemble_pdf_pages(path: &Path, deal_id: &str, pages: &[PdfPage]) -> PdfDocumentAssembly {
     let (document_text, _) = document_text_with_page_ranges(pages);
 
     parse_pdf_file_with_metadata(
         Some(path),
-        user_id,
+        deal_id,
         pages,
         u64::try_from(document_text.len()).unwrap(),
         deterministic_id(&document_text),
@@ -113,7 +113,7 @@ fn parses_pdf_bytes_into_document_and_chunk_nodes_without_a_local_path() {
 
     let assembly = parse_pdf_by_bytes(bytes, None, "user-1").unwrap();
 
-    assert_eq!(assembly.document.user_id, "user-1");
+    assert_eq!(assembly.document.deal_id, "user-1");
     assert_eq!(assembly.document.file_name, "Document.pdf");
     assert_eq!(assembly.document.source_type, "pdf");
     assert_eq!(assembly.document.local_path, None);
@@ -155,7 +155,7 @@ fn assembles_ordered_document_chunks_with_global_offsets() {
 
     let assembly = assemble_pdf_pages(Path::new("/documents/report.pdf"), "user-1", &pdf_pages);
 
-    assert_eq!(assembly.document.user_id, "user-1");
+    assert_eq!(assembly.document.deal_id, "user-1");
     assert_eq!(assembly.document.file_name, "report.pdf");
     assert_eq!(assembly.document.source_type, "pdf");
     assert_eq!(
@@ -191,7 +191,7 @@ fn assembles_ordered_document_chunks_with_global_offsets() {
 
     for (chunk_index, chunk) in assembly.chunks.iter().enumerate() {
         assert_eq!(chunk.document_id, assembly.document.document_id);
-        assert_eq!(chunk.user_id, "user-1");
+        assert_eq!(chunk.deal_id, "user-1");
         assert_eq!(
             chunk.sequence_number,
             u32::try_from(chunk_index + 1).unwrap()

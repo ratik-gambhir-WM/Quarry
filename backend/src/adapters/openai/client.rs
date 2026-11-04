@@ -35,6 +35,7 @@ pub struct OpenAiClient {
     http_client: reqwest::Client,
     api_key: Arc<str>,
     responses_url: Arc<str>,
+    embeddings_url: Arc<str>,
     embedding_dimensions: NonZeroUsize,
     prompts: Arc<PromptCatalog>,
 }
@@ -102,6 +103,7 @@ impl OpenAiClient {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(OPENAI_RESPONSES_URL),
+            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
             prompts,
         }
@@ -118,6 +120,7 @@ impl OpenAiClient {
             http_client,
             api_key: Arc::from(api_key.into()),
             responses_url: Arc::from(responses_url.into()),
+            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
             prompts,
         }
@@ -132,6 +135,7 @@ impl OpenAiClient {
             http_client,
             api_key: Arc::from(config.api_key.expose()),
             responses_url: Arc::from(OPENAI_RESPONSES_URL),
+            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
             embedding_dimensions: config.embedding_dimensions,
             prompts,
         }
@@ -139,6 +143,17 @@ impl OpenAiClient {
 
     pub fn prompts(&self) -> &PromptCatalog {
         &self.prompts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_embeddings_url(
+        http_client: reqwest::Client,
+        embeddings_url: String,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
+        let mut client = Self::new(http_client, "unused-test-key", prompts);
+        client.embeddings_url = Arc::from(embeddings_url);
+        client
     }
 
     pub async fn gen_model_response(
@@ -524,7 +539,7 @@ impl OpenAiClient {
 
         let response = match self
             .http_client
-            .post(OPENAI_EMBEDDINGS_URL)
+            .post(self.embeddings_url.as_ref())
             .bearer_auth(self.api_key.as_ref())
             .json(&request_body)
             .send()
