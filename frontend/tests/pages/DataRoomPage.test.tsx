@@ -64,19 +64,34 @@ vi.mock("@/components/data-room/FileReviewTable", () => ({
   }: {
     onSelectFile: (file: DataRoomTreeNode) => void;
   }) => (
-    <button
-      onClick={() =>
-        onSelectFile({
-          id: "local:test.pdf",
-          kind: "pdf",
-          name: "test.pdf",
-          relativePath: "test.pdf",
-        })
-      }
-      type="button"
-    >
-      Open test document
-    </button>
+    <>
+      <button
+        onClick={() =>
+          onSelectFile({
+            id: "local:test.pdf",
+            kind: "pdf",
+            name: "test.pdf",
+            relativePath: "test.pdf",
+          })
+        }
+        type="button"
+      >
+        Open test document
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSelectFile({
+            id: "local:second.pdf",
+            kind: "pdf",
+            name: "second.pdf",
+            relativePath: "second.pdf",
+          })
+        }
+      >
+        Open second document
+      </button>
+    </>
   ),
 }));
 
@@ -182,5 +197,55 @@ describe("DataRoomPage", () => {
     expect(
       document.querySelector("[data-workspace-sidebar-replacement]"),
     ).toBeNull();
+  });
+  it("opens, switches, and closes browser tabs with only one active viewer", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <DataRoomPage />
+      </MemoryRouter>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Open test document" }),
+    );
+    await screen.findByRole("region", { name: "Selected document preview" });
+    expect(
+      screen
+        .getByRole("tab", { name: "test.pdf" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Add document tab" }));
+    expect(
+      screen.queryByRole("region", { name: "Selected document preview" }),
+    ).toBeNull();
+    expect(screen.getByRole("tab", { name: "New tab" })).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Open second document" }),
+    );
+    expect(
+      screen.getAllByRole("region", { name: "Selected document preview" }),
+    ).toHaveLength(1);
+    await user.click(screen.getByRole("tab", { name: "test.pdf" }));
+    expect(previewDealDocument).toHaveBeenCalledTimes(2);
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "second.pdf" })).toBe(
+      document.activeElement,
+    );
+    expect(
+      screen
+        .getByRole("tab", { name: "second.pdf" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    await user.keyboard("{Delete}");
+    expect(screen.queryByRole("tab", { name: "second.pdf" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "test.pdf" })).toBe(
+      document.activeElement,
+    );
+    await user.click(screen.getByRole("button", { name: "Close test.pdf" }));
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open test document" }),
+    ).not.toBeNull();
+    expect(screen.queryByText("Data room explorer")).toBeNull();
   });
 });

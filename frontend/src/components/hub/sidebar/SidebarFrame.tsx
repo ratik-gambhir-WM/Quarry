@@ -17,6 +17,7 @@ type SidebarFrameProps = {
   children: ReactNode | ((state: { collapsed: boolean }) => ReactNode);
   email?: string;
   headerContent?: ReactNode;
+  headerIdentity?: ReactNode;
   headerBackLabel?: string;
   headerBackTo?: string;
   showHeaderBackButton?: boolean;
@@ -32,6 +33,7 @@ export function SidebarFrame({
   children,
   email,
   headerContent,
+  headerIdentity,
   headerBackLabel = "Back to home page",
   headerBackTo = "/hub",
   navigationState,
@@ -86,16 +88,18 @@ export function SidebarFrame({
                 </NavLink>
               ) : null}
 
-              {collapsed ? null : (
-                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
-                    <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
-                    {sidebarLabel}
-                  </span>
-                </div>
-              )}
+              {collapsed
+                ? null
+                : (headerIdentity ?? (
+                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
+                        <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
+                        {sidebarLabel}
+                      </span>
+                    </div>
+                  ))}
             </>
           )}
 

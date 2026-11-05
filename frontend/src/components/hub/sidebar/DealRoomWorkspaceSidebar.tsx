@@ -1,10 +1,19 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import {
   getDataRoomPath,
   getDealAnalysisPath,
   getDealRoomPath,
   getDeliverablesPath,
 } from "../../../data/workspace";
+import { ChevronDown } from "lucide-react";
+import { isTerminalDealStatus } from "../../../data/dealModel";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown-menu";
 import { SidebarFrame } from "./SidebarFrame";
 import { SidebarIcon } from "./SidebarIcon";
 import { SidebarSection } from "./SidebarSection";
@@ -34,6 +43,11 @@ export function DealRoomWorkspaceSidebar({
 }: DealRoomSidebarProps) {
   const activeDeal =
     deals.find((deal) => deal.room.id === activeDealId) ?? deals[0];
+  const otherActiveDeals = deals.filter(
+    (deal) =>
+      deal.room.id !== activeDeal?.room.id &&
+      !isTerminalDealStatus(deal.portfolio.status),
+  );
   const renderLink = (
     link: (typeof primaryDealRoomLinks | typeof dealArtifactLinks)[number],
   ) => {
@@ -82,6 +96,53 @@ export function DealRoomWorkspaceSidebar({
       email={email}
       headerBackLabel="Back to deals"
       headerBackTo="/hub/deals"
+      headerIdentity={
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Switch deal room"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-left text-sidebar-active outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed [@media(hover:hover)]:hover:bg-sidebar-hover active:brightness-95"
+              title={activeDeal?.room.name}
+              type="button"
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
+                <SidebarIcon className="h-4 w-4" name="dashboard" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
+                Deal Room
+              </span>
+              <ChevronDown
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-sidebar-muted"
+              />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-64 max-w-80 rounded-xl p-2 motion-reduce:animate-none [font-family:var(--font-sidebar)]"
+          >
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Other active deals
+            </DropdownMenuLabel>
+            {otherActiveDeals.map((deal) => (
+              <DropdownMenuItem asChild key={deal.room.id}>
+                <Link
+                  className="min-h-9 whitespace-normal break-words text-[13px]"
+                  state={navigationState}
+                  to={getDealRoomPath(deal.room.id)}
+                >
+                  {deal.room.name}
+                </Link>
+              </DropdownMenuItem>
+            ))}
+            {otherActiveDeals.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground">
+                No other active deals.
+              </p>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
       navigationState={navigationState}
       profileDeal={activeDeal}
       sidebarIcon="dashboard"

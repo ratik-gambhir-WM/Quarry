@@ -25,6 +25,7 @@ type DocumentPreviewPanelProps = {
   onClose: () => void;
   onPageCountChange: (pageCount: number) => void;
   onRequestRawText: () => void;
+  onRetry?: () => void;
   onRequestedPageHandled: () => void;
   preview: PreviewState;
   rawText: RawTextState;
@@ -46,6 +47,7 @@ export const DocumentPreviewPanel = forwardRef<
     onClose,
     onPageCountChange,
     onRequestRawText,
+    onRetry,
     onRequestedPageHandled,
     preview,
     rawText,
@@ -95,7 +97,7 @@ export const DocumentPreviewPanel = forwardRef<
 
   function showRawText() {
     setViewMode("raw-text");
-    if (rawText.status === "idle") {
+    if (rawText.status === "idle" || rawText.status === "error") {
       onRequestRawText();
     }
   }
@@ -121,13 +123,24 @@ export const DocumentPreviewPanel = forwardRef<
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {preview.status === "error" ? (
-          <PreviewMessage
-            detail={preview.message}
-            title={
-              document.error ? "File is inaccessible" : "Preview unavailable"
-            }
-            tone="error"
-          />
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
+            <PreviewMessage
+              detail={preview.message}
+              title={
+                document.error ? "File is inaccessible" : "Preview unavailable"
+              }
+              tone="error"
+            />
+            {onRetry ? (
+              <button
+                type="button"
+                className="m-4 rounded px-3 py-2 text-sm text-primary focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={onRetry}
+              >
+                Try again
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         {preview.status === "loading" ? <PdfPreviewLoading /> : null}

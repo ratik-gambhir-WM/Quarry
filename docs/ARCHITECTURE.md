@@ -418,9 +418,13 @@ global state or query-cache library.
   leaving the Assistant route or unmounting its conversation; Chat shows the persisted regular
   thread list plus a New chat action. The normal home sidebar still labels `/hub/assistant` as Assistant
   and uses an animated Twitch glyph.
+  The Deal Room sidebar identity opens a deal-switching menu from the existing workspace deal
+  resource. It lists other accessible non-terminal deals (excluding Closed and Pencils Down),
+  preserves navigation state, and links to the selected deal’s overview route. Its back and collapse
+  controls remain separate; an empty menu explains that no other active deals are available.
   An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
-  with the Data Room file explorer; closing the preview restores the Deal Room sidebar, while the
+  with the Data Room file explorer; closing the last document tab restores the Deal Room sidebar, while the
   explorer's left-arrow back control returns to Deal Home.
 - Notebook uses native BlockNote edit buffers plus explicit server saves. Its `NotebookProvider`
   owns search, URL selection and the mobile drawer around `WorkspaceHomeShell`. The sidebar reuses
@@ -529,9 +533,19 @@ global state or query-cache library.
   intentionally disappear on refresh. Signature persistence is disabled so the editor does not
   write signature data to `localStorage`.
 - `useDataRoomContents` owns independent local-tree and stored-document resources, stale-request
-  protection, retry, and their derived explorer/review model. `useDocumentSession` owns one
-  selected document plus preview and raw-text request lifecycles; closing it invalidates pending
-  work and releases retained preview/text values.
+  protection, retry, and their derived explorer/review model. `useDocumentSession` owns open
+  document tabs with one active preview, deduplicated preview/text requests, and a route-local
+  64 MiB least-recently-used cache. The cache budgets PDF byte lengths (or twice the base64
+  string length) plus twice the extracted-text length. Oversized payloads remain usable only in
+  the active viewer and bypass the cache; the budget excludes the active viewer's working memory,
+  editor engine, and existing annotation snapshots. Eviction preserves tabs and reloads their
+  payloads on selection. Closing a tab drops its cached payload and ignores its pending responses;
+  leaving the route or refreshing releases all cached payloads. Nothing is persisted to disk.
+- The Data Room uses the controlled Movin browser-tab component adapted to Quarry theme tokens.
+  Each document tab has a close button; the plus button opens a New tab file-review picker.
+  Selecting an already-open file activates its existing tab. Closing the active tab selects its
+  neighbor; closing the last tab returns to the file-review grid. Arrow keys, Home/End, and Delete
+  support tab navigation and closing. Only the active document preview/editor is mounted.
 - A Data Room file selection lazy-loads the document-preview module. Its local Suspense fallback
   preserves the filename and an accessible Close action; once loaded, the preview shell shows
   preview-byte loading and errors before mounting the PDF editor. The editor's EmbedPDF packages
@@ -541,7 +555,7 @@ global state or query-cache library.
   assets by the bundle-size check. Neither is requested by an
   unselected Data Room. The editor stays mounted when the raw-text view is open so unsaved
   in-memory edits are preserved. The selected-document session also owns the sidebar swap: the
-  Data Room explorer exists only while the preview surface is open, and the
+  Data Room explorer exists while any document tabs are open (including the New tab picker), and the
   workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
 - `DataRoomWorkspace` owns selected-document search coordination. It registers live current-file,
   page-count, requested-page, boundary, and focus capabilities with the Data Room tools registry;
@@ -617,8 +631,12 @@ global state or query-cache library.
   folder context remain runtime-derived, while the displayed review findings are explicitly
   illustrative fixtures. Its compact search control is left-aligned with the grid and expands in
   normal layout flow so the adjacent status filters move with it; search, status, and file-type
-  controls use a consistent 12-pixel text size. Selecting a file from the grid enters the existing
-  preview state and swaps the Deal Room sidebar for the file explorer without nesting another main
+  controls use a consistent 12-pixel text size. Status filters form one segmented group. The grid
+  matches the main inset surface, uses horizontal row dividers, gives file identity a wider pinned
+  column, and wraps findings and signal descriptions rather than truncating them. Pagination stays
+  at the bottom of the available panel while the table scrolls independently. Selecting a file from
+  the grid enters the existing preview state and swaps the Deal Room sidebar for the file explorer
+  without nesting another main
   container; an empty Data Room continues to use the upload-first state.
 - The Assistant page uses the custom `AgentRuntime` for its selected conversation and remote
   thread list. Axum/SQLite own thread metadata and normalized messages; the runtime owns the
@@ -834,6 +852,12 @@ React feature
   -> authenticated fetch / FormData / GET-SSE
   -> Axum /api/v1
 ```
+
+`api/httpQuarryApi.ts` composes HTTP domain modules under `api/http/` for authentication,
+companies, deals, documents/data room, assistant chat, templates, and summarization, alongside
+the existing shared notebook and membership adapters. `api/http/transport.ts` owns base-URL
+validation, JSON/multipart request helpers, activity logging, and `BackendApiError`, which remains
+re-exported from `httpQuarryApi.ts`. Domain modules retain their binary and streaming handling.
 
 The HTTP adapter validates `VITE_API_BASE_URL`, permits HTTPS outside development and loopback HTTP
 in development, serializes JSON/multipart, validates PDF content type, reads bytes, normalizes

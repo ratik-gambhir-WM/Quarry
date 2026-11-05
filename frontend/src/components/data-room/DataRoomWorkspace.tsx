@@ -1,10 +1,19 @@
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { DocumentSearchResult } from "./document-search/documentSearchModel";
 import type { DocumentPreviewPanelHandle } from "./DocumentPreviewPanel";
 import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type { WorkspaceLocationState } from "../../data/workspace";
 import type { DataRoomContents } from "../../hooks/useDataRoomContents";
 import { useDocumentSession } from "../../hooks/useDocumentSession";
+import { BrowserTabs } from "../tab-browser";
 import { EmptyState } from "../empty-state/empty-state";
 import { DataRoomExplorer } from "./DataRoomExplorer";
 import { FileReviewTable } from "./FileReviewTable";
@@ -39,10 +48,14 @@ export function DataRoomWorkspace({
 }: DataRoomWorkspaceProps) {
   const {
     closeDocument,
+    documents,
+    showFiles,
     requestRawText,
     selectDocument,
     state: documentSession,
   } = useDocumentSession(dealId);
+  const tabsId = useId();
+  const mainRef = useRef<HTMLElement>(null);
   const [documentPageCount, setDocumentPageCount] = useState(0);
   const [requestedPreviewPage, setRequestedPreviewPage] = useState<
     number | null
@@ -55,18 +68,32 @@ export function DataRoomWorkspace({
 
   const handleSelectDocument = useCallback(
     (document: DataRoomTreeNode) => {
+      if (
+        selectedDocument?.id === document.id &&
+        documentSession.status === "open" &&
+        documentSession.preview.status !== "error"
+      )
+        return;
       setDocumentPageCount(0);
       setRequestedPreviewPage(null);
       void selectDocument(document);
     },
-    [selectDocument],
+    [selectDocument, selectedDocument, documentSession],
   );
 
-  const handleClosePreview = useCallback(() => {
-    setDocumentPageCount(0);
-    setRequestedPreviewPage(null);
-    closeDocument();
-  }, [closeDocument]);
+  const handleClosePreview = useCallback(
+    (id?: string) => {
+      if (!id || selectedDocument?.id === id) {
+        setDocumentPageCount(0);
+        setRequestedPreviewPage(null);
+      }
+      closeDocument(id);
+      if (documents.length === 1) {
+        requestAnimationFrame(() => mainRef.current?.focus());
+      }
+    },
+    [closeDocument, selectedDocument, documents.length],
+  );
 
   const focusDocumentPreview = useCallback(() => {
     documentPreviewRef.current?.focusViewer();
@@ -95,7 +122,7 @@ export function DataRoomWorkspace({
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 flex-1">
-      {selectedDocument ? (
+      {documents.length > 0 ? (
         <div className="contents" data-workspace-sidebar-replacement>
           <DataRoomExplorer
             dealName={dealName}
@@ -106,13 +133,14 @@ export function DataRoomWorkspace({
             onSelectFile={handleSelectDocument}
             onUploadNewFile={onUploadFiles}
             rootPath={contents.rootPath}
-            selectedFilePath={selectedDocument.relativePath}
+            selectedFilePath={selectedDocument?.relativePath}
             treeLoading={contents.isLoading}
           />
         </div>
       ) : null}
       <main
         id="main-content"
+        ref={mainRef}
         tabIndex={-1}
         className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0"
       >
@@ -128,28 +156,73 @@ export function DataRoomWorkspace({
           />
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 basis-0 overflow-hidden">
-            {documentSession.status === "open" ? (
-              <Suspense
-                fallback={
-                  <DocumentPreviewFallback
-                    fileName={documentSession.document.name}
-                    onClose={handleClosePreview}
-                  />
-                }
+            {documents.length > 0 ? (
+              <BrowserTabs
+                id={tabsId}
+                tabs={[
+                  ...documents.map((document) => ({
+                    id: document.id,
+                    label: document.name,
+                  })),
+                  ...(documentSession.status === "closed"
+                    ? [{ id: "new-tab", label: "New tab" }]
+                    : []),
+                ]}
+                selectedId={selectedDocument?.id ?? "new-tab"}
+                onAdd={() => {
+                  setDocumentPageCount(0);
+                  setRequestedPreviewPage(null);
+                  showFiles();
+                }}
+                onSelect={(id) => {
+                  const document = documents.find(
+                    (document) => document.id === id,
+                  );
+                  if (document) handleSelectDocument(document);
+                }}
+                onClose={(id) => {
+                  if (id === "new-tab") {
+                    const lastDocument = documents[documents.length - 1];
+                    if (lastDocument) handleSelectDocument(lastDocument);
+                  } else {
+                    handleClosePreview(id);
+                  }
+                }}
               >
-                <DocumentPreviewPanel
-                  document={documentSession.document}
-                  key={documentSession.document.id}
-                  onClose={handleClosePreview}
-                  onPageCountChange={setDocumentPageCount}
-                  onRequestRawText={() => void requestRawText()}
-                  onRequestedPageHandled={() => setRequestedPreviewPage(null)}
-                  preview={documentSession.preview}
-                  rawText={documentSession.rawText}
-                  ref={documentPreviewRef}
-                  requestedPage={requestedPreviewPage}
-                />
-              </Suspense>
+                {documentSession.status === "open" ? (
+                  <Suspense
+                    fallback={
+                      <DocumentPreviewFallback
+                        fileName={documentSession.document.name}
+                        onClose={() => handleClosePreview()}
+                      />
+                    }
+                  >
+                    <DocumentPreviewPanel
+                      document={documentSession.document}
+                      key={documentSession.document.id}
+                      onClose={() => handleClosePreview()}
+                      onPageCountChange={setDocumentPageCount}
+                      onRequestRawText={() => void requestRawText()}
+                      onRetry={() =>
+                        void selectDocument(documentSession.document)
+                      }
+                      onRequestedPageHandled={() =>
+                        setRequestedPreviewPage(null)
+                      }
+                      preview={documentSession.preview}
+                      rawText={documentSession.rawText}
+                      ref={documentPreviewRef}
+                      requestedPage={requestedPreviewPage}
+                    />
+                  </Suspense>
+                ) : (
+                  <FileReviewTable
+                    files={contents.reviewFiles}
+                    onSelectFile={handleSelectDocument}
+                  />
+                )}
+              </BrowserTabs>
             ) : (
               <FileReviewTable
                 files={contents.reviewFiles}
