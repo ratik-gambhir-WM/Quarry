@@ -12,7 +12,6 @@ import {
   DocumentPreviewPanel,
   type DocumentPreviewPanelHandle,
   type PreviewState,
-  type RawTextState,
 } from "@/components/data-room/DocumentPreviewPanel";
 
 const pdfMock = vi.hoisted(() => ({
@@ -104,10 +103,8 @@ const preview = {
 };
 
 function renderPreview(
-  rawText: RawTextState = { status: "idle" },
   previewState: PreviewState = preview,
 ) {
-  const onRequestRawText = vi.fn();
   const onPageCountChange = vi.fn();
   const onRequestedPageHandled = vi.fn();
   const previewRef = createRef<DocumentPreviewPanelHandle>();
@@ -122,10 +119,8 @@ function renderPreview(
         document={document}
         onClose={vi.fn()}
         onPageCountChange={onPageCountChange}
-        onRequestRawText={onRequestRawText}
         onRequestedPageHandled={onRequestedPageHandled}
         preview={activePreview}
-        rawText={rawText}
         ref={previewRef}
         requestedPage={requestedPage}
       />
@@ -135,7 +130,6 @@ function renderPreview(
   return {
     ...view,
     onPageCountChange,
-    onRequestRawText,
     onRequestedPageHandled,
     previewRef,
     resolvePreview() {
@@ -159,7 +153,6 @@ afterEach(cleanup);
 describe("DocumentPreviewPanel navigation contract", () => {
   it("shows the document header and loading state while preview bytes load", () => {
     const { container, onPageCountChange } = renderPreview(
-      { status: "idle" },
       { status: "loading" },
     );
 
@@ -179,7 +172,6 @@ describe("DocumentPreviewPanel navigation contract", () => {
 
   it("mounts the editor when preview bytes resolve", () => {
     const { resolvePreview } = renderPreview(
-      { status: "idle" },
       { status: "loading" },
     );
 
@@ -191,7 +183,7 @@ describe("DocumentPreviewPanel navigation contract", () => {
   });
 
   it("applies an externally requested page exactly once without remounting", async () => {
-    const { container, onRequestRawText, onRequestedPageHandled, requestPage } =
+    const { container, onRequestedPageHandled, requestPage } =
       renderPreview();
     const viewer = container.querySelector("[data-testid='pdf-editor']");
 
@@ -203,7 +195,6 @@ describe("DocumentPreviewPanel navigation contract", () => {
     expect(onRequestedPageHandled).toHaveBeenCalledTimes(1);
     expect(pdfMock.mounts).toBe(1);
     expect(pdfMock.unmounts).toBe(0);
-    expect(onRequestRawText).not.toHaveBeenCalled();
   });
 
   it("reports the loaded page count through its reusable preview contract", () => {
@@ -212,28 +203,11 @@ describe("DocumentPreviewPanel navigation contract", () => {
     expect(onPageCountChange).toHaveBeenCalledWith(3);
   });
 
-  it("returns from raw text before applying an externally requested page", async () => {
-    const user = userEvent.setup();
-    const rawText: RawTextState = {
-      response: {
-        fileName: document.name,
-        sourceKind: "pdf",
-        text: "Synthetic extracted text.",
-      },
-      status: "ready",
-    };
-    const { onRequestRawText, requestPage } = renderPreview(rawText);
-    await user.click(screen.getByRole("button", { name: "Show raw text" }));
-    expect(screen.getByText("Synthetic extracted text.")).toBeTruthy();
-
-    requestPage(1);
-
-    await waitFor(() => expect(screen.getByTestId("pdf-editor")).toBeTruthy());
-    expect(pdfMock.scrollToPage).toHaveBeenCalledTimes(1);
-    expect(pdfMock.scrollToPage).toHaveBeenCalledWith(1);
-    expect(pdfMock.mounts).toBe(1);
-    expect(pdfMock.unmounts).toBe(0);
-    expect(onRequestRawText).not.toHaveBeenCalled();
+  it("omits raw-text and duplicate close actions from the loaded PDF toolbar", () => {
+    renderPreview();
+    expect(screen.getByTestId("pdf-editor")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show raw text" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close document preview" })).toBeNull();
   });
 
   it("restores annotations from memory when the same document is reopened", async () => {

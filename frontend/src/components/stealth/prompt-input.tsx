@@ -74,7 +74,7 @@ export function PromptInput({
   return (
     <form
       className={cn(
-        "relative isolate flex w-full flex-col rounded-[16px] border border-outline-variant bg-surface-container-lowest shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/20 motion-reduce:transition-none",
+        "relative isolate flex w-full flex-col rounded-[16px] border border-outline-variant bg-surface-container-lowest shadow-sm transition-[border-color,box-shadow] duration-150 motion-reduce:transition-none",
         condensed && "[&>div:last-child]:p-1.5",
       )}
       data-slot="query-composer"

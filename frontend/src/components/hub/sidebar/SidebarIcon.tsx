@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { AnimatedIcon } from "../../ui/AnimatedIcon";
 import type { AnimatedIconName } from "../../ui/AnimatedIcon";
 import { Icon } from "../../ui/Icon";
@@ -34,13 +35,31 @@ const animatedIconNames = new Set<SidebarIconName>([
   "twitch",
 ]);
 
+const iconColors: Partial<Record<SidebarIconName, string>> = {
+  assistant: "text-icon-assistant",
+  sparkles: "text-icon-assistant",
+  telescope: "text-icon-assistant",
+  bookOpen: "text-icon-knowledge",
+  fileStack: "text-icon-knowledge",
+  graph: "text-icon-knowledge",
+  timeline: "text-icon-knowledge",
+  dataset: "text-icon-knowledge",
+  folderOpen: "text-icon-files",
+  folderTree: "text-icon-files",
+  bookmark: "text-icon-files",
+  layers: "text-icon-files",
+};
+
 export function SidebarIcon({
   className,
   name,
+  inheritColor = false,
 }: {
   className: string;
   name: SidebarIconName;
+  inheritColor?: boolean;
 }) {
+  className = cn(inheritColor ? "text-current" : iconColors[name] ?? "text-icon-navigation", className);
   if (name === "assistant") return <AssistantIcon className={className} />;
   return isAnimatedIconName(name) ? (
     <AnimatedIcon className={className} name={name} />

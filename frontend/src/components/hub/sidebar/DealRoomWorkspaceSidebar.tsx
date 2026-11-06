@@ -106,7 +106,7 @@ export function DealRoomWorkspaceSidebar({
               type="button"
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
-                <SidebarIcon className="h-4 w-4" name="dashboard" />
+                <SidebarIcon inheritColor className="h-4 w-4" name="dashboard" />
               </span>
               <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
                 Deal Room

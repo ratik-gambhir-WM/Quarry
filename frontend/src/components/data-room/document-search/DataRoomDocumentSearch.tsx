@@ -1,16 +1,15 @@
-import { useMemo, type ReactElement } from "react";
-import { buildDocumentSearchFixtureResults } from "../../../fixtures/data-room/documentSearch";
+import { useCallback, type ReactElement } from "react";
+import { runtime } from "@quarry/runtime";
+import { keywordSearchExcerpt } from "@/data/documents/keywordSearch";
 import DocumentSearch from "./DocumentSearch";
-import {
-  formatDocumentSearchFileName,
-  isDocumentSearchResultAvailable,
-  type DocumentSearchItem,
-  type DocumentSearchResult,
-} from "./documentSearchModel";
+import type { DocumentSearchItem, DocumentSearchResult } from "./documentSearchModel";
 
 export type DataRoomDocumentSearchProps = {
+  dealId: string;
+  currentFileId?: string;
   currentFileName: string;
   currentPageCount: number;
+  files?: { fileId: string; name: string }[];
   finalFocusEl?: () => HTMLElement | null;
   onActivateResult: (result: DocumentSearchResult) => void;
   onOpenChange?: (open: boolean) => void;
@@ -23,64 +22,59 @@ export type DataRoomDocumentSearchProps = {
 };
 
 export function DataRoomDocumentSearch({
-  currentFileName,
-  currentPageCount,
-  finalFocusEl,
-  onActivateResult,
-  onOpenChange,
-  open,
-  hideTrigger,
-  dialogTitle,
-  onSelectionFocus,
-  boundaryElement,
-  trigger,
+  dealId, currentFileId, currentFileName, currentPageCount, files,
+  onActivateResult, onOpenChange, open, hideTrigger, dialogTitle,
+  onSelectionFocus, finalFocusEl, boundaryElement, trigger,
 }: DataRoomDocumentSearchProps) {
-  const results = useMemo(
-    () => buildDocumentSearchFixtureResults(currentFileName),
-    [currentFileName],
-  );
-  const items = useMemo<DocumentSearchItem[]>(
-    () =>
-      results.map((result) => {
-        const available = isDocumentSearchResultAvailable({
-          currentFileName,
-          numPages: currentPageCount,
-          result,
-        });
-
-        return {
-          disabledReason: available
-            ? undefined
-            : "Preview navigation unavailable",
-          id: result.id,
-          primaryText: formatDocumentSearchFileName(result.fileName),
-          searchText: `${result.fileName} ${result.location} ${result.excerpt}`,
-          secondaryText: result.excerpt,
-          tertiaryText: available
-            ? `${result.location} · Open page ${result.target?.page}`
-            : result.location,
-        };
-      }),
-    [currentFileName, currentPageCount, results],
-  );
+  const search = useCallback(async (query: string): Promise<DocumentSearchItem[]> => {
+    const hits = await runtime.api.searchDealDocumentChunksByKeyword(dealId, {
+      queryText: query,
+      limit: 30,
+    });
+    return hits.map((hit) => {
+      const fileName = files?.find((file) => file.fileId === hit.file_id)?.name
+        ?? (hit.file_id === currentFileId ? currentFileName : "Uploaded document");
+      const page = hit.page_start;
+      const available = hit.file_id === currentFileId && page !== null
+        && page >= 1 && page <= currentPageCount;
+      const location = page === null ? `Passage ${hit.chunk_index}`
+        : hit.page_end !== null && hit.page_end !== page
+          ? `Pages ${page}–${hit.page_end}` : `Page ${page}`;
+      return {
+        id: hit.chunk_id,
+        fileName,
+        primaryText: fileName,
+        secondaryText: keywordSearchExcerpt(hit.text, query).map((part) => part.text).join(""),
+        tertiaryText: [hit.section_path.trim(), location].filter(Boolean).join(" · "),
+        target: available ? { kind: "pdf-page", page } : undefined,
+        disabledReason: available ? undefined : hit.file_id !== currentFileId
+          ? "Open this document in the Data Room to navigate to this passage."
+          : "Page navigation unavailable for this passage.",
+      };
+    });
+  }, [dealId, currentFileId, currentFileName, currentPageCount, files]);
 
   function activateItem(item: DocumentSearchItem) {
-    const result = results.find((candidate) => candidate.id === item.id);
-
-    if (result) {
-      onActivateResult(result);
-    }
+    if (!item.target || item.disabledReason) return;
+    onActivateResult({
+      id: item.id,
+      fileName: item.fileName ?? item.primaryText,
+      excerpt: item.secondaryText ?? "",
+      location: item.tertiaryText ?? "",
+      target: item.target,
+    });
   }
 
   return (
     <DocumentSearch
       buttonProps={{ "aria-label": "Search document", iconOnly: true }}
-      dialogDescription={`Search local mock excerpts for ${currentFileName}.`}
-      dialogTitle={dialogTitle ?? `Search ${currentFileName}`}
+      dialogDescription="Keyword search across uploaded documents in this deal. Results update as you type."
+      dialogTitle={dialogTitle ?? "Search documents"}
       open={open}
       hideTrigger={hideTrigger}
       finalFocusEl={finalFocusEl}
-      items={items}
+      search={search}
+      sourceLabel="This deal · Keyword"
       onOpenChange={onOpenChange}
       onSelect={activateItem}
       onSelectionFocus={onSelectionFocus}

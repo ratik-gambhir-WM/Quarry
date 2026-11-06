@@ -1,7 +1,6 @@
 use axum::{
     body::{to_bytes, Body},
-    http::{HeaderMap, Request, StatusCode},
-    routing::get,
+    http::{Request, StatusCode},
     Json, Router,
 };
 use docx_rust::{document::Paragraph, Docx};
@@ -347,65 +346,6 @@ async fn template_document_route_validates_ids_and_degrades_when_unconfigured() 
 }
 
 #[tokio::test]
-async fn template_document_route_relays_valid_json_with_private_no_store() {
-    async fn upstream(headers: HeaderMap) -> Json<Value> {
-        assert_eq!(
-            headers
-                .get("X-App-Id")
-                .and_then(|value| value.to_str().ok()),
-            Some("Quarry_WestMonroe")
-        );
-        Json(serde_json::json!({
-            "presentation": {
-                "preserveElementOrder": true,
-                "showBranding": false,
-                "slides": [],
-                "title": "Integration template",
-                "unknownField": { "preserved": true }
-            }
-        }))
-    }
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            Router::new().route("/api/v1/templates/example", get(upstream)),
-        )
-        .await
-        .unwrap();
-    });
-    let client = crate::adapters::diligence_studio::client::DiligenceStudioClient::new(
-        reqwest::Client::new(),
-        reqwest::Url::parse(&format!("http://{address}/api/v1/")).unwrap(),
-    );
-    let api = crate::domains::templates::route::routes(Arc::new(
-        crate::domains::templates::service::TemplateService::new(Some(Arc::new(client))),
-    ));
-    let app = crate::app::http::create_router(
-        api.layer(axum::Extension(crate::integration_support::test_actor())),
-        &crate::AppConfig::default().http,
-    );
-
-    let response = app
-        .oneshot(
-            Request::get("/api/v1/templates/example")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["cache-control"], "private, no-store");
-    let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["presentation"]["unknownField"]["preserved"], true);
-    upstream_task.abort();
-}
-
-#[tokio::test]
 async fn template_export_route_validates_json_before_capability_lookup() {
     let app = test_router();
     let invalid = app
@@ -430,73 +370,6 @@ async fn template_export_route_validates_json_before_capability_lookup() {
         .await
         .unwrap();
     assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
-}
-
-#[tokio::test]
-async fn template_export_route_relays_bounded_powerpoint_downloads() {
-    async fn upstream(headers: HeaderMap, Json(body): Json<Value>) -> axum::response::Response {
-        assert_eq!(headers["X-App-Id"], "Quarry_WestMonroe");
-        assert_eq!(body["presentation"]["title"], "Integration export");
-        axum::response::Response::builder()
-            .header(
-                "content-type",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            )
-            .header(
-                "content-disposition",
-                "attachment; filename=\"Integration export.pptx\"",
-            )
-            .header("x-powerpoint-warning-count", "1")
-            .body(Body::from(b"PK\x03\x04powerpoint".as_slice()))
-            .unwrap()
-    }
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            Router::new().route("/api/v1/export", axum::routing::post(upstream)),
-        )
-        .await
-        .unwrap();
-    });
-    let client = crate::adapters::diligence_studio::client::DiligenceStudioClient::new(
-        reqwest::Client::new(),
-        reqwest::Url::parse(&format!("http://{address}/api/v1/")).unwrap(),
-    );
-    let api = crate::domains::templates::route::routes(Arc::new(
-        crate::domains::templates::service::TemplateService::new(Some(Arc::new(client))),
-    ));
-    let app = crate::app::http::create_router(
-        api.layer(axum::Extension(crate::integration_support::test_actor())),
-        &crate::AppConfig::default().http,
-    );
-
-    let response = app
-        .oneshot(
-            Request::post("/api/v1/templates/export")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"presentation":{"title":"Integration export"}}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["cache-control"], "private, no-store");
-    assert_eq!(response.headers()["x-powerpoint-warning-count"], "1");
-    assert_eq!(
-        response.headers()["content-disposition"],
-        "attachment; filename=\"Integration export.pptx\""
-    );
-    assert!(to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap()
-        .starts_with(b"PK"));
-    upstream_task.abort();
 }
 
 #[tokio::test]

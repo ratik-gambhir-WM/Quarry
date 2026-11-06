@@ -1,45 +1,31 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 type SelectionOrigin = "init" | "keyboard" | "pointer";
 
 export function useDocumentSearchKeyboardNavigation(itemIds: string[]) {
-  const [selectedIndex, setSelectedIndex] = useState(
-    itemIds.length > 0 ? 0 : -1,
-  );
-  const [selectionOrigin, setSelectionOrigin] =
-    useState<SelectionOrigin>("init");
   const itemKey = itemIds.join("\u0000");
+  const [selection, setSelection] = useState({
+    itemKey,
+    index: itemIds.length > 0 ? 0 : -1,
+    origin: "init" as SelectionOrigin,
+  });
+  const selectedIndex = selection.itemKey === itemKey
+    ? selection.index
+    : itemIds.length > 0 ? 0 : -1;
+  const selectionOrigin = selection.itemKey === itemKey ? selection.origin : "init";
 
-  useEffect(() => {
-    setSelectedIndex(itemIds.length > 0 ? 0 : -1);
-    setSelectionOrigin("init");
-  }, [itemIds.length, itemKey]);
+  function move(direction: 1 | -1) {
+    const index = itemIds.length
+      ? ((selectedIndex >= 0 ? selectedIndex : 0) + direction + itemIds.length) % itemIds.length
+      : -1;
+    setSelection({ itemKey, index, origin: "keyboard" });
+  }
 
-  const move = useCallback(
-    (direction: 1 | -1) => {
-      if (itemIds.length === 0) {
-        setSelectedIndex(-1);
-        return;
-      }
-      setSelectedIndex((current) => {
-        const safeCurrent = current >= 0 ? current : 0;
-        return (safeCurrent + direction + itemIds.length) % itemIds.length;
-      });
-      setSelectionOrigin("keyboard");
-    },
-    [itemIds.length],
-  );
-
-  const hoverIndex = useCallback(
-    (index: number) => {
-      if (index < 0 || index >= itemIds.length) {
-        return;
-      }
-      setSelectedIndex(index);
-      setSelectionOrigin("pointer");
-    },
-    [itemIds.length],
-  );
+  function hoverIndex(index: number) {
+    if (index >= 0 && index < itemIds.length) {
+      setSelection({ itemKey, index, origin: "pointer" });
+    }
+  }
 
   return {
     hoverIndex,

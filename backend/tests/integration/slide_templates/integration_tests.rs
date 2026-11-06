@@ -81,7 +81,8 @@ fn routes(studio: Arc<SlideTemplates>) -> Router {
         templates::route::routes(Arc::new(templates::service::TemplateService::embedded(
             studio.clone(),
         )))
-        .merge(templates::slide_templates::route::routes(studio)),
+        .merge(templates::slide_templates::route::routes(studio))
+        .layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,
     )
 }

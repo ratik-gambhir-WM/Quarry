@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { DocumentSearchResult } from "./document-search/documentSearchModel";
 import type { DocumentPreviewPanelHandle } from "./DocumentPreviewPanel";
-import type { DataRoomTreeNode } from "../../data/dataRoom";
+import { flattenDataRoomFiles, type DataRoomTreeNode } from "../../data/dataRoom";
 import type { WorkspaceLocationState } from "../../data/workspace";
 import type { DataRoomContents } from "../../hooks/useDataRoomContents";
 import { useDocumentSession } from "../../hooks/useDocumentSession";
@@ -17,7 +17,7 @@ import { BrowserTabs } from "../tab-browser";
 import { EmptyState } from "../empty-state/empty-state";
 import { DataRoomExplorer } from "./DataRoomExplorer";
 import { FileReviewTable } from "./FileReviewTable";
-import { useDataRoomDocumentSearch } from "./DataRoomToolsProvider";
+import { useDataRoomDocumentSearch } from "./dataRoomToolsContext";
 
 const DocumentPreviewPanel = lazy(() =>
   import("./DocumentPreviewPanel").then((module) => ({
@@ -50,7 +50,6 @@ export function DataRoomWorkspace({
     closeDocument,
     documents,
     showFiles,
-    requestRawText,
     selectDocument,
     state: documentSession,
   } = useDocumentSession(dealId);
@@ -100,10 +99,13 @@ export function DataRoomWorkspace({
   }, []);
 
   const searchContext = useMemo(() => {
-    if (!selectedDocument) return null;
     return {
+      files: flattenDataRoomFiles(contents.explorerNodes).flatMap(({ node }) =>
+        node.storedFileId ? [{ fileId: node.storedFileId, name: node.name }] : [],
+      ),
+      currentFileId: selectedDocument?.storedFileId,
       boundaryElement: searchBoundaryElement,
-      currentFileName: selectedDocument.name,
+      currentFileName: selectedDocument?.name ?? "",
       currentPageCount: documentPageCount,
       onActivateResult: (result: DocumentSearchResult) => {
         if (result.target?.kind === "pdf-page") {
@@ -114,6 +116,7 @@ export function DataRoomWorkspace({
     };
   }, [
     selectedDocument,
+    contents.explorerNodes,
     searchBoundaryElement,
     documentPageCount,
     focusDocumentPreview,
@@ -203,7 +206,6 @@ export function DataRoomWorkspace({
                       key={documentSession.document.id}
                       onClose={() => handleClosePreview()}
                       onPageCountChange={setDocumentPageCount}
-                      onRequestRawText={() => void requestRawText()}
                       onRetry={() =>
                         void selectDocument(documentSession.document)
                       }
@@ -211,7 +213,6 @@ export function DataRoomWorkspace({
                         setRequestedPreviewPage(null)
                       }
                       preview={documentSession.preview}
-                      rawText={documentSession.rawText}
                       ref={documentPreviewRef}
                       requestedPage={requestedPreviewPage}
                     />

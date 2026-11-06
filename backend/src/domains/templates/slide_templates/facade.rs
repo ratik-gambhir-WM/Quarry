@@ -28,6 +28,15 @@ pub struct SlideTemplates {
     active: Arc<StdMutex<Vec<Weak<AtomicBool>>>>,
 }
 impl SlideTemplates {
+    /// Scope request operations while retaining the global worker and concurrency budgets.
+    pub(crate) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
+        Ok(Self {
+            import: Arc::new(self.import.for_user(user_id)?),
+            export: Arc::new(self.export.for_user(user_id)?),
+            ..self.clone()
+        })
+    }
+
     pub fn new(
         repository: Arc<dyn TemplateRepository>,
         preview: Arc<dyn TemplatePreviewGenerator>,
@@ -316,9 +325,11 @@ impl SlideTemplates {
         })?;
         let key = id.clone();
         let removed = self.run(move |i, _, _| i.delete(&key)).await?;
-        // Also retry a previously failed projection deletion when SQLite already lacks the membership.
-        if let Some(index) = &self.projection {
-            index.delete(&id).await.map_err(|_| projection_failure())?;
+        // An inaccessible ID must never delete another owner's graph projection.
+        if removed {
+            if let Some(index) = &self.projection {
+                index.delete(&id).await.map_err(|_| projection_failure())?;
+            }
         }
         Ok(removed)
     }

@@ -126,7 +126,7 @@ describe("AssistantWorkspaceSidebar", () => {
     ).toBe("");
   });
 
-  it("centers the new-chat action when the sidebar is collapsed", async () => {
+  it("hides new chat while collapsed and restores it on expansion", async () => {
     const user = userEvent.setup();
     render(
       <ChatTestRuntime>
@@ -138,10 +138,9 @@ describe("AssistantWorkspaceSidebar", () => {
 
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
-    const newChat = screen.getByRole("button", { name: "New chat" });
-    expect(newChat.className).toContain("justify-center");
-    expect(newChat.className).toContain("px-0");
-    expect(newChat.querySelectorAll("svg")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "New chat" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    expect(screen.getByRole("button", { name: "New chat" })).toBeTruthy();
   });
 });
 

@@ -35,6 +35,15 @@ pub struct ExportService {
 }
 
 impl ExportService {
+    pub(super) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
+        Ok(Self {
+            repository: self
+                .repository
+                .for_user(user_id)
+                .map_err(SlideTemplateError::internal)?,
+        })
+    }
+
     #[must_use]
     pub fn new(repository: Arc<dyn TemplateRepository>) -> Self {
         Self { repository }
@@ -123,6 +132,16 @@ pub struct ImportService {
 }
 
 impl ImportService {
+    pub(super) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
+        Ok(Self {
+            repository: self
+                .repository
+                .for_user(user_id)
+                .map_err(SlideTemplateError::internal)?,
+            ..self.clone()
+        })
+    }
+
     #[must_use]
     pub fn new(repository: Arc<dyn TemplateRepository>) -> Self {
         Self {

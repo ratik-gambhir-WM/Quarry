@@ -41,10 +41,23 @@ pub(crate) fn routes(templates: Arc<TemplateService>) -> Router {
 
 async fn admit(
     axum::extract::State(templates): axum::extract::State<Arc<TemplateService>>,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
+    let Some(actor) = request
+        .extensions()
+        .get::<crate::domains::identity::model::AuthenticatedUser>()
+    else {
+        return crate::app::http::error::AppError::Unauthorized.into_response();
+    };
+    let scoped = match templates.for_user(actor.user.id) {
+        Ok(scoped) => scoped,
+        Err(error) => return crate::app::http::error::AppError::from(error).into_response(),
+    };
+    request.extensions_mut().insert(TemplatesHttpState {
+        templates: Arc::new(scoped),
+    });
     match templates.try_admit() {
         Ok(Some(permit)) => hold_admission(next.run(request).await, permit),
         Ok(None) => next.run(request).await,

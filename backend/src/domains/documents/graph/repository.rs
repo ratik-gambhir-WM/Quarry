@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     num::NonZeroUsize,
     sync::Arc,
     time::{Duration, Instant},
@@ -537,26 +537,33 @@ impl DocumentGraphSearch {
         .map_err(|e| RepositoryError::BlockingWorker(e.to_string()))
     }
 }
-/// Bounded lexical relevance over canonical current candidates. The pinned SDK has no within-stream text ranking.
+/// All query words must match whole tokens in a canonical current candidate.
+/// The pinned SDK has no within-stream text ranking.
 fn rank_keywords(
     chunks: Vec<FileChunkResult>,
     query: &str,
     limit: usize,
 ) -> Vec<KeywordFileChunkHit> {
-    let terms = query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .collect::<HashSet<_>>();
+    let query = query.to_lowercase();
+    let terms = keyword_words(&query).collect::<HashSet<_>>();
+    if terms.is_empty() {
+        return Vec::new();
+    }
     let mut hits = chunks
         .into_iter()
         .filter_map(|chunk| {
             let text = chunk.text.to_lowercase();
-            let score = terms
-                .iter()
-                .map(|term| text.matches(term.as_str()).count() as f64)
-                .sum::<f64>()
-                / (1.0 + text.split_whitespace().count() as f64).sqrt();
-            (score > 0.0).then_some(KeywordFileChunkHit { chunk, score })
+            let mut counts = HashMap::new();
+            let mut word_count = 0_usize;
+            for word in keyword_words(&text) {
+                *counts.entry(word).or_insert(0_usize) += 1;
+                word_count += 1;
+            }
+            let occurrences = terms.iter().try_fold(0.0, |total, term| {
+                counts.get(term).map(|count| total + *count as f64)
+            })?;
+            let score = occurrences / (1.0 + word_count as f64).sqrt();
+            Some(KeywordFileChunkHit { chunk, score })
         })
         .collect::<Vec<_>>();
     hits.sort_by(|a, b| {
@@ -566,6 +573,11 @@ fn rank_keywords(
     });
     hits.truncate(limit);
     hits
+}
+
+fn keyword_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|character: char| !character.is_alphanumeric() && !matches!(character, '+' | '#'))
+        .filter(|word| word.chars().any(char::is_alphanumeric))
 }
 
 impl DocumentGraphSearch {
@@ -613,3 +625,7 @@ async fn has_complete_chunks(
     }
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/domains/documents/graph/repository_tests.rs"]
+mod tests;

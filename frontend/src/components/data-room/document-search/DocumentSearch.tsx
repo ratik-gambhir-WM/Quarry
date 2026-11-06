@@ -1,13 +1,5 @@
-import { Input } from "../../ui/input";
+import { XIcon } from "lucide-react";
 import {
-  ArrowDown,
-  ArrowUp,
-  CornerDownLeft,
-  SearchIcon,
-  XIcon,
-} from "lucide-react";
-import {
-  memo,
   useEffect,
   useMemo,
   useRef,
@@ -29,9 +21,9 @@ import {
   type DocumentSearchButtonProps,
   DocumentSearchButton,
 } from "./DocumentSearchButton";
-import { getDocumentSearchQueryTerms } from "./DocumentSearchHighlightedText";
-import { DocumentSearchResultCard } from "./DocumentSearchResultCard";
-import type { DocumentSearchItem } from "./documentSearchModel";
+import { SearchDialogContent } from "@/components/ui/stealth/search-dialog";
+import { filterDocumentSearchItems, type DocumentSearchItem } from "./documentSearchModel";
+import { useLiveDocumentSearch, type DocumentSearchRequest } from "./useLiveDocumentSearch";
 import { useDocumentSearchKeyboardNavigation } from "./useDocumentSearchKeyboardNavigation";
 
 export type DocumentSearchConfig = {
@@ -41,7 +33,9 @@ export type DocumentSearchConfig = {
   dialogTitle?: string;
   enableKeyboardShortcut?: boolean;
   finalFocusEl?: () => HTMLElement | null;
-  items: DocumentSearchItem[];
+  items?: DocumentSearchItem[];
+  search?: DocumentSearchRequest;
+  sourceLabel?: string;
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
   hideTrigger?: boolean;
@@ -52,197 +46,6 @@ export type DocumentSearchConfig = {
   boundaryElement?: HTMLElement | null;
   trigger?: ReactElement;
 };
-
-type SearchInputProps = {
-  activeItemId?: string;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  onArrowDown: () => void;
-  onArrowUp: () => void;
-  onEnter: () => void;
-  onQueryChange: (query: string) => void;
-  onClose: () => void;
-  placeholder: string;
-  query: string;
-};
-
-const SearchInput = memo(function SearchInput({
-  activeItemId,
-  inputRef,
-  onArrowDown,
-  onArrowUp,
-  onEnter,
-  onQueryChange,
-  onClose,
-  placeholder,
-  query,
-}: SearchInputProps) {
-  return (
-    <form
-      className="flex flex-row items-center rounded-t-sm border-b border-muted bg-background p-2 placeholder:text-muted-foreground"
-      onReset={(event) => {
-        event.preventDefault();
-        onQueryChange("");
-        inputRef.current?.focus();
-      }}
-      onSubmit={(event) => event.preventDefault()}
-      role="search"
-    >
-      <span
-        aria-hidden="true"
-        className="flex items-center justify-center rounded-full p-2 text-muted-foreground transition-colors peer-focus:text-primary"
-      >
-        <SearchIcon strokeWidth={1.5} />
-      </span>
-      <Input
-        aria-activedescendant={activeItemId}
-        aria-controls="local-search-results"
-        aria-label="Search document"
-        autoCapitalize="off"
-        autoComplete="off"
-        autoCorrect="off"
-        autoFocus
-        className="peer h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent text-xl font-light text-foreground shadow-none outline-none focus-visible:ring-0"
-        inputMode="search"
-        maxLength={512}
-        onChange={(event) => onQueryChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            onArrowDown();
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            onArrowUp();
-          } else if (event.key === "Enter") {
-            event.preventDefault();
-            onEnter();
-          }
-        }}
-        placeholder={placeholder}
-        ref={inputRef}
-        spellCheck={false}
-        type="search"
-        value={query}
-      />
-      <span className="ml-auto flex items-center gap-2">
-        {query ? (
-          <Button
-            className="px-2 text-muted-foreground"
-            type="reset"
-            variant="ghost"
-          >
-            Clear
-          </Button>
-        ) : null}
-        <Button
-          aria-label="Close document search"
-          className="px-2 text-muted-foreground"
-          onClick={onClose}
-          type="button"
-          variant="outline"
-        >
-          esc
-        </Button>
-      </span>
-    </form>
-  );
-});
-
-type HitsListProps = {
-  items: DocumentSearchItem[];
-  onHoverIndex: (index: number) => void;
-  onSelect: (item: DocumentSearchItem) => void;
-  query: string;
-  selectedIndex: number;
-  shouldScrollSelection: boolean;
-};
-
-const HitsList = memo(function HitsList({
-  items,
-  onHoverIndex,
-  onSelect,
-  query,
-  selectedIndex,
-  shouldScrollSelection,
-}: HitsListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!shouldScrollSelection) {
-      return;
-    }
-    const container = containerRef.current;
-    const selected = container?.querySelector<HTMLElement>(
-      "[aria-selected='true']",
-    );
-    selected?.scrollIntoView?.({ block: "nearest" });
-  }, [selectedIndex, shouldScrollSelection]);
-
-  return (
-    <div
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-muted p-2"
-      id="local-search-results"
-      ref={containerRef}
-      role="listbox"
-    >
-      {items.map((item, index) => (
-        <DocumentSearchResultCard
-          index={index}
-          item={item}
-          key={item.id}
-          onHover={onHoverIndex}
-          onSelect={onSelect}
-          query={query}
-          selected={selectedIndex === index}
-        />
-      ))}
-    </div>
-  );
-});
-
-const NoResults = memo(function NoResults({
-  onClear,
-  query,
-}: {
-  onClear: () => void;
-  query: string;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-muted p-4 text-foreground">
-      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-muted-foreground p-2">
-        <SearchIcon aria-hidden="true" />
-      </span>
-      <p className="text-lg font-medium">No results for &quot;{query}&quot;</p>
-      <p className="text-sm text-muted-foreground">Try a different query.</p>
-      <Button onClick={onClear} variant="outline">
-        Clear query
-      </Button>
-    </div>
-  );
-});
-
-const Footer = memo(function Footer() {
-  return (
-    <div className="flex items-center justify-between rounded-b-sm bg-background p-4">
-      <div className="inline-flex items-center gap-4 text-sm">
-        <span className="flex items-center gap-2">
-          <kbd className="flex h-6 items-center justify-center rounded-sm bg-muted p-1 text-muted-foreground">
-            <CornerDownLeft aria-hidden="true" size={20} />
-          </kbd>
-          <span className="text-muted-foreground">Open</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <kbd className="flex h-6 items-center justify-center rounded-sm bg-muted p-1 text-muted-foreground">
-            <ArrowUp aria-hidden="true" size={20} />
-          </kbd>
-          <kbd className="flex h-6 items-center justify-center rounded-sm bg-muted p-1 text-muted-foreground">
-            <ArrowDown aria-hidden="true" size={20} />
-          </kbd>
-          <span className="text-muted-foreground">Navigate</span>
-        </span>
-      </div>
-    </div>
-  );
-});
 
 const DOCUMENT_SEARCH_DEFAULT_SIZE = { width: 720, height: 440 };
 const DOCUMENT_SEARCH_MIN_SIZE = { width: 320, height: 220 };
@@ -265,18 +68,19 @@ function getInitialDocumentSearchSize() {
 }
 
 /**
- * Installed from the @algolia/search shadcn registry item, then adapted to accept
- * local items. It intentionally has no Algolia client, credentials, analytics,
- * branding, or network behavior.
+ * Stealth search-dialog contents inside the existing non-modal, resizable panel.
+ * The feature retains ownership of filtering, selection and document navigation.
  */
 export default function DocumentSearch({
   buttonProps,
   buttonText = "Search",
-  dialogDescription = "Search local mock results.",
+  dialogDescription = "Search document passages.",
   dialogTitle = "Search",
   enableKeyboardShortcut = false,
   finalFocusEl,
-  items,
+  items = [],
+  search,
+  sourceLabel = "Local results",
   onOpenChange,
   open: controlledOpen,
   hideTrigger = false,
@@ -297,7 +101,8 @@ export default function DocumentSearch({
     () => filterDocumentSearchItems(items, query),
     [items, query],
   );
-  const visibleItems = query.trim() ? filteredItems : [];
+  const live = useLiveDocumentSearch(search, query, isPanelOpen);
+  const visibleItems = search ? live.items : query.trim() ? filteredItems : [];
   const { hoverIndex, moveDown, moveUp, selectedIndex, selectionOrigin } =
     useDocumentSearchKeyboardNavigation(visibleItems.map((item) => item.id));
   const selectedItem =
@@ -367,7 +172,7 @@ export default function DocumentSearch({
       </FloatingPanelTrigger> : null}
       <FloatingPanelContent
         aria-describedby="local-search-description"
-        className="max-w-[calc(100vw-2rem)] overflow-hidden"
+        className="max-w-[calc(100vw-2rem)]"
       >
         <FloatingPanelHeader>
           <FloatingPanelTitle>{dialogTitle}</FloatingPanelTitle>
@@ -388,65 +193,28 @@ export default function DocumentSearch({
           {dialogDescription}
         </p>
         <div className="flex min-h-0 flex-1 flex-col">
-          <SearchInput
-            activeItemId={
-              selectedItem
-                ? `local-search-result-${selectedItem.id}`
-                : undefined
-            }
+          <SearchDialogContent
+            activeItemId={selectedItem ? `local-search-result-${selectedItem.id}` : undefined}
+            loading={live.loading}
+            error={live.error}
+            onRetry={live.retry}
+            sourceLabel={sourceLabel}
             inputRef={inputRef}
+            items={visibleItems}
             onArrowDown={moveDown}
             onArrowUp={moveUp}
             onEnter={() => selectItem(selectedItem)}
+            onHoverIndex={hoverIndex}
+            onSelect={selectItem}
             onQueryChange={setQuery}
             onClose={() => setOpen(false)}
             placeholder={placeholder}
             query={query}
+            selectedIndex={selectedIndex}
+            shouldScrollSelection={selectionOrigin === "keyboard"}
           />
-          {query.trim() && visibleItems.length > 0 ? (
-            <HitsList
-              items={visibleItems}
-              onHoverIndex={hoverIndex}
-              onSelect={selectItem}
-              query={query}
-              selectedIndex={selectedIndex}
-              shouldScrollSelection={selectionOrigin === "keyboard"}
-            />
-          ) : null}
-          {query.trim() && visibleItems.length === 0 ? (
-            <NoResults
-              onClear={() => {
-                setQuery("");
-                inputRef.current?.focus();
-              }}
-              query={query}
-            />
-          ) : null}
-          <Footer />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>
   );
-}
-
-export function filterDocumentSearchItems(
-  items: DocumentSearchItem[],
-  query: string,
-): DocumentSearchItem[] {
-  const terms = getDocumentSearchQueryTerms(query);
-  if (terms.length === 0) {
-    return items;
-  }
-  return items.filter((item) => {
-    const searchable = [
-      item.primaryText,
-      item.secondaryText,
-      item.tertiaryText,
-      item.searchText,
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(" ")
-      .toLocaleLowerCase();
-    return terms.every((term) => searchable.includes(term));
-  });
 }

@@ -498,7 +498,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 16
+            supported: 17
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -974,4 +974,60 @@ fn classification_status_upgrade_rejects_damaged_layout_and_rolls_back_rename() 
         assert_eq!(table_count(&connection, "slide_classifications"), 1);
         assert!(table_columns(&connection, "template_classification_status").is_empty());
     }
+}
+
+#[test]
+fn template_ownership_upgrade_preserves_shared_records_unassigned_and_enforces_users() {
+    let mut connection = classification_schema_fifteen();
+    connection
+        .execute_batch(CLASSIFICATION_STATUS_UPGRADE)
+        .unwrap();
+    connection.pragma_update(None, "user_version", 16).unwrap();
+    let before = product_snapshot(&connection);
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(product_snapshot(&connection), before);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT template_json,owner_user_id FROM templates WHERE template_id='retained'",
+                [],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
+            )
+            .unwrap(),
+        ("{}".into(), None)
+    );
+    assert!(connection
+        .execute(
+            "UPDATE templates SET owner_user_id=999 WHERE template_id='retained'",
+            []
+        )
+        .is_err());
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+}
+
+#[test]
+fn template_ownership_upgrade_rejects_damaged_marker_sixteen_without_partial_changes() {
+    let mut connection = classification_schema_fifteen();
+    connection
+        .execute_batch(CLASSIFICATION_STATUS_UPGRADE)
+        .unwrap();
+    connection.pragma_update(None, "user_version", 16).unwrap();
+    connection
+        .execute_batch("DROP INDEX app_templates_template_id_idx")
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert!(!table_columns(&connection, "templates").contains(&"owner_user_id".into()));
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        16
+    );
+    assert_eq!(table_count(&connection, "templates"), 1);
 }

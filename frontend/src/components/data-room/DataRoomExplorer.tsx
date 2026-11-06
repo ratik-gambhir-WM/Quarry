@@ -153,7 +153,7 @@ function ExplorerNodeItem({
               />
             ) : null}
           </span>
-          <span className="mt-0.5 shrink-0 text-sidebar-muted">
+          <span className={`mt-0.5 shrink-0 ${isFolder ? "text-icon-files" : "text-icon-knowledge"}`}>
             <Icon
               className="h-[18px] w-[18px]"
               name={iconNameForNode(node.kind)}

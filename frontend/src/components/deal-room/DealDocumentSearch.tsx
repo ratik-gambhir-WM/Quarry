@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { runtime } from "@quarry/runtime";
 import type { KeywordFileChunkHit } from "../../contracts/quarryApi";
 import { getDataRoomPath } from "../../data/workspace";
+import { keywordSearchExcerpt } from "../../data/documents/keywordSearch";
 import { useWorkspace } from "../../app/WorkspaceProvider";
 import { Button } from "../ui/stealth/button";
 import { SearchField } from "../ui/search-field";
@@ -135,11 +136,11 @@ export function DealDocumentSearch({ dealId }: { dealId: string }) {
           Search documents
         </Button>
       </form>
-      <div aria-live="polite" role="status">
+      <div aria-live="polite" role="status" className="text-sm text-muted-foreground">
         {result.status === "loading"
           ? "Searching documents…"
           : result.status === "ready"
-            ? `${result.hits.length} results${scope === "deal" ? " in this deal" : " across accessible deals"}.`
+            ? `${result.hits.length} matching ${result.hits.length === 1 ? "passage" : "passages"}${scope === "deal" ? " in this deal" : " across accessible deals"}.`
             : "Search current uploaded documents."}
       </div>
       {result.status === "error" ? (
@@ -157,22 +158,41 @@ export function DealDocumentSearch({ dealId }: { dealId: string }) {
             description="Try different search terms."
           />
         ) : (
-          <ul className="divide-y divide-border">
-            {result.hits.map((hit) => (
-              <li key={hit.chunk_id} className="space-y-2 py-4">
-                <Link
-                  className="font-medium text-primary underline"
-                  to={getDataRoomPath(hit.deal_id)}
-                >
-                  {deals.find((d) => d.room.id === hit.deal_id)?.room.name ??
-                    "Deal"}{" "}
-                  · Open data room
-                </Link>
-                <p className="whitespace-pre-wrap text-sm">
-                  {hit.text.slice(0, 600)}
-                </p>
-              </li>
-            ))}
+          <ul aria-label="Search results" className="divide-y divide-border">
+            {result.hits.map((hit) => {
+              const dealName = deals.find((d) => d.room.id === hit.deal_id)?.room.name ?? "Deal";
+              const page = hit.page_start == null
+                ? `Passage ${hit.chunk_index}`
+                : hit.page_end != null && hit.page_end !== hit.page_start
+                  ? `Pages ${hit.page_start}–${hit.page_end}`
+                  : `Page ${hit.page_start}`;
+              return (
+                <li key={hit.chunk_id} className="py-5">
+                  <div className="max-w-4xl space-y-3">
+                    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+                      <div className="min-w-0 flex-1 basis-56 space-y-1">
+                        <p className="text-xs text-muted-foreground">{dealName} · {page}</p>
+                        <h2 className="line-clamp-2 text-base font-medium text-foreground">
+                          {hit.section_path.trim() || `Passage ${hit.chunk_index}`}
+                        </h2>
+                      </div>
+                      <Link
+                        aria-label={`Open data room for ${dealName}`}
+                        className="shrink-0 rounded-sm text-sm text-primary underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+                        to={getDataRoomPath(hit.deal_id)}
+                      >
+                        Open data room
+                      </Link>
+                    </div>
+                    <p className="wrap-anywhere text-sm leading-relaxed text-foreground [&_mark]:rounded-xs [&_mark]:bg-primary/10 [&_mark]:text-foreground [&_mark]:font-medium">
+                      {keywordSearchExcerpt(hit.text, query).map((part, index) =>
+                        part.matched ? <mark key={index}>{part.text}</mark> : part.text,
+                      )}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )
       ) : null}

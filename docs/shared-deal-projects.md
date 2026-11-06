@@ -99,9 +99,13 @@ Search first selects current, live, authorized chunk identities from SQLite, ver
 projection headers, ranks only those candidates, then checks canonical identities again before
 exposing text. Vector search uses the pinned SDK's within-stream cosine ranking; distances from
 the same configured embedding model are comparable across deals. The pinned SDK lacks a
-within-stream text ranking operation. Keyword search therefore uses bounded lexical term-frequency
-ranking, length normalization and deterministic ID tie breaks, with reciprocal-rank fusion across
-deals (`1 / (60 + rank + 1)`). This is not a BM25 score comparison across partitions.
+within-stream text ranking operation. Keyword search therefore requires every distinct query word
+to match a whole, case-insensitive token in the same chunk. Punctuation separates tokens; `+` and
+`#` are retained so `C`, `C++` and `C#` stay distinct. It does not accept a passage merely because
+one query word or a substring matches (`on` does not match `confidential`). Matching candidates use
+bounded term-frequency ranking, length normalization and deterministic ID tie breaks, with
+reciprocal-rank fusion across deals (`1 / (60 + rank + 1)`). This is not a BM25 score comparison
+across partitions.
 
 Search is explicitly bounded to 200 accessible deals globally, 5,000 current files and 10,000
 canonical chunk identities per deal (including retained generations). Exceeding a bound returns an

@@ -148,7 +148,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 }
 
 #[allow(clippy::too_many_arguments)]
-fn assemble_api_with_templates(
+pub(crate) fn assemble_api_with_templates(
     config: &AppConfig,
     sqlite: SqliteClient,
     document_graph: Arc<HelixClient>,
@@ -351,11 +351,13 @@ async fn build_templates(
             .map(|c| Arc::new(DiligenceStudioClient::new(http, c.base_url.clone())));
         return Ok((Arc::new(TemplateService::new(legacy)), None));
     }
-    let repository = tokio::task::spawn_blocking(move || seed_templates(sqlite))
+    let repository = tokio::task::spawn_blocking(move || initialize_template_repository(sqlite))
         .await
         .map_err(|_| BootstrapError::SlideTemplates("template store worker failed".into()))?
         .map_err(|_| {
-            BootstrapError::SlideTemplates("shared SQLite template catalog seeding failed".into())
+            BootstrapError::SlideTemplates(
+                "shared SQLite template catalog initialization failed".into(),
+            )
         })?;
     let native_preview: Arc<dyn native::TemplatePreviewGenerator> = match &settings.chromium_path {
         Some(path) => Arc::new(native::HeadlessTemplatePreviewGenerator::new(
@@ -430,13 +432,12 @@ async fn build_templates(
     ))
 }
 /// The repository shares the migrated product connection; it never opens or initializes a store.
-fn seed_templates(
+fn initialize_template_repository(
     sqlite: SqliteClient,
 ) -> anyhow::Result<Arc<dyn templates::slide_templates::TemplateRepository>> {
-    use templates::slide_templates::{catalog, SqliteTemplateRepository, APP_ID};
+    use templates::slide_templates::{SqliteTemplateRepository, APP_ID};
     let repository = Arc::new(SqliteTemplateRepository::new(sqlite));
     repository.ensure_app(APP_ID, None)?;
-    catalog::seed(repository.as_ref())?;
     Ok(repository)
 }
 

@@ -27,7 +27,7 @@ export function SidebarStaticItem({
       type="button"
     >
       <SidebarIcon
-        className={`h-5 w-5 ${active ? "text-current" : "text-sidebar-muted"}`}
+        className="h-5 w-5"
         name={icon}
       />
       <span className="text-[13px] font-medium leading-5">{label}</span>

@@ -110,7 +110,7 @@ async fn svg_asset_responses_isolate_active_content() {
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" onload="fetch('/api/v1/deals')"><script>localStorage.setItem('svg-executed','yes')</script><foreignObject><iframe xmlns="http://www.w3.org/1999/xhtml" src="/api/v1/deals"/></foreignObject><rect width="10" height="10" fill="red"/></svg>"#;
     connection
         .execute(
-            "INSERT INTO templates (template_id, template_json) VALUES (?1, json(?2))",
+            "INSERT INTO templates (template_id, template_json, owner_user_id) VALUES (?1, json(?2), 1)",
             rusqlite::params![
                 "svg-template",
                 serde_json::to_string(&presentation(false)).unwrap()
@@ -631,7 +631,7 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
     let connection = rusqlite::Connection::open(&database_path).expect("open SQLite for seeding");
     connection
         .execute(
-            "INSERT INTO templates (template_id, template_json) VALUES (?1, json(?2))",
+            "INSERT INTO templates (template_id, template_json, owner_user_id) VALUES (?1, json(?2), 1)",
             rusqlite::params![
                 template_id,
                 serde_json::to_string(&presentation(false)).expect("serialize presentation")
@@ -1041,5 +1041,8 @@ fn compose(endpoint: SlideTemplateEndpoint) -> Router {
     let api = crate::domains::templates::route::routes(facade).merge(
         crate::domains::templates::slide_templates::route::routes(studio),
     );
-    crate::create_router(api, &crate::AppConfig::default().http)
+    crate::create_router(
+        api.layer(axum::Extension(crate::integration_support::test_actor())),
+        &crate::AppConfig::default().http,
+    )
 }

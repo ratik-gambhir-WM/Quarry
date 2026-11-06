@@ -1360,7 +1360,6 @@ function PdfEditorZoomControl({
       >
         <SelectTrigger
           size="sm"
-          className="w-[104px] min-w-[104px]"
           aria-label="Zoom level"
         >
           <SelectValue placeholder="Zoom">

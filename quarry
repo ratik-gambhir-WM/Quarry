@@ -17,6 +17,8 @@ readonly TEMPLATE_BACKEND="${QUARRY_TEMPLATE_BACKEND:-embedded}"
 readonly DILIGENCE_STUDIO_ROOT="${QUARRY_DILIGENCE_STUDIO_ROOT:-${HOME}/diligence-studio-server}"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
 readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
+readonly HELIX_VOLUME_NAME="${HELIX_CONTAINER_NAME}-data"
+readonly HELIX_DATA_DIR="/var/lib/helix"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
 readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
 
@@ -32,6 +34,7 @@ Usage: quarry <web|desktop>
   desktop  Start Docker, Helix, Axum, and the Tauri desktop UI.
 
 Templates run in Axum and persist in Quarry's shared SQLite database by default.
+Helix uses disk storage in the Docker volume <container-name>-data.
 QUARRY_TEMPLATE_BACKEND=diligence-studio selects the retained Node rollback service.
 
 Run this command from the Quarry repository root.
@@ -241,9 +244,19 @@ else
   docker create \
     --name "$HELIX_CONTAINER_NAME" \
     --restart unless-stopped \
-    --publish 6969:8080 \
+    --publish 127.0.0.1:6969:8080 \
+    --env "HELIX_DATA_DIR=${HELIX_DATA_DIR}" \
+    --mount "type=volume,source=${HELIX_VOLUME_NAME},target=${HELIX_DATA_DIR}" \
     "$HELIX_IMAGE" >/dev/null \
     || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
+fi
+
+helix_disk_storage="$(docker container inspect --format '{{range .Config.Env}}{{if eq . "HELIX_DATA_DIR=/var/lib/helix"}}true{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
+  || fail "could not inspect Helix storage configuration"
+helix_data_volume="$(docker container inspect --format '{{range .Mounts}}{{if and (eq .Destination "/var/lib/helix") (eq .Type "volume") .RW}}{{.Name}}{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
+  || fail "could not inspect Helix data volume"
+if [[ "$helix_disk_storage" != "true" || "$helix_data_volume" != "$HELIX_VOLUME_NAME" ]]; then
+  fail "Helix container '${HELIX_CONTAINER_NAME}' must use HELIX_DATA_DIR=${HELIX_DATA_DIR} and writable Docker volume '${HELIX_VOLUME_NAME}'. Stop Quarry and preserve/export any live graph before deliberately replacing the container. This launcher will not replace it or use memory storage."
 fi
 
 if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" == "true" ]]; then

@@ -49,8 +49,7 @@ import { Check, Copy, Pipette, ChevronsUpDown } from "lucide-react";
 
 const cossInputKeyboardFocusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-const cossInputWrapperFocusRing =
-  "focus-within:border-input-focus focus-within:ring-1 focus-within:ring-input-focus/24 focus-within:ring-offset-0 dark:focus-within:border-input-focus dark:focus-within:ring-input-focus/24";
+const cossInputWrapperFocus = "text-input-group";
 const cossOutlineEdge =
   "before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit]";
 const cossOutlineEdgeHighlight =
@@ -93,12 +92,12 @@ function withHueContinuity<
   return angular < tolerance ? { ...next, h: previousHue } : next;
 }
 const triggerGroupClass =
-  "relative flex h-10 w-full min-w-0 items-center rounded-md border border-input bg-popover not-dark:bg-clip-padding text-base text-foreground shadow-xs/5 ring-input-focus/32 transition-shadow before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] not-has-disabled:not-has-focus-visible:before:shadow-[0_1px_--theme(--color-black/4%)] has-focus-visible:border-input-focus has-focus-visible:ring-[3px] has-disabled:opacity-64 has-[:disabled,:focus-visible]:shadow-none dark:bg-input/32 dark:ring-input-focus/32 dark:has-focus-visible:border-input-focus dark:not-has-focus-visible:border-white/[0.08] dark:not-has-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-has-disabled:not-has-focus-visible:before:shadow-[0_-1px_--theme(--color-white/6%)]";
+  "text-input-group relative flex h-10 w-full min-w-0 items-center rounded-md border border-input bg-popover not-dark:bg-clip-padding text-base text-foreground shadow-xs/5 ring-input-focus/32 transition-shadow before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] not-has-disabled:not-has-focus-visible:before:shadow-[0_1px_--theme(--color-black/4%)] has-focus-visible:border-input-focus has-focus-visible:ring-[3px] has-disabled:opacity-64 has-[:disabled,:focus-visible]:shadow-none dark:bg-input/32 dark:ring-input-focus/32 dark:has-focus-visible:border-input-focus dark:not-has-focus-visible:border-white/[0.08] dark:not-has-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-has-disabled:not-has-focus-visible:before:shadow-[0_-1px_--theme(--color-white/6%)]";
 const fieldSurfaceClass = cn(
   "relative rounded-md border border-input bg-popover text-foreground shadow-xs/5 transition-shadow not-dark:bg-clip-padding dark:border-white/[0.08] dark:bg-input/32",
   cossOutlineEdge,
   cossOutlineEdgeHighlight,
-  cossInputWrapperFocusRing,
+  cossInputWrapperFocus,
 );
 const channelInputClass =
   "h-full w-full min-w-0 border-0 bg-transparent px-1 py-0 text-center text-sm leading-none tabular-nums text-foreground outline-none [transition:background-color_5000000s_ease-in-out_0s] placeholder:text-muted-foreground/72 focus:border-0 focus:outline-none focus:ring-0";
