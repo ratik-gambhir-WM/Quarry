@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DataRoomDocumentSearch } from "@/components/data-room/document-search/DataRoomDocumentSearch";
@@ -17,6 +17,39 @@ function mount(onActivateResult = vi.fn()) {
     files={[{ fileId: "file-1", name: "Synthetic_Terms.pdf" }, { fileId: "file-2", name: "Other.pdf" }]}
     onActivateResult={onActivateResult} open />);
 }
+
+it.each([
+  ["on", "Confidential provisions on liability", ["on"]],
+  ["Ruby, Rails", "Ruby on Rails", ["Ruby", "Rails"]],
+  ["C", "C, C++ and C# services", ["C"]],
+  ["C++", "C, C++ and C# services", ["C++"]],
+  ["C#", "C, C++ and C# services", ["C#"]],
+  ["CAFÉ", "A café service", ["café"]],
+  ["liability", "Background context. ".repeat(40) + "\nThe liability provision. " + "More context. ".repeat(40), ["liability"]],
+] as const)("highlights whole keyword tokens for %s in results and preview", async (query, text, expected) => {
+  search.mockResolvedValue([keywordHit({ text })]);
+  mount();
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: query } });
+  const option = await screen.findByRole("option");
+  const preview = screen.getByRole("complementary", { name: "Preview", hidden: true });
+  for (const surface of [option, preview]) {
+    expect([...surface.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(expected);
+  }
+  expect(within(preview).getByRole("heading").querySelector("mark")).toBeNull();
+});
+
+it("uses whole-token ranges in file names without truncating or normalizing them", async () => {
+  search.mockResolvedValue([keywordHit({ text: "The café uses C++ and C#." })]);
+  const fileName = "📄 café_C++_C#_Confidential.pdf";
+  render(<DataRoomDocumentSearch dealId="DEAL-1" currentFileId="file-1"
+    currentFileName={fileName} currentPageCount={3} onActivateResult={vi.fn()} open />);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "CAFÉ, C++" } });
+  const option = await screen.findByRole("option");
+  const heading = within(screen.getByRole("complementary", { name: "Preview", hidden: true })).getByRole("heading");
+  expect(heading.textContent).toBe(fileName);
+  expect([...heading.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["café", "C++"]);
+  expect([...option.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["café", "C++", "café", "C++"]);
+});
 
 it("debounces typing, calls the deal keyword API and activates an actual page", async () => {
   vi.useFakeTimers();

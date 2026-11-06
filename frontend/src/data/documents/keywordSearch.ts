@@ -7,18 +7,23 @@ function keywordWords(text: string) {
   );
 }
 
+function keywordMatches(text: string, query: string) {
+  const terms = new Set(keywordWords(query).map(([word]) => word.toLowerCase()));
+  return keywordWords(text).filter(([word]) => terms.has(word.toLowerCase()));
+}
+
+/** Whole-token offsets into the supplied text, without excerpting or normalization. */
+export function keywordSearchMatchRanges(text: string, query: string): [number, number][] {
+  return keywordMatches(text, query).map((word) => [word.index, word.index + word[0].length]);
+}
+
 /** A compact passage around a distinctive match, with safe text-only highlights. */
 export function keywordSearchExcerpt(
   text: string,
   query: string,
 ): KeywordExcerptPart[] {
   const compact = text.replace(/\s+/gu, " ").trim();
-  const terms = new Set(
-    keywordWords(query).map(([word]) => word.toLowerCase()),
-  );
-  const matches = keywordWords(compact).filter(([word]) =>
-    terms.has(word.toLowerCase()),
-  );
+  const matches = keywordMatches(compact, query);
   const frequencies = new Map<string, number>();
   for (const [word] of matches) {
     const key = word.toLowerCase();
@@ -46,8 +51,7 @@ export function keywordSearchExcerpt(
   const parts: KeywordExcerptPart[] = [];
   let position = 0;
   if (start > 0) parts.push({ text: "…", matched: false });
-  for (const word of keywordWords(excerpt)) {
-    if (!terms.has(word[0].toLowerCase())) continue;
+  for (const word of keywordMatches(excerpt, query)) {
     if (word.index > position)
       parts.push({ text: excerpt.slice(position, word.index), matched: false });
     parts.push({ text: word[0], matched: true });

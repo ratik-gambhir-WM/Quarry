@@ -3,8 +3,17 @@ import { ArrowDown, ArrowUp, CornerDownLeft, FileText, Search, X } from "lucide-
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { HighlightMatch } from "./highlight-match";
+import type { MatchRange } from "./highlight-match-model";
 
-type SearchDialogItem = { id: string; primaryText: string; secondaryText?: string; tertiaryText?: string; disabledReason?: string };
+type SearchDialogItem = {
+  id: string;
+  primaryText: string;
+  primaryMatchRanges?: readonly MatchRange[];
+  secondaryText?: string;
+  secondaryMatchRanges?: readonly MatchRange[];
+  tertiaryText?: string;
+  disabledReason?: string;
+};
 
 /** Adapted from https://www.stealth.pm/r/search-dialog.json: compact results,
  * preview and keyboard footer, hosted by Quarry's non-modal floating panel.
@@ -70,8 +79,8 @@ export function SearchDialogContent<T extends SearchDialogItem>({
               className="flex min-h-14 w-full cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-foreground outline-none aria-selected:bg-foreground/7 [@media(hover:hover)]:hover:bg-foreground/5 active:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring">
               <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-icon-knowledge" />
               <span className="min-w-0 flex-1">
-                <HighlightMatch className="block truncate" text={item.primaryText} query={query} />
-                {item.secondaryText && <HighlightMatch className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground" text={item.secondaryText} query={query} excerpt={140} />}
+                <HighlightMatch className="block truncate" text={item.primaryText} query={query} ranges={item.primaryMatchRanges} />
+                {item.secondaryText && <HighlightMatch className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground" text={item.secondaryText} query={query} ranges={item.secondaryMatchRanges} excerpt={140} />}
                 <span className="mt-1 block text-[11px] text-muted-foreground">{item.tertiaryText}</span>
                 {item.disabledReason && <span className="mt-1 block text-[11px] text-muted-foreground">{item.disabledReason}</span>}
               </span>
@@ -87,8 +96,8 @@ export function SearchDialogContent<T extends SearchDialogItem>({
           {selected ? <>
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-5">
               <p className="text-xs text-muted-foreground">{selected.tertiaryText}</p>
-              <h3 className="break-words text-[15px] font-medium leading-snug tracking-tight"><HighlightMatch text={selected.primaryText} query={query} /></h3>
-              {selected.secondaryText && <p className="text-[13px] leading-relaxed text-muted-foreground"><HighlightMatch text={selected.secondaryText} query={query} /></p>}
+              <h3 className="break-words text-[15px] font-medium leading-snug tracking-tight"><HighlightMatch text={selected.primaryText} query={query} ranges={selected.primaryMatchRanges} /></h3>
+              {selected.secondaryText && <p className="text-[13px] leading-relaxed text-muted-foreground"><HighlightMatch text={selected.secondaryText} query={query} ranges={selected.secondaryMatchRanges} /></p>}
               {selected.disabledReason && <p className="text-xs text-muted-foreground">{selected.disabledReason}</p>}
             </div>
             <div className="shrink-0 border-t border-outline-variant px-5 py-3"><Button size="sm" disabled={Boolean(selected.disabledReason)} onClick={() => onSelect(selected)}>Open <CornerDownLeft aria-hidden="true" className="size-3.5" /></Button></div>

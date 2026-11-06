@@ -11,8 +11,10 @@ export type DocumentSearchItem = {
   imageAlt?: string;
   imageUrl?: string;
   primaryText: string;
+  primaryMatchRanges?: readonly (readonly [number, number])[];
   searchText?: string;
   secondaryText?: string;
+  secondaryMatchRanges?: readonly (readonly [number, number])[];
   tertiaryText?: string;
 };
 

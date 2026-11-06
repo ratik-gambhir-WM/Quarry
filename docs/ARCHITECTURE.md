@@ -763,6 +763,9 @@ components to Quarry tokens: a compact results list, a selected-result preview a
 600px or more, match highlighting, result counts, and keyboard hints anchored at the bottom.
 Matched words use the light-theme action button's deep indigo with white text in both themes,
 through shared search-match tokens, including file names, result snippets and the preview.
+Live keyword results supply whole-token match ranges for file names and preserve the excerpt
+helper's ranges through both result and preview rendering, including punctuation-separated terms
+and distinct C/C++/C# tokens. Local search items without supplied ranges retain generic highlighting.
 Its search input stays borderless when focused; the existing row divider supplies a subtle focus
 indicator instead of an inner rectangle.
 The existing floating shell retains resizing and background interaction; no modal backdrop or

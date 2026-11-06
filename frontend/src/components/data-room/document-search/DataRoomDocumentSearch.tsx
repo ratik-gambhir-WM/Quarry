@@ -1,6 +1,6 @@
 import { useCallback, type ReactElement } from "react";
 import { runtime } from "@quarry/runtime";
-import { keywordSearchExcerpt } from "@/data/documents/keywordSearch";
+import { keywordSearchExcerpt, keywordSearchMatchRanges } from "@/data/documents/keywordSearch";
 import DocumentSearch from "./DocumentSearch";
 import type { DocumentSearchItem, DocumentSearchResult } from "./documentSearchModel";
 
@@ -40,11 +40,20 @@ export function DataRoomDocumentSearch({
       const location = page === null ? `Passage ${hit.chunk_index}`
         : hit.page_end !== null && hit.page_end !== page
           ? `Pages ${page}–${hit.page_end}` : `Page ${page}`;
+      const excerpt = keywordSearchExcerpt(hit.text, query);
+      let offset = 0;
+      const secondaryMatchRanges: [number, number][] = [];
+      for (const part of excerpt) {
+        if (part.matched) secondaryMatchRanges.push([offset, offset + part.text.length]);
+        offset += part.text.length;
+      }
       return {
         id: hit.chunk_id,
         fileName,
         primaryText: fileName,
-        secondaryText: keywordSearchExcerpt(hit.text, query).map((part) => part.text).join(""),
+        primaryMatchRanges: keywordSearchMatchRanges(fileName, query),
+        secondaryText: excerpt.map((part) => part.text).join(""),
+        secondaryMatchRanges,
         tertiaryText: [hit.section_path.trim(), location].filter(Boolean).join(" · "),
         target: available ? { kind: "pdf-page", page } : undefined,
         disabledReason: available ? undefined : hit.file_id !== currentFileId
