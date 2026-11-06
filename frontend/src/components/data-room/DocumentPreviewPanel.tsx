@@ -4,7 +4,6 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
   type RefObject,
 } from "react";
 import type { AnnotationTransferItem } from "@embedpdf/plugin-annotation/react";
@@ -13,7 +12,6 @@ import type { DataRoomTreeNode } from "../../data/dataRoom";
 import type {
   DocumentPreviewResponse,
   PreviewState,
-  RawTextState,
 } from "../../data/dataRoomPreview";
 import { PDFEditor, type PDFEditorHandle } from "../extend/pdf-editor";
 import { Icon } from "../ui/Icon";
@@ -24,11 +22,9 @@ type DocumentPreviewPanelProps = {
   document: DataRoomTreeNode;
   onClose: () => void;
   onPageCountChange: (pageCount: number) => void;
-  onRequestRawText: () => void;
   onRetry?: () => void;
   onRequestedPageHandled: () => void;
   preview: PreviewState;
-  rawText: RawTextState;
   requestedPage: number | null;
 };
 
@@ -36,7 +32,7 @@ export type DocumentPreviewPanelHandle = {
   focusViewer: () => void;
 };
 
-export type { PreviewState, RawTextState } from "../../data/dataRoomPreview";
+export type { PreviewState } from "../../data/dataRoomPreview";
 
 export const DocumentPreviewPanel = forwardRef<
   DocumentPreviewPanelHandle,
@@ -46,18 +42,14 @@ export const DocumentPreviewPanel = forwardRef<
     document,
     onClose,
     onPageCountChange,
-    onRequestRawText,
     onRetry,
     onRequestedPageHandled,
     preview,
-    rawText,
     requestedPage,
   },
   ref,
 ) {
-  const [viewMode, setViewMode] = useState<"preview" | "raw-text">("preview");
   const editorRef = useRef<PDFEditorHandle>(null);
-  const canShowRawText = Boolean(document.storedFileId);
 
   useEffect(() => {
     if (requestedPage === null) {
@@ -67,7 +59,6 @@ export const DocumentPreviewPanel = forwardRef<
       return;
     }
     const frame = requestAnimationFrame(() => {
-      setViewMode("preview");
       editorRef.current?.scrollToPage(requestedPage);
       onRequestedPageHandled();
     });
@@ -95,29 +86,13 @@ export const DocumentPreviewPanel = forwardRef<
     [],
   );
 
-  function showRawText() {
-    setViewMode("raw-text");
-    if (rawText.status === "idle" || rawText.status === "error") {
-      onRequestRawText();
-    }
-  }
-
   return (
     <section className="glass-panel workspace-pane relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-none border-y-0">
-      {viewMode === "raw-text" || preview.status !== "ready" ? (
+      {preview.status !== "ready" ? (
         <DocumentPreviewHeader
           document={document}
-          onBackToPreview={
-            viewMode === "raw-text" ? () => setViewMode("preview") : undefined
-          }
           onClose={onClose}
-          subtitle={
-            viewMode === "raw-text"
-              ? rawText.status === "ready"
-                ? `Raw text · ${rawText.response.sourceKind.toUpperCase()}`
-                : "Raw document text"
-              : "Document preview"
-          }
+          subtitle="Document preview"
         />
       ) : null}
 
@@ -147,18 +122,14 @@ export const DocumentPreviewPanel = forwardRef<
 
         {preview.status === "ready" ? (
           <PdfEditorViewer
-            className={viewMode === "raw-text" ? "hidden" : undefined}
             documentId={document.id}
             documentName={document.name}
-            onClose={onClose}
             onLoad={onPageCountChange}
-            onShowRawText={canShowRawText ? showRawText : undefined}
             response={preview.response}
             editorRef={editorRef}
           />
         ) : null}
 
-        {viewMode === "raw-text" ? <RawTextViewer rawText={rawText} /> : null}
       </div>
     </section>
   );
@@ -166,12 +137,10 @@ export const DocumentPreviewPanel = forwardRef<
 
 function DocumentPreviewHeader({
   document,
-  onBackToPreview,
   onClose,
   subtitle,
 }: {
   document: DataRoomTreeNode;
-  onBackToPreview?: () => void;
   onClose: () => void;
   subtitle: string;
 }) {
@@ -194,15 +163,6 @@ function DocumentPreviewHeader({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        {onBackToPreview ? (
-          <button
-            className="rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-2 text-[12px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
-            onClick={onBackToPreview}
-            type="button"
-          >
-            Back to preview
-          </button>
-        ) : null}
         <button
           aria-label="Close document preview"
           className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-4 text-[12px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
@@ -216,67 +176,6 @@ function DocumentPreviewHeader({
         </button>
       </div>
     </header>
-  );
-}
-
-function RawTextViewer({ rawText }: { rawText: RawTextState }) {
-  if (rawText.status === "idle" || rawText.status === "loading") {
-    return <RawTextLoading />;
-  }
-  if (rawText.status === "error") {
-    return (
-      <PreviewMessage
-        detail={rawText.message}
-        title="Raw text unavailable"
-        tone="error"
-      />
-    );
-  }
-
-  return (
-    <div className="workspace-scrollbar-hidden min-h-0 flex-1 overflow-auto bg-surface-container px-6 py-8">
-      <article className="mx-auto max-w-5xl rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm">
-        <header className="border-b border-outline-variant px-6 py-4">
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-            Extracted from {rawText.response.sourceKind.toUpperCase()}
-          </p>
-          <h2
-            className="mt-1 truncate text-base font-semibold text-text-main"
-            title={rawText.response.fileName}
-          >
-            {rawText.response.fileName}
-          </h2>
-        </header>
-        <pre className="whitespace-pre-wrap break-words px-6 py-5 font-mono text-[13px] leading-6 text-text-main">
-          {rawText.response.text}
-        </pre>
-      </article>
-    </div>
-  );
-}
-
-function RawTextLoading() {
-  return (
-    <div
-      aria-live="polite"
-      className="flex min-h-0 flex-1 items-center justify-center bg-surface-container p-8 [html[data-theme=dark]_&]:bg-black"
-      role="status"
-    >
-      <div className="text-center">
-        <img
-          alt=""
-          aria-hidden="true"
-          className="mx-auto h-14 w-14 animate-spin motion-reduce:animate-none [animation-duration:1.4s] [html[data-theme=dark]_&]:brightness-0 [html[data-theme=dark]_&]:invert"
-          src={previewLoadingMark}
-        />
-        <p className="mt-5 text-base font-semibold text-text-main">
-          Loading raw text
-        </p>
-        <p className="mt-1 text-sm leading-6 text-muted">
-          Extracting the document’s raw text…
-        </p>
-      </div>
-    </div>
   );
 }
 
@@ -306,21 +205,15 @@ function PdfPreviewLoading() {
 }
 
 function PdfEditorViewer({
-  className,
   documentId,
   documentName,
-  onClose,
   onLoad,
-  onShowRawText,
   response,
   editorRef,
 }: {
-  className?: string;
   documentId: string;
   documentName: string;
-  onClose: () => void;
   onLoad: (numPages: number) => void;
-  onShowRawText?: () => void;
   response: DocumentPreviewResponse;
   editorRef: RefObject<PDFEditorHandle | null>;
 }) {
@@ -350,7 +243,7 @@ function PdfEditorViewer({
   return (
     <div
       aria-label={`PDF document editor: ${response.fileName ?? documentName}`}
-      className={`min-h-0 min-w-0 flex-1 bg-surface-container [html[data-theme=dark]_&]:bg-black ${className ?? ""}`}
+      className="min-h-0 min-w-0 flex-1 bg-surface-container [html[data-theme=dark]_&]:bg-black"
       role="region"
     >
       <PDFEditor
@@ -389,30 +282,6 @@ function PdfEditorViewer({
         showUpload={false}
         signatureFontsStylesheetUrl={null}
         src={decodedPdf.source}
-        toolbarActions={
-          <div className="flex shrink-0 items-center gap-2">
-            {onShowRawText ? (
-              <button
-                className="h-8 rounded-lg px-3 text-[11px] font-semibold text-muted transition hover:bg-surface-container-high hover:text-text-main"
-                onClick={onShowRawText}
-                type="button"
-              >
-                Show raw text
-              </button>
-            ) : null}
-            <button
-              aria-label="Close document preview"
-              className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-3 text-[11px] font-semibold text-muted transition hover:bg-surface-container hover:text-text-main"
-              onClick={onClose}
-              type="button"
-            >
-              <span aria-hidden="true" className="text-base leading-none">
-                ×
-              </span>
-              Close
-            </button>
-          </div>
-        }
       />
     </div>
   );

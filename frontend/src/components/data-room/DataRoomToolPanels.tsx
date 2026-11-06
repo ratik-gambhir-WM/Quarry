@@ -25,8 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { DataRoomDocumentSearch } from "./document-search/DataRoomDocumentSearch";
-import DocumentSearch from "./document-search/DocumentSearch";
-import type { DocumentSearchContext } from "./DataRoomToolsProvider";
+import type { DocumentSearchContext } from "./dataRoomToolsContext";
 
 const SYNTHESIS_PANEL_DEFAULT_SIZE = { width: 520, height: 512 };
 const SYNTHESIS_PANEL_DEFAULT_INSET = { right: 72, bottom: 48 };
@@ -135,28 +134,19 @@ export default function DataRoomToolPanels({
         </FloatingPanelContent>
       </FloatingPanel>
 
-      {search ? (
-        <DataRoomDocumentSearch
-          {...search}
-          dialogTitle="Workspace Search"
-          finalFocusEl={finalFocusEl}
-          open={panel === "search"}
-          onOpenChange={onSearchOpenChange}
-          hideTrigger
-        />
-      ) : (
-        <DocumentSearch
-          dialogTitle="Workspace Search"
-          dialogDescription="Open a document in the Data Room to search its sample excerpts. Workspace-wide search is not connected yet."
-          showDescription
-          finalFocusEl={finalFocusEl}
-          items={[]}
-          onSelect={() => {}}
-          open={panel === "search"}
-          onOpenChange={onSearchOpenChange}
-          hideTrigger
-        />
-      )}
+      <DataRoomDocumentSearch
+        currentFileName=""
+        currentPageCount={0}
+        onActivateResult={() => {}}
+        {...search}
+        dealId={dealId}
+        key={`${email ?? ""}:${dealId}`}
+        dialogTitle="Workspace Search"
+        finalFocusEl={finalFocusEl}
+        open={panel === "search"}
+        onOpenChange={onSearchOpenChange}
+        hideTrigger
+      />
     </>
   );
 }

@@ -1,9 +1,7 @@
 import {
-  createContext,
   lazy,
   Suspense,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,43 +11,9 @@ import {
 import { WestMonroeMark } from "../brand/WestMonroeMark";
 import { SpeedDial, SpeedDialAction } from "../ui/speed-dial";
 import { AssistantIcon, WorkspaceSearchIcon } from "../ui/workspace-tool-icons";
-import type { DataRoomDocumentSearchProps } from "./document-search/DataRoomDocumentSearch";
+import { createSearchRegistry, ToolsContext, type DataRoomTool } from "./dataRoomToolsContext";
 
 const DataRoomToolPanels = lazy(() => import("./DataRoomToolPanels"));
-export type DocumentSearchContext = Omit<
-  DataRoomDocumentSearchProps,
-  "trigger" | "finalFocusEl" | "open" | "onOpenChange"
->;
-
-// The selected viewer registers its live page/focus capabilities. The shell subscribes
-// without copying document state or retaining callbacks after the viewer unmounts.
-function createSearchRegistry() {
-  let snapshot: DocumentSearchContext | null = null;
-  const listeners = new Set<() => void>();
-  return {
-    getSnapshot: () => snapshot,
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => { listeners.delete(listener); };
-    },
-    register(value: DocumentSearchContext) {
-      snapshot = value;
-      listeners.forEach((listener) => listener());
-      return () => {
-        if (snapshot !== value) return;
-        snapshot = null;
-        listeners.forEach((listener) => listener());
-      };
-    },
-  };
-}
-
-type Tool = "assistant" | "search";
-const ToolsContext = createContext<{
-  launch: (tool: Tool, trigger: HTMLButtonElement | null) => void;
-  registry: ReturnType<typeof createSearchRegistry>;
-} | null>(null);
-
 export function DataRoomToolsProvider({ active = true, children, dealId, email }: {
   active?: boolean;
   children: ReactNode;
@@ -64,12 +28,12 @@ export function DataRoomToolsProvider({ active = true, children, dealId, email }
   );
   const [panelState, setPanelState] = useState<{
     session: object;
-    panel: Tool | null;
+    panel: DataRoomTool | null;
   } | null>(null);
   const hasOpened = active && panelState?.session === session;
   const panel = hasOpened ? panelState.panel : null;
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  function launch(tool: Tool, trigger: HTMLButtonElement | null) {
+  function launch(tool: DataRoomTool, trigger: HTMLButtonElement | null) {
     triggerRef.current = trigger;
     setPanelState({ session, panel: tool });
   }
@@ -98,13 +62,6 @@ export function DataRoomToolsProvider({ active = true, children, dealId, email }
   );
 }
 
-export function useDataRoomDocumentSearch(value: DocumentSearchContext | null) {
-  const registry = useContext(ToolsContext)?.registry;
-  useEffect(() => {
-    if (value && registry) return registry.register(value);
-  }, [registry, value]);
-}
-
 export function DataRoomToolsDial() {
   const tools = useContext(ToolsContext);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -122,11 +79,11 @@ export function DataRoomToolsDial() {
       restoreFocus={() => !actionChosen.current}
       onOpenChange={(open) => { if (open) actionChosen.current = false; }}
     >
-      <SpeedDialAction icon={<AssistantIcon className="size-5" />} onClick={() => {
+      <SpeedDialAction icon={<AssistantIcon className="size-5 text-icon-assistant" />} onClick={() => {
         actionChosen.current = true;
         tools.launch("assistant", triggerRef.current);
       }}>Assistant</SpeedDialAction>
-      <SpeedDialAction icon={<WorkspaceSearchIcon className="size-5" />} onClick={() => {
+      <SpeedDialAction icon={<WorkspaceSearchIcon className="size-5 text-icon-navigation" />} onClick={() => {
         actionChosen.current = true;
         tools.launch("search", triggerRef.current);
       }}>Workspace Search</SpeedDialAction>

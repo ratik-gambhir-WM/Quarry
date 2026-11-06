@@ -242,7 +242,7 @@ fn load(tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<Option<Row>> {
 // Select one due row instead of decoding every completed template/vector on each poll.
 fn next_job_row(
     tx: &SqliteTransaction<'_>,
-    app_id: &str,
+    scope: &SqliteTemplateRepository,
     embedding: bool,
     now: &str,
 ) -> anyhow::Result<Option<Row>> {
@@ -277,7 +277,13 @@ fn next_job_row(
                 "template_classification_status.template_id",
                 "app_templates.template_id",
             )
-            .and_where(Condition::equal("app_templates.app_id", app_id))
+            .inner_join(
+                "templates",
+                "templates.template_id",
+                "app_templates.template_id",
+            )
+            .and_where(scope.owner_condition())
+            .and_where(Condition::equal("app_templates.app_id", &scope.app_id))
             .and_where(Condition::equal(status, state))
             .and_where(due);
         if embedding {
@@ -454,7 +460,7 @@ impl SqliteTemplateRepository {
         id: &str,
     ) -> anyhow::Result<RetrySlideProcessingOutcome> {
         self.client.transaction_result(|tx| {
-            if !visible(tx, &self.app_id, id)? {
+            if !self.visible(tx, id)? {
                 return Ok(RetrySlideProcessingOutcome::NotFound);
             }
             let Some(mut row) = load(tx, id)? else {
@@ -582,7 +588,7 @@ impl SqliteTemplateRepository {
     ) -> anyhow::Result<()> {
         self.client.transaction_result(|tx| {
             check_publication(cancellation)?;
-            Self::write_new(tx, &r.template, &r.assets, &r.metadata, r.preview.as_ref())?;
+            self.write_new(tx, &r.template, &r.assets, &r.metadata, r.preview.as_ref())?;
             membership(tx, &self.app_id, &r.template.template_id)?;
             write_pending(tx, &r.template.template_id, p, processing)?;
             check_publication(cancellation)
@@ -597,7 +603,7 @@ impl SqliteTemplateRepository {
             check_publication(cancellation)?;
             for (record, pending) in records {
                 check_publication(cancellation)?;
-                Self::write_new(
+                self.write_new(
                     tx,
                     &record.template,
                     &record.assets,
@@ -615,7 +621,7 @@ impl SqliteTemplateRepository {
         id: &str,
     ) -> anyhow::Result<Option<StoredSlideClassification>> {
         self.client.transaction_result(|tx| {
-            if !visible(tx, &self.app_id, id)? {
+            if !self.visible(tx, id)? {
                 return Ok(None);
             }
             Ok(load(tx, id)?.map(|r| r.state))
@@ -627,7 +633,7 @@ impl SqliteTemplateRepository {
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideClassificationJob>> {
         self.client.transaction_result(|tx| {
-            let Some(mut row) = next_job_row(tx, &self.app_id, false, now)? else {
+            let Some(mut row) = next_job_row(tx, self, false, now)? else {
                 return Ok(None);
             };
             row.state.status = "processing".into();
@@ -681,7 +687,7 @@ impl SqliteTemplateRepository {
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideEmbeddingJob>> {
         self.client.transaction_result(|tx| {
-            let Some(mut row) = next_job_row(tx, &self.app_id, true, now)? else {
+            let Some(mut row) = next_job_row(tx, self, true, now)? else {
                 return Ok(None);
             };
             row.state.embedding_status = "processing".into();
@@ -726,6 +732,12 @@ impl SqliteTemplateRepository {
                         "app_templates.template_id",
                         "template_classification_status.template_id",
                     )))
+                    .inner_join(
+                        "templates",
+                        "templates.template_id",
+                        "app_templates.template_id",
+                    )
+                    .and_where(self.owner_condition())
                     .and_where(Condition::equal("app_templates.app_id", app_id))
                     .and_where(Condition::is_not_null("metadata_json"))
                     .and_where(Condition::equal("schema_version", 2))
@@ -779,6 +791,12 @@ impl SqliteTemplateRepository {
                     "template_classification_status.template_id",
                     "slide_classifications_fts.template_id",
                 )
+                .inner_join(
+                    "templates",
+                    "templates.template_id",
+                    "app_templates.template_id",
+                )
+                .and_where(self.owner_condition())
                 .and_where(Condition::equal("app_templates.app_id", app_id))
                 .and_where(Condition::is_not_null(
                     "template_classification_status.metadata_json",

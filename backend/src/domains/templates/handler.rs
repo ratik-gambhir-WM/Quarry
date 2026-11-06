@@ -2,13 +2,13 @@ use std::{path::Path as FilePath, sync::Arc};
 
 use axum::{
     body::Body,
-    extract::{rejection::QueryRejection, Multipart, Path, Query, State},
+    extract::{rejection::QueryRejection, Multipart, Path, Query},
     http::{
         header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderValue, Response, StatusCode,
     },
     response::IntoResponse,
-    Json,
+    Extension, Json,
 };
 use serde::Deserialize;
 
@@ -42,7 +42,7 @@ fn default_page() -> usize {
 }
 
 pub(super) async fn list_template_previews_handler(
-    State(state): State<TemplatesHttpState>,
+    Extension(state): Extension<TemplatesHttpState>,
     query: Result<Query<TemplatePreviewQuery>, QueryRejection>,
 ) -> AppResult<Json<TemplatePreviewPage>> {
     let Query(query) =
@@ -59,7 +59,7 @@ pub(super) async fn list_template_previews_handler(
 }
 
 pub(super) async fn delete_template_handler(
-    State(state): State<TemplatesHttpState>,
+    Extension(state): Extension<TemplatesHttpState>,
     Path(template_id): Path<String>,
 ) -> AppResult<StatusCode> {
     validate_template_id(&template_id)?;
@@ -72,7 +72,7 @@ pub(super) async fn delete_template_handler(
 }
 
 pub(super) async fn get_template_handler(
-    State(state): State<TemplatesHttpState>,
+    Extension(state): Extension<TemplatesHttpState>,
     Path(template_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     validate_template_id(&template_id)?;
@@ -88,7 +88,7 @@ pub(super) async fn get_template_handler(
 }
 
 pub(super) async fn import_pptx_template_handler(
-    State(state): State<TemplatesHttpState>,
+    Extension(state): Extension<TemplatesHttpState>,
     query: Result<Query<PptxTemplateImportQuery>, QueryRejection>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<PptxTemplateImportResult>)> {
@@ -105,7 +105,7 @@ pub(super) async fn import_pptx_template_handler(
 }
 
 pub(super) async fn export_powerpoint_handler(
-    State(state): State<TemplatesHttpState>,
+    Extension(state): Extension<TemplatesHttpState>,
     Json(document): Json<serde_json::Value>,
 ) -> AppResult<Response<Body>> {
     validate_presentation_document(&document)?;

@@ -24,6 +24,18 @@ pub struct TemplateService {
     backend: TemplateBackend,
 }
 impl TemplateService {
+    pub(crate) fn for_user(&self, user_id: i64) -> ServiceResult<Self> {
+        match &self.backend {
+            TemplateBackend::Embedded(studio) => Ok(Self::embedded(Arc::new(
+                studio.for_user(user_id).map_err(map_embedded_error)?,
+            ))),
+            TemplateBackend::Unavailable => Ok(self.clone()),
+            TemplateBackend::DiligenceStudio(_) => Err(ServiceError::unavailable(
+                "user-private templates require the embedded template backend",
+            )),
+        }
+    }
+
     pub fn new(client: Option<Arc<DiligenceStudioClient>>) -> Self {
         Self {
             backend: client

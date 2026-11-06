@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 16;
+const LATEST_SCHEMA_VERSION: i64 = 17;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -37,7 +37,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if ![12, 13, 14, 15, LATEST_SCHEMA_VERSION].contains(&version) {
+        if ![12, 13, 14, 15, 16, LATEST_SCHEMA_VERSION].contains(&version) {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
@@ -91,6 +91,21 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         )?;
         transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
     }
+    if version < 17 {
+        validate_owned_schema(
+            &transaction,
+            &[
+                SCHEMA,
+                TEMPLATE_SCHEMA,
+                NOTEBOOK_SCHEMA,
+                MEMBERSHIP_SCHEMA,
+                DOCUMENT_SCOPE_UPGRADE,
+                IMAGE_RECOVERY_SCHEMA,
+                CLASSIFICATION_STATUS_UPGRADE,
+            ],
+        )?;
+        transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
+    }
     validate_template_schema(&transaction, false)?;
     validate_owned_schema(
         &transaction,
@@ -102,6 +117,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
             DOCUMENT_SCOPE_UPGRADE,
             IMAGE_RECOVERY_SCHEMA,
             CLASSIFICATION_STATUS_UPGRADE,
+            TEMPLATE_OWNERSHIP_UPGRADE,
         ],
     )?;
     let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
@@ -232,6 +248,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
         transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
         transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
+        transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -752,4 +769,10 @@ ALTER TABLE slide_classifications RENAME TO template_classification_status;
 UPDATE template_classification_status SET status = 'pending', attempt_count = 0,
     last_error_code = 'classification_interrupted', next_attempt_at = NULL
     WHERE status = 'processing' AND lease_expires_at IS NULL;
+"#;
+
+// Existing shared records have no trustworthy importer identity. Preserve them unassigned.
+const TEMPLATE_OWNERSHIP_UPGRADE: &str = r#"
+ALTER TABLE templates ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
+CREATE INDEX templates_owner_user_id_idx ON templates(owner_user_id, template_id);
 "#;

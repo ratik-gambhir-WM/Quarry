@@ -15,31 +15,14 @@ async fn rejects_a_missing_catalog_before_opening_local_infrastructure() {
 }
 
 #[test]
-fn template_bootstrap_shares_product_client_and_preserves_builtin_deletions() {
+fn template_bootstrap_starts_with_an_empty_catalog_across_restarts() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("quarry.sqlite3");
-    for startup in 0..3 {
+    for _ in 0..3 {
         let sqlite = open_sqlite(&path).unwrap();
         migrations::migrate(&sqlite).unwrap();
-        let repository = seed_templates(sqlite.clone()).unwrap();
-        if startup == 0 {
-            assert!(repository.delete("layered-architecture").unwrap());
-        }
-        assert!(repository
-            .find_by_id("layered-architecture")
-            .unwrap()
-            .is_none());
-        sqlite
-            .with_connection(|connection| {
-                let count: i64 =
-                    connection.query_row("SELECT count(*) FROM templates", [], |r| r.get(0))?;
-                assert_eq!(count, 9);
-                let membership: i64 =
-                    connection.query_row("SELECT count(*) FROM app_templates", [], |r| r.get(0))?;
-                assert_eq!(membership, 8);
-                Ok(())
-            })
-            .unwrap();
+        let repository = initialize_template_repository(sqlite).unwrap();
+        assert!(repository.list(None).unwrap().is_empty());
     }
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
 }

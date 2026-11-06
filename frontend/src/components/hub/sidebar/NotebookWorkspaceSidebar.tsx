@@ -170,7 +170,7 @@ export function NotebookNotesList() {
                   `flex items-start gap-2.5 rounded-lg px-3 py-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring ${isActive ? "bg-sidebar-selected text-sidebar-active" : "text-sidebar-text hover:bg-sidebar-hover"}`
                 }
               >
-                <FileText className="mt-0.5 size-4 shrink-0 text-sidebar-muted" />
+                <FileText className="mt-0.5 size-4 shrink-0 text-icon-knowledge" />
                 <div className="min-w-0">
                   <p className="truncate font-medium">{notebookTitle(note)}</p>
                   <time

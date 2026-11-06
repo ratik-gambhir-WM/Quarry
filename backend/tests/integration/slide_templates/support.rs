@@ -7,7 +7,15 @@ pub fn repository(path: &Path) -> anyhow::Result<SqliteTemplateRepository> {
         SqliteClient::open(path)?
     };
     crate::app::migrations::migrate(&client)?;
-    let repository = SqliteTemplateRepository::new(client);
+    let has_user = client.with_connection(|connection| {
+        connection.query_row("SELECT EXISTS(SELECT 1 FROM users WHERE id=1)", [], |row| {
+            row.get::<_, bool>(0)
+        })
+    })?;
+    if !has_user {
+        crate::integration_support::seed_identity(&client, "template-fixture@example.com", 't');
+    }
+    let repository = SqliteTemplateRepository::new(client).user_scope(1)?;
     repository.ensure_app("Quarry_WestMonroe", None)?;
     Ok(repository)
 }

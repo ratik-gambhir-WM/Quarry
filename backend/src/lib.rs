@@ -70,3 +70,7 @@ mod memberships_http_tests;
 #[cfg(test)]
 #[path = "../tests/integration/shared_document_search_tests.rs"]
 mod shared_document_search_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/slide_templates/user_scope_tests.rs"]
+mod slide_templates_user_scope_tests;

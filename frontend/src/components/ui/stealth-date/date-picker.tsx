@@ -333,6 +333,7 @@ export function DatePicker({
         <Popover.Anchor asChild>
         <div
           ref={anchorRef}
+          data-slot="text-input-group"
           data-invalid={invalid || undefined}
           data-disabled={disabled || undefined}
           data-readonly={readOnly || undefined}
@@ -344,8 +345,7 @@ export function DatePicker({
           className={cn(
             "group/box relative flex w-full min-w-0 items-center border border-outline-variant bg-surface-container-lowest text-on-surface shadow-sm",
             "transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-outline",
-            "focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/8 hover:focus-within:border-primary",
-            "group-data-open/picker:border-primary group-data-open/picker:ring-3 group-data-open/picker:ring-primary/8",
+            "group-data-open/picker:border-field-focus",
             "data-invalid:border-error/70 data-invalid:hover:border-error data-invalid:focus-within:border-error data-invalid:focus-within:ring-error/15",
             "data-disabled:cursor-not-allowed data-disabled:opacity-50 data-disabled:shadow-none data-disabled:hover:border-outline-variant",
             "data-readonly:bg-surface-container-low data-readonly:shadow-none data-readonly:hover:border-outline-variant",

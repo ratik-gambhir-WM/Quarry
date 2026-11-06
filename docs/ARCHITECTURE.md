@@ -48,7 +48,8 @@ Quarry is a multiplatform diligence application with three core runtimes and a s
 4. An explicitly selected legacy Node/Express service in a separate checkout, responsible for
    its separate app-scoped in-memory template catalog, PowerPoint import/export, optional classification,
    and Playwright previews. Default embedded mode runs templates in Axum with shared durable SQLite,
-   native Rust conversion, and Chromium/CDP previews.
+   native Rust conversion, and Chromium/CDP previews. Authenticated template operations require
+   embedded mode; the legacy service lacks user isolation and its facade operations return 503.
 
 The web and desktop distributions share pages, components, hooks, contracts, and product routes.
 Build-time aliases select the router and runtime adapter:
@@ -190,13 +191,23 @@ root. Both modes reject conflicting listeners on ports 3001 and 1420; legacy mod
 43127. They start Docker Desktop on macOS when its daemon is unavailable and wait for Docker and the Helix service
 at `127.0.0.1:6969`. The launcher first inspects the local container named by
 `QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-v3-dev`. If it is absent, the launcher
-creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section, a
-persistent restart policy, and the `6969:8080` development port mapping. It starts that named
-container before waiting for the local runtime's `/healthz` endpoint, so an unrelated listener
-cannot satisfy readiness. Before reusing an existing named container, it compares the
+creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section,
+the `unless-stopped` restart policy, and the loopback-only `127.0.0.1:6969:8080` port mapping.
+It sets `HELIX_DATA_DIR=/var/lib/helix` and mounts the named Docker volume
+`<container-name>-data` there. Helix's default storage is in memory: `DB_PATH=db/` and a
+restart policy alone do not preserve graph data when the server stops. The data volume is
+independent of the container; preserve it during container replacement and Docker cleanup.
+It starts that named container before waiting for the local runtime's `/healthz` endpoint, so an
+unrelated listener cannot satisfy readiness. Before reusing an existing named container, it compares the
 container image ID with the configured digest and fails without modifying a mismatch. This keeps
 the local Docker topology while preventing a stale v2 runtime from silently serving a v3 SDK. The
-launcher does not recreate or delete an existing container.
+launcher does not recreate or delete an existing container. It also rejects existing containers
+unless disk storage is enabled at `/var/lib/helix` and the expected named volume is mounted there
+read-write; an old memory-backed container requires an explicit operator cutover. Stop product
+writers and preserve/export any live graph before stopping that old container, retain the old
+container under a different name, and create the disk-backed replacement with the original name.
+Previously lost document projections still require exact-byte upload recovery (section 9.3);
+enabling disk storage cannot restore graph data already lost on an earlier stop.
 It then starts `cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001` and the versioned
 Diligence Studio upstream URL and selected `QUARRY_TEMPLATE_BACKEND` set explicitly; waits for `/api/v1/health`; and runs either
 `npm run dev:web` or `npm run dev:desktop` from `frontend/`. After Vite serves the internal preview
@@ -336,7 +347,11 @@ focuses the shared main landmark. Workspace scroll bodies expose themed scrollba
 phone gutters, and size the shell to the dynamic viewport. Below desktop width, a safe-area-aware
 bottom navigation keeps Home, Deals, Assistant, Notebook, Vault, and Account reachable while the
 full sidebar is hidden. Shared controls retain visible focus outlines and targeted transitions;
-global reduced-motion styles cover ordinary animations as well as route transitions. The HTML entry uses Quarry icons and excludes the private application from
+text inputs, textareas and editable text surfaces use a single thin inset line in a muted,
+theme-aware focus color. Composite auth/date/color fields, file-review search, the Home question
+draft and chat composers put the same indicator on the outer surface without a second inner ring.
+Validation colors and forced-color focus remain available; global reduced-motion styles cover
+ordinary animations as well as route transitions. The HTML entry uses Quarry icons and excludes the private application from
 search indexing; it includes an explicit JavaScript-required message for script-disabled browsers.
 The Home-to-Assistant draft travels in router state, initializes the scoped runtime once, and never
 starts a model request until the user sends it. Suggestions fill the Home draft and focus it.
@@ -378,7 +393,7 @@ session without extending its server expiry. Router state and the removed `quarr
 | `components/reui/` | Vendored ReUI data-grid foundation | table rendering, column controls, scrolling, pagination |
 | `hooks/` | Cross-component state and synchronization | workspace session/deals, theme |
 | `data/` | UI domain types, mapping, selectors and lifecycle-owned request stores | workspace, deal extraction, deals view |
-| `fixtures/` | Explicit shipped mock/demo/placeholder records, grouped by consuming feature | workspace portfolio, hub activity, Data Room search/report data |
+| `fixtures/` | Explicit shipped mock/demo/placeholder records, grouped by consuming feature | workspace portfolio, hub activity, Data Room report data |
 | `contracts/` | Transport-neutral application contract | `QuarryApi`, runtime and platform capabilities |
 | `api/` | Browser and Tauri transport adapters | HTTP, multipart, binary, SSE, IPC mapping |
 | `platform/` | Build-selected router/runtime composition | web and desktop adapters |
@@ -422,6 +437,9 @@ global state or query-cache library.
   resource. It lists other accessible non-terminal deals (excluding Closed and Pencils Down),
   preserves navigation state, and links to the selected deal’s overview route. Its back and collapse
   controls remain separate; an empty menu explains that no other active deals are available.
+  Collapsing any shared sidebar reduces its rail from 288px to 48px, leaving only the centered
+  expand button. Back/navigation, profile and logo/tool controls are hidden from view and keyboard
+  navigation until expanded; the flex layout gives the released width to the main inset surface.
   An unselected Data Room keeps the Deal Room sidebar and the same inset main surface used
   by the other deal routes. Opening a document preview replaces that sidebar in the same shell slot
   with the Data Room file explorer; closing the last document tab restores the Deal Room sidebar, while the
@@ -524,6 +542,9 @@ global state or query-cache library.
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes through a mode dropdown. The top toolbar contains the pages sidebar and page
   navigation; document controls and preview actions appear in the horizontally scrollable ribbon.
+  The zoom selector sizes to its current percentage and dropdown arrow instead of a fixed width.
+  The loaded PDF toolbar omits the raw-text toggle and duplicate Close action; document tabs own
+  closing. Loading/error shells retain their accessible Close action.
   The annotation ribbon omits rectangle, ellipse, line, arrow, polyline, and polygon
   creation controls; existing shape annotations remain renderable. The details-panel, download, and
   more-actions controls sit at the right end of the ribbon in both modes; the annotation ribbon has
@@ -553,25 +574,31 @@ global state or query-cache library.
   the desktop CSP and resolved to an absolute URL before it crosses the blob-worker boundary. The
   separately emitted PDFium engine runtime is tracked alongside other non-application PDF engine
   assets by the bundle-size check. Neither is requested by an
-  unselected Data Room. The editor stays mounted when the raw-text view is open so unsaved
-  in-memory edits are preserved. The selected-document session also owns the sidebar swap: the
+  unselected Data Room. The viewer no longer exposes a raw-text mode; the raw-text API and
+  session request/cache capability remain available below the UI. The selected-document session also owns the sidebar swap: the
   Data Room explorer exists while any document tabs are open (including the New tab picker), and the
   workspace shell suppresses its normal sidebar whenever that structural replacement is mounted.
 - `DataRoomWorkspace` owns selected-document search coordination. It registers live current-file,
-  page-count, requested-page, boundary, and focus capabilities with the Data Room tools registry;
-  unmounting the viewer removes those capabilities. This preserves page jumps without coupling
+  file identities/names, page-count, requested-page, boundary, and focus capabilities with the Data
+  Room tools registry. The route also registers the stored-file catalog without an open preview;
+  unmounting the workspace removes those capabilities. This preserves page jumps without coupling
   the reusable search UI to the editor implementation.
 - `DealRoomPage` keeps `DataRoomToolsProvider` around the persistent shell and activates its tools
   only for the Data Room route. The West Monroe logo
   opens a Stealth speed dial with Assistant and Workspace Search; outside that route the logo is
-  non-interactive. The shared shell and replacement explorer use the same provider. A floating
+  non-interactive. The shared shell and replacement explorer use the same provider. The provider
+  module exports components only; `dataRoomToolsContext.ts` owns the shared context, registry and
+  registration hook so component edits remain compatible with Vite Fast Refresh. Search filtering
+  and highlight matching helpers likewise live in non-component model modules. A floating
   logo trigger keeps the tools reachable below the desktop sidebar breakpoint.
 - `DataRoomToolPanels` lazy-loads on first tool invocation. Its draggable Assistant panel reuses
   the Assistant runtime and thread view with a provider keyed by user and deal. Its picker lists
   only that deal's chats, and new threads persist the active deal association. Closing the panel
   preserves chat state for the Data Room route mount; leaving the route releases it. Search
-  continues to expose sample excerpts and current-document page navigation only; without a selected
-  document it explains that workspace-wide search is not connected.
+  uses the existing deal-scoped keyword API, including without a selected document. It searches
+  250ms after typing pauses, hides results while the query changes, ignores late responses on
+  query changes/close/unmount, and displays loading, empty and retryable error states. Page
+  activation still requires the selected stored-file identity and an available page target.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Direct API lookup also resolves archived deals excluded
   from the default portfolio list. Lookup results enter the shared deal cache so company edits
@@ -674,8 +701,8 @@ operational failures.
 | Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each template can be deleted from the app-scoped selected catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action search with local mock results and current-PDF page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review/search content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action live deal-scoped keyword search with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
@@ -731,13 +758,31 @@ Search, using custom SVGs rather than a plus trigger. Base UI owns popup mountin
 its transition-state attributes drive short CSS transitions, with no second animation/presence
 controller or invisible per-action initial state. Reduced motion disables those transitions. The search floating panel opens centered
 within the usable Data Room surface without a backdrop. Its title bar supports dragging and stays
-above sticky file-review chrome. Closing either panel restores focus to the originating logo;
+above sticky file-review chrome. Its body adapts Stealth's search-dialog and highlight-match
+components to Quarry tokens: a compact results list, a selected-result preview at panel widths of
+600px or more, match highlighting, result counts, and keyboard hints anchored at the bottom.
+Matched words use the light-theme action button's deep indigo with white text in both themes,
+through shared search-match tokens, including file names, result snippets and the preview.
+Live keyword results supply whole-token match ranges for file names and preserve the excerpt
+helper's ranges through both result and preview rendering, including punctuation-separated terms
+and distinct C/C++/C# tokens. Local search items without supplied ranges retain generic highlighting.
+Its search input stays borderless when focused; the existing row divider supplies a subtle focus
+indicator instead of an inner rectangle.
+The existing floating shell retains resizing and background interaction; no modal backdrop or
+focus trap is added. The source label identifies deal keyword results. Request lifecycle and
+page activation remain owned by the Data Room feature; API results are not filtered again by
+filename or truncated excerpt. Closing either panel restores focus to the originating logo;
 selecting an available search result returns focus to the document viewer. The logo remains static
 outside the Data Room.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
-and primitives instead of adding hard-coded parallel color/spacing systems.
+and primitives instead of adding hard-coded parallel color/spacing systems. Workspace navigation
+uses shared semantic icon accents: slate blue for navigation, muted teal for knowledge/analysis,
+plum for Assistant, and ochre for folders. The same color roles appear in desktop and mobile
+navigation; Data Room folders, search results and tool actions reuse these accents. Light and
+dark token values preserve contrast on neutral surfaces; icons inside filled identity badges
+inherit their contrasting foreground. Labels and selected backgrounds continue to convey state.
 Shared text, search, password, textarea, and checkbox controls adapt Stealth interactions to
 Quarry's theme and retain native form values and event contracts. Search fields with a clear action
 return focus to the input, and textareas retain their feature-specific keyboard behavior. Native
@@ -838,7 +883,7 @@ The contract covers:
 - keyword/vector document search
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
-- app-scoped template deletion through `deleteTemplate`
+- owner-scoped template deletion through `deleteTemplate`
 - classified single-slide or deck PPTX import through `importPptxTemplate`; save acknowledgment does not wait for background classification/embeddings
 - uploaded-file summarization
 - platform-specific local data-room selection/read and file export
@@ -1142,7 +1187,7 @@ fonts unavailable on the host can still change wrapping. Plate retains custom ta
 while its live HTML editing surface uses the default tab interval; SVG previews and PowerPoint
 export apply explicit stops.
 
-The embedded domain owns OOXML, normalization, JSON contracts, built-ins, catalog persistence,
+The embedded domain owns OOXML, normalization, JSON contracts, catalog persistence,
 classification and retrieval rules. Adapters own Chromium/CDP, optional QuickLook, and bounded
 provider HTTP transport. SQLite work, conversion, browser work, and projection serialization are
 offloaded. Four shared HTTP admissions remain held until response-body consumption/drop, with two
@@ -1161,15 +1206,27 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
-schema DDL and marker 16. Startup creates a fresh schema, upgrades validated markers 12/13/14/15,
-or validates/reuses marker 16; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 17. Startup creates a fresh schema, upgrades validated markers 12/13/14/15/16,
+or validates/reuses marker 17; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
-transactionally. Built-in checksums, ordering, memberships, refresh behavior, imports, and per-app
-deletion choices persist across restart. Removing the last app membership retains a built-in
-record/checksum so unchanged reseeding does not restore its membership; imported templates are
-physically removed after their last membership is deleted. Previously created standalone template files remain
+transactionally. New databases start with an empty catalog; startup no longer seeds built-in templates.
+Each new import records `templates.owner_user_id` from the verified bearer-session identity.
+Both facade and native route middleware derive immutable request scopes from that identity;
+clients cannot select another owner. Catalogs and pagination, documents, previews, image assets,
+classification/retrieval status and retries, updates, deletion, and export/insertion asset hydration
+all use the owner-filtered repository within the fixed Quarry app. Cross-owner IDs behave as
+missing records. The global worker and admission/mutation budgets remain shared; only trusted
+background processing and startup reconciliation use the unscoped repository. Helix remains an
+app-scoped recoverable projection with globally unique template IDs; SQLite is the ownership
+authority and no public route returns raw Helix template results.
+Existing built-in and imported records are preserved with a null owner and hidden from all user
+catalogs; startup never guesses the importer or transfers these records to a new account.
+Users can reimport their original files to create owned copies. The explicit legacy Diligence
+Studio backend cannot enforce user ownership and returns 503 for template facade operations
+rather than relaying its shared catalog. See [template ownership and rollout](template-ownership.md).
+Imported templates are physically removed after their last membership is deleted. Previously created standalone template files remain
 untouched and are not automatically imported.
 
 Helix holds a recoverable template projection: a searchable `SlideTemplate` root, bounded
@@ -1298,7 +1355,7 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12 to 13, or validate v13]
+    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12-16, or validate v17]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Sqlite --> Adapters[Construct concrete adapters]
@@ -1314,10 +1371,10 @@ flowchart TD
 configuration, bootstrap, bind, serve, and graceful shutdown.
 [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
 and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
-owns all product/auth/template SQLite initialization/validation, schema-13 compatibility, and
+owns all product/auth/template SQLite initialization/validation, schema-12-through-16 upgrades, and
 the explicitly invoked offline development reset. Bootstrap opens and migrates SQLite on the
-blocking pool, passes clones of the same client to product and template repositories, seeds
-templates, and reconciles their Helix projection before binding routes. Bootstrap passes each
+blocking pool, passes clones of the same client to product and template repositories, initializes
+the template catalog, and reconciles its Helix projection before binding routes. Bootstrap passes each
 domain only its required capabilities and
 merges the returned, already-state-bound routers; adding a feature does not widen shared request
 state.
@@ -1368,7 +1425,7 @@ service, model, table, or product capability.
 | `memberships` | Canonical deal roles, capabilities, registered-user access management, teams, revisions and transactional activity |
 | `workspaces` | Organization tenancy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
-| `templates::{slide_templates}` | Five stable facade operations dispatch to legacy or embedded execution; embedded mode adds native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared SQLite canonical store, and Helix template/metadata/dual-vector projection |
+| `templates::{slide_templates}` | Five stable facade operations use authenticated owner scopes; legacy execution fails closed without ownership support; embedded mode adds native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared SQLite canonical store, and Helix template/metadata/dual-vector projection |
 | `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, Markdown/embedding/Helix projection; web/desktop transports and explicit-save editor implemented; folder UI deferred |
 | `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
@@ -1459,7 +1516,7 @@ fresh isolated Helix store, rebuild/reload matching clients, sign up again, and 
 manually. No status conversion or automatic downgrade is provided. See
 [development reset and recovery](authentication.md#schema-15-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 16
+### 9.1 Shared SQLite schema marker 17
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1522,7 +1579,7 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 16` is the shared marker. Empty databases receive the complete schema.
+`PRAGMA user_version = 17` is the shared marker. Empty databases receive the complete schema.
 Validated marker 12 receives notebooks first; validated 12/13 then receives the data-preserving
 membership/file-scope upgrade. Memberships backfill the creator as owner, including archived deals;
 legacy uploader attribution remains null. Validated 12/13/14 layouts also receive the additive
@@ -1531,7 +1588,11 @@ backfilled. Schema 16 validates the complete preceding layout and transactionall
 `slide_classifications` to `template_classification_status`, preserving metadata, vectors, FTS,
 indexes and foreign keys. Old synchronous `processing` rows without a lease become pending with
 attempts reset and `classification_interrupted`; ready/failed and leased rows retain their state.
-See [classified import rollout and recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
+Schema 17 validates the preceding layout and adds nullable `templates.owner_user_id`, a foreign
+key to `users(id)` with deletion restricted, and an owner/template index. Existing records remain
+unassigned; all authenticated imports persist a verified owner in the publication transaction.
+See [private template rollout and recovery](template-ownership.md) and
+[classified import rollout and recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
 Schema/layout, foreign keys and exactly-one-owner
 invariants are checked before advancing the marker and on restart. Malformed/unsupported layouts
 fail without deletion or silent repairs. The file rebuild restores foreign-key enforcement even
@@ -1766,7 +1827,7 @@ embedding request leaves no partial document persistence.
 4. The frontend's Extend UI editor renders the bytes through EmbedPDF/PDFium and keeps annotation
    snapshots in frontend memory only.
 5. The selected-file header can open a panel-scoped search overlay while the editor stays mounted;
-   supported local mock results call the panel's typed page-navigation action.
+   supported keyword hits call the panel's typed page-navigation action.
 
 Stored-document DOCX-to-PDF conversion has a built-in fallback renderer when LibreOffice is
 unavailable. Local data-room DOCX, XLSX, and PPTX previews call the Office converter directly and
@@ -1779,17 +1840,26 @@ routes authorize the deal path. Both select canonical current/live chunk identit
 verify complete projection headers and batch-check canonical identities again before exposing text.
 Vector search uses within-stream cosine ranking. Keyword search uses bounded lexical ranking and
 reciprocal-rank fusion across deals because the pinned SDK lacks within-stream text ranking.
+Every distinct keyword must match a whole, case-insensitive token in the same passage; punctuation
+separates words while `+` and `#` preserve language names such as `C++` and `C#`. A longer query
+cannot match solely through one common word or through a substring inside an unrelated word.
 Oversized searches and incomplete projections fail explicitly; they do not return silent partial
 results. The limits, algorithms and migration contract are in [shared deal projects](shared-deal-projects.md).
 
 The Deal Room Search documents tab calls these APIs and exposes “This deal” and “All accessible
-deals” scopes. Results link to the authorized data room.
-The Data Room document-search overlay does not consume these endpoints. Its reusable frontend
-component currently filters deterministic fixture excerpts, while `DataRoomPage` maps activated
-results to the selected preview's generic requested-page contract. It can navigate only valid page
-targets in the already selected PDF and highlights terms only in result text. Cross-document
-activation and programmatic text highlighting inside the PDF require stable result identities and
-an expanded viewer contract.
+deals” scopes. Results count matching passages and show a section heading, page or passage location,
+and a compact whitespace-normalized excerpt around a distinctive matching word. Whole-word matches
+are highlighted as text; result links open the authorized data room.
+The Data Room floating search panel calls the deal-scoped keyword endpoint through the shared
+runtime adapter, in both web and desktop. A 250ms debounce avoids a request on every keystroke;
+blank queries send nothing. Query changes, closing, focus revalidation and route/deal changes
+invalidate pending results so stale responses cannot replace the current query. Errors remain
+explicit and retryable, without fixture fallback. The server controls matching/ranking; the UI
+maps uploaded-file IDs to the current catalog's names and displays compact highlighted excerpts,
+section and page context. Search works without a selected preview. Activation is enabled only
+when the hit's stored-file ID matches the open document and its page is within the reported page
+count. Other documents and passages without page metadata remain readable in the result preview,
+with navigation disabled. Cross-document activation and highlighting inside the PDF remain deferred.
 
 ### 10.5 Assistant chat
 
@@ -1821,7 +1891,7 @@ a backend process crash. Current-turn file bytes are still not retained for reus
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
-| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-v3-dev` | Local development identifier; not passed to application runtimes |
+| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-v3-dev`; its persistent Docker volume is `<container-name>-data` | Local development identifier; not passed to application runtimes |
 | `QUARRY_DILIGENCE_STUDIO_ROOT` | Root launcher | Optional legacy Node service directory; defaults to `$HOME/diligence-studio-server` | Local filesystem path; used only when `QUARRY_TEMPLATE_BACKEND=diligence-studio` |
 
 Local development has one live environment file per runtime build root: `frontend/.env` for public
@@ -2116,6 +2186,12 @@ suites are included from the crate root. The architecture suite verifies
 the source/test separation and mirrored unit-test layout; adding a file under `backend/tests/`
 without an inclusion hook will not make Cargo execute it.
 
+Local-server transport tests bind ephemeral ports on `127.0.0.1` and connect to their own mock
+servers. The full backend suite therefore requires permission to listen and connect on loopback,
+even though it does not require live external services. If a restricted runner reports
+`PermissionDenied` / `Operation not permitted` at `TcpListener::bind`, rerun the suite with
+loopback access; do not skip these tests or treat that restricted run as a complete verification.
+
 The Tauri crate follows the same model: `autotests = false`, test bodies live under
 `frontend/src-tauri/tests/`, and source modules include them through test-only path hooks. Its
 layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
@@ -2127,7 +2203,8 @@ multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP 
 graph-request preflight, Helix query construction and v3 response mapping,
 OpenAI/WM mapping, stored previews, Diligence Studio URL/payload/delete/import/template-document
 validation, bounded declared and streamed template bodies, template service error mapping, template
-HTTP headers/status/body, and isolated SharePoint behavior.
+HTTP headers/status/body, two-account template ownership on both API mounts, unassigned-record
+preservation and schema-17 upgrades, shared-worker processing of owned imports, and isolated SharePoint behavior.
 
 The ignored Helix v3 compatibility test is an opt-in local-Docker suite. It requires
 `QUARRY_HELIX_COMPAT_URL` and verifies DDL readiness, graph writes, reads, replacement, and scoped
@@ -2146,7 +2223,16 @@ From the repository root, the local full-stack development entrypoints are:
 
 These are runtime operations rather than verification gates. They start the backend only with
 known local/disposable data. On macOS the launcher opens Docker Desktop when necessary, creates an
-absent configured Helix container from `backend/helix.toml`, and starts it before Axum.
+absent configured Helix container from `backend/helix.toml` with disk storage and a persistent
+named volume, and starts it before Axum. Existing memory-backed or incorrectly mounted containers
+fail the storage guard without being changed.
+
+Launcher syntax and storage guards can be checked without starting product services:
+
+```sh
+bash -n quarry
+python3 -B -m unittest discover -s tests -p 'test_quarry_launcher.py'
+```
 
 From `frontend/`:
 
@@ -2209,12 +2295,12 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 16 SQLite, preserving 12/13/14/15 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 17 SQLite, preserving 12/13/14/15/16 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
-| Template catalog | Embedded mode uses the shared durable product SQLite database; the legacy Node catalog remains in memory | Embedded imports survive restart and startup reconciles Helix from canonical SQLite; legacy imports are lost on restart; changing backend does not transfer imports |
+| Template catalog | Embedded mode uses the shared durable product SQLite database; the legacy Node catalog remains in memory | Embedded imports are private to their authenticated owner and survive restart; unassigned older records are preserved but hidden; startup reconciles Helix from canonical SQLite; legacy facade operations fail closed because the Node catalog cannot enforce ownership |
 | Assistant chat | SQLite transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |

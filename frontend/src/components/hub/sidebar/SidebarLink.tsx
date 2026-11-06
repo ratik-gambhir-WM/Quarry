@@ -37,7 +37,7 @@ export function SidebarLink({
         state={navigationState}
         to={href}
       >
-        <SidebarIcon className="h-5 w-5 text-current" name={icon} />
+        <SidebarIcon className="h-5 w-5" name={icon} />
         <span className="min-w-0 truncate text-[13px] leading-5">{label}</span>
       </NavLink>
     );
@@ -49,7 +49,7 @@ export function SidebarLink({
       className="grid w-full grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 text-left font-normal text-sidebar-text transition hover:bg-sidebar-hover hover:text-sidebar-active"
       type="button"
     >
-      <SidebarIcon className="h-5 w-5 text-sidebar-muted" name={icon} />
+      <SidebarIcon className="h-5 w-5" name={icon} />
       <span className="min-w-0 truncate text-[13px] leading-5">{label}</span>
     </button>
   );

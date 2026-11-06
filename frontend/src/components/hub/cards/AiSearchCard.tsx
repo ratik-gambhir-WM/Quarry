@@ -24,7 +24,7 @@ export function AiSearchCard({ suggestions }: AiSearchCardProps) {
         <Sparkles aria-hidden="true" className="size-4 text-muted" />
         <h2 id="home-assistant-title" className="text-[15px] font-medium text-on-surface">Ask your assistant</h2>
       </div>
-      <form onSubmit={openAssistant} className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm focus-within:border-primary">
+      <form onSubmit={openAssistant} data-slot="text-input-group" className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
         <label htmlFor="home-assistant-draft" className="sr-only">Your question</label>
         <textarea
           id="home-assistant-draft"

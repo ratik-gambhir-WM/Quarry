@@ -4,9 +4,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import DocumentSearch, {
-  filterDocumentSearchItems,
-} from "@/components/data-room/document-search/DocumentSearch";
+import DocumentSearch from "@/components/data-room/document-search/DocumentSearch";
+import { filterDocumentSearchItems } from "@/components/data-room/document-search/documentSearchModel";
 import type { DocumentSearchItem } from "@/components/data-room/document-search/documentSearchModel";
 
 const items: DocumentSearchItem[] = [
@@ -46,7 +45,7 @@ function Harness({
         onSelectionFocus={onSelectionFocus}
         boundaryElement={boundaryElement}
       />
-      <div data-testid="preview-canvas">Mounted document canvas</div>
+      <button data-testid="preview-canvas">Mounted document canvas</button>
       <div data-testid="search-boundary" ref={setBoundaryElement} />
     </div>
   );
@@ -88,6 +87,11 @@ describe("DocumentSearch", () => {
     ).toBeTruthy();
     expect(document.querySelector('[class*="bg-black/50"]')).toBeNull();
     expect(screen.getByTestId("preview-canvas")).toBeTruthy();
+    expect(dialog.querySelectorAll('[data-slot="floating-panel-resize-trigger"]').length).toBe(8);
+    await user.click(screen.getByTestId("preview-canvas"));
+    expect(document.activeElement).toBe(screen.getByTestId("preview-canvas"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await user.click(searchbox);
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -147,4 +151,23 @@ describe("DocumentSearch", () => {
     await user.keyboard("{ArrowDown}{ArrowUp}{Enter}");
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+});
+
+it("updates the preview with keyboard selection and clears back to guidance", async () => {
+  const user = userEvent.setup();
+  render(<Harness />);
+  await user.click(screen.getByRole("button", { name: "Search document" }));
+  const input = screen.getByRole("searchbox", { name: "Search document" });
+  await user.type(input, "liability");
+  const preview = screen.getByRole("complementary", { name: "Preview", hidden: true });
+  expect(preview.textContent).toContain("Synthetic Terms.pdf");
+  await user.keyboard("{ArrowDown}");
+  expect(preview.textContent).toContain("Global Risk Assurance 2023.pdf");
+  expect(screen.getByRole("button", { name: "Open", hidden: true })).toHaveProperty("disabled", true);
+  await user.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(document.activeElement).toBe(input);
+  expect(input).toHaveProperty("value", "");
+  expect(screen.queryAllByRole("option")).toHaveLength(0);
+  expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+  expect(screen.getByText("Search files and excerpts to find a passage.")).toBeTruthy();
 });

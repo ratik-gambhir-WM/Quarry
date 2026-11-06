@@ -93,6 +93,13 @@ pub trait TemplateRepository: Send + Sync {
         fts_query: &str,
         limit: usize,
     ) -> RepositoryResult<Vec<String>>;
+    /// Immutable owner scope derived only from an authenticated server-side identity.
+    fn for_user(&self, _user_id: i64) -> RepositoryResult<Arc<dyn TemplateRepository>> {
+        Err(RepositoryError::invalid(
+            "this repository does not implement user isolation",
+        ))
+    }
+
     /// Returns an independent, immutable app scope sharing the same durable store.
     fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
         if app_id != DEFAULT_APP_ID {
@@ -180,12 +187,25 @@ pub trait TemplateRepository: Send + Sync {
 pub struct SqliteTemplateRepository {
     client: SqliteClient,
     app_id: String,
+    owner_user_id: Option<i64>,
 }
 impl SqliteTemplateRepository {
+    pub(crate) fn user_scope(&self, user_id: i64) -> RepositoryResult<Self> {
+        if user_id <= 0 || self.owner_user_id.is_some_and(|owner| owner != user_id) {
+            return Err(RepositoryError::Forbidden);
+        }
+        Ok(Self {
+            client: self.client.clone(),
+            app_id: self.app_id.clone(),
+            owner_user_id: Some(user_id),
+        })
+    }
+
     pub fn new(client: SqliteClient) -> Self {
         Self {
             client,
             app_id: DEFAULT_APP_ID.into(),
+            owner_user_id: None,
         }
     }
 }
@@ -342,12 +362,16 @@ impl TemplateRepository for SqliteTemplateRepository {
         repository_boundary(|| -> anyhow::Result<_> { Self::find_app(self, app_id) })
     }
 
+    fn for_user(&self, user_id: i64) -> RepositoryResult<Arc<dyn TemplateRepository>> {
+        Ok(Arc::new(self.user_scope(user_id)?))
+    }
     fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
         repository_boundary(|| -> anyhow::Result<Option<Arc<dyn TemplateRepository>>> {
             self.ensure_app(app_id, None)?;
             Ok(Some(Arc::new(Self {
                 client: self.client.clone(),
                 app_id: app_id.into(),
+                owner_user_id: self.owner_user_id,
             })))
         })
     }
@@ -389,7 +413,7 @@ impl TemplateRepository for SqliteTemplateRepository {
             self.client.transaction_result(|tx| -> anyhow::Result<()> {
                 check_publication(cancellation)?;
                 for record in records {
-                    Self::write_new(
+                    self.write_new(
                         tx,
                         &record.template,
                         &record.assets,
@@ -421,7 +445,7 @@ impl TemplateRepository for SqliteTemplateRepository {
             );
             self.client.transaction_result(|tx| -> anyhow::Result<()> {
                 ensure!(
-                    visible(tx, &self.app_id, &template.template_id)?,
+                    self.visible(tx, &template.template_id)?,
                     "template is unavailable to this app"
                 );
                 let builtin = tx
@@ -474,6 +498,7 @@ impl TemplateRepository for SqliteTemplateRepository {
                     SqlBuilder::insert_into("templates")
                         .value("template_id", &template.template_id)
                         .value("template_json", json)
+                        .value("owner_user_id", self.owner_user_id)
                         .on_conflict_update(
                             ConflictUpdate::new(["template_id"]).set_excluded("template_json"),
                         )
@@ -503,7 +528,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     fn find_by_id(&self, id: &str) -> RepositoryResult<Option<StoredTemplate>> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
-                if !visible(tx, &self.app_id, id)? {
+                if !self.visible(tx, id)? {
                     return Ok(None);
                 }
                 let json = tx.read_one_with(
@@ -526,7 +551,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     fn find_metadata(&self, id: &str) -> RepositoryResult<Option<StoredTemplateMetadata>> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
-                if !visible(tx, &self.app_id, id)? {
+                if !self.visible(tx, id)? {
                     return Ok(None);
                 }
                 metadata_in(tx, id)
@@ -536,7 +561,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     fn find_preview(&self, id: &str) -> RepositoryResult<Option<StoredTemplatePreview>> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
-                if !visible(tx, &self.app_id, id)? {
+                if !self.visible(tx, id)? {
                     return Ok(None);
                 }
                 Ok(tx.read_one_with(
@@ -571,7 +596,8 @@ impl TemplateRepository for SqliteTemplateRepository {
                             "template_previews.template_id",
                         )),
                     )
-                    .and_where(Condition::equal("app_templates.app_id", &self.app_id));
+                    .and_where(Condition::equal("app_templates.app_id", &self.app_id))
+                    .and_where(self.owner_condition());
                 let total = usize::try_from(
                     tx.read_one_with(query.clone().count_rows().build(), |r| r.get::<_, i64>(0))?
                         .unwrap_or(0),
@@ -605,6 +631,7 @@ impl TemplateRepository for SqliteTemplateRepository {
                         "templates.template_id",
                     )))
                     .and_where(Condition::equal("app_templates.app_id", &self.app_id))
+                    .and_where(self.owner_condition())
                     .order_by("template_metadata.created_at", SortDirection::Descending)
                     .order_by("templates.rowid", SortDirection::Descending);
                 if let Some(kind) = kind {
@@ -642,6 +669,9 @@ impl TemplateRepository for SqliteTemplateRepository {
     fn delete(&self, id: &str) -> RepositoryResult<bool> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
+                if !self.visible(tx, id)? {
+                    return Ok(false);
+                }
                 let changed = tx
                     .write(
                         SqlBuilder::delete_from("app_templates")
@@ -682,7 +712,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     ) -> RepositoryResult<Option<StoredTemplateWithAssets>> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
-                if !visible(tx, &self.app_id, id)? {
+                if !self.visible(tx, id)? {
                     return Ok(None);
                 }
                 let json = tx
@@ -712,7 +742,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     fn find_asset(&self, id: &str, asset: &str) -> RepositoryResult<Option<TemplateAsset>> {
         repository_boundary(|| -> anyhow::Result<_> {
             self.client.transaction_result(|tx| {
-                if !visible(tx, &self.app_id, id)? {
+                if !self.visible(tx, id)? {
                     return Ok(None);
                 }
                 Ok(tx.read_one_with(
@@ -832,6 +862,7 @@ fn timestamp_millis(value: &str) -> anyhow::Result<i64> {
 mod tests;
 impl SqliteTemplateRepository {
     fn write_new(
+        &self,
         tx: &SqliteTransaction<'_>,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
@@ -848,6 +879,7 @@ impl SqliteTemplateRepository {
             SqlBuilder::insert_into("templates")
                 .value("template_id", &template.template_id)
                 .value("template_json", json)
+                .value("owner_user_id", self.owner_user_id)
                 .build(),
         )?;
         write_metadata(tx, metadata, false)?;
@@ -866,17 +898,32 @@ fn membership(tx: &SqliteTransaction<'_>, app: &str, id: &str) -> anyhow::Result
     )?;
     Ok(())
 }
-fn visible(tx: &SqliteTransaction<'_>, app: &str, id: &str) -> anyhow::Result<bool> {
-    Ok(tx
-        .read_one(
-            SqlBuilder::select("app_templates")
-                .columns(["template_id"])
-                .and_where(Condition::equal("app_id", app))
-                .and_where(Condition::equal("template_id", id))
-                .build(),
-        )?
-        .is_some())
+impl SqliteTemplateRepository {
+    fn owner_condition(&self) -> Condition {
+        match self.owner_user_id {
+            Some(owner) => Condition::equal("templates.owner_user_id", owner),
+            None => Condition::is_not_null("templates.template_id"),
+        }
+    }
+    fn visible(&self, tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<bool> {
+        Ok(tx
+            .read_one(
+                SqlBuilder::select("app_templates")
+                    .column("app_templates.template_id")
+                    .inner_join(
+                        "templates",
+                        "templates.template_id",
+                        "app_templates.template_id",
+                    )
+                    .and_where(Condition::equal("app_templates.app_id", &self.app_id))
+                    .and_where(Condition::equal("app_templates.template_id", id))
+                    .and_where(self.owner_condition())
+                    .build(),
+            )?
+            .is_some())
+    }
 }
+
 fn write_metadata(
     tx: &SqliteTransaction<'_>,
     m: &StoredTemplateMetadata,

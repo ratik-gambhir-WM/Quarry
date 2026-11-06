@@ -66,12 +66,12 @@ describe("SidebarFrame", () => {
     );
   });
 
-  it("centers the collapsed header and navigation controls on one rail", async () => {
+  it("collapses to a narrow rail with only the expand control and restores content", async () => {
     const user = userEvent.setup();
 
     render(
       <MemoryRouter>
-        <SidebarFrame alignedHeader showHeaderBackButton={false}>
+        <SidebarFrame alignedHeader>
           <nav>
             <a href="/example">
               <svg aria-hidden="true" />
@@ -87,11 +87,18 @@ describe("SidebarFrame", () => {
     const expandButton = screen.getByRole("button", {
       name: /^Expand sidebar$/,
     });
-    const navigation = document.getElementById("workspace-sidebar-navigation");
-
     expect(expandButton.classList.contains("mx-auto")).toBe(true);
-    expect(navigation?.className).toContain("[&_nav>a]:justify-center");
-    expect(navigation?.className).toContain("[&_nav>button]:justify-center");
+    expect(expandButton.closest("aside")?.classList.contains("w-12")).toBe(true);
+    expect(screen.getAllByRole("button")).toEqual([expandButton]);
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.queryByRole("img", { name: "Quarry" })).toBeNull();
+    expect(expandButton.getAttribute("aria-expanded")).toBe("false");
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("link", { name: "Example" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to home page" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /profile$/ })).toBeTruthy();
+    expect(expandButton.closest("aside")?.classList.contains("w-72")).toBe(true);
   });
 
   it("renders its back control as a left arrow to the requested destination", () => {

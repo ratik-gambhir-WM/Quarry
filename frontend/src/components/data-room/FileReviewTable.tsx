@@ -204,7 +204,8 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 flex-wrap items-center gap-3 px-5 py-3">
           <div
-            className={`relative h-8 shrink-0 overflow-hidden rounded-[8px] border border-input bg-[var(--theme-workspace-surface)] transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 motion-reduce:transition-none ${
+            data-slot="text-input-group"
+            className={`relative h-8 shrink-0 overflow-hidden rounded-[8px] border border-input bg-[var(--theme-workspace-surface)] transition-[border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none ${
               searchExpanded ? "w-64 max-sm:w-44" : "w-8"
             }`}
           >

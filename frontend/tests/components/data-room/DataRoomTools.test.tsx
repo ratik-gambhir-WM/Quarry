@@ -5,11 +5,13 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { DataRoomToolsProvider, useDataRoomDocumentSearch } from "@/components/data-room/DataRoomToolsProvider";
+import { DataRoomToolsProvider } from "@/components/data-room/DataRoomToolsProvider";
+import { useDataRoomDocumentSearch } from "@/components/data-room/dataRoomToolsContext";
 import { SidebarFrame } from "@/components/hub/sidebar/SidebarFrame";
-import type { DataRoomDocumentSearchProps } from "@/components/data-room/document-search/DataRoomDocumentSearch";
+import type { DocumentSearchContext } from "@/components/data-room/dataRoomToolsContext";
+import { keywordHit } from "../../fixtures/documents/keywordSearch";
 
-function SearchRegistration({ search }: { search: DataRoomDocumentSearchProps }) {
+function SearchRegistration({ search }: { search: DocumentSearchContext }) {
   const value = useMemo(() => search, [search]);
   useDataRoomDocumentSearch(value);
   return null;
@@ -17,7 +19,7 @@ function SearchRegistration({ search }: { search: DataRoomDocumentSearchProps })
 function ToolsHarness({ dealId, email, documentSearch }: {
   dealId: string;
   email?: string;
-  documentSearch: DataRoomDocumentSearchProps;
+  documentSearch: DocumentSearchContext;
 }) {
   return <DataRoomToolsProvider dealId={dealId} email={email}>
     <SearchRegistration search={documentSearch} />
@@ -30,6 +32,7 @@ async function launch(user: ReturnType<typeof userEvent.setup>, label: string) {
 
 const { api } = vi.hoisted(() => ({
   api: {
+    searchDealDocumentChunksByKeyword: vi.fn(),
     createAssistantThread: vi.fn(),
     deleteAssistantThread: vi.fn(),
     getAssistantThread: vi.fn(),
@@ -50,6 +53,7 @@ afterAll(() => {
 afterEach(cleanup);
 
 beforeEach(() => {
+  api.searchDealDocumentChunksByKeyword.mockReset().mockResolvedValue([keywordHit()]);
   api.createAssistantThread.mockReset();
   api.deleteAssistantThread.mockReset();
   api.getAssistantThread.mockReset();
@@ -112,6 +116,7 @@ describe("DataRoomTools", () => {
       <ToolsHarness
         dealId="DEAL-000184"
         documentSearch={{
+          currentFileId: "file-1",
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
           onActivateResult: vi.fn(),
@@ -137,14 +142,15 @@ describe("DataRoomTools", () => {
     const activate = vi.fn();
     const focusPreview = vi.fn(() => screen.getByRole("button", { name: "Document viewer" }).focus());
     render(<><button>Document viewer</button><ToolsHarness dealId="DEAL-000184" documentSearch={{
-      currentFileName: "Synthetic_Terms.pdf",
+      currentFileId: "file-1",
+          currentFileName: "Synthetic_Terms.pdf",
       currentPageCount: 3,
       onActivateResult: activate,
       onSelectionFocus: focusPreview,
     }} /></>);
     await launch(user, "Workspace Search");
     await user.type(await screen.findByRole("searchbox", { name: "Search document" }), "Synthetic");
-    await user.click(screen.getByRole("option", { name: /Open page 2/ }));
+    await user.click(await screen.findByRole("option", { name: /Page 2/ }));
     expect(activate).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: "pdf-page", page: 2 } }));
     await waitFor(() => expect(focusPreview).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Document viewer" })));
@@ -155,7 +161,8 @@ describe("DataRoomTools", () => {
     const boundary = document.createElement("div");
     boundary.getBoundingClientRect = () => DOMRect.fromRect({ x: 100, y: 40, width: 900, height: 600 });
     render(<ToolsHarness dealId="DEAL-000184" documentSearch={{
-      currentFileName: "Synthetic_Terms.pdf", currentPageCount: 3,
+      currentFileId: "file-1",
+          currentFileName: "Synthetic_Terms.pdf", currentPageCount: 3,
       onActivateResult: vi.fn(), boundaryElement: boundary,
     }} />);
     await launch(user, "Workspace Search");
@@ -168,7 +175,7 @@ describe("DataRoomTools", () => {
     const user = userEvent.setup();
     render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
     await launch(user, "Workspace Search");
-    expect(await screen.findByText(/Workspace-wide search is not connected yet/)).not.toBeNull();
+    expect(await screen.findByText("This deal · Keyword")).not.toBeNull();
   });
 
   it("shows the Assistant chat interface in the Synthesis Canvas", async () => {
@@ -178,6 +185,7 @@ describe("DataRoomTools", () => {
       <ToolsHarness
         dealId="DEAL-000184"
         documentSearch={{
+          currentFileId: "file-1",
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
           onActivateResult: vi.fn(),
@@ -291,6 +299,7 @@ describe("DataRoomTools", () => {
       <ToolsHarness
         dealId="DEAL-000184"
         documentSearch={{
+          currentFileId: "file-1",
           currentFileName: "Synthetic_Terms.pdf",
           currentPageCount: 3,
           onActivateResult: vi.fn(),

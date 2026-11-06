@@ -53,7 +53,7 @@ export function SidebarFrame({
   return (
     <aside
       className={`workspace-sidebar hidden h-full shrink-0 overflow-hidden text-sidebar-text transition-[width] duration-300 ease-out lg:flex [font-family:var(--font-sidebar)] ${
-        collapsed ? "w-20" : "w-72"
+        collapsed ? "w-12" : "w-72"
       }`}
     >
       <div className="flex h-full min-h-0 w-full flex-col">
@@ -72,7 +72,7 @@ export function SidebarFrame({
             )
           ) : (
             <>
-              {showHeaderBackButton ? (
+              {showHeaderBackButton && !collapsed ? (
                 <NavLink
                   aria-label={headerBackLabel}
                   className="group flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed"
@@ -93,7 +93,7 @@ export function SidebarFrame({
                 : (headerIdentity ?? (
                     <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-sidebar-selected px-2 py-1.5 text-sidebar-active">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary-container shadow-[0_4px_12px_rgba(7,1,84,0.12)]">
-                        <SidebarIcon className="h-4 w-4" name={sidebarIcon} />
+                        <SidebarIcon inheritColor className="h-4 w-4" name={sidebarIcon} />
                       </span>
                       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
                         {sidebarLabel}
@@ -108,7 +108,7 @@ export function SidebarFrame({
             aria-expanded={!collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={`${collapsed && !showHeaderBackButton ? "mx-auto" : "ml-auto"} flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed`}
+            className={`${collapsed ? "mx-auto" : "ml-auto"} flex h-[1.6rem] w-[1.6rem] shrink-0 items-center justify-center rounded-md text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fixed`}
             onClick={() => {
               setCollapsed((isCollapsed) => !isCollapsed);
               setProfileMenuOpen(false);
@@ -123,16 +123,13 @@ export function SidebarFrame({
         </div>
 
         <div
-          className={`flex min-h-0 flex-1 flex-col ${collapsed ? "p-2" : "p-4"}`}
+          hidden={collapsed}
+          className={`${collapsed ? "hidden" : "flex"} min-h-0 flex-1 flex-col p-4`}
         >
           <div
             id="workspace-sidebar-navigation"
             className={`min-h-0 flex-1 overflow-y-auto pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
               alignedHeader ? "pt-2" : "pt-6"
-            } ${
-              collapsed
-                ? "[&_h2]:hidden [&_span]:hidden [&_nav>a]:flex [&_nav>a]:justify-center [&_nav>a]:px-0 [&_nav>button]:flex [&_nav>button]:justify-center [&_nav>button]:px-0"
-                : ""
             }`}
           >
             {typeof children === "function"

@@ -13,6 +13,7 @@ import {
 } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { DealDocumentSearch } from "@/components/deal-room/DealDocumentSearch";
+import type { KeywordFileChunkHit } from "@/contracts/quarryApi";
 // Use Motion's JS fallback: happy-dom rejects canceled Web Animations promises.
 const animationDescriptor = Object.getOwnPropertyDescriptor(
   Element.prototype,
@@ -51,6 +52,16 @@ function mount() {
       <DealDocumentSearch dealId="DEAL-1" />
     </MemoryRouter>,
   );
+}
+function hit(text: string, overrides: Partial<KeywordFileChunkHit> = {}): KeywordFileChunkHit {
+  return {
+    chunk_id: "chunk-search", deal_id: "DEAL-1", file_id: "file-search",
+    version_id: "version-search", index_generation: "generation-search",
+    chunk_index: 1, chunk_sha256: "0".repeat(64), text, token_count: 10,
+    page_start: null, page_end: null, char_start: 0, char_end: text.length,
+    section_path: "Architecture", created_at: "2026-11-06T00:00:00Z", score: 1,
+    ...overrides,
+  };
 }
 describe("document search scope", () => {
   it("defaults to this deal and lets the user search across accessible deals", async () => {
@@ -101,13 +112,13 @@ describe("document search scope", () => {
       screen.getByRole("option", { name: "All accessible deals" }),
     );
     finish([
-      { chunk_id: "late", deal_id: "DEAL-1", text: "late private result" },
+      hit("late private result", { chunk_id: "late" }),
     ]);
     await waitFor(() =>
       expect(screen.queryByText("late private result")).toBeNull(),
     );
     global.mockResolvedValue([
-      { chunk_id: "current", deal_id: "DEAL-2", text: "current result" },
+      hit("current result", { chunk_id: "current", deal_id: "DEAL-2" }),
     ]);
     await user.click(screen.getByRole("button", { name: "Search documents" }));
     await screen.findByText("current result");
@@ -135,6 +146,25 @@ describe("document search scope", () => {
     await user.click(screen.getByRole("button", { name: "Retry search" }));
     await screen.findByText("No matching documents.");
   });
+});
+
+it("shows compact highlighted passages, section and page context", async () => {
+  const user = userEvent.setup();
+  scoped.mockResolvedValue([hit(
+    `${"Background on the service. ".repeat(40)}The application uses Ruby on Rails. ${"Additional context. ".repeat(40)}`,
+    { section_path: "Application architecture", page_start: 2, page_end: 3 },
+  )]);
+  const { container } = mount();
+  await user.type(screen.getByRole("searchbox"), "Ruby on Rails");
+  await user.click(screen.getByRole("button", { name: "Search documents" }));
+  await screen.findByRole("heading", { name: "Application architecture" });
+  expect(screen.getByRole("status").textContent).toBe("1 matching passage in this deal.");
+  const results = screen.getByRole("list", { name: "Search results" });
+  expect(results.textContent).toContain("Pages 2–3");
+  expect(results.textContent).toContain("Ruby on Rails");
+  expect(results.textContent?.length).toBeLessThan(450);
+  expect([...container.querySelectorAll("mark")].map((mark) => mark.textContent)).toContain("Ruby");
+  expect(screen.getByRole("link", { name: "Open data room for Deal" }).getAttribute("href")).toContain("DEAL-1");
 });
 
 it("clears the Stealth search field, restores focus and disables an empty search", async () => {

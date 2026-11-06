@@ -27,6 +27,11 @@
   --color-surface-container-high: var(--theme-surface-hover);
   --color-on-surface: var(--theme-text);
   --color-on-surface-variant: var(--theme-text-subtle);
+  --color-icon-navigation: var(--theme-icon-navigation);
+  --color-icon-knowledge: var(--theme-icon-knowledge);
+  --color-icon-assistant: var(--theme-icon-assistant);
+  --color-icon-files: var(--theme-icon-files);
+  --color-field-focus: var(--theme-field-focus);
   --color-outline: var(--theme-border-strong);
   --color-outline-variant: var(--theme-border);
   --color-primary: var(--theme-interactive);
@@ -42,6 +47,8 @@
   --color-on-primary-fixed: #070154;
   --color-chat-action: var(--theme-chat-action);
   --color-on-chat-action: var(--theme-on-chat-action);
+  --color-search-match: #0c006b;
+  --color-on-search-match: #ffffff;
   --color-action: var(--theme-action);
   --color-action-hover: var(--theme-action-hover);
   --color-on-action: var(--theme-on-action);
@@ -137,6 +144,7 @@
     --theme-text-subtle: #50658e;
     --theme-border: #dcdce1;
     --theme-border-strong: #a8a8af;
+    --theme-field-focus: #8790a0;
     --theme-translucent-border: #dcdce1;
 
     /* Interactive and supporting accents */
@@ -154,6 +162,12 @@
     --theme-secondary-surface: #e7e7e7;
     --theme-secondary-fixed: #e7e7e7;
     --theme-tertiary: #f0f0f0;
+
+    /* Quiet icon accents on neutral workspace surfaces */
+    --theme-icon-navigation: #50658e;
+    --theme-icon-knowledge: #397b78;
+    --theme-icon-assistant: #756299;
+    --theme-icon-files: #947030;
 
     /* Sidebar */
     --theme-sidebar-active: #242424;
@@ -206,6 +220,7 @@
     --theme-text-subtle: #b8c0cf;
     --theme-border: #323c59;
     --theme-border-strong: #6f7890;
+    --theme-field-focus: #71809b;
     --theme-translucent-border: rgba(184, 192, 207, 0.18);
 
     /* Interactive and supporting accents */
@@ -221,6 +236,12 @@
     --theme-secondary-surface: #070154;
     --theme-secondary-fixed: #25304d;
     --theme-tertiary: #c8d0de;
+
+    /* Softer, lighter icon accents for dark surfaces */
+    --theme-icon-navigation: #9fb3d9;
+    --theme-icon-knowledge: #87bbb3;
+    --theme-icon-assistant: #b9a6d5;
+    --theme-icon-files: #c9ac76;
 
     /* Sidebar */
     --theme-sidebar-active: #f2f2f2;
@@ -1192,9 +1213,49 @@
   outline-offset: 3px;
 }
 
-/* The rounded composer owns focus feedback for its inset textarea. */
+/* Text entry uses one quiet inset line instead of stacked outlines and rings. */
+:where(
+  input:not([type]),
+  input:is([type="text"], [type="search"], [type="password"], [type="email"], [type="url"], [type="tel"], [type="number"], [type="date"], [type="datetime-local"], [type="time"]),
+  textarea,
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"],
+  [role="textbox"]
+):focus-visible {
+  outline: 1px solid var(--theme-field-focus);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
+/* Composite fields and chat put that same line around their outer surface. */
+:where(.text-input-group, [data-slot="text-input-group"], [data-slot="query-composer"]):focus-within {
+  border-color: var(--theme-field-focus);
+  outline: 1px solid var(--theme-field-focus);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
+.text-input-group :is(input, textarea):focus-visible,
+[data-slot="text-input-group"] :is(input, textarea):focus-visible,
 [data-slot="query-composer"] textarea:focus-visible {
   outline: none;
+  box-shadow: none;
+}
+
+/* Floating search uses its existing row divider as the focus indicator. */
+[data-slot="search-input-row"]:has(input:focus-visible) {
+  border-bottom-color: var(--theme-field-focus);
+}
+[data-slot="search-input-row"] input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Keep invalid fields distinct while retaining the same thin focus treatment. */
+:is(input, textarea)[aria-invalid="true"]:focus-visible,
+:where(.text-input-group, [data-slot="text-input-group"])[data-invalid]:focus-within {
+  outline-color: var(--theme-error);
+  border-color: var(--theme-error);
 }
 
 /* Delay the import panel to avoid flashing on fast saves; leave feedback visible without motion. */

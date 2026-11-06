@@ -1,10 +1,10 @@
 //! Native HTTP mappings; Quarry supplies request IDs, timeout, tracing and CORS.
 use axum::{
     body::{to_bytes, Body},
-    extract::{Multipart, Path, Request, State},
+    extract::{Multipart, Path, Request},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use std::sync::Arc;
 
@@ -177,7 +177,7 @@ fn powerpoint(result: ExportedPowerPoint) -> SlideResult<Response> {
     Ok(private(response))
 }
 pub(super) async fn export(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     query(request.uri(), request.headers(), &[])?;
@@ -193,25 +193,25 @@ pub(super) async fn export(
     powerpoint(s.studio.export(input).await?)
 }
 pub(super) async fn import(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, false).await
 }
 pub(super) async fn batch_import(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, true, false).await
 }
 pub(super) async fn import_classified(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, true).await
 }
 pub(super) async fn batch_import_classified(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, true, true).await
@@ -319,7 +319,7 @@ async fn import_inner(
     Ok(private(response))
 }
 pub(super) async fn catalog(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     let pairs = query(request.uri(), request.headers(), &["kind"])?;
@@ -334,7 +334,7 @@ pub(super) async fn catalog(
     ))
 }
 pub(super) async fn previews(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     let pairs = query(request.uri(), request.headers(), &["page"])?;
@@ -354,7 +354,7 @@ pub(super) async fn previews(
     ))
 }
 pub(super) async fn get(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -366,7 +366,7 @@ pub(super) async fn get(
     ))
 }
 pub(super) async fn delete(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -378,7 +378,7 @@ pub(super) async fn delete(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 pub(super) async fn preview(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -412,7 +412,7 @@ pub(super) async fn preview(
     Ok(private(response))
 }
 pub(super) async fn asset(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path((id, asset)): Path<(String, String)>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -446,7 +446,7 @@ pub(super) async fn asset(
     Ok(private(response))
 }
 pub(super) async fn retry_processing(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -465,7 +465,7 @@ pub(super) async fn retry_processing(
 }
 
 pub(super) async fn retrieval(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -496,7 +496,7 @@ pub(super) async fn retrieval(
     ))
 }
 pub(super) async fn insert(
-    State(s): State<EndpointState>,
+    Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     query(request.uri(), request.headers(), &[])?;

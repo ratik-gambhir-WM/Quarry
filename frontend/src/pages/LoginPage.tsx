@@ -204,7 +204,7 @@ export function LoginPage({ register = false }: { register?: boolean }) {
                   >
                     West Monroe email
                   </label>
-                  <div className="flex h-12 overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15">
+                  <div data-slot="text-input-group" className="flex h-12 overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest">
                     <Input
                       className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-md py-sm text-[16px] leading-[1.6] text-on-surface shadow-none outline-none focus-visible:ring-0"
                       id="email"

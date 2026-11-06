@@ -1,7 +1,10 @@
 # Slide Templates Studio migration evidence
 
-Current rollout (2026-11-04): schema **16** preserves validated **12/13/14/15** product and
-template records and enables asynchronous classified imports. See the rollout below.
+Current rollout (2026-11-05): schema **17** preserves validated **12/13/14/15/16** product and
+template records and adds authenticated user ownership. Existing shared records remain unassigned
+and hidden from user catalogs. See [private template rollout and recovery](template-ownership.md).
+The asynchronous classified-import rollout below describes schema 16 and still applies before
+schema 17 is added.
 Schema 11 and older still require the deliberately selected, drained development reset described in
 [authentication](authentication.md#schema-15-and-development-reset), paired with a fresh isolated
 Helix store. Historical schema-9/10 upgrade instructions below do not authorize an older migration.
