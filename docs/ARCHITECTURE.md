@@ -21,7 +21,9 @@ planned domain scaffolds into implemented capabilities.
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root README provides concise developer onboarding. The current code has a broader Tauri
+The root [README](../README.md) provides the product overview, feature status, and roadmap direction;
+[Getting Started](../Getting%20Started.md) covers dependencies, setup, commands, and verification.
+The current code has a broader Tauri
 boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
 Tauri IPC before reaching the same Axum API used by the browser. This document records that
 implemented path in detail.
