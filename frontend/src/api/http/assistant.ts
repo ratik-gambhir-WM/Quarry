@@ -21,6 +21,8 @@ import { get, post, requestJson, apiUrl } from "./transport";
 function queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
   const form = new FormData();
   form.append("prompt", input.prompt);
+  if (input.fileReferences?.length) form.append("fileReferences", JSON.stringify(input.fileReferences));
+  if (input.fileScopeDealId) form.append("fileScopeDealId", input.fileScopeDealId);
   form.append("context", JSON.stringify(input.context));
   if (input.model !== undefined) form.append("model", input.model);
   if (input.systemInstructions !== undefined) {
@@ -46,6 +48,8 @@ function runAssistantThread(
 ) {
   const form = new FormData();
   form.append("prompt", input.prompt);
+  if (input.fileReferences?.length) form.append("fileReferences", JSON.stringify(input.fileReferences));
+  if (input.fileScopeDealId) form.append("fileScopeDealId", input.fileScopeDealId);
   form.append("userMessageId", input.userMessageId);
   form.append("assistantMessageId", input.assistantMessageId);
   form.append("requestId", input.requestId);

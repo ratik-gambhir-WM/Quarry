@@ -5,7 +5,17 @@ use crate::adapters::sqlite::query::{
 use super::*;
 
 fn test_client() -> SqliteClient {
-    let client = SqliteClient::open_in_memory().unwrap();
+    create_test_tables(SqliteClient::open_in_memory().unwrap())
+}
+
+fn pooled_test_client() -> (tempfile::TempDir, SqliteClient) {
+    let directory = tempfile::tempdir().unwrap();
+    let client =
+        create_test_tables(SqliteClient::open(directory.path().join("pool.sqlite")).unwrap());
+    (directory, client)
+}
+
+fn create_test_tables(client: SqliteClient) -> SqliteClient {
     client
         .with_connection(|connection| {
             connection.execute_batch(
@@ -500,4 +510,312 @@ async fn immediate_transactions_serialize_dependent_version_writers() {
     }
     versions.sort_unstable();
     assert_eq!(versions, vec![1, 2]);
+}
+
+#[test]
+fn file_pool_runs_four_shared_read_snapshots_while_the_writer_commits() {
+    use std::sync::mpsc;
+    let (_directory, client) = pooled_test_client();
+    client
+        .write(
+            SqlBuilder::insert_into("users")
+                .value("name", "Before")
+                .value("active", true)
+                .build(),
+        )
+        .unwrap();
+    std::thread::scope(|scope| {
+        let (started, arrivals) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut readers = Vec::new();
+        for _ in 0..4 {
+            let clone = client.clone();
+            let started = started.clone();
+            let (release, wait) = mpsc::channel();
+            releases.push(release);
+            readers.push(scope.spawn(move || {
+                clone
+                    .read_transaction(|transaction| {
+                        let count = || SqlBuilder::select("users").count_rows().build();
+                        let before = transaction
+                            .read_one_with(count(), |row| row.get::<_, i64>(0))?
+                            .unwrap();
+                        started.send(()).unwrap();
+                        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                        let after = transaction
+                            .read_one_with(count(), |row| row.get::<_, i64>(0))?
+                            .unwrap();
+                        assert_eq!((before, after), (1, 1));
+                        Ok(())
+                    })
+                    .unwrap();
+            }));
+        }
+        for _ in 0..4 {
+            arrivals
+                .recv_timeout(Duration::from_secs(5))
+                .expect("all four readers must acquire separate shared connections");
+        }
+        // This must complete while all four snapshots are held open.
+        client
+            .write(
+                SqlBuilder::insert_into("users")
+                    .value("name", "After")
+                    .value("active", true)
+                    .build(),
+            )
+            .unwrap();
+        for release in releases {
+            release.send(()).unwrap();
+        }
+        for reader in readers {
+            reader.join().unwrap();
+        }
+    });
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn read_transactions_reject_writes_and_return_connections_after_errors() {
+    let (_directory, pooled) = pooled_test_client();
+    for client in [pooled, test_client()] {
+        for _ in 0..8 {
+            let error = client
+                .read_transaction(|tx| {
+                    tx.write(
+                        SqlBuilder::insert_into("users")
+                            .value("name", "Rejected")
+                            .value("active", true)
+                            .build(),
+                    )
+                })
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                SqliteClientError::InvalidOperation {
+                    operation: "read transaction",
+                    ..
+                }
+            ));
+            assert!(client
+                .read(SqlBuilder::select("missing_table").build())
+                .is_err());
+        }
+        assert!(client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .is_empty());
+        client
+            .write(
+                SqlBuilder::insert_into("users")
+                    .value("name", "Allowed")
+                    .value("active", true)
+                    .build(),
+            )
+            .unwrap();
+        assert_eq!(
+            client
+                .read(SqlBuilder::select("users").build())
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn pooled_connections_use_wal_foreign_keys_and_read_only_guards() {
+    let (_directory, client) = pooled_test_client();
+    let journal: String = client
+        .with_connection(|connection| {
+            connection.pragma_query_value(None, "journal_mode", |row| row.get(0))
+        })
+        .unwrap();
+    assert_eq!(journal, "wal");
+    client
+        .with_read_connection(|connection| -> Result<_, SqliteClientError> {
+            let foreign_keys: i64 =
+                connection.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
+            let query_only: i64 =
+                connection.pragma_query_value(None, "query_only", |row| row.get(0))?;
+            assert_eq!((foreign_keys, query_only), (1, 1));
+            assert!(connection
+                .execute("INSERT INTO users(name,active) VALUES ('Rejected',1)", [])
+                .is_err());
+            Ok(())
+        })
+        .unwrap();
+    let error = client
+        .write(
+            SqlBuilder::insert_into("profiles")
+                .value("user_id", 999)
+                .value("bio", "Invalid")
+                .build(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("FOREIGN KEY"));
+}
+
+#[test]
+fn a_reader_error_rolls_back_its_snapshot_before_reuse() {
+    let (_directory, client) = pooled_test_client();
+    let result: Result<(), SqliteClientError> = client.read_transaction(|tx| {
+        tx.read(SqlBuilder::select("users").build())?;
+        Err(SqliteClientError::transaction_aborted("test abort"))
+    });
+    assert!(matches!(
+        result,
+        Err(SqliteClientError::TransactionAborted(_))
+    ));
+    client
+        .write(
+            SqlBuilder::insert_into("users")
+                .value("name", "Committed")
+                .value("active", true)
+                .build(),
+        )
+        .unwrap();
+    let rows = client
+        .read_transaction(|tx| tx.read(SqlBuilder::select("users").build()))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn private_memory_databases_retain_their_identity_and_clones_share_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let fake_path = directory.path().join("unused.sqlite");
+    let client = create_test_tables(
+        SqliteClient::from_connection(Connection::open_in_memory().unwrap(), &fake_path).unwrap(),
+    );
+    assert!(client.readers.is_none());
+    client
+        .clone()
+        .write(
+            SqlBuilder::insert_into("users")
+                .value("name", "Memory")
+                .value("active", true)
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!fake_path.exists());
+    assert!(test_client()
+        .read(SqlBuilder::select("users").build())
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn pooled_writer_transactions_keep_dependent_writes_atomic() {
+    let (_directory, client) = pooled_test_client();
+    let mut writers = tokio::task::JoinSet::new();
+    for index in 0..12 {
+        let clone = client.clone();
+        writers.spawn(async move {
+            clone
+                .transaction_async(move |tx| {
+                    let id = tx
+                        .read_one_with(SqlBuilder::select("users").count_rows().build(), |row| {
+                            row.get::<_, i64>(0)
+                        })?
+                        .unwrap()
+                        + 1;
+                    tx.write(
+                        SqlBuilder::insert_into("users")
+                            .value("id", id)
+                            .value("name", format!("Writer {index}"))
+                            .value("active", true)
+                            .build(),
+                    )?;
+                    tx.write(
+                        SqlBuilder::insert_into("profiles")
+                            .value("user_id", id)
+                            .value("bio", "Atomic profile")
+                            .build(),
+                    )?;
+                    Ok(())
+                })
+                .await
+        });
+    }
+    while let Some(result) = writers.join_next().await {
+        result.unwrap().unwrap();
+    }
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .len(),
+        12
+    );
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("profiles").build())
+            .unwrap()
+            .len(),
+        12
+    );
+    let result = client.transaction(|tx| {
+        tx.write(
+            SqlBuilder::insert_into("users")
+                .value("name", "Rolled back")
+                .value("active", true)
+                .build(),
+        )?;
+        tx.write(
+            SqlBuilder::insert_into("profiles")
+                .value("user_id", 999)
+                .value("bio", "Rejected")
+                .build(),
+        )?;
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .len(),
+        12
+    );
+}
+
+#[test]
+fn from_connection_pools_the_actual_database_not_its_display_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let actual_path = directory.path().join("actual.sqlite");
+    let display_path = directory.path().join("display-only.sqlite");
+    let client = create_test_tables(
+        SqliteClient::from_connection(Connection::open(&actual_path).unwrap(), &display_path)
+            .unwrap(),
+    );
+    client
+        .write(
+            SqlBuilder::insert_into("users")
+                .value("name", "Actual database")
+                .value("active", true)
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(
+        client
+            .read(SqlBuilder::select("users").build())
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!display_path.exists());
 }

@@ -11,6 +11,7 @@ import { runtime } from "@quarry/runtime";
 import type {
   AssistantMessage as PersistedAssistantMessage,
   AssistantThread,
+  ChatFileReference,
   AssistantThreadListOptions,
   QuarryApi,
 } from "../../contracts/quarryApi";
@@ -25,6 +26,7 @@ export type ThreadRuntimeState = {
   deletingThreadId: string | null;
   draft: string;
   draftFiles: readonly File[];
+  draftReferences: readonly ChatFileReference[];
   attachmentError: string | null;
   selectedModel: ChatModelSelection;
   sendError: string | null;
@@ -58,6 +60,7 @@ type AgentRuntimeOptions = {
   scope?: "all" | "freeform" | "deal";
   dealId?: string;
   initialDraft?: string;
+  initialFileReference?: ChatFileReference;
 };
 
 type AgentRuntimeValue = {
@@ -69,6 +72,8 @@ type AgentRuntimeValue = {
   selectThread(threadId: string): Promise<void>;
   send(prompt?: string): void;
   setDraft(draft: string): void;
+  setReferences(references: readonly ChatFileReference[]): void;
+  addReference(reference: ChatFileReference): void;
   addFiles(files: readonly File[]): void;
   removeFile(index: number): void;
   setModel(model: ChatModelSelection): void;
@@ -82,6 +87,7 @@ const emptyState: ThreadRuntimeState = {
   copiedMessageId: null,
   deletingThreadId: null,
   draft: "",
+  draftReferences: [],
   draftFiles: [],
   attachmentError: null,
   selectedModel: { type: "default" },
@@ -105,6 +111,7 @@ export function useAgentRuntime({
   scope = "all",
   dealId,
   initialDraft = "",
+  initialFileReference,
 }: AgentRuntimeOptions): AgentRuntimeValue {
   const [state, dispatch] = useReducer(
     (_current: ThreadRuntimeState, next: ThreadRuntimeState) => next,
@@ -112,6 +119,8 @@ export function useAgentRuntime({
     (email) => ({
       ...emptyState,
       draft: initialDraft,
+      draftReferences: initialFileReference && scope === "deal" && initialFileReference.dealId === dealId
+        ? [initialFileReference] : [],
       isThreadListLoading: Boolean(email),
       scopeDealId: scope === "deal" ? (dealId ?? null) : null,
     }),
@@ -134,6 +143,7 @@ export function useAgentRuntime({
       id: string,
       text: string | undefined,
       status: AssistantMessage["status"],
+      error?: string,
     ) => {
       update({
         messages: stateRef.current.messages.map((message) =>
@@ -144,6 +154,7 @@ export function useAgentRuntime({
                   ? {}
                   : { content: [{ text, type: "text" as const }] }),
                 status,
+                error,
               }
             : message,
         ),
@@ -176,7 +187,7 @@ export function useAgentRuntime({
       });
       onContextTruncated(false);
       update({
-        ...(!reusesUserMessage ? { draft: "", draftFiles: [], attachmentError: null } : {}),
+        ...(!reusesUserMessage ? { draft: "", draftFiles: [], draftReferences: [], attachmentError: null } : {}),
         isRunning: true,
         messages,
         sendError: null,
@@ -215,7 +226,7 @@ export function useAgentRuntime({
           replaceAssistantMessage(assistantMessage.id, undefined, {
             reason: "error",
             type: "incomplete",
-          });
+          }, userMessage.fileReferences?.length ? "Couldn’t complete this response with the selected files. Check access, file types and size limits, then retry or start a new message with different references." : undefined);
           logChat("run.failed", {
             assistantMessageId: assistantMessage.id,
             error: errorMessage(error),
@@ -254,7 +265,7 @@ export function useAgentRuntime({
         persisted: Boolean(userEmail),
         promptChars: [...text].length,
       });
-      const message = userMessageFor(text, current.draftFiles);
+      const message = userMessageFor(text, current.draftFiles, current.draftReferences, current.scopeDealId);
       const model = current.selectedModel.type === "model" ? current.selectedModel.id.trim() : undefined;
       if (!userEmail) {
         void startRun(message, "", false, model);
@@ -293,10 +304,32 @@ export function useAgentRuntime({
     [api.createAssistantThread, startRun, update, userEmail, scope, dealId],
   );
 
+  const setReferences = useCallback((draftReferences: readonly ChatFileReference[]) => {
+    const current = stateRef.current;
+    if (current.isPreparingThread || current.isThreadLoading) return;
+    if (draftReferences.length + current.draftFiles.length > 20) {
+      update({ attachmentError: "Choose up to 20 uploads and file references in total." });
+      return;
+    }
+    update({ draftReferences, attachmentError: null });
+  }, [update]);
+
+  const addReference = useCallback((reference: ChatFileReference) => {
+    const current = stateRef.current;
+    if (current.scopeDealId !== reference.dealId || current.draftReferences.some(
+      (file) => file.dealId === reference.dealId && file.fileId === reference.fileId,
+    )) return;
+    setReferences([...current.draftReferences, reference]);
+  }, [setReferences]);
+
   const setDraft = useCallback((draft: string) => update({ draft }), [update]);
 
   const addFiles = useCallback((incoming: readonly File[]) => {
     if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    if (stateRef.current.draftFiles.length + stateRef.current.draftReferences.length + incoming.length > 20) {
+      update({ attachmentError: "Choose up to 20 uploads and file references in total." });
+      return;
+    }
     const result = addChatFiles(stateRef.current.draftFiles, incoming);
     update({ draftFiles: result.files, attachmentError: result.error });
   }, [update]);
@@ -339,6 +372,7 @@ export function useAgentRuntime({
           deletingThreadId: null,
           draft: wasSelected ? "" : stateRef.current.draft,
           draftFiles: wasSelected ? [] : stateRef.current.draftFiles,
+          draftReferences: wasSelected ? [] : stateRef.current.draftReferences,
           attachmentError: wasSelected ? null : stateRef.current.attachmentError,
           sendError: wasSelected ? null : stateRef.current.sendError,
           isThreadLoading: wasSelected
@@ -372,6 +406,7 @@ export function useAgentRuntime({
     update({
       copiedMessageId: null,
       draft: "",
+      draftReferences: [],
       draftFiles: [],
       attachmentError: null,
       sendError: null,
@@ -401,6 +436,7 @@ export function useAgentRuntime({
       update({
         copiedMessageId: null,
         draft: "",
+        draftReferences: [],
         draftFiles: [],
         attachmentError: null,
         sendError: null,
@@ -554,6 +590,8 @@ export function useAgentRuntime({
     selectThread,
     send,
     setDraft,
+    setReferences,
+    addReference,
     addFiles,
     removeFile,
     setModel,
@@ -648,9 +686,11 @@ function fromAssistantMessage(message: PersistedAssistantMessage): Message {
   };
 }
 
-function userMessageFor(text: string, files: readonly File[]): UserMessage {
+function userMessageFor(text: string, files: readonly File[], references: readonly ChatFileReference[], scopeDealId: string | null): UserMessage {
   return {
     attachments: [...files],
+    fileReferences: [...references],
+    ...(scopeDealId ? { fileScopeDealId: scopeDealId } : {}),
     content: [{ text, type: "text" }],
     id: createId(),
     role: "user",

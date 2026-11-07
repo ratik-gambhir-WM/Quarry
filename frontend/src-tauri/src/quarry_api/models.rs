@@ -62,9 +62,20 @@ pub enum ChatContextRole {
     Assistant,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChatFileReference {
+    pub deal_id: String,
+    pub file_id: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QueryStreamRequest {
+    #[serde(default)]
+    pub file_references: Vec<ChatFileReference>,
+    pub file_scope_deal_id: Option<String>,
     pub assistant_message_id: Option<String>,
     #[serde(default)]
     pub context: Vec<ChatContextMessage>,

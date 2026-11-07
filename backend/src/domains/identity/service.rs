@@ -136,13 +136,6 @@ impl IdentityService {
         .map_err(|_| ServiceError::internal("password worker failed"))?
     }
     pub async fn authenticate(&self, token: &str) -> ServiceResult<AuthenticatedUser> {
-        if token.len() != 43
-            || !token
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        {
-            return Err(ServiceError::Unauthorized);
-        }
         self.authenticate_hash(digest(token)).await
     }
     pub async fn authenticate_hash(&self, hash: String) -> ServiceResult<AuthenticatedUser> {

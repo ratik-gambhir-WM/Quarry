@@ -45,6 +45,8 @@
   --color-error-container: var(--theme-error-surface);
   --color-primary-fixed: var(--theme-focus);
   --color-on-primary-fixed: #070154;
+  --color-file-mention: #1e1a62;
+  --color-on-file-mention: #ffffff;
   --color-chat-action: var(--theme-chat-action);
   --color-on-chat-action: var(--theme-on-chat-action);
   --color-search-match: #0c006b;

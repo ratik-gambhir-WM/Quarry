@@ -105,6 +105,13 @@ cargo test --locked --all-targets
 
 Add `cargo build --locked --release` when release compilation, feature flags, or packaging changed.
 
+For backend code changes affecting validation or authorization, follow the
+[boundary verification checklist](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+Use `cargo test --locked --lib architecture_tests` as the focused dependency gate; the full backend
+suite includes it. Also verify early rejection through the real handler path and retain tests for
+state-dependent permission/freshness guards. Passing source-dependency checks alone does not prove
+that a check runs before a provider call, job start, or mutation.
+
 `autotests = false`: `backend/tests/unit/**` mirrors `backend/src/**`, while cross-module suites
 live under `backend/tests/integration/**`. Both are manually included modules, so do not use
 `cargo test --test <filename>`. Confirm a new test file is actually included.

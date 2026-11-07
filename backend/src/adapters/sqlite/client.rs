@@ -11,9 +11,10 @@ use rusqlite::{
 };
 use thiserror::Error;
 
+use super::read_pool::ReadPool;
 use crate::adapters::sqlite::query::{QueryKind, SqlBuilderError, SqlQuery, SqlValue};
 
-const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Error)]
 pub enum SqliteClientError {
@@ -93,6 +94,7 @@ pub struct WriteResult {
 /// propagated before executing SQL. Callers cannot commit independently.
 pub struct SqliteTransaction<'connection> {
     transaction: Transaction<'connection>,
+    read_only: bool,
 }
 
 impl SqliteTransaction<'_> {
@@ -182,6 +184,12 @@ impl SqliteTransaction<'_> {
     ) -> Result<WriteResult, SqliteClientError> {
         let query = query?;
         ensure_write_query(&query)?;
+        if self.read_only {
+            return Err(SqliteClientError::InvalidOperation {
+                operation: "read transaction",
+                kind: query.kind(),
+            });
+        }
         let rows_affected = self
             .transaction
             .execute(query.sql(), params_from_iter(query.parameters()))?;
@@ -192,7 +200,8 @@ impl SqliteTransaction<'_> {
     }
 }
 
-/// Cloneable access to one SQLite connection.
+/// Cloneable access to one writer and four shared read-only SQLite connections.
+/// Private in-memory and temporary databases retain one connection to preserve their identity.
 ///
 /// Synchronous methods are useful inside an existing `spawn_blocking` task.
 /// The `_async` variants move the database work to Tokio's blocking pool so an
@@ -201,7 +210,9 @@ impl SqliteTransaction<'_> {
 /// propagate construction errors before accessing the connection.
 #[derive(Clone)]
 pub struct SqliteClient {
-    connection: Arc<Mutex<Connection>>,
+    // Drop readers before the final writer so SQLite can checkpoint and clean up WAL sidecars.
+    readers: Option<Arc<ReadPool>>,
+    writer: Arc<Mutex<Connection>>,
     path: Arc<PathBuf>,
 }
 
@@ -224,8 +235,15 @@ impl SqliteClient {
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
 
+        let readers = connection
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(|path| ReadPool::open(Path::new(path)))
+            .transpose()?
+            .map(Arc::new);
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
+            readers,
+            writer: Arc::new(Mutex::new(connection)),
             path: Arc::new(path.into()),
         })
     }
@@ -234,12 +252,13 @@ impl SqliteClient {
         self.path.as_path()
     }
 
+    /// Writer-only raw access for schema maintenance and test setup.
     pub fn with_connection<T>(
         &self,
         operation: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
     ) -> Result<T, SqliteClientError> {
         let mut connection = self
-            .connection
+            .writer
             .lock()
             .map_err(|_| SqliteClientError::ConnectionLockPoisoned)?;
         let result = operation(&mut connection)?;
@@ -254,7 +273,7 @@ impl SqliteClient {
         E: From<SqliteClientError>,
     {
         let mut connection = self
-            .connection
+            .writer
             .lock()
             .map_err(|_| E::from(SqliteClientError::ConnectionLockPoisoned))?;
         operation(&mut connection)
@@ -284,12 +303,12 @@ impl SqliteClient {
     {
         let query = query?;
         ensure_read_query(&query)?;
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut statement = connection.prepare(query.sql())?;
             let rows = statement
                 .query_map(params_from_iter(query.parameters()), |row| map_row(row))?
-                .collect();
-            rows
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
     }
 
@@ -303,12 +322,12 @@ impl SqliteClient {
     {
         let query = query?;
         ensure_read_query(&query)?;
-        self.with_connection(|connection| {
-            connection
+        self.with_read_connection(|connection| {
+            Ok(connection
                 .query_row(query.sql(), params_from_iter(query.parameters()), |row| {
                     map_row(row)
                 })
-                .optional()
+                .optional()?)
         })
     }
 
@@ -340,13 +359,16 @@ impl SqliteClient {
         E: From<SqliteClientError>,
     {
         let mut connection = self
-            .connection
+            .writer
             .lock()
             .map_err(|_| E::from(SqliteClientError::ConnectionLockPoisoned))?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(SqliteClientError::from)?;
-        let transaction = SqliteTransaction { transaction };
+        let transaction = SqliteTransaction {
+            transaction,
+            read_only: false,
+        };
         let result = operation(&transaction)?;
         transaction
             .transaction
@@ -360,14 +382,17 @@ impl SqliteClient {
         F: for<'connection> FnOnce(&SqliteTransaction<'connection>) -> Result<T, SqliteClientError>,
     {
         let mut connection = self
-            .connection
+            .writer
             .lock()
             .map_err(|_| SqliteClientError::ConnectionLockPoisoned)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(SqliteClientError::from)
             .map_err(|error| error.context("failed to begin immediate sqlite transaction"))?;
-        let transaction = SqliteTransaction { transaction };
+        let transaction = SqliteTransaction {
+            transaction,
+            read_only: false,
+        };
         let result = operation(&transaction);
 
         match result {
@@ -387,6 +412,72 @@ impl SqliteClient {
                 }),
             },
         }
+    }
+
+    fn with_read_connection<T, E>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<SqliteClientError>,
+    {
+        match &self.readers {
+            Some(readers) => readers.with_connection(operation),
+            None => self.with_connection_result(operation),
+        }
+    }
+
+    /// A consistent, read-only snapshot on one pooled connection. It never reserves the writer.
+    pub fn read_transaction_result<T, E>(
+        &self,
+        operation: impl for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<SqliteClientError>,
+    {
+        self.with_read_connection(|connection| {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Deferred)
+                .map_err(SqliteClientError::from)?;
+            let transaction = SqliteTransaction {
+                transaction,
+                read_only: true,
+            };
+            let result = operation(&transaction)?;
+            transaction
+                .transaction
+                .commit()
+                .map_err(SqliteClientError::from)?;
+            Ok(result)
+        })
+    }
+
+    pub fn read_transaction<T>(
+        &self,
+        operation: impl for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, SqliteClientError>,
+    ) -> Result<T, SqliteClientError> {
+        self.read_transaction_result(operation)
+    }
+
+    pub async fn read_transaction_result_async<T, E, F>(&self, operation: F) -> Result<T, E>
+    where
+        T: Send + 'static,
+        E: From<SqliteClientError> + Send + 'static,
+        F: for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, E> + Send + 'static,
+    {
+        let client = self.clone();
+        tokio::task::spawn_blocking(move || client.read_transaction_result(operation))
+            .await
+            .map_err(|error| E::from(SqliteClientError::BlockingWorker(error.to_string())))?
+    }
+
+    pub async fn read_transaction_async<T, F>(&self, operation: F) -> Result<T, SqliteClientError>
+    where
+        T: Send + 'static,
+        F: for<'c> FnOnce(&SqliteTransaction<'c>) -> Result<T, SqliteClientError> + Send + 'static,
+    {
+        let client = self.clone();
+        run_blocking(move || client.read_transaction(operation)).await
     }
 
     pub async fn read_async(

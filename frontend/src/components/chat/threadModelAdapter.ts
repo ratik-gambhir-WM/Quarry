@@ -135,6 +135,8 @@ export function createModelAdapter(
                 {
                   assistantMessageId: runOptions.assistantMessageId!,
                   files: [...currentUser.attachments],
+                  ...(currentUser.fileReferences?.length ? { fileReferences: [...currentUser.fileReferences] } : {}),
+                  ...(currentUser.fileScopeDealId ? { fileScopeDealId: currentUser.fileScopeDealId } : {}),
                   ...(runOptions.model ? { model: runOptions.model } : {}),
                   parentMessageId,
                   prompt,
@@ -147,6 +149,8 @@ export function createModelAdapter(
             : api.queryModel({
                 context,
                 files: [...currentUser.attachments],
+                ...(currentUser.fileReferences?.length ? { fileReferences: [...currentUser.fileReferences] } : {}),
+                ...(currentUser.fileScopeDealId ? { fileScopeDealId: currentUser.fileScopeDealId } : {}),
                 ...(runOptions.model ? { model: runOptions.model } : {}),
                 prompt,
               }, handlers);

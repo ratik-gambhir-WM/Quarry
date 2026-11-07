@@ -67,6 +67,8 @@ export type TauriQueryRequest = {
   sessionGeneration?: number;
   assistantMessageId?: string;
   context?: QueryModelInput["context"];
+  fileReferences?: QueryModelInput["fileReferences"];
+  fileScopeDealId?: string;
   files: TauriMultipartRequest["files"];
   model?: string;
   parentMessageId?: string;
@@ -397,6 +399,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
               model: input.model,
               path: "/api/v1/query_model",
               prompt: input.prompt,
+              fileReferences: input.fileReferences,
+              fileScopeDealId: input.fileScopeDealId,
               systemInstructions: input.systemInstructions,
             },
             (payload) => {
@@ -483,6 +487,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
               parentMessageId: input.parentMessageId,
               path: `/api/v1/assistant/threads/${encodeURIComponent(input.threadId)}/runs`,
               prompt: input.prompt,
+              fileReferences: input.fileReferences,
+              fileScopeDealId: input.fileScopeDealId,
               requestId: input.requestId,
               systemInstructions: input.systemInstructions,
               userMessageId: input.userMessageId,

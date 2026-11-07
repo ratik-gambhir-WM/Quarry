@@ -148,7 +148,6 @@ impl DealService {
             .by_email(&user_email)
             .await?
             .ok_or_else(|| ServiceError::not_found("user not found"))?;
-        validate_target_rule(&input.fields)?;
         let mut aggregate = self
             .deals
             .create(CreateDealRecord {
@@ -173,7 +172,6 @@ impl DealService {
         actor: i64,
         fields: DealFields,
     ) -> ServiceResult<SaveDealResponse> {
-        validate_target_rule(&fields)?;
         let mut aggregate = self.deals.update(id.to_string(), actor, fields).await?;
         self.attach_access(&mut aggregate, actor).await?;
         let metadata = aggregate
@@ -385,28 +383,6 @@ fn updated_optional_value(submitted: Option<String>, existing: Option<String>) -
 #[path = "../../../tests/integration/domains/deals/service_tests.rs"]
 mod tests;
 
-fn validate_target_rule(fields: &DealFields) -> ServiceResult<()> {
-    use super::model::{PartyRole, TransactionType};
-    if fields.status.requires_acquisition_target()
-        && matches!(
-            fields.transaction_type,
-            TransactionType::PlatformAcquisition
-                | TransactionType::AddOnAcquisition
-                | TransactionType::StrategicAcquisition
-        )
-        && fields
-            .parties
-            .iter()
-            .filter(|p| p.role == PartyRole::Target)
-            .count()
-            != 1
-    {
-        return Err(ServiceError::validation(
-            "working-stage or closed acquisitions require exactly one target",
-        ));
-    }
-    Ok(())
-}
 pub(super) fn party_context(deal: &Deal) -> String {
     deal.parties
         .iter()

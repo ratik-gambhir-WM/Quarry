@@ -198,10 +198,26 @@ request -> router -> handler -> service -> repository/client
 ## Backend development rules
 
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
-- Keep handlers thin and body-consuming extractors last. Validate every client-controlled
-  path, query, header, JSON, and multipart value in the handler (or router only when routing
-  requires it); do not move transport validation into services. Services retain only use-case
-  constraints derived from trusted, persisted, or upstream state.
+- Before adding, moving, or reviewing a backend check, apply the
+  [boundary placement decision](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+  State the loaded-state or lifecycle reason for any check kept later; a business-logic label
+  alone is not a reason to delay a caller-only check.
+- Keep handlers thin and body-consuming extractors last. Check every client-controlled path,
+  query, header, JSON, and multipart value at the HTTP handler boundary before invoking product
+  work. Put reusable request-validation functions in handler-owned `handler/validate.rs` modules;
+  use `validate.rs`, not `validation.rs` or a generic `file.rs`, for dedicated validation modules.
+  Multipart extraction and streaming size limits may live in a handler-owned `upload.rs`.
+  Models hold data; services and adapters must not own request-shape validation or HTTP errors.
+- Authenticate and authorize requests at the HTTP boundary before protected product work.
+  Shared authentication middleware may enforce common header/session/path policy; handlers own
+  resource checks derived from request bodies. Use the verified actor, never a caller-supplied
+  identity, and delegate state lookup through service/policy interfaces rather than repositories.
+- Move checks that can safely reject a request early into that boundary. Keep checks that require
+  loaded state or must protect an operation at its point of use: atomic transaction permissions,
+  ownership/current-version constraints, canonical filesystem containment, persisted/upstream
+  content integrity, worker and stream revocation, and final result authorization. Do not remove
+  these safeguards in favor of a stale preflight. Pure shared parsers may support both boundary
+  validation and those integrity checks, but must not depend on HTTP types or errors.
 - Use `ServiceError` for use-case failures, `RepositoryError` for persistence failures, and
   `AppError` only at the HTTP boundary. Log internal context and return sanitized client messages.
 - Never hold a blocking filesystem, SQLite, Office, or CPU-heavy operation on a Tokio worker.
@@ -300,6 +316,9 @@ standalone runtime operation.
 - Update web and desktop adapters without bypassing their transport boundaries.
 - Update Tauri relay/native code if method, body, bytes, multipart, or SSE behavior changed.
 - Update Axum route, extractor, handler, service, and error mapping as needed.
+- For backend validation/authorization changes, review check placement and test early rejection
+  before protected work, plus the retained state-dependent guards. Run the architecture suite
+  (directly or through the full backend gate); static dependency checks alone do not prove order.
 - When a template operation changes, also update and test the matching Diligence Studio route,
   headers, request bounds, app scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
@@ -391,3 +410,33 @@ A change is ready only when:
 - `git diff --check` is clean and `git status --short` has been reviewed.
 - The handoff reports exact commands and outcomes, skipped checks, remaining uncertainty, and any
   pre-existing failure separately.
+
+## Post-feature refactoring review
+
+After completing a feature and before handoff, use the
+globally installed `$refactor` skill to look for opportunities to simplify the code
+changed by the feature. Apply small, behavior-preserving improvements when they clearly improve
+readability or maintainability. Keep the review scoped to the feature, preserve existing user
+work, and follow this guide's verification and architecture-impact requirements for any changes.
+If no useful refactor is warranted, leave the code as it is.
+
+### Frontend review and guidance improvements
+
+For frontend changes, also read the globally installed `$dev-refactor-frontend` skill alongside
+[react-vite-development](.agents/skills/react-vite-development/SKILL.md). Keep both refactoring
+skills global; do not add project-local copies. Resolve their SKILL.md paths from the current
+Codex skill catalog.
+
+Include a brief review coverage record for applicable architecture/state, accessibility and
+interaction, visual consistency, performance, and verification concerns. Mark anything not
+inspected or not applicable explicitly. Give confirmed findings file/line evidence, user impact,
+a concrete remedy, and a disposition (fixed, deferred with a reason, or outside scope). For a
+larger requested audit, map accepted findings to tasks and acceptance criteria; avoid duplicate
+findings and mandatory report files for routine feature work.
+
+Evaluate conflicting skill recommendations against Quarry's actual stack and contracts. When a
+recommendation improves correctness, accessibility, maintainability, performance, or verification,
+explain the evidence, tradeoffs, and checks, then update the affected Quarry guidance explicitly
+in the same change before treating it as the new rule. A difference from Ring's preferred
+framework or library is not itself a defect. See
+[the skill evaluation](docs/frontend-refactor-skill-evaluation.md) for the adopted decisions.

@@ -1,4 +1,5 @@
 //! Deal membership is the canonical shared-project authorization boundary.
+pub(crate) mod handler;
 pub mod model;
 pub(crate) mod repository;
 pub(crate) mod route;

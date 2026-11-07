@@ -527,7 +527,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     }
     fn find_by_id(&self, id: &str) -> RepositoryResult<Option<StoredTemplate>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 if !self.visible(tx, id)? {
                     return Ok(None);
                 }
@@ -550,7 +550,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     }
     fn find_metadata(&self, id: &str) -> RepositoryResult<Option<StoredTemplateMetadata>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 if !self.visible(tx, id)? {
                     return Ok(None);
                 }
@@ -560,7 +560,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     }
     fn find_preview(&self, id: &str) -> RepositoryResult<Option<StoredTemplatePreview>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 if !self.visible(tx, id)? {
                     return Ok(None);
                 }
@@ -579,7 +579,7 @@ impl TemplateRepository for SqliteTemplateRepository {
         offset: usize,
     ) -> RepositoryResult<StoredTemplatePreviewPage> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 let query = SqlBuilder::select("template_previews")
                     .columns(["template_previews.*"])
                     .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
@@ -617,7 +617,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     }
     fn list(&self, kind: Option<TemplateKind>) -> RepositoryResult<Vec<StoredTemplateCatalogItem>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 let mut query = SqlBuilder::select("templates")
                     .columns(["templates.template_id", "templates.template_json"])
                     .join(
@@ -711,7 +711,7 @@ impl TemplateRepository for SqliteTemplateRepository {
         id: &str,
     ) -> RepositoryResult<Option<StoredTemplateWithAssets>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 if !self.visible(tx, id)? {
                     return Ok(None);
                 }
@@ -741,7 +741,7 @@ impl TemplateRepository for SqliteTemplateRepository {
     }
     fn find_asset(&self, id: &str, asset: &str) -> RepositoryResult<Option<TemplateAsset>> {
         repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
+            self.client.read_transaction_result(|tx| {
                 if !self.visible(tx, id)? {
                     return Ok(None);
                 }

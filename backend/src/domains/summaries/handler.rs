@@ -1,15 +1,17 @@
+pub(super) mod upload;
+
 use axum::{
     extract::{Multipart, State},
     Json,
 };
 use serde::Serialize;
 
-use super::upload::collect_summary_upload;
 use crate::{
     app::http::error::{AppError, AppResult},
     domains::summaries::service::SummaryService,
 };
 use std::sync::Arc;
+use upload::collect_summary_upload;
 
 #[derive(Clone)]
 pub(super) struct SummariesHttpState {
@@ -27,6 +29,12 @@ pub(super) async fn summarize_upload_handler(
     multipart: Multipart,
 ) -> AppResult<Json<SummaryResponse>> {
     let upload = collect_summary_upload(multipart).await?;
+    if upload.files.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "no supported files found in {}",
+            upload.root_label
+        )));
+    }
     state
         .document_summaries
         .summarize_collected_files(&upload.root_label, upload.files, upload.skipped_files)

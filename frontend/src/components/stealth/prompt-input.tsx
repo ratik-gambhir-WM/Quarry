@@ -1,6 +1,6 @@
 // Adapted from https://stealth.pm/ui/prompt-input (MIT; see ./LICENSE).
 // Quarry owns drafts and transport; only supported text-chat controls are exposed.
-import { ArrowUp, Paperclip, Square, Upload } from "lucide-react";
+import { ArrowUp, FileText, Paperclip, Square, Upload, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
@@ -8,9 +8,15 @@ import { Button } from "../ui/button";
 import { CHAT_FILE_ACCEPT } from "../chat/chatAttachments";
 import { isChatModelValid, type ChatModelSelection } from "../chat/chatModel";
 import { AttachmentList } from "./attachment-list";
+import type { ChatFileReference } from "../../contracts/quarryApi";
+import { FileMentionPicker } from "../chat/FileMentionPicker";
+import { mentionAt } from "../chat/fileMentions";
 import { ModelPicker } from "./model-picker";
 
 type PromptInputProps = {
+  references?: readonly ChatFileReference[];
+  onReferencesChange?(references: readonly ChatFileReference[]): void;
+  scopeDealId?: string | null;
   value: string;
   onValueChange(value: string): void;
   onSend(): void;
@@ -29,6 +35,9 @@ type PromptInputProps = {
 
 export function PromptInput({
   value,
+  references = [],
+  onReferencesChange,
+  scopeDealId = null,
   onValueChange,
   onSend,
   onStop,
@@ -54,12 +63,26 @@ export function PromptInput({
   const dragDepth = useRef(0);
   const [dragging, setDragging] = useState(false);
   const noticeId = useId();
+  const mentionId = useId();
+  const [mention, setMention] = useState<ReturnType<typeof mentionAt>>(null);
+  const [activeMention, setActiveMention] = useState(0);
+  const selectMention = (file: ChatFileReference) => {
+    if (!mention || !onReferencesChange || references.length + files.length >= 20) return;
+    if (!references.some((reference) => reference.fileId === file.fileId && reference.dealId === file.dealId)) {
+      onReferencesChange([...references, file]);
+    }
+    onValueChange(value.slice(0, mention.start) + value.slice(mention.end));
+    const caret = mention.start;
+    setMention(null);
+    requestAnimationFrame(() => { area.current?.focus(); area.current?.setSelectionRange(caret, caret); });
+  };
   const modelValid = isChatModelValid(model);
   const canSend = !disabled && !generating && modelValid && Boolean(value.trim());
   const notice = error || (!modelValid ? "Enter a valid model ID (up to 128 characters) to send." : null);
   const focus = () => area.current?.focus({ preventScroll: true });
   const send = () => {
     if (!canSend) return;
+    setMention(null);
     onSend();
     focus();
   };
@@ -109,6 +132,42 @@ export function PromptInput({
         send();
       }}
     >
+      {mention && onReferencesChange ? (
+        <FileMentionPicker
+          id={mentionId}
+          dealId={scopeDealId}
+          query={mention.query}
+          selected={references}
+          activeIndex={activeMention}
+          limitReached={references.length + files.length >= 20}
+          onSelect={selectMention}
+        />
+      ) : null}
+      {references.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 px-3.5 pt-3" aria-label="Referenced files">
+          {references.map((file) => (
+            <span
+              key={`${file.dealId}:${file.fileId}`}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-file-mention px-2 py-1 text-xs text-on-file-mention"
+            >
+              <FileText aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate" title={`${file.name} · ${file.dealId}`}>{file.name}</span>
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label={`Remove reference ${file.name}`}
+                className="min-h-6 min-w-6 shrink-0 rounded-sm p-0.5 hover:bg-white/15 focus-visible:outline-2 disabled:opacity-50"
+                onClick={() => {
+                  onReferencesChange?.(references.filter((reference) => reference !== file));
+                  focus();
+                }}
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <AttachmentList files={files} disabled={disabled} onRemove={(index) => { onFileRemove(index); focus(); }} />
       <input
         ref={fileInput}
@@ -151,9 +210,39 @@ export function PromptInput({
           style={sizeStyle}
           rows={compact ? 1 : 2}
           value={value}
-          onChange={(event) => onValueChange(event.target.value)}
+          onBlur={() => setMention(null)}
+          aria-activedescendant={mention ? `${mentionId}-active` : undefined}
+          aria-controls={mention ? mentionId : undefined}
+          aria-expanded={mention ? true : undefined}
+          aria-autocomplete="list"
+          onSelect={(event) => {
+            const next = mentionAt(event.currentTarget.value, event.currentTarget.selectionStart);
+            if (event.currentTarget.selectionStart !== event.currentTarget.selectionEnd || !next) setMention(null);
+            else if (mention && (mention.start !== next.start || mention.end !== next.end)) {
+              setMention(next);
+              setActiveMention(0);
+            }
+          }}
+          onChange={(event) => {
+            onValueChange(event.target.value);
+            setMention(mentionAt(event.target.value, event.target.selectionStart));
+            setActiveMention(0);
+          }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (mention && onReferencesChange && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.key === "Escape") setMention(null);
+              else if (event.key === "Enter") document.getElementById(mentionId)?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.click();
+              else setActiveMention((index) => Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)));
+              return;
+            }
+            if (event.key === "Backspace" && event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0 && references.length) {
+              event.preventDefault();
+              onReferencesChange?.(references.slice(0, -1));
+              return;
+            }
             if (event.key === "Escape" && generating) {
               event.preventDefault();
               // Escape stops the response before it can close the Data Room panel.

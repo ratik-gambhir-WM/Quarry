@@ -52,3 +52,23 @@ fn query_request_path_is_restricted_to_the_two_assistant_contracts() {
     assert!(validate_query_path("https://example.com").is_err());
     assert!(validate_query_path("/api/v1/assistant/threads/thread-1/runs/extra").is_err());
 }
+
+#[test]
+fn file_reference_request_preserves_metadata_and_rejects_invalid_scope_or_duplicates() {
+    let input = serde_json::json!({
+        "path": "/api/v1/query_model", "prompt": "Review", "context": [], "files": [],
+        "fileScopeDealId": "DEAL-A",
+        "fileReferences": [{"dealId":"DEAL-A","fileId":"file-1","name":"Architecture.pdf"}]
+    });
+    let request = serde_json::from_value(input.clone()).unwrap();
+    assert!(build_query_form_sync(request).is_ok());
+    let mut wrong_scope = input.clone();
+    wrong_scope["fileScopeDealId"] = serde_json::json!("DEAL-B");
+    assert!(build_query_form_sync(serde_json::from_value(wrong_scope).unwrap()).is_err());
+    let mut duplicate = input.clone();
+    duplicate["fileReferences"]
+        .as_array_mut()
+        .unwrap()
+        .push(input["fileReferences"][0].clone());
+    assert!(build_query_form_sync(serde_json::from_value(duplicate).unwrap()).is_err());
+}

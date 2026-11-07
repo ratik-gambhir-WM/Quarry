@@ -106,7 +106,24 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     if let Some(instructions) = request.system_instructions.as_deref() {
         validate_text("systemInstructions", instructions, MAX_INSTRUCTIONS_CHARS)?;
     }
-    if request.files.len() > MAX_FILES {
+    if let Some(scope) = request.file_scope_deal_id.as_deref() {
+        validate_identifier("fileScopeDealId", scope)?;
+    }
+    let mut seen = std::collections::HashSet::new();
+    for reference in &request.file_references {
+        validate_identifier("dealId", &reference.deal_id)?;
+        validate_identifier("fileId", &reference.file_id)?;
+        if !valid_filename(&reference.name)
+            || request
+                .file_scope_deal_id
+                .as_deref()
+                .is_some_and(|scope| scope != reference.deal_id)
+            || !seen.insert((&reference.deal_id, &reference.file_id))
+        {
+            return Err("file reference metadata is invalid".to_string());
+        }
+    }
+    if request.files.len() + request.file_references.len() > MAX_FILES {
         return Err("at most 20 files are allowed".to_string());
     }
     let mut form = Form::new().text("prompt", request.prompt);
@@ -131,6 +148,16 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     }
     if let Some(instructions) = request.system_instructions {
         form = form.text("systemInstructions", instructions);
+    }
+    if !request.file_references.is_empty() {
+        form = form.text(
+            "fileReferences",
+            serde_json::to_string(&request.file_references)
+                .map_err(|_| "file references are invalid".to_string())?,
+        );
+    }
+    if let Some(scope) = request.file_scope_deal_id {
+        form = form.text("fileScopeDealId", scope);
     }
     let mut total = 0usize;
     for file in request.files {

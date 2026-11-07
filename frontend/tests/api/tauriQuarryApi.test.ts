@@ -500,6 +500,8 @@ describe("createTauriQuarryApi", () => {
     api.runAssistantThread(
       {
         assistantMessageId: "assistant-1",
+        fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }],
+        fileScopeDealId: "DEAL-A",
         files: [new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" })],
         model: "gpt-5.5",
         prompt: "hello",
@@ -516,6 +518,8 @@ describe("createTauriQuarryApi", () => {
       files: [{ dataBase64: "AQID", filename: "notes.txt", mimeType: "text/plain" }],
       model: "gpt-5.5",
       path: "/api/v1/assistant/threads/thread-1/runs",
+      fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }],
+      fileScopeDealId: "DEAL-A",
       requestId: "assistant-1",
       userMessageId: "user-1",
     });

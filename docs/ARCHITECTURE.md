@@ -37,6 +37,14 @@ responsibility, boundary, flow, schema, contract, integration, configuration, se
 verification command, feature maturity, or known limitation. If no update is needed, the handoff
 must state `Architecture impact: none — <specific reason>`.
 
+Agent-led frontend changes use the project frontend and verification skills together with the
+globally installed `refactor` and `dev-refactor-frontend` skills; the refactoring skills are not
+vendored under `.agents/skills/`. Review records applicable coverage, evidence, and finding
+dispositions. External recommendations can improve Quarry's guidance after an explicit
+evaluation and update; they do not silently redefine the runtime or framework contract. See
+[the frontend refactor skill evaluation](frontend-refactor-skill-evaluation.md) for the source,
+adopted improvements, and adaptations for Quarry's React/Vite architecture.
+
 ## 1. Executive summary
 
 Quarry is a multiplatform diligence application with three core runtimes and a selectable legacy template service:
@@ -596,7 +604,14 @@ global state or query-cache library.
 - `DataRoomToolPanels` lazy-loads on first tool invocation. Its draggable Assistant panel reuses
   the Assistant runtime and thread view with a provider keyed by user and deal. Its picker lists
   only that deal's chats, and new threads persist the active deal association. Closing the panel
-  preserves chat state for the Data Room route mount; leaving the route releases it. Search
+  preserves chat state for the Data Room route mount; leaving the route releases it. Each Assistant
+  open snapshots the active uploaded file from the tools registry into a removable reference chip.
+  The lazy first mount seeds the draft; later opens notify the retained runtime through a scoped
+  reference-event subscription. Tab changes while open do not alter the draft, and removing the
+  chip keeps it removed until another open. Reopening adds the then-active file without duplicating
+  an existing reference or clearing draft text/uploads/other references; normal draft limits apply.
+  With no active stored-file ID (including local-only previews), no default reference is added.
+  This applies only to the Data Room panel. Search
   uses the additive deal-scoped hybrid API, including without a selected document. Enter or Search
   submits the draft, with All/Keyword/Semantic result views, source badges, and an explicit keyword fallback when
   hybrid is unavailable. It hides results while editing, ignores late responses on query
@@ -712,8 +727,8 @@ operational failures.
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
-| Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
+| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas shares authenticated deal-linked threads and explicit current-room file references; there is no automatic document retrieval; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Assistant | SQLite-backed multi-thread chat with current-turn uploads and scoped `@` file references, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, automatic retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
@@ -867,6 +882,20 @@ prior text pairs remain usable context, but their attachment bytes are never res
 Thread-creation failures retain the draft/files and expose retry guidance. New chat, history
 selection, selected-thread deletion, and identity/scope changes clear pending file selections.
 Uploaded bytes and filenames are not restored after reload; callers must reattach files then.
+
+Typing `@` at a word boundary opens a filename-filtered picker above the composer. Assistant lists
+stored files across the actor's accessible deals through the existing deal/document catalog;
+the Data Room panel lists only its active deal. Catalog requests run with at most four in flight and stop scheduling on picker close,
+and the picker renders a moving window of 50 matches with keyboard access to every result.
+Loading, empty and retryable failure states never substitute demo records. Arrow keys and Enter
+select a file, Escape dismisses suggestions before stopping/closing, and mouse selection keeps
+input focus. Selections become removable `#1e1a62`/white chips inside the composer, separate from
+the editable text; their deal/file IDs survive text edits. Duplicates are excluded, Backspace at
+the beginning removes the last reference, and the combined upload/reference limit is 20.
+The runtime snapshots references with each current user turn and retains them for in-memory retry;
+new chat, history selection, deletion, and identity/scope changes clear the draft selections.
+Reference chips/IDs are not persisted in transcript metadata or restored after reload. Current
+file versions are resolved anew on retry; file evidence is never automatically replayed in later turns.
 Voice, reasoning, tool, editing, and branching controls remain omitted. The former bouncing-dot
 typing component has been removed.
 
@@ -1065,6 +1094,25 @@ signature. Accepted images are PNG, JPEG, WebP, and single-frame GIF; accepted d
 PDF, UTF-8 TXT/Markdown/JSON/HTML/CSV, OLE DOC, and bounded inspected DOCX/PPTX/XLSX ZIPs. The route
 has a scoped 54 MiB body limit.
 
+Both chat multipart contracts also accept optional JSON `fileReferences` (up to 20 combined with
+uploads), each `{dealId, fileId, name}`, plus optional `fileScopeDealId`. The display name never
+selects stored bytes. The Data Room client sends its active scope, which must match each reference
+and the owned thread's deal association; Assistant omits it to permit cross-deal references even
+when viewing an existing linked chat. This scope is a contextual constraint, not an authorization
+authority: each reference independently rechecks current server-side deal membership before loading
+its canonical SQLite current blob through the injected `StoredDocumentService`. Missing, inaccessible,
+invalid or unsupported references reject the request before SSE; files are never silently omitted.
+Up to four file-reference jobs run as spawned Tokio tasks in a request-owned `JoinSet`, each
+checking membership before loading bytes from the shared read pool and offloading validation.
+Finished jobs immediately free slots; their indexed results restore selection order before joining
+manual uploads. Aggregate count/byte accounting stays sequential. Errors abort and drain sibling
+async tasks; dropping the request aborts the set. Already-running SQLite/validation blocking workers
+may finish. The resolver, per-file validation, and task/limit collection have separate helpers.
+Stored files reuse upload name/MIME/signature validation off the async worker, and their bytes count
+toward the same 50-MiB aggregate limit as uploads. Validated files join the existing Responses
+`input_file`/image inputs; provider architecture and SSE event names are unchanged. No new endpoint,
+local-path access, schema change or provider-side attachment reuse was introduced.
+
 The response is SSE with `started`, ordered `delta`, and exactly one `completed` or `failed` event,
 a 15-second keepalive, `Content-Encoding: identity`, and proxy buffering disabled. Pre-stream
 validation failures are 400 and missing OpenAI capability is 503. Once HTTP 200 begins, failures
@@ -1217,7 +1265,7 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
-Quarry's existing `SqliteClient` connection and database location; `app/migrations.rs` owns all
+Quarry's shared `SqliteClient` pool and database location; `app/migrations.rs` owns all
 schema DDL and marker 17. Startup creates a fresh schema, upgrades validated markers 12/13/14/15/16,
 or validates/reuses marker 17; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
@@ -1413,6 +1461,24 @@ request layers do not reach repositories or concrete adapters, domain routers bi
 state before composition, domain code does not read ambient configuration, and cross-domain
 imports use public facades instead of another domain's private layers.
 
+Request validation runs in handlers before product work. Reusable request checks live in
+handler-owned `handler/validate.rs` modules; multipart extraction and streaming bounds live in
+handler-owned `upload.rs` modules. Assistant models contain data rather than HTTP validators,
+membership routes only compose handlers, and the WM AI adapter serializes validated requests
+rather than deciding whether incoming fields are valid. Shared pure attachment/path parsers use
+`validate.rs` and carry no HTTP error types. Architecture tests reject HTTP extraction/error
+dependencies in domain models, services, and repositories and handler dependencies in services.
+
+Authentication and initial resource authorization happen at the HTTP boundary: shared middleware
+checks bearer/header/session/path policy, while handler-owned checks cover body-selected values.
+Checks needing loaded or changing state remain at their point of use, including canonical file
+membership, atomic write permissions, stored-thread scope, current-result filtering, filesystem
+containment, and background-job/stream revocation. An early check does not replace those guards.
+See [backend boundary checks](backend-boundary-checks.md) for the audit and verification scope.
+Its placement decision and review checklist apply to every new or changed backend check.
+Changes explain the state/lifecycle reason for a later guard and use behavioral tests to prove
+early rejection; the architecture gate alone does not establish execution order.
+
 #### 8.2.1 Product domain registry
 
 The domain tree reserves ownership for capabilities that are not implemented yet. A comment-only,
@@ -1492,8 +1558,22 @@ repositories map the resulting client error to their storage error at the reposi
 ### 8.5 Concurrency and blocking work
 
 - Tokio provides the async runtime and job/watch primitives.
-- `SqliteClient` owns a single bundled SQLite connection behind a mutex and moves async database
-  operations to Tokio's blocking pool.
+- One cloneable `SqliteClient` is injected across product and embedded-template repositories.
+  File-backed clients share four read-only connections and one mutex-serialized write connection;
+  every `_async` operation, including pool checkout, runs on Tokio's blocking pool. Reader leases
+  return on success/error/unwind. Readers use read-only open flags and `query_only=ON`; all
+  connections retain foreign-key enforcement and a five-second busy timeout. The writer enables
+  WAL before opening readers, allowing reads to overlap each other and a writer. Client teardown
+  closes readers before the final writer so normal SQLite checkpoint/sidecar cleanup can complete.
+- Single-query reads lease a reader. Read-only aggregate/authorization transactions use deferred
+  snapshots on one reader; mutations retain `BEGIN IMMEDIATE` and their existing atomic rollback
+  on the writer. The transaction wrapper rejects writes in a read snapshot, including tests using
+  private in-memory databases. Raw connection/schema access always uses the writer. Migrations
+  still complete before request/job assembly and the schema marker remains 17.
+- `open_in_memory` and temporary connections without a file path keep their original single
+  private connection; opening independent `:memory:` readers would create different databases.
+  They do not enable SQLite shared-cache mode. Pool concurrency/isolation tests use disposable
+  file-backed WAL databases, while existing in-memory fixtures keep their identity and isolation.
 - Document batch ingestion uses bounded unordered concurrency, default eight.
 - Search shares four bounded deal pipelines and eight Helix reads; opt-in hybrid adds bounded
   request admission and a four-miss query embedder with request-polled cache coalescing.
@@ -1616,9 +1696,11 @@ are in [shared deal projects](shared-deal-projects.md#schema-14-rollout-and-reco
 image checkpoint rollout is described in [schema 15 image recovery](shared-deal-projects.md#schema-15-image-recovery).
 
 All aggregate reads use one transaction snapshot: deals `LEFT JOIN` their optional metadata, then
-bounded batches fetch parties joined to companies and scopes separately. These reads run sequentially on the same transaction connection
-inside the blocking pool; spawning Tokio tasks would still serialize on the shared connection lock.
-They do not fetch children separately for every deal or multiply parties by scopes in a combined join.
+bounded batches fetch parties joined to companies and scopes separately. Each aggregate leases one
+reader and runs its related queries sequentially within a consistent read snapshot on the blocking
+pool; different aggregates can run concurrently on the four readers. Splitting one aggregate's
+queries across separate tasks/connections would lose its common snapshot. They do not fetch
+children separately for every deal or multiply parties by scopes in a combined join.
 
 The offline `reset_development` binary requires `--discard` and an existing, absolute disposable
 SQLite path. It drops dependent tables and recreates the final schema in one controlled transaction,
@@ -1911,11 +1993,12 @@ rollout/rollback, capability evidence and the remaining benchmark and indexed-re
 ### 10.5 Assistant chat
 
 ```text
-Custom AgentRuntime remote thread list + current prompt/files, optional model, and stable IDs
+Custom AgentRuntime remote thread list + current prompt/uploads/file references, optional model, and stable IDs
   -> ModelAdapter emits cumulative thread-message snapshots
   -> web fetch parser or allowlisted Tauri thread-run relay
   -> assistant::chat resolves the development user and atomically inserts the pending turn
   -> SQLite supplies bounded completed prior pairs
+  -> current-turn references recheck membership and load canonical blobs, scoped to the room when supplied
   -> AssistantChatService resolves server defaults and opens bounded event channels
   -> OpenAiClient replays text plus current files to Responses API with store=false
   -> started, ordered deltas, and one completed/failed terminal persisted to SQLite
@@ -2275,6 +2358,12 @@ preservation and schema-17 upgrades, shared-worker processing of owned imports, 
 The ignored Helix v3 compatibility test is an opt-in local-Docker suite. It requires
 `QUARRY_HELIX_COMPAT_URL` and verifies DDL readiness, graph writes, reads, replacement, and scoped
 search against the pinned local image; it never starts or changes a developer's default container.
+The opt-in browser tests also require installed Chromium and loopback access. Their test helper
+honors `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH`; the tab-backgrounding test requires full Chrome or
+Chromium rather than the headless-shell executable. The ignored `notebook_visual_fixture` and
+`serve_disposable_slide_template_validation_api` are interactive server fixtures that run until
+stopped. Validate their startup and HTTP behavior on unused ports, then stop only the owned
+processes; the template fixture accepts `QUARRY_VALIDATION_API_PORT` to avoid an existing API.
 There is no automatically run live integration suite for OpenAI, WM AI, Microsoft Graph, or
 LibreOffice.
 

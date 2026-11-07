@@ -33,10 +33,10 @@ pub fn studio(seed: bool) -> Arc<SlideTemplates> {
     ))
 }
 pub fn chromium_candidates() -> Vec<std::path::PathBuf> {
-    let values = std::env::var("HOME")
-        .ok()
-        .map(|home| vec![("HOME", home)])
-        .unwrap_or_default();
+    let values = ["HOME", "QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+        .collect::<Vec<_>>();
     crate::app::config::AppConfig::from_values(values)
         .unwrap()
         .slide_templates

@@ -92,7 +92,15 @@ export type ChatContextMessage = {
   role: "user" | "assistant";
 };
 
+export type ChatFileReference = {
+  dealId: string;
+  fileId: string;
+  name: string;
+};
+
 export type QueryModelInput = {
+  fileReferences?: ChatFileReference[];
+  fileScopeDealId?: string;
   context: ChatContextMessage[];
   files: File[];
   model?: string;
@@ -133,6 +141,8 @@ export type AssistantThreadPage = {
 };
 
 export type RunAssistantThreadInput = {
+  fileReferences?: ChatFileReference[];
+  fileScopeDealId?: string;
   assistantMessageId: string;
   files: File[];
   model?: string;

@@ -477,13 +477,15 @@ describe("httpQuarryApi", () => {
     if (mode === "persisted") {
       httpQuarryApi.runAssistantThread({
         assistantMessageId: "assistant-1", userMessageId: "user-1", requestId: "assistant-1", threadId: "thread-1",
-        files: [file], model: "gpt-5.5", prompt: "Review these notes",
+        files: [file], fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }], fileScopeDealId: "DEAL-A", model: "gpt-5.5", prompt: "Review these notes",
       }, handlers);
     } else {
-      httpQuarryApi.queryModel({ context: [], files: [file], model: "gpt-5.5", prompt: "Review these notes" }, handlers);
+      httpQuarryApi.queryModel({ context: [], files: [file], fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }], fileScopeDealId: "DEAL-A", model: "gpt-5.5", prompt: "Review these notes" }, handlers);
     }
     await vi.waitFor(() => expect(handlers.onEvent).toHaveBeenCalledWith({ type: "completed", response: "Done" }));
     const form = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(form.get("fileReferences")).toBe(JSON.stringify([{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }]));
+    expect(form.get("fileScopeDealId")).toBe("DEAL-A");
     expect(form.get("model")).toBe("gpt-5.5");
     expect(form.get("prompt")).toBe("Review these notes");
     const uploaded = form.get("files") as File;

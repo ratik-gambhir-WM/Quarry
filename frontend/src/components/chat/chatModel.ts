@@ -1,7 +1,10 @@
+import type { ChatFileReference } from "../../contracts/quarryApi";
 export type ContentPart =
   { text: string; type: "text" } | { image: string; type: "image" };
 
 export type UserMessage = {
+  fileReferences?: readonly ChatFileReference[];
+  fileScopeDealId?: string;
   attachments: readonly File[];
   content: readonly ContentPart[];
   id: string;
@@ -18,6 +21,7 @@ export type AssistantMessage = {
   id: string;
   role: "assistant";
   status: AssistantStatus;
+  error?: string;
 };
 
 export type Message = UserMessage | AssistantMessage;

@@ -151,7 +151,7 @@ pub async fn manifest(
     version: String,
 ) -> Result<Option<IdentityManifest>, RepositoryError> {
     Ok(sqlite
-        .transaction_async(move |tx| read(tx, &version))
+        .read_transaction_async(move |tx| read(tx, &version))
         .await?)
 }
 pub async fn ready(sqlite: &SqliteClient) -> Result<bool, RepositoryError> {

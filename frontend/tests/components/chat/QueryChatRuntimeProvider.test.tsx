@@ -14,6 +14,8 @@ const { api } = vi.hoisted(() => ({
     deleteAssistantThread: vi.fn(),
     getAssistantThread: vi.fn(),
     listAssistantThreads: vi.fn(),
+    listDeals: vi.fn(),
+    listDealDocuments: vi.fn(),
     queryModel: vi.fn(),
     runAssistantThread: vi.fn(),
   },
@@ -35,6 +37,8 @@ afterEach(() => {
   api.getAssistantThread.mockReset();
   api.listAssistantThreads.mockReset();
   api.queryModel.mockReset();
+  api.listDeals.mockReset();
+  api.listDealDocuments.mockReset();
   api.runAssistantThread.mockReset();
 });
 
@@ -483,4 +487,55 @@ it("keys drafts, pending lists, and new threads by the active deal", async () =>
   await waitFor(() =>
     expect(api.createAssistantThread).toHaveBeenCalledWith(undefined, "DEAL-B"),
   );
+});
+
+it("snapshots cross-deal mentions with uploads for retry and preserves the next draft", async () => {
+  const user = userEvent.setup();
+  api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockResolvedValue(threadMetadata);
+  api.listDeals.mockResolvedValue([{ dealId: "DEAL-A", dealName: "Alpha" }, { dealId: "DEAL-B", dealName: "Beta" }]);
+  api.listDealDocuments.mockImplementation(async (id: string) => [{ fileId: `file-${id}`, displayName: id === "DEAL-A" ? "Architecture.pdf" : "Budget.xlsx" }]);
+  api.runAssistantThread.mockImplementation((_input, handlers) => {
+    handlers.onEvent({ type: "failed", error: "test failure" });
+    return () => undefined;
+  });
+  render(<QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="analyst@example.com"><QueryChatThread contextTruncated={false} /></QueryChatRuntimeProvider>);
+  const input = screen.getByRole("textbox", { name: "Message input" });
+  await user.type(input, "Review @arch");
+  await user.click(await screen.findByRole("option", { name: /Architecture/ }));
+  await user.type(input, "with @budget");
+  await user.click(await screen.findByRole("option", { name: /Budget/ }));
+  await user.upload(screen.getByLabelText("Choose attachments"), new File(["Notes"], "manual.txt", { type: "text/plain" }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByRole("button", { name: "Try again" });
+  const original = api.runAssistantThread.mock.calls[0][0];
+  expect(original.fileReferences).toEqual([
+    { dealId: "DEAL-A", fileId: "file-DEAL-A", name: "Architecture.pdf" },
+    { dealId: "DEAL-B", fileId: "file-DEAL-B", name: "Budget.xlsx" },
+  ]);
+  expect(original.files[0].name).toBe("manual.txt");
+  expect(original.fileScopeDealId).toBeUndefined();
+  expect(screen.queryByRole("button", { name: "Remove reference Architecture.pdf" })).toBeNull();
+  await user.type(input, "Next question @budget");
+  await user.click(await screen.findByRole("option", { name: /Budget/ }));
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledTimes(2));
+  expect(api.runAssistantThread.mock.calls[1][0].fileReferences).toEqual(original.fileReferences);
+  expect((input as HTMLTextAreaElement).value).toBe("Next question ");
+  expect(screen.getByRole("button", { name: "Remove reference Budget.xlsx" })).toBeTruthy();
+});
+
+it("sends the active data room scope with references", async () => {
+  const user = userEvent.setup();
+  api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockResolvedValue({ ...threadMetadata, dealId: "DEAL-A" });
+  api.listDealDocuments.mockResolvedValue([{ fileId: "file-a", displayName: "Architecture.pdf" }]);
+  api.runAssistantThread.mockImplementation((_input, handlers) => { handlers.onEvent({ type: "completed", response: "Done" }); return () => undefined; });
+  render(<QueryChatRuntimeProvider scope="deal" dealId="DEAL-A" onContextTruncated={vi.fn()} userEmail="analyst@example.com"><QueryChatThread contextTruncated={false} /></QueryChatRuntimeProvider>);
+  await user.type(screen.getByRole("textbox", { name: "Message input" }), "Review @");
+  await user.click(await screen.findByRole("option", { name: /Architecture/ }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledOnce());
+  expect(api.runAssistantThread.mock.calls[0][0]).toMatchObject({ fileScopeDealId: "DEAL-A", fileReferences: [{ dealId: "DEAL-A", fileId: "file-a", name: "Architecture.pdf" }] });
+  expect(api.listDeals).not.toHaveBeenCalled();
 });

@@ -132,7 +132,7 @@ fn domains_and_adapters_preserve_dependency_direction() {
     }
 
     for (path, source) in rust_sources("src/domains") {
-        let is_request_layer = path.ends_with("handler.rs") || path.ends_with("route.rs");
+        let is_request_layer = is_handler_source(&path) || path.ends_with("route.rs");
         if is_request_layer {
             assert!(
                 !source.contains("::repository") && !source.contains("repository::"),
@@ -296,7 +296,7 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
 #[test]
 fn template_domain_keeps_sql_and_http_ownership_explicit() {
     for (path, source) in rust_sources("src/domains/templates/slide_templates") {
-        if !path.ends_with("/handler.rs") && !path.ends_with("/route.rs") {
+        if !is_handler_source(&path) && !path.ends_with("/route.rs") {
             assert!(
                 !source.contains("axum::") && !source.contains("StatusCode"),
                 "reusable template mechanism depends on HTTP: {path}"
@@ -307,6 +307,41 @@ fn template_domain_keeps_sql_and_http_ownership_explicit() {
                 && !source.contains(".execute_batch(")
                 && !source.contains(".prepare("),
             "template domain bypasses the SQLite builder/client: {path}"
+        );
+    }
+}
+
+fn is_handler_source(path: &str) -> bool {
+    path.ends_with("/handler.rs") || path.ends_with("_handler.rs") || path.contains("/handler/")
+}
+
+#[test]
+fn http_types_and_errors_stay_in_the_handler_layer() {
+    for (path, source) in rust_sources("src/domains") {
+        if is_handler_source(&path) {
+            continue;
+        }
+        assert!(
+            !source.contains("app::http")
+                && (path.ends_with("/route.rs") || !source.contains("axum::"))
+                && !source.contains("AppError")
+                && !source.contains("AppResult"),
+            "domain model/service/repository or route owns HTTP extraction or validation: {path}"
+        );
+    }
+}
+
+#[test]
+fn product_services_do_not_reach_handler_owned_validation() {
+    for (path, source) in rust_sources("src/domains")
+        .into_iter()
+        .filter(|(path, _)| path.ends_with("service.rs"))
+    {
+        assert!(
+            !source.contains("super::handler")
+                && !source.contains("handler::")
+                && !source.contains("::upload::"),
+            "product service depends on the HTTP handler layer: {path}"
         );
     }
 }

@@ -1128,3 +1128,122 @@ fn insert_stored_document(
     )?;
     Ok(())
 }
+
+#[tokio::test]
+async fn research_request_checks_run_before_unconfigured_provider_lookup() {
+    let app = test_router();
+    for (method, path, body, expected) in [
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[]}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[{"filename":"memo.pdf","text":" "}]}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "GET",
+            "/api/v1/indexes/bad%5Cid/status",
+            None,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"resource","question":" "}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"../private","question":"Question"}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"..","question":"Question"}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[{"filename":"memo.pdf","text":"Document"}]}"#),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"resource","question":"Question"}"#),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    ] {
+        let mut request = Request::builder().method(method).uri(path);
+        if body.is_some() {
+            request = request.header("content-type", "application/json");
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                request
+                    .body(body.map_or_else(Body::empty, Body::from))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn assistant_reference_scope_is_rejected_before_storage_or_provider_lookup() {
+    let boundary = "assistant-reference-boundary";
+    let body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nQuestion\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n[]\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileScopeDealId\"\r\n\r\nDEAL-A\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileReferences\"\r\n\r\n[{{\"dealId\":\"DEAL-B\",\"fileId\":\"file-1\",\"name\":\"Document.pdf\"}}]\r\n--{boundary}--\r\n");
+    let response = test_router()
+        .oneshot(
+            Request::post("/api/v1/query_model")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes).unwrap()["error"],
+        "referenced file is outside this data room"
+    );
+}
+
+#[tokio::test]
+async fn data_room_relative_paths_are_checked_before_loading_the_configured_source() {
+    let app = test_router();
+    for path in ["", "../outside.pdf", "/absolute.pdf", "./document.pdf"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/deals/DEAL-PATH/data-room/preview")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"relativePath":path}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["error"],
+            "document path must be a non-empty path relative to the deal data room"
+        );
+    }
+}

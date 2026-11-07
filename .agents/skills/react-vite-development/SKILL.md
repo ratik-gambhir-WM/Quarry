@@ -94,6 +94,20 @@ cancel/clean up correctly, and retain complete dependencies.
 - Canary-only React features need a guarded/fallback path when the existing code establishes one,
   focused tests, and both target typechecks.
 
+## Refactoring review
+
+For frontend changes, consult the globally installed `$refactor` and `$dev-refactor-frontend`
+skills. Keep the post-feature review scoped to changed code and affected consumers. Record which
+applicable review areas were inspected, with evidence and dispositions for confirmed findings.
+For a requested broader audit, connect accepted findings to tasks and acceptance criteria. An
+uninspected area is a limitation, not a passing result.
+
+Evaluate a proposed improvement to Quarry's guidance on its merits. Explain the concrete benefit,
+tradeoffs, and verification, then update the relevant guidance explicitly when adopting it. Apply
+framework-specific recommendations only to capabilities Quarry actually uses; Vite client code
+has no Next.js server-component or App Router requirement. The evaluation is documented in
+[frontend-refactor-skill-evaluation.md](../../../docs/frontend-refactor-skill-evaluation.md).
+
 ## Verification ladder
 
 Use the narrowest applicable step first, then broaden in proportion to the change:
