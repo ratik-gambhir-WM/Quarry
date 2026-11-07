@@ -9,6 +9,7 @@ import { DataRoomToolsProvider } from "@/components/data-room/DataRoomToolsProvi
 import { useDataRoomDocumentSearch } from "@/components/data-room/dataRoomToolsContext";
 import { SidebarFrame } from "@/components/hub/sidebar/SidebarFrame";
 import type { DocumentSearchContext } from "@/components/data-room/dataRoomToolsContext";
+import { hybridResponse } from "../../fixtures/documents/hybridSearch";
 import { keywordHit } from "../../fixtures/documents/keywordSearch";
 
 function SearchRegistration({ search }: { search: DocumentSearchContext }) {
@@ -33,6 +34,7 @@ async function launch(user: ReturnType<typeof userEvent.setup>, label: string) {
 const { api } = vi.hoisted(() => ({
   api: {
     searchDealDocumentChunksByKeyword: vi.fn(),
+    searchDealDocumentChunksHybrid: vi.fn(),
     createAssistantThread: vi.fn(),
     deleteAssistantThread: vi.fn(),
     getAssistantThread: vi.fn(),
@@ -53,6 +55,7 @@ afterAll(() => {
 afterEach(cleanup);
 
 beforeEach(() => {
+  api.searchDealDocumentChunksHybrid.mockReset().mockResolvedValue(hybridResponse());
   api.searchDealDocumentChunksByKeyword.mockReset().mockResolvedValue([keywordHit()]);
   api.createAssistantThread.mockReset();
   api.deleteAssistantThread.mockReset();
@@ -149,7 +152,7 @@ describe("DataRoomTools", () => {
       onSelectionFocus: focusPreview,
     }} /></>);
     await launch(user, "Workspace Search");
-    await user.type(await screen.findByRole("searchbox", { name: "Search document" }), "Synthetic");
+    await user.type(await screen.findByRole("searchbox", { name: "Search document" }), "Synthetic{Enter}");
     await user.click(await screen.findByRole("option", { name: /Page 2/ }));
     expect(activate).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: "pdf-page", page: 2 } }));
     await waitFor(() => expect(focusPreview).toHaveBeenCalledTimes(1));
@@ -175,7 +178,7 @@ describe("DataRoomTools", () => {
     const user = userEvent.setup();
     render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
     await launch(user, "Workspace Search");
-    expect(await screen.findByText("This deal · Keyword")).not.toBeNull();
+    expect(await screen.findByText("This deal · Hybrid")).not.toBeNull();
   });
 
   it("shows the Assistant chat interface in the Synthesis Canvas", async () => {

@@ -1,3 +1,4 @@
+use helix_db::dsl::prelude::*;
 use std::{env, num::NonZeroUsize, sync::Arc};
 
 use crate::{
@@ -18,11 +19,11 @@ async fn v3_runtime_accepts_document_index_initialization_and_graph_writes() {
         .expect("the ignored compatibility test requires an explicit Helix URL");
     let helix = Arc::new(HelixClient::with_config(&url, None).expect("valid Helix URL"));
     let vector_dimension = NonZeroUsize::new(2).expect("test vector dimension is non-zero");
-    let writer = DocumentGraphWriter::new(helix.clone());
+    let writer = DocumentGraphWriter::new(helix.clone(), vector_dimension);
     let reader = DocumentGraphReader::new(helix.clone());
     let search = DocumentGraphSearch::new(helix.clone());
     writer
-        .initialize(vector_dimension)
+        .initialize()
         .await
         .expect("the disposable runtime must initialize every document index");
     let file = FileNode {
@@ -223,4 +224,134 @@ fn file_chunk(
         section_path: "Synthetic".to_string(),
         created_at: "2026-09-28T00:00:00.000Z".to_string(),
     }
+}
+
+#[tokio::test]
+#[ignore = "requires explicitly selected disposable QUARRY_HELIX_COMPAT_URL"]
+async fn v3_current_vector_query_preserves_cosine_distances_and_candidate_filter() {
+    let url = env::var(HELIX_COMPAT_URL_ENV).expect("disposable Helix URL");
+    let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
+    let writer = DocumentGraphWriter::new(helix.clone(), std::num::NonZeroUsize::new(2).unwrap());
+    writer.initialize().await.unwrap();
+    let search = DocumentGraphSearch::new(helix.clone());
+    let deal = "DEAL-VECTOR-METRIC-CHECK";
+    let mut chunks = Vec::new();
+    for (index, (id, vector)) in [
+        ("aligned", vec![1.0, 0.0]),
+        ("scaled", vec![5.0, 0.0]),
+        ("orthogonal", vec![0.0, 1.0]),
+        ("opposite", vec![-1.0, 0.0]),
+        ("oblique", vec![3.0, 4.0]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut chunk = file_chunk(
+            deal,
+            "metric-file",
+            "metric-version",
+            id,
+            i64::try_from(index).unwrap(),
+            "Synthetic metric evidence",
+        );
+        chunk.embedding = vector;
+        chunks.push(chunk);
+    }
+    let expected_vectors = chunks
+        .iter()
+        .map(|c| (c.chunk_id.clone(), c.embedding.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    writer
+        .insert_graph(
+            FileNode {
+                deal_id: deal.into(),
+                file_id: "metric-file".into(),
+                display_name: "synthetic-metric.txt".into(),
+            },
+            FileVersionNode {
+                deal_id: deal.into(),
+                file_id: "metric-file".into(),
+                version_id: "metric-version".into(),
+                mime_type: "text/plain".into(),
+                content_sha256: "synthetic-metric-content".into(),
+                byte_size: 25,
+                index_generation: "metric-version".into(),
+                indexed_at: "2026-11-06T00:00:00.000Z".into(),
+            },
+            chunks,
+        )
+        .await
+        .unwrap();
+    #[derive(serde::Deserialize)]
+    struct StoredVector {
+        chunk_id: String,
+        embedding: Vec<f32>,
+    }
+    #[derive(serde::Deserialize)]
+    struct StoredVectors {
+        chunks: Vec<StoredVector>,
+    }
+    let stored: StoredVectors = helix
+        .execute_read_query(
+            "test.synthetic_vector_dimensions",
+            metric_stored_vectors(deal.into()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored.chunks.len(), expected_vectors.len());
+    for stored in stored.chunks {
+        assert_eq!(stored.embedding.len(), 2);
+        assert_eq!(stored.embedding, expected_vectors[&stored.chunk_id]);
+    }
+    let query = |limit| FileChunkVectorSearch {
+        deal_id: deal.into(),
+        query_embedding: vec![1.0, 0.0],
+        limit,
+    };
+    let ids = vec![
+        "aligned".into(),
+        "scaled".into(),
+        "orthogonal".into(),
+        "opposite".into(),
+        "oblique".into(),
+    ];
+    let hits = search.vector_current(query(5), ids).await.unwrap();
+    assert_eq!(hits.len(), 5);
+    for (id, expected) in [
+        ("aligned", 0.0),
+        ("scaled", 0.0),
+        ("orthogonal", 0.5),
+        ("opposite", 1.0),
+        ("oblique", 0.2),
+    ] {
+        let hit = hits.iter().find(|h| h.chunk.chunk_id == id).unwrap();
+        assert!(
+            (hit.distance - expected).abs() < 1e-5,
+            "{id}: expected {expected}, got {}",
+            hit.distance
+        );
+    }
+    let scoped = search
+        .vector_current(query(1), vec!["orthogonal".into(), "opposite".into()])
+        .await
+        .unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].chunk.chunk_id, "orthogonal");
+    assert!((scoped[0].distance - 0.5).abs() < 1e-5);
+}
+
+#[query]
+fn metric_stored_vectors(deal: String) -> ReadBatch {
+    let _ = &deal;
+    read_batch()
+        .var_as(
+            "chunks",
+            g().n_with_label("FileChunk")
+                .where_(Predicate::eq_param("deal_id", "deal"))
+                .project(vec![
+                    PropertyProjection::new("chunk_id"),
+                    PropertyProjection::new("embedding"),
+                ]),
+        )
+        .returning(["chunks"])
 }

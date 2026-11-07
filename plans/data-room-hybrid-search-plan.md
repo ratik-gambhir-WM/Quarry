@@ -1,6 +1,10 @@
 # Concurrent hybrid document search implementation plan
 
-Updated: 2026-11-06. Status: proposed; implementation has not started.
+Updated: 2026-11-06. Status: initial bounded-scan delivery implemented (shared preparation,
+concurrent hybrid, query cache and shared UI). Rollout defaults to disabled pending the
+Phase 0 disposable-load/relevance gates. Indexed lexical retrieval and large-deal preparation
+remain gated milestones, with no schema/index/model changes. See
+[the maintained implementation and release gates](../docs/hybrid-document-search.md).
 
 This refresh replaces the older schema-9/workspace-based proposal in this file with a plan
 based on the current working tree. Code and [the architecture](../docs/ARCHITECTURE.md) remain
@@ -24,7 +28,7 @@ activation, importing local/SharePoint files, answer generation, reranking, pars
 and embedding-model migration are separate work. These were broader ideas in the previous
 proposal, not prerequisites for this optimization. Do not silently implement them here.
 
-## Verified starting point
+## Verified pre-implementation baseline
 
 | Area | Current source and behavior | Implication |
 | --- | --- | --- |

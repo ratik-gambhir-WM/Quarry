@@ -62,4 +62,24 @@ describe("FileReviewTable", () => {
     });
     expect(document.activeElement).toBe(restoredTrigger);
   });
+
+  it("recognizes image and Markdown extensions despite generic document kinds and preserves file activation", async () => {
+    const user = userEvent.setup();
+    const onSelectFile = vi.fn();
+    const files = ["notes.docx", "photo.JPG", "diagram.png", "README.md"].map((name, index): DataRoomFileEntry => ({
+      ...file,
+      node: { ...file.node, id: `typed-file-${index}`, name },
+    }));
+    render(<FileReviewTable files={files} onSelectFile={onSelectFile} />);
+    await user.selectOptions(screen.getByLabelText("File type"), "Image");
+    expect(screen.getByRole("button", { name: "photo.JPG" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "diagram.png" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "notes.docx" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "README.md" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "diagram.png" }));
+    expect(onSelectFile).toHaveBeenCalledWith(files[2].node);
+    await user.selectOptions(screen.getByLabelText("File type"), "Markdown");
+    expect(screen.getByRole("button", { name: "README.md" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "photo.JPG" })).toBeNull();
+  });
 });

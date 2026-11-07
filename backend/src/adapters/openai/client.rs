@@ -150,9 +150,11 @@ impl OpenAiClient {
         http_client: reqwest::Client,
         embeddings_url: String,
         prompts: Arc<PromptCatalog>,
+        dimensions: NonZeroUsize,
     ) -> Self {
         let mut client = Self::new(http_client, "unused-test-key", prompts);
         client.embeddings_url = Arc::from(embeddings_url);
+        client.embedding_dimensions = dimensions;
         client
     }
 
@@ -600,7 +602,7 @@ impl OpenAiClient {
         let response_json: Value = serde_json::from_str(&response_body)
             .map_err(|err| format!("failed to parse OpenAI embeddings response: {err}"))?;
 
-        extract_embeddings(&response_json, contents.len())
+        extract_embeddings(&response_json, contents.len(), self.embedding_dimensions)
     }
 }
 
@@ -1194,6 +1196,7 @@ fn extract_response_text(response_json: &Value) -> Option<String> {
 fn extract_embeddings(
     response_json: &Value,
     expected_count: usize,
+    expected_dimensions: NonZeroUsize,
 ) -> Result<Vec<Vec<f64>>, String> {
     let items = response_json["data"]
         .as_array()
@@ -1218,13 +1221,23 @@ fn extract_embeddings(
         let values = item["embedding"].as_array().ok_or_else(|| {
             format!("OpenAI embeddings response did not include embedding at index {index}")
         })?;
+        if values.len() != expected_dimensions.get() {
+            return Err("OpenAI embedding dimension does not match the configured index".into());
+        }
         *destination = Some(
             values
                 .iter()
                 .map(|value| {
-                    value
-                        .as_f64()
-                        .ok_or_else(|| "OpenAI embedding contained a non-number value".to_string())
+                    let number = value.as_f64().ok_or_else(|| {
+                        "OpenAI embedding contained a non-number value".to_string()
+                    })?;
+                    if !number.is_finite() || !(number as f32).is_finite() {
+                        return Err(
+                            "OpenAI embedding contained a non-finite or out-of-range value"
+                                .to_string(),
+                        );
+                    }
+                    Ok(number)
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         );

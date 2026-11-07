@@ -120,6 +120,7 @@ pub struct AppConfig {
     pub wm_ai: Option<WmAiConfig>,
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
+    pub search: SearchConfig,
     pub diligence_studio: Option<DiligenceStudioConfig>,
     pub slide_templates: SlideTemplatesConfig,
     pub prompts: PromptConfig,
@@ -155,6 +156,7 @@ impl AppConfig {
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
+            search: parse_search_config(&values)?,
             diligence_studio: parse_diligence_studio_config(&values)?,
             slide_templates: parse_slide_templates_config(&values)?,
             prompts: parse_prompt_config(&values)?,
@@ -186,6 +188,7 @@ impl Default for AppConfig {
             },
             openai: None,
             wm_ai: None,
+            search: SearchConfig::default(),
             data_room: DataRoomConfig::default(),
             documents: DocumentConfig {
                 max_concurrent_documents: DEFAULT_DOCUMENT_CONCURRENCY,
@@ -330,6 +333,16 @@ fn parse_openai_config(
         return Ok(None);
     }
     let api_key = required(values, "OPENAI_API_KEY", "OpenAI capability")?;
+    let embedding_model =
+        value(values, "OPENAI_EMBEDDING_MODEL").unwrap_or(DEFAULT_EMBEDDING_MODEL);
+    let max_dimensions = match embedding_model {
+        "text-embedding-3-small" => Some(1536),
+        "text-embedding-3-large" => Some(3072),
+        _ => None,
+    };
+    if max_dimensions.is_some_and(|maximum| embedding_dimensions.get() > maximum) {
+        return Err("HELIX_VECTOR_DIMENSION exceeds the selected OPENAI_EMBEDDING_MODEL's supported dimensions".into());
+    }
     Ok(Some(OpenAiConfig {
         api_key: SecretString::new(api_key),
         chat_model: value(values, "OPENAI_CHAT_MODEL")
@@ -338,9 +351,7 @@ fn parse_openai_config(
         deal_extraction_model: value(values, "OPENAI_DEAL_EXTRACTION_MODEL")
             .unwrap_or(DEFAULT_DEAL_EXTRACTION_MODEL)
             .to_string(),
-        embedding_model: value(values, "OPENAI_EMBEDDING_MODEL")
-            .unwrap_or(DEFAULT_EMBEDDING_MODEL)
-            .to_string(),
+        embedding_model: embedding_model.to_string(),
         embedding_dimensions,
         document_summary_model: value(values, "OPENAI_DOCUMENT_SUMMARY_MODEL")
             .unwrap_or(DEFAULT_DOCUMENT_SUMMARY_MODEL)
@@ -696,4 +707,79 @@ fn resolve_chromium(values: &HashMap<String, String>) -> Result<Option<PathBuf>,
         .map(PathBuf::from),
     );
     Ok(candidates.into_iter().find(|p| p.is_file()))
+}
+
+/// Trial rollout limits. Kept disabled until disposable-load/relevance measurements are reviewed.
+#[derive(Clone, Debug)]
+pub struct SearchConfig {
+    pub enabled: bool,
+    pub deal_concurrency: usize,
+    pub helix_reads: usize,
+    pub embedding_concurrency: usize,
+    pub active_requests: usize,
+    pub queued_requests: usize,
+    pub queue_timeout: Duration,
+    pub request_timeout: Duration,
+    pub embedding_timeout: Duration,
+    pub min_semantic_similarity: f64,
+}
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            deal_concurrency: 4,
+            helix_reads: 8,
+            embedding_concurrency: 4,
+            active_requests: 16,
+            queued_requests: 32,
+            queue_timeout: Duration::from_secs(2),
+            request_timeout: Duration::from_secs(30),
+            embedding_timeout: Duration::from_secs(15),
+            min_semantic_similarity: 0.4,
+        }
+    }
+}
+fn parse_search_config(values: &HashMap<String, String>) -> Result<SearchConfig, String> {
+    let mut config = SearchConfig {
+        enabled: parse_value(values, "QUARRY_HYBRID_SEARCH_ENABLED", false)?,
+        ..Default::default()
+    };
+    config.min_semantic_similarity =
+        parse_value(values, "QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY", 0.4)?;
+    if !config.min_semantic_similarity.is_finite()
+        || !(0.0..=1.0).contains(&config.min_semantic_similarity)
+    {
+        return Err("QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY must be a finite value in 0..=1".into());
+    }
+    config.deal_concurrency = parse_search_bound(values, "QUARRY_SEARCH_DEAL_CONCURRENCY", 4, 32)?;
+    config.helix_reads = parse_search_bound(values, "QUARRY_SEARCH_HELIX_READS", 8, 64)?;
+    config.embedding_concurrency =
+        parse_search_bound(values, "QUARRY_SEARCH_EMBEDDING_CONCURRENCY", 4, 16)?;
+    config.active_requests = parse_search_bound(values, "QUARRY_SEARCH_ACTIVE_REQUESTS", 16, 128)?;
+    config.queued_requests = parse_search_bound(values, "QUARRY_SEARCH_QUEUED_REQUESTS", 32, 256)?;
+    config.queue_timeout =
+        Duration::from_secs(
+            parse_search_bound(values, "QUARRY_SEARCH_QUEUE_SECONDS", 2, 30)? as u64,
+        );
+    config.request_timeout =
+        Duration::from_secs(
+            parse_search_bound(values, "QUARRY_SEARCH_TIMEOUT_SECONDS", 30, 110)? as u64,
+        );
+    config.embedding_timeout =
+        Duration::from_secs(
+            parse_search_bound(values, "QUARRY_SEARCH_EMBEDDING_SECONDS", 15, 60)? as u64,
+        );
+    Ok(config)
+}
+fn parse_search_bound(
+    values: &HashMap<String, String>,
+    name: &str,
+    default: usize,
+    max: usize,
+) -> Result<usize, String> {
+    let n = parse_value(values, name, default)?;
+    if n == 0 || n > max {
+        return Err(format!("{name} must be in 1..={max}"));
+    }
+    Ok(n)
 }

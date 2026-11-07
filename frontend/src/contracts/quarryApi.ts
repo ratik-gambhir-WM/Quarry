@@ -190,6 +190,14 @@ export type FileChunkKeywordSearch = {
   queryText: string;
 };
 
+export type HybridDocumentSearch = { queryText: string; limit: number };
+export type HybridDocumentHit = {
+  chunkId: string; dealId: string; fileId: string; versionId: string;
+  text: string; chunkIndex: number; pageStart: number | null; pageEnd: number | null;
+  sectionPath: string; matchSources: ("keyword" | "semantic")[];
+};
+export type HybridDocumentResponse = { results: HybridDocumentHit[] };
+
 export type FileChunkResult = {
   char_end: number;
   char_start: number;
@@ -372,6 +380,8 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
     input: RunAssistantThreadInput,
     handlers: SendQueryEventHandlers,
   ): () => void;
+  searchDealDocumentChunksHybrid(dealId: string, search: HybridDocumentSearch, signal?: AbortSignal): Promise<HybridDocumentResponse>;
+  searchDocumentChunksHybrid(search: HybridDocumentSearch, signal?: AbortSignal): Promise<HybridDocumentResponse>;
   searchDealDocumentChunksByKeyword(
     dealId: string,
     search: FileChunkKeywordSearch,

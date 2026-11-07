@@ -62,6 +62,7 @@ struct IndexOperationStatusResponse {
 #[derive(Clone)]
 pub struct DocumentGraphWriter {
     helix: Arc<HelixClient>,
+    vector_dimension: NonZeroUsize,
 }
 
 /// Immutable Helix graph writes that have passed exact request-size validation.
@@ -97,12 +98,15 @@ impl PreparedDocumentGraph {
 }
 
 impl DocumentGraphWriter {
-    pub fn new(helix: Arc<HelixClient>) -> Self {
-        Self { helix }
+    pub fn new(helix: Arc<HelixClient>, vector_dimension: NonZeroUsize) -> Self {
+        Self {
+            helix,
+            vector_dimension,
+        }
     }
 
-    pub async fn initialize(&self, vector_dimension: NonZeroUsize) -> Result<(), RepositoryError> {
-        ensure_document_indexes(&self.helix, vector_dimension)
+    pub async fn initialize(&self) -> Result<(), RepositoryError> {
+        ensure_document_indexes(&self.helix, self.vector_dimension)
             .await
             .map(|_| ())
             .map_err(RepositoryError::storage)
@@ -124,6 +128,14 @@ impl DocumentGraphWriter {
         version_node: FileVersionNode,
         chunk_nodes: Vec<FileChunkNode>,
     ) -> Result<PreparedDocumentGraph, RepositoryError> {
+        if chunk_nodes
+            .iter()
+            .any(|chunk| chunk.embedding.len() != self.vector_dimension.get())
+        {
+            return Err(RepositoryError::invalid(
+                "document embedding dimension does not match the configured Helix index",
+            ));
+        }
         let graph_write =
             insert_file_version_graph(file_node.clone(), version_node.clone(), chunk_nodes.clone())
                 .map_err(RepositoryError::storage)?;
@@ -530,8 +542,18 @@ impl DocumentGraphSearch {
         if response.chunks.len() > 10000 {
             return Err(RepositoryError::Capacity);
         }
+        let chunk_count = response.chunks.len();
+        let text_bytes: usize = response.chunks.iter().map(|c| c.text.len()).sum();
+        tracing::info!(phase = "keyword_transfer", chunk_count, text_bytes);
         tokio::task::spawn_blocking(move || {
-            rank_keywords(response.chunks, &search.query_text, search.limit)
+            let started = Instant::now();
+            let hits = rank_keywords(response.chunks, &search.query_text, search.limit);
+            tracing::info!(
+                phase = "keyword_ranking",
+                result_count = hits.len(),
+                elapsed_seconds = started.elapsed().as_secs_f64()
+            );
+            hits
         })
         .await
         .map_err(|e| RepositoryError::BlockingWorker(e.to_string()))

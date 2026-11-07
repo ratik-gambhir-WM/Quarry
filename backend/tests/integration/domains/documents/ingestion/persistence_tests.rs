@@ -53,10 +53,11 @@ fn document_chunk(document: &Document) -> DocumentChunk {
     }
 }
 
-fn test_graph_writer() -> DocumentGraphWriter {
-    DocumentGraphWriter::new(Arc::new(
-        HelixClient::with_config("http://127.0.0.1:6969", None).unwrap(),
-    ))
+fn test_graph_writer(dimensions: usize) -> DocumentGraphWriter {
+    DocumentGraphWriter::new(
+        Arc::new(HelixClient::with_config("http://127.0.0.1:6969", None).unwrap()),
+        std::num::NonZeroUsize::new(dimensions).unwrap(),
+    )
 }
 
 fn dense_chunks(document: &Document) -> Vec<DocumentChunk> {
@@ -187,7 +188,7 @@ fn persistence_input_derives_canonical_modern_office_mime_types() {
 
 #[test]
 fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
-    let writer = test_graph_writer();
+    let writer = test_graph_writer(2);
     let bytes = b"office bytes";
     let document = document("logical-office", OWNER, "model.xlsx", bytes);
     let chunk = document_chunk(&document);
@@ -211,7 +212,7 @@ fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
 
     let dense_chunks = dense_chunks(&document);
     prepare_document_persistence(
-        &writer,
+        &test_graph_writer(1536),
         "DEAL-1",
         1,
         &document,
@@ -224,7 +225,7 @@ fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
 #[test]
 fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
     let (sqlite, _files) = test_document_store();
-    let writer = test_graph_writer();
+    let writer = test_graph_writer(1536);
     let bytes = b"office bytes".to_vec();
     let document = document("logical-office", OWNER, "model.xlsx", &bytes);
 
@@ -408,4 +409,26 @@ fn rejects_a_chunk_for_another_document_before_persisting() {
     };
 
     assert!(ensure_chunk_belongs_to_document(&document, &chunk).is_err());
+}
+
+#[tokio::test]
+async fn dimension_mismatch_is_rejected_before_any_canonical_document_is_saved() {
+    let (sqlite, files) = test_document_store();
+    let bytes = b"synthetic dimension evidence".to_vec();
+    let document = document("dimension-file", OWNER, "dimensions.pdf", &bytes);
+    let mut chunk = document_chunk(&document);
+    chunk.sequence_number = 1;
+    let error = persist_document_and_chunks(
+        &files,
+        &test_graph_writer(3),
+        OWNER,
+        1,
+        document,
+        vec![chunk],
+        bytes,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("embedding dimension"));
+    assert_eq!(persisted_file_count(&sqlite), 0);
 }

@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     );
     let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts);
     let embeddings = client
-        .gen_embeddings(&chunks, Some("text-embedding-3-small"))
+        .gen_embeddings(&chunks, Some(&openai.embedding_model))
         .await
         .map_err(Error::msg)?;
 

@@ -6,13 +6,14 @@ import type {
   SortingState,
 } from "@tanstack/react-table";
 import { useTable } from "@tanstack/react-table";
-import { FileText, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
+import { FILE_TYPES } from "@/data/fileTypes";
+import { FileTypeIcon } from "@/components/ui/FileTypeIcon";
 import type { DataRoomFileEntry, DataRoomTreeNode } from "../../data/dataRoom";
 import {
   buildFileReviewRows,
   type FileReviewRow,
   type FileReviewStatus,
-  type ReviewSignalLevel,
 } from "../../data/fileReview";
 import { illustrativeFileReviewSummaries } from "../../fixtures/data-room/fileReview";
 import {
@@ -30,7 +31,6 @@ import {
   quarryDataGridTableClassNames,
 } from "../reui/data-grid/quarry-data-grid";
 import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
@@ -46,7 +46,7 @@ const reviewTableClassNames = {
   ...quarryDataGridTableClassNames,
   base: cn(
     quarryDataGridTableClassNames.base,
-    "bg-[var(--theme-workspace-surface)] [&_tbody_td]:align-top [&_tbody_td]:py-4",
+    "bg-[var(--theme-workspace-surface)] [&_tbody_td]:align-top [&_tbody_td]:py-2.5",
   ),
   edgeCell: cn(
     quarryDataGridTableClassNames.edgeCell,
@@ -128,12 +128,7 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
         ),
         cell: ({ row }) => (
           <div className="flex min-w-0 items-start gap-3">
-            <span
-              aria-hidden="true"
-              className="grid size-8 shrink-0 place-items-center rounded-[8px] border border-outline-variant/70 bg-surface-container-low text-muted"
-            >
-              <FileText className="size-4" />
-            </span>
+            <FileTypeIcon filename={row.original.fileName} kind={row.original.node.kind} />
             <div className="min-w-0">
               <button
                 className="block max-w-full whitespace-normal break-words text-left text-xs font-medium leading-5 text-foreground [@media(hover:hover)]:hover:text-primary active:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -160,9 +155,9 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
         meta: { headerTitle: "File" },
       },
       reviewColumn("keyFinding", "Key findings"),
-      reviewColumn("risks", "Risks", "riskLevel"),
-      reviewColumn("opportunities", "Opportunities", "opportunityLevel"),
-      reviewColumn("impact", "Key question impact", "impactLevel"),
+      reviewColumn("risks", "Risks"),
+      reviewColumn("opportunities", "Opportunities"),
+      reviewColumn("impact", "Key question impact"),
     ],
     [onSelectFile],
   );
@@ -304,7 +299,7 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
               }}
               value={typeFilter}
             >
-              {(["All types", "PDF", "Document", "Spreadsheet"] as const).map(
+              {(["All types", ...FILE_TYPES] as const).map(
                 (type) => (
                   <option key={type}>{type}</option>
                 ),
@@ -355,7 +350,6 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
 function reviewColumn(
   accessorKey: "impact" | "keyFinding" | "opportunities" | "risks",
   title: string,
-  levelKey?: "impactLevel" | "opportunityLevel" | "riskLevel",
 ): ColumnDef<DataGridFeatures, FileReviewRow> {
   return {
     accessorKey,
@@ -368,10 +362,9 @@ function reviewColumn(
     ),
     cell: ({ row }) => (
       <div
-        className="flex min-w-0 flex-col items-start gap-2 whitespace-normal"
+        className="min-w-0 whitespace-normal"
         title={row.original[accessorKey]}
       >
-        {levelKey ? <SignalBadge level={row.original[levelKey]} /> : null}
         <span className="whitespace-normal break-words text-xs leading-5">
           {row.original[accessorKey]}
         </span>
@@ -381,15 +374,4 @@ function reviewColumn(
     minSize: 220,
     meta: { headerTitle: title },
   };
-}
-
-function SignalBadge({ level }: { level: ReviewSignalLevel }) {
-  return (
-    <Badge
-      className="rounded-[4px] px-1.5 py-0 text-[10px] leading-4"
-      variant={level === "high" ? "destructive" : "outline"}
-    >
-      {level}
-    </Badge>
-  );
 }

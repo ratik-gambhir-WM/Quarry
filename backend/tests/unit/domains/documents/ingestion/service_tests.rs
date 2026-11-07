@@ -45,6 +45,7 @@ async fn retries_repair_published_versions_before_skipping() {
         .route(
             "/embeddings",
             post(|Json(body): Json<Value>| async move {
+                assert_eq!(body["dimensions"], 2);
                 let data = body["input"]
                     .as_array()
                     .unwrap()
@@ -65,7 +66,7 @@ async fn retries_repair_published_versions_before_skipping() {
     let sqlite: SqliteClient = application.sqlite;
     let files = DocumentStore::new(sqlite.clone());
     let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
-    let writer = DocumentGraphWriter::new(helix.clone());
+    let writer = DocumentGraphWriter::new(helix.clone(), std::num::NonZeroUsize::new(2).unwrap());
     let mut source = Docx::default();
     source
         .document
@@ -111,6 +112,7 @@ async fn retries_repair_published_versions_before_skipping() {
             reqwest::Client::new(),
             format!("http://{address}/embeddings"),
             crate::integration_support::prompt_catalog(),
+            std::num::NonZeroUsize::new(2).unwrap(),
         ))),
         "test".into(),
         "unused".into(),
@@ -429,9 +431,10 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let writer = DocumentGraphWriter::new(Arc::new(
-        HelixClient::with_config(&format!("http://{address}"), None).unwrap(),
-    ));
+    let writer = DocumentGraphWriter::new(
+        Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap()),
+        std::num::NonZeroUsize::new(2).unwrap(),
+    );
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("image-recovery.sqlite");
     let sqlite = SqliteClient::open(&path).unwrap();

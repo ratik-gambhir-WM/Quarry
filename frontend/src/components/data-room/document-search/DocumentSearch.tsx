@@ -35,6 +35,9 @@ export type DocumentSearchConfig = {
   finalFocusEl?: () => HTMLElement | null;
   items?: DocumentSearchItem[];
   search?: DocumentSearchRequest;
+  submitSearch?: boolean;
+  filterByMatchSource?: boolean;
+  keywordFallback?: DocumentSearchRequest;
   sourceLabel?: string;
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
@@ -80,6 +83,9 @@ export default function DocumentSearch({
   finalFocusEl,
   items = [],
   search,
+  submitSearch = false,
+  filterByMatchSource = false,
+  keywordFallback,
   sourceLabel = "Local results",
   onOpenChange,
   open: controlledOpen,
@@ -101,8 +107,37 @@ export default function DocumentSearch({
     () => filterDocumentSearchItems(items, query),
     [items, query],
   );
-  const live = useLiveDocumentSearch(search, query, isPanelOpen);
-  const visibleItems = search ? live.items : query.trim() ? filteredItems : [];
+  const [mode, setMode] = useState<"hybrid" | "keyword">("hybrid");
+  const submissionScope = useMemo(() => ({}), [isPanelOpen]);
+  const [submitted, setSubmitted] = useState<{ query: string; scope: object } | null>(null);
+  const submittedQuery = submitted?.scope === submissionScope && submitted.query === query.trim() ? submitted.query : "";
+  const request = mode === "keyword" ? keywordFallback : search;
+  const live = useLiveDocumentSearch(request, submitSearch ? submittedQuery : query, isPanelOpen, submitSearch ? 0 : 250);
+  const awaitingSubmit = submitSearch && !submittedQuery;
+  function changeQuery(next: string) {
+    setQuery(next);
+    if (submitSearch) setSubmitted(null);
+  }
+  function submit() {
+    if (!query.trim() || live.loading) return;
+    if (submittedQuery) live.retry();
+    else setSubmitted({ query: query.trim(), scope: submissionScope });
+  }
+  const resultItems = search ? live.items : query.trim() ? filteredItems : [];
+  const [sourceSelection, setSourceSelection] = useState<{
+    submission: object | null;
+    source: "all" | "keyword" | "semantic";
+  }>({ submission: null, source: "all" });
+  const showSourceFilters = filterByMatchSource && submitSearch && mode === "hybrid";
+  const sourceFilter = showSourceFilters && submittedQuery && sourceSelection.submission === submitted
+    ? sourceSelection.source : "all";
+  const sourceCounts = resultItems.reduce((counts, item) => {
+    if (item.matchSources?.includes("keyword")) counts.keyword += 1;
+    if (item.matchSources?.includes("semantic")) counts.semantic += 1;
+    return counts;
+  }, { all: resultItems.length, keyword: 0, semantic: 0 });
+  const visibleItems = sourceFilter === "all" ? resultItems
+    : resultItems.filter((item) => item.matchSources?.includes(sourceFilter));
   const { hoverIndex, moveDown, moveUp, selectedIndex, selectionOrigin } =
     useDocumentSearchKeyboardNavigation(visibleItems.map((item) => item.id));
   const selectedItem =
@@ -110,6 +145,7 @@ export default function DocumentSearch({
 
   function setOpen(open: boolean) {
     if (open) selectionFocusPending.current = false;
+    if (!open) setSubmitted(null);
     setIsPanelOpen(open);
     onOpenChange?.(open);
   }
@@ -198,15 +234,26 @@ export default function DocumentSearch({
             loading={live.loading}
             error={live.error}
             onRetry={live.retry}
-            sourceLabel={sourceLabel}
+            sourceLabel={submitSearch ? `This deal · ${mode === "hybrid" ? "Hybrid" : "Keyword"}` : sourceLabel}
+            onSubmitSearch={submitSearch ? submit : undefined}
+            awaitingSubmit={awaitingSubmit}
+            resultFilter={showSourceFilters ? {
+              value: sourceFilter,
+              counts: sourceCounts,
+              onChange: (source) => setSourceSelection({ submission: submitted, source }),
+            } : undefined}
+            onKeywordFallback={submitSearch && mode === "hybrid" && keywordFallback && live.unavailable ? () => {
+              setMode("keyword");
+              setSubmitted({ query: query.trim(), scope: submissionScope });
+            } : undefined}
             inputRef={inputRef}
             items={visibleItems}
             onArrowDown={moveDown}
             onArrowUp={moveUp}
-            onEnter={() => selectItem(selectedItem)}
+            onEnter={() => { if (awaitingSubmit) submit(); else selectItem(selectedItem); }}
             onHoverIndex={hoverIndex}
             onSelect={selectItem}
-            onQueryChange={setQuery}
+            onQueryChange={changeQuery}
             onClose={() => setOpen(false)}
             placeholder={placeholder}
             query={query}

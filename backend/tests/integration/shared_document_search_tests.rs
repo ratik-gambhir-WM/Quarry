@@ -19,7 +19,11 @@ use crate::{
                 repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
             },
             ingestion::persistence::persist_document_and_chunks,
-            search::service::DocumentSearchService,
+            search::{
+                embedding::{EmbeddingProvider, QueryEmbeddingCache},
+                model::HybridSearch,
+                service::DocumentSearchService,
+            },
             store::sqlite::DocumentStore,
         },
         identity::access::ResourceAccess,
@@ -34,11 +38,8 @@ use crate::{
 async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries() {
     let url = std::env::var("QUARRY_HELIX_COMPAT_URL").expect("disposable instance URL");
     let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
-    let writer = DocumentGraphWriter::new(helix.clone());
-    writer
-        .initialize(NonZeroUsize::new(2).unwrap())
-        .await
-        .unwrap();
+    let writer = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
+    writer.initialize().await.unwrap();
     let sqlite = SqliteClient::open_in_memory().unwrap();
     migrations::migrate(&sqlite).unwrap();
     sqlite.with_connection(|connection| {
@@ -90,8 +91,22 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
         sqlite.clone(),
         Arc::new(DealAccessService::new(members.clone())),
     );
-    let search =
-        DocumentSearchService::new(DocumentGraphSearch::new(helix.clone())).with_access(access);
+    let search = DocumentSearchService::new(DocumentGraphSearch::new(helix.clone()))
+        .with_access(access)
+        .with_hybrid(
+            crate::app::config::SearchConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            Some(Arc::new(
+                QueryEmbeddingCache::new(
+                    Arc::new(SyntheticQueryEmbedding),
+                    4,
+                    std::time::Duration::from_secs(1),
+                )
+                .unwrap(),
+            )),
+        );
     let keyword = |deal: &str| FileChunkKeywordSearch {
         deal_id: deal.into(),
         query_text: "architecture".into(),
@@ -103,6 +118,43 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
         .unwrap();
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0].chunk.file_id, "shared-search-file");
+    let hybrid = search
+        .hybrid_owned(
+            HybridSearch {
+                query_text: "architecture".into(),
+                limit: 10,
+            },
+            2,
+            "DEAL-SHARED-SEARCH",
+        )
+        .await
+        .unwrap();
+    assert_eq!(hybrid.results.len(), 1);
+    assert_eq!(hybrid.results[0].chunk_id, scoped[0].chunk.chunk_id);
+    assert_eq!(hybrid.results[0].match_sources.len(), 2);
+    let global_hybrid = search
+        .hybrid_owned(
+            HybridSearch {
+                query_text: "architecture".into(),
+                limit: 10,
+            },
+            2,
+            "",
+        )
+        .await
+        .unwrap();
+    assert_eq!(global_hybrid.results.len(), 1);
+    assert!(search
+        .hybrid_owned(
+            HybridSearch {
+                query_text: "architecture".into(),
+                limit: 10
+            },
+            2,
+            "DEAL-OTHER-SEARCH"
+        )
+        .await
+        .is_err());
     let global = search.keyword_owned(keyword(""), 2).await.unwrap();
     assert_eq!(global.len(), 1);
     assert_eq!(global[0].chunk.chunk_id, scoped[0].chunk.chunk_id);
@@ -236,4 +288,14 @@ fn remove_partial_chunks() -> WriteBatch {
                 .count(),
         )
         .returning(["removed"])
+}
+
+struct SyntheticQueryEmbedding;
+impl EmbeddingProvider for SyntheticQueryEmbedding {
+    fn embed<'a>(
+        &'a self,
+        _: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, crate::shared::error::ServiceResult<Vec<f32>>> {
+        Box::pin(async { Ok(vec![0.25, 0.75]) })
+    }
 }

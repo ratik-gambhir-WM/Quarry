@@ -4,6 +4,7 @@ export type DocumentSearchTarget = {
 };
 
 export type DocumentSearchItem = {
+  matchSources?: ("keyword" | "semantic")[];
   fileName?: string;
   target?: DocumentSearchTarget;
   disabledReason?: string;
