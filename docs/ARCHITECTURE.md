@@ -889,7 +889,9 @@ the Data Room panel lists only its active deal. Catalog requests run with at mos
 and the picker renders a moving window of 50 matches with keyboard access to every result.
 Loading, empty and retryable failure states never substitute demo records. Arrow keys and Enter
 select a file, Escape dismisses suggestions before stopping/closing, and mouse selection keeps
-input focus. Selections become removable `#1e1a62`/white chips inside the composer, separate from
+input focus. Keyboard focus can move to the failure state's retry button without closing the
+picker; retry returns focus to the message input, and leaving the composer closes suggestions.
+Selections become removable `#1e1a62`/white chips inside the composer, separate from
 the editable text; their deal/file IDs survive text edits. Duplicates are excluded, Backspace at
 the beginning removes the last reference, and the combined upload/reference limit is 20.
 The runtime snapshots references with each current user turn and retains them for in-memory retry;

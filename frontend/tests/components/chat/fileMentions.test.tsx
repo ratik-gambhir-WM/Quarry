@@ -87,4 +87,36 @@ describe("file mentions", () => {
     for (let i = 0; i < 80; i++) fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(screen.getByRole("option", { selected: true }).textContent).toContain("080.pdf");
   });
+  it("lets the keyboard retry a failed load and select a file after focus returns", async () => {
+    const user = userEvent.setup();
+    api.listDealDocuments.mockRejectedValueOnce(new Error("offline"));
+    render(<Example dealId="DEAL-A" />);
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    await user.type(input, "Review @");
+    await screen.findByRole("button", { name: "Try again" });
+    // This test environment does not load Tailwind's hidden utility for the file input.
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Try again" }));
+    await user.keyboard("{Enter}");
+    await screen.findByRole("option", { name: /Architecture/ });
+    expect(document.activeElement).toBe(input);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Remove reference Architecture.pdf" })).toBeTruthy();
+    expect((input as HTMLTextAreaElement).value).toBe("Review ");
+  });
+  it("dismisses the picker when keyboard focus leaves the composer", async () => {
+    const user = userEvent.setup();
+    api.listDealDocuments.mockRejectedValueOnce(new Error("offline"));
+    render(<><button type="button">Outside composer</button><Example dealId="DEAL-A" /></>);
+    await user.type(screen.getByRole("textbox", { name: "Message input" }), "@");
+    await screen.findByRole("button", { name: "Try again" });
+    // Step past the file input whose hidden utility is not loaded in this environment.
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Try again" }));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Outside composer" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
 });

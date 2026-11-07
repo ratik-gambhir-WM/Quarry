@@ -103,6 +103,9 @@ export function PromptInput({
       data-slot="query-composer"
       data-compact={compact ? "" : undefined}
       data-state={generating ? "generating" : "idle"}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setMention(null);
+      }}
       onDragEnter={(event) => {
         if (disabled || !event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -141,6 +144,7 @@ export function PromptInput({
           activeIndex={activeMention}
           limitReached={references.length + files.length >= 20}
           onSelect={selectMention}
+          onRetry={focus}
         />
       ) : null}
       {references.length > 0 ? (
@@ -210,7 +214,6 @@ export function PromptInput({
           style={sizeStyle}
           rows={compact ? 1 : 2}
           value={value}
-          onBlur={() => setMention(null)}
           aria-activedescendant={mention ? `${mentionId}-active` : undefined}
           aria-controls={mention ? mentionId : undefined}
           aria-expanded={mention ? true : undefined}

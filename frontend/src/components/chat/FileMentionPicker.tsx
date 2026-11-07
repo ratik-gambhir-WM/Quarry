@@ -12,6 +12,7 @@ type FileMentionPickerProps = {
   activeIndex: number;
   limitReached: boolean;
   onSelect(file: ChatFileReference): void;
+  onRetry(): void;
 };
 
 type CatalogResult =
@@ -24,7 +25,10 @@ export function FileMentionPicker(props: FileMentionPickerProps) {
     <MentionResults
       key={`${props.dealId ?? "all"}:${attempt}`}
       {...props}
-      retry={() => setAttempt(attempt + 1)}
+      retry={() => {
+        props.onRetry();
+        setAttempt(attempt + 1);
+      }}
     />
   );
 }
