@@ -1,6 +1,7 @@
 import { sessionStore } from "../../auth/sessionStore";
 import { authFetch } from "../authFetch";
 import type {
+  HybridDocumentResponse,
   DealDocumentPdf,
   DealDocumentSummary,
   DealDocumentText,
@@ -260,6 +261,8 @@ export const httpDocumentsApi: Pick<
   | "searchDocumentChunksByKeyword"
   | "listDealDataRoom"
   | "previewDealDocument"
+  | "searchDealDocumentChunksHybrid"
+  | "searchDocumentChunksHybrid"
   | "searchDealDocumentChunksByKeyword"
   | "searchDealDocumentChunksByVector"
 > = {
@@ -273,6 +276,16 @@ export const httpDocumentsApi: Pick<
   searchDocumentChunksByKeyword,
   listDealDataRoom,
   previewDealDocument,
+  searchDealDocumentChunksHybrid: (d, body, signal) => requestJson<HybridDocumentResponse>(
+    `/api/v1/deals/${encodeURIComponent(d)}/documents/search/hybrid`,
+    { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" }, signal },
+    undefined, false,
+  ),
+  searchDocumentChunksHybrid: (body, signal) => requestJson<HybridDocumentResponse>(
+    "/api/v1/documents/search/hybrid",
+    { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" }, signal },
+    undefined, false,
+  ),
   searchDealDocumentChunksByKeyword: (d, body) =>
     requestJson(
       `/api/v1/deals/${encodeURIComponent(d)}/documents/search/keyword`,

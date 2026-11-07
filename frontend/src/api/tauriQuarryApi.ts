@@ -146,6 +146,11 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         return transport.post<T>(path, body);
       },
     ),
+    // Native JSON relay has no per-request cancellation; the request owner ignores late replies.
+    searchDealDocumentChunksHybrid: (d, body) => transport.post(
+      `/api/v1/deals/${encodeURIComponent(d)}/documents/search/hybrid`, body,
+    ),
+    searchDocumentChunksHybrid: (body) => transport.post("/api/v1/documents/search/hybrid", body),
     searchDealDocumentChunksByKeyword: (d, body) =>
       transport.post(
         `/api/v1/deals/${encodeURIComponent(d)}/documents/search/keyword`,

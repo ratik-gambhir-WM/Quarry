@@ -21,7 +21,9 @@ planned domain scaffolds into implemented capabilities.
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root README provides concise developer onboarding. The current code has a broader Tauri
+The root [README](../README.md) provides the product overview, feature status, and roadmap direction;
+[Getting Started](../Getting%20Started.md) covers dependencies, setup, commands, and verification.
+The current code has a broader Tauri
 boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
 Tauri IPC before reaching the same Axum API used by the browser. This document records that
 implemented path in detail.
@@ -595,9 +597,11 @@ global state or query-cache library.
   the Assistant runtime and thread view with a provider keyed by user and deal. Its picker lists
   only that deal's chats, and new threads persist the active deal association. Closing the panel
   preserves chat state for the Data Room route mount; leaving the route releases it. Search
-  uses the existing deal-scoped keyword API, including without a selected document. It searches
-  250ms after typing pauses, hides results while the query changes, ignores late responses on
-  query changes/close/unmount, and displays loading, empty and retryable error states. Page
+  uses the additive deal-scoped hybrid API, including without a selected document. Enter or Search
+  submits the draft, with All/Keyword/Semantic result views, source badges, and an explicit keyword fallback when
+  hybrid is unavailable. It hides results while editing, ignores late responses on query
+  changes/close/unmount, and displays loading, empty and retryable error states. The server rollout
+  defaults to disabled pending disposable load/relevance review. Page
   activation still requires the selected stored-file identity and an available page target.
 - `DealRoomPage` resolves the active deal and owns the shared sidebar, overview-section state, and
   timeline state for URL-backed nested routes. Direct API lookup also resolves archived deals excluded
@@ -656,11 +660,17 @@ global state or query-cache library.
 - A populated Data Room with no selected document renders a read-only ReUI file-review grid built
   from the same explorer nodes inside one direct, full-size inset main surface. File identity and
   folder context remain runtime-derived, while the displayed review findings are explicitly
-  illustrative fixtures. Its compact search control is left-aligned with the grid and expands in
+  illustrative fixtures. File rows use locally bundled, unmodified Microsoft Fluent file-type
+  artwork selected from case-insensitive filename extensions, with generic kind fallbacks.
+  The same format resolver supplies the type labels/filter, including Markdown, images,
+  presentations, and text; official artwork provenance and license are retained alongside the
+  assets under `frontend/src/assets/file-types/fluent/`. No runtime third-party icon requests or
+  new icon dependency are introduced. Its compact search control is left-aligned with the grid and expands in
   normal layout flow so the adjacent status filters move with it; search, status, and file-type
   controls use a consistent 12-pixel text size. Status filters form one segmented group. The grid
   matches the main inset surface, uses horizontal row dividers, gives file identity a wider pinned
-  column, and wraps findings and signal descriptions rather than truncating them. Pagination stays
+  column, and wraps findings and descriptions rather than truncating them. Rows use compact
+  10-pixel vertical cell padding and display descriptions without severity badges. Pagination stays
   at the bottom of the available panel while the table scrolls independently. Selecting a file from
   the grid enters the existing preview state and swaps the Deal Room sidebar for the file explorer
   without nesting another main
@@ -702,7 +712,7 @@ operational failures.
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
 | Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s selected template backend; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
-| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action live deal-scoped keyword search with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
+| Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas uses the Assistant's existing development-identity thread contract and does not gain deal/document context; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | SQLite-backed multi-thread chat with current-turn file uploads, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
 | Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
@@ -880,7 +890,7 @@ The contract covers:
 - synchronous and job-based document processing
 - document job subscriptions
 - persisted assistant threads/messages and thread-scoped streaming, plus legacy ephemeral queries
-- keyword/vector document search
+- keyword/vector and opt-in text-in hybrid document search
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
 - owner-scoped template deletion through `deleteTemplate`
@@ -1036,6 +1046,8 @@ The shared Settings form accepts email only.
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
 | POST | `/documents/search/vector` | Vector search Helix chunks | Server derives accessible deals; canonical candidates precede cosine ranking |
 | POST | `/documents/search/keyword` | Keyword search Helix chunks | Server derives accessible deals; bounded lexical ranking and rank fusion |
+| POST | `/documents/search/hybrid` | Text-in keyword + semantic passage search | Server-derived accessible deals; camelCase `{results}`; rollout opt-in |
+| POST | `/deals/{deal_id}/documents/search/hybrid` | Same hybrid operation within one authorized deal | `{queryText, limit}`; strict failure policy and final canonical access snapshot |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
@@ -1483,6 +1495,8 @@ repositories map the resulting client error to their storage error at the reposi
 - `SqliteClient` owns a single bundled SQLite connection behind a mutex and moves async database
   operations to Tokio's blocking pool.
 - Document batch ingestion uses bounded unordered concurrency, default eight.
+- Search shares four bounded deal pipelines and eight Helix reads; opt-in hybrid adds bounded
+  request admission and a four-miss query embedder with request-polled cache coalescing.
 - Duplicate work for the same deal/document attachment is serialized with per-identity async locks.
 - Helix writes are process-serialized and retry bounded concurrent-write conflicts.
 - LibreOffice work is bounded to two concurrent conversions with a 45-second subprocess timeout.
@@ -1674,7 +1688,7 @@ reindex command is shipped, so another unconverted store requires reviewed offli
 Document persistence is not a distributed transaction:
 
 1. Validate parser-derived identities and chunk invariants.
-2. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence only when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
+2. Validate each provider embedding against the configured `HELIX_VECTOR_DIMENSION`, including finite f64/f32 values. The graph writer carries that same dimension for index setup and checks every chunk against it before canonical persistence. After embeddings are attached, build one immutable SQLite/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before SQLite persistence when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
 3. Commit the logical file/version/blob aggregate, identity manifest, and accepted image document/chunks (for image inputs) in SQLite and confirm the returned identity matches the prepared plan.
 4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
 5. If Helix fails after that SQLite commit, return an error naming the already committed file/version.
@@ -1703,6 +1717,7 @@ across Helix graph writes so a large XLSX/PPTX file can still be indexed.
 | Document jobs | In-memory map of Tokio watch senders | Lost on process restart; terminal default retention 10 minutes |
 | Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
 | Duplicate-ingestion locks | Weak per-identity async mutexes | Process lifetime |
+| Query embeddings | Private process-local bounded cache; no results or permissions | Five-minute TTL; 512 entries/16 MiB; lost on restart |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
 | Notebook API resources and save jobs | Shared SQLite; Helix projection | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
 | Notebook edit buffers and save tracking | Session-scoped module/external-store memory | Survives routes; clears on reload/auth changes; saved content reloads from SQLite, unsaved edits are lost |
@@ -1838,7 +1853,9 @@ therefore require LibreOffice.
 Global keyword/vector requests derive all accessible deals from the bearer actor. Deal-scoped
 routes authorize the deal path. Both select canonical current/live chunk identities before ranking,
 verify complete projection headers and batch-check canonical identities again before exposing text.
-Vector search uses within-stream cosine ranking. Keyword search uses bounded lexical ranking and
+Vector search uses within-stream cosine ranking. The pinned Helix runtime returns normalized
+cosine distance `(1 - similarity) / 2`; the graph adapter converts it explicitly for hybrid relevance
+policy and leaves legacy distance DTO values unchanged. Keyword search uses bounded lexical ranking and
 reciprocal-rank fusion across deals because the pinned SDK lacks within-stream text ranking.
 Every distinct keyword must match a whole, case-insensitive token in the same passage; punctuation
 separates words while `+` and `#` preserve language names such as `C++` and `C#`. A longer query
@@ -1850,16 +1867,46 @@ The Deal Room Search documents tab calls these APIs and exposes “This deal” 
 deals” scopes. Results count matching passages and show a section heading, page or passage location,
 and a compact whitespace-normalized excerpt around a distinctive matching word. Whole-word matches
 are highlighted as text; result links open the authorized data room.
-The Data Room floating search panel calls the deal-scoped keyword endpoint through the shared
-runtime adapter, in both web and desktop. A 250ms debounce avoids a request on every keystroke;
-blank queries send nothing. Query changes, closing, focus revalidation and route/deal changes
-invalidate pending results so stale responses cannot replace the current query. Errors remain
-explicit and retryable, without fixture fallback. The server controls matching/ranking; the UI
-maps uploaded-file IDs to the current catalog's names and displays compact highlighted excerpts,
-section and page context. Search works without a selected preview. Activation is enabled only
-when the hit's stored-file ID matches the open document and its page is within the reported page
-count. Other documents and passages without page metadata remain readable in the result preview,
-with navigation disabled. Cross-document activation and highlighting inside the PDF remain deferred.
+Hybrid search adds a strict text-in operation in `domains/documents/search/`. It overlaps one
+query embedding/cache lookup with four bounded deal pipelines, shares canonical preparation,
+retrieves 50–100 candidates per source, rejects weak semantic neighbors before discarding their
+Helix-normalized cosine distances (similarity = `1 - 2 × distance`), refreshes immutable identities,
+fuses ranks per deal and performs the final bounded access snapshot. The default similarity floor
+is 0.4; the selected large/3072 local profile uses a measured 0.26 override. Both branches must
+succeed. Legacy keyword/vector operations share preparation/freshness and bounded scheduling,
+preserving their DTOs and ranking.
+Eight process-service search Helix reads and four provider misses are the trial defaults. Hybrid
+admission permits 16 active and 32 queued requests, with two-second queue, 15-second embedding
+and 30-second request deadlines. First error/drop stops scheduling; accepted remote/blocking work
+may finish. The embedding cache has a five-minute TTL, 512-entry/16 MiB bounds and a private
+salted digest key bound to provider/model/dimensions/preprocessing; 32 in-flight keys and 64 waiters
+per key coalesce misses without detached tasks. No document results or access decisions are cached.
+Bootstrap injects all collaborators and typed limits. `QUARRY_HYBRID_SEARCH_ENABLED` defaults to
+false pending disposable load/relevance measurements. Missing embedding capability or disabled
+rollout returns explicit 503; legacy keyword search still works without OpenAI.
+
+The Data Room floating search panel submits hybrid requests through shared HTTP/Tauri adapters
+on Enter or Search; typing does not call the provider. Draft edits, clearing, closing and actor/deal
+changes invalidate results; focus revalidation repeats authorized retrieval. Browser requests are
+abortable; desktop late completions are suppressed because JSON IPC has no request cancellation.
+Loading, empty and error/retry remain explicit, with **Use keyword search** offered after a 503.
+The selected mode and actual Keyword/Semantic source badges remain visible. The hybrid panel
+offers All results, Keyword, and Semantic views with counts derived from the returned passages.
+Filtering is local and preserves server ranking; a passage matched by both branches appears once
+in All results and in both source views, so source counts can overlap. The preview names its
+match type explicitly. An empty source view can return to All results without another request;
+filters reset for a new submission and are hidden during explicit keyword-only fallback.
+Excerpts highlight only literal whole-token matches as escaped text. The UI maps uploaded-file IDs
+to catalog names and keeps current-document valid-page activation; other documents remain readable
+but cannot activate.
+Cross-document activation and in-PDF highlighting remain deferred. Other live keyword consumers
+retain their 250 ms debounce. The new HTTP operation omits query/response bodies from activity logs.
+
+Indexed lexical ranking and large-deal preparation are not implemented: the pinned text builder
+starts from root top-K, with no verified predicate-aware canonical stream. Current all-token
+scans and 5,000-document/10,000-chunk/200-deal ceilings remain. No schema/index/model migration is
+introduced. See [Hybrid document search](hybrid-document-search.md) for cancellation/cache invariants,
+rollout/rollback, capability evidence and the remaining benchmark and indexed-retrieval gates.
 
 ### 10.5 Assistant chat
 
@@ -1916,7 +1963,17 @@ pins it to the loopback API.
 | `QUARRY_PROMPTS_DIR` | `prompts`; relative to the backend process working directory; must contain the four startup-validated catalog assets |
 | `HELIX_URL` | `http://127.0.0.1:6969`; origin only (no `/v2/query` path, credentials, query, or fragment) |
 | `HELIX_API_KEY` | optional secret |
-| `HELIX_VECTOR_DIMENSION` | `1536`; must be a positive integer; configures both the Helix vector index and the OpenAI embeddings request |
+| `HELIX_VECTOR_DIMENSION` | `1536`; positive integer shared by the Helix index, ingestion/query embedding request and response validation, and graph write preflight; dimension mismatch fails before SQLite commit |
+| `QUARRY_HYBRID_SEARCH_ENABLED` | `false`; explicit hybrid rollout switch; requires reviewed disposable performance/relevance evidence |
+| `QUARRY_SEARCH_DEAL_CONCURRENCY` | 4; 1–32 active deal pipelines per search |
+| `QUARRY_SEARCH_HELIX_READS` | 8; 1–64 process-service search Helix reads, including legacy operations |
+| `QUARRY_SEARCH_EMBEDDING_CONCURRENCY` | 4; 1–16 active query embedding misses |
+| `QUARRY_SEARCH_ACTIVE_REQUESTS` | 16; 1–128 active hybrid requests |
+| `QUARRY_SEARCH_QUEUED_REQUESTS` | 32; 1–256 additional admitted hybrid waiters |
+| `QUARRY_SEARCH_QUEUE_SECONDS` | 2; 1–30 queue deadline |
+| `QUARRY_SEARCH_TIMEOUT_SECONDS` | 30; 1–110 hybrid operation deadline (outer HTTP timeout can be shorter) |
+| `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` | 0.4 default; selected large/3072 local profile overrides to 0.26 after recall/control measurements; finite 0–1 cosine-similarity floor before fusion; tune against judged queries, not confidence percentages |
+| `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 fixed embedding-flight deadline, including provider queue |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
@@ -2039,7 +2096,12 @@ All fields are required if any one is present:
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
   `HELIX_VECTOR_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
-  generated vectors use one configured size.
+  generated vectors use one configured size. Known v3 model maxima are checked at configuration
+  parsing: 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
+  A model/dimension change requires compatible empty/rebuilt document and notebook vector indexes;
+  changing configuration cannot convert existing vectors. The selected local 3072-dimensional
+  trial and its backed-up, explicitly authorized document reset are recorded in
+  [Hybrid document search](hybrid-document-search.md). Repository defaults remain small/1536.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
   parse or wire them into the product application.
 - Data-room environment roots are not always a fallback: if a deal metadata row exists with a
@@ -2104,6 +2166,8 @@ and deployment TLS/rate limits/observability established.
 - `x-request-id` is generated and returned.
 - Internal application errors log contextual detail while returning a generic message.
 - Parser and AI-client paths record selected timing/failure context.
+- Hybrid search records phase durations, counts/bytes, embedding hit/miss and sanitized failure
+  categories without query/passages/vectors/keys/provider bodies; release measurements remain gated.
 - Assistant query logs contain request/thread/message identifiers, phase, counts, provider
   status/category, and timing only; prompts, context, instructions, filenames, file contents,
   deltas, completed text, and raw provider bodies are omitted. The frontend also emits matching
@@ -2148,7 +2212,8 @@ Coverage currently includes:
 - Data Room PDF editor loading-shell behavior, in-memory annotation restoration, focus, page count,
   and requested-page navigation
 - Data Room document-search filtering, reusable result activation, accessible overlay interaction,
-  viewer mount preservation, and generic requested-page navigation
+  viewer mount preservation, generic requested-page navigation, explicit hybrid submission,
+  cancellation/session reset, source badges and explicit unavailable keyword fallback
 - Data Room explorer quick-action placement, direct Upload/Search/Synthesis Canvas access,
   shared Assistant chat rendering, previous-chat selection, and focus restoration
 - Data Room tree flattening and illustrative file-review row mapping
@@ -2198,7 +2263,8 @@ layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
 
 Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
 router composition, schema migration and constraints, SQLite transactions/concurrency,
-repositories, services, router contracts,
+repositories, services, router contracts, deterministic hybrid overlap/single embedding,
+request/provider/read bounds, immutable-identity freshness, final access and cache cancellation/eviction,
 multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP limits,
 graph-request preflight, Helix query construction and v3 response mapping,
 OpenAI/WM mapping, stored previews, Diligence Studio URL/payload/delete/import/template-document

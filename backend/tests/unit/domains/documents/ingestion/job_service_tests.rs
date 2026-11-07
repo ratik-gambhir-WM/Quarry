@@ -64,7 +64,7 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
     let ingestion = Arc::new(DocumentIngestionService::new(
         DocumentStore::new(db.clone()),
         DocumentGraphReader::new(helix.clone()),
-        DocumentGraphWriter::new(helix),
+        DocumentGraphWriter::new(helix, std::num::NonZeroUsize::new(2).unwrap()),
         None,
         "test".into(),
         "test".into(),

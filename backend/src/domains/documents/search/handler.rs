@@ -77,3 +77,40 @@ fn validate_common(limit: usize) -> AppResult<()> {
     }
     Ok(())
 }
+
+pub(super) async fn hybrid_search_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
+    State(state): State<DocumentSearchHttpState>,
+    path: Option<axum::extract::Path<String>>,
+    input: Result<Json<super::model::HybridSearch>, axum::extract::rejection::JsonRejection>,
+) -> AppResult<Json<super::model::HybridResponse>> {
+    let Json(mut search) =
+        input.map_err(|_| AppError::bad_request("invalid hybrid search input"))?;
+    let deal = path.map(|p| p.0).unwrap_or_default();
+    if !deal.is_empty()
+        && (!deal.starts_with("DEAL-")
+            || deal.len() > 64
+            || !deal
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')))
+    {
+        return Err(AppError::bad_request("invalid dealId"));
+    }
+    validate_common(search.limit)?;
+    search.query_text = search.query_text.trim().to_owned();
+    if search.query_text.is_empty() || search.query_text.len() > 2000 {
+        return Err(AppError::bad_request(
+            "queryText must contain 1 to 2000 bytes",
+        ));
+    }
+    state
+        .document_search
+        .hybrid_owned(search, actor.user.id, &deal)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
+}
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/domains/documents/search/handler_tests.rs"]
+mod tests;

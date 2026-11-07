@@ -114,6 +114,7 @@ fn rejects_invalid_values_and_partial_optional_capabilities() {
 fn helix_requires_an_instance_base_url_and_a_nonzero_vector_dimension() {
     let configured = AppConfig::from_values([
         ("HELIX_VECTOR_DIMENSION", "3072"),
+        ("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
         ("OPENAI_API_KEY", "secret"),
     ])
     .unwrap();
@@ -133,6 +134,29 @@ fn helix_requires_an_instance_base_url_and_a_nonzero_vector_dimension() {
         assert!(error.contains("HELIX_URL"), "{error}");
     }
     assert!(AppConfig::from_values([("HELIX_VECTOR_DIMENSION", "0")]).is_err());
+}
+
+#[test]
+fn embedding_models_reject_dimensions_above_their_supported_maximum() {
+    for (model, dimensions) in [
+        ("text-embedding-3-small", "3072"),
+        ("text-embedding-3-large", "4096"),
+    ] {
+        assert!(AppConfig::from_values([
+            ("OPENAI_API_KEY", "secret"),
+            ("OPENAI_EMBEDDING_MODEL", model),
+            ("HELIX_VECTOR_DIMENSION", dimensions),
+        ])
+        .unwrap_err()
+        .contains("supported dimensions"));
+    }
+    let config = AppConfig::from_values([
+        ("OPENAI_API_KEY", "secret"),
+        ("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
+        ("HELIX_VECTOR_DIMENSION", "1536"),
+    ])
+    .unwrap();
+    assert_eq!(config.openai.unwrap().embedding_dimensions.get(), 1536);
 }
 
 #[test]
@@ -230,4 +254,38 @@ fn configured_chromium_path_must_be_executable() {
         executable.to_str().unwrap()
     )])
     .is_err());
+}
+
+#[test]
+fn hybrid_search_rollout_is_opt_in_with_bounded_limits() {
+    assert!(!AppConfig::default().search.enabled);
+    let config = AppConfig::from_values([
+        ("QUARRY_HYBRID_SEARCH_ENABLED", "true"),
+        ("QUARRY_SEARCH_HELIX_READS", "4"),
+    ])
+    .unwrap();
+    assert!(config.search.enabled);
+    assert_eq!(config.search.helix_reads, 4);
+    for (key, value) in [
+        ("QUARRY_HYBRID_SEARCH_ENABLED", "yes"),
+        ("QUARRY_SEARCH_ACTIVE_REQUESTS", "0"),
+        ("QUARRY_SEARCH_QUEUED_REQUESTS", "257"),
+        ("QUARRY_SEARCH_TIMEOUT_SECONDS", "111"),
+        ("QUARRY_SEARCH_EMBEDDING_CONCURRENCY", "17"),
+    ] {
+        assert!(AppConfig::from_values([(key, value)]).is_err());
+    }
+}
+
+#[test]
+fn hybrid_semantic_relevance_threshold_is_finite_and_bounded() {
+    assert_eq!(AppConfig::default().search.min_semantic_similarity, 0.4);
+    let config =
+        AppConfig::from_values([("QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY", "0.55")]).unwrap();
+    assert_eq!(config.search.min_semantic_similarity, 0.55);
+    for value in ["NaN", "inf", "-0.1", "1.01", "invalid"] {
+        assert!(
+            AppConfig::from_values([("QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY", value)]).is_err()
+        );
+    }
 }

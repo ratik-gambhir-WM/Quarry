@@ -106,8 +106,8 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
             "document scope checkpoint incomplete; keep writers drained and restore the matching verified SQLite/Helix backup before startup".into(),
         ));
     }
-    DocumentGraphWriter::new(helix.clone())
-        .initialize(config.helix.vector_dimension)
+    DocumentGraphWriter::new(helix.clone(), config.helix.vector_dimension)
+        .initialize()
         .await
         .map_err(|error| BootstrapError::HelixIndexes(error.to_string()))?;
 
@@ -171,7 +171,8 @@ pub(crate) fn assemble_api_with_templates(
     let deals_repository = DealRepository::new(sqlite.clone());
     let document_files = DocumentStore::new(sqlite.clone());
     let document_graph_reader = DocumentGraphReader::new(document_graph.clone());
-    let document_graph_writer = DocumentGraphWriter::new(document_graph.clone());
+    let document_graph_writer =
+        DocumentGraphWriter::new(document_graph.clone(), config.helix.vector_dimension);
     let document_graph_search = DocumentGraphSearch::new(document_graph.clone());
     let openai = config.openai.as_ref().map(|openai_config| {
         Arc::new(OpenAiClient::from_config(
@@ -264,8 +265,32 @@ pub(crate) fn assemble_api_with_templates(
         document_ingestion.clone(),
         config.documents.completed_job_retention,
     ));
-    let document_search =
-        Arc::new(DocumentSearchService::new(document_graph_search).with_access(access.clone()));
+    let search_embeddings = config
+        .openai
+        .as_ref()
+        .zip(openai.as_ref())
+        .map(|(settings, client)| {
+            crate::domains::documents::search::embedding::QueryEmbeddingCache::openai(
+                client.clone(),
+                settings.embedding_model.clone(),
+                config.helix.vector_dimension.get(),
+                config.search.embedding_concurrency,
+                config.search.embedding_timeout,
+            )
+            .map(Arc::new)
+        })
+        .transpose()
+        .unwrap_or_else(|_| {
+            tracing::error!(
+                "private search cache initialization failed; semantic search unavailable"
+            );
+            None
+        });
+    let document_search = Arc::new(
+        DocumentSearchService::new(document_graph_search)
+            .with_access(access.clone())
+            .with_hybrid(config.search.clone(), search_embeddings),
+    );
     let stored_documents = Arc::new(StoredDocumentService::new(document_files, office));
     let research = Arc::new(ResearchService::new(wm_clients));
     let assistant_chat = Arc::new(

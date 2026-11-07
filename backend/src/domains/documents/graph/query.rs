@@ -58,7 +58,15 @@ pub struct FileChunkResult {
 pub struct VectorFileChunkHit {
     #[serde(flatten)]
     pub chunk: FileChunkResult,
+    /// Helix-normalized cosine distance in 0..=1; lower is closer.
     pub distance: f64,
+}
+
+/// The pinned Helix runtime reports normalized cosine distance: (1 - cosine) / 2.
+/// Keep raw distances on legacy DTOs and convert explicitly before similarity policy.
+/// Verified against the pinned image with aligned, scaled, oblique and orthogonal vectors.
+pub(crate) fn helix_cosine_similarity(distance: f64) -> Option<f64> {
+    (distance.is_finite() && (0.0..=1.0).contains(&distance)).then_some(1.0 - 2.0 * distance)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

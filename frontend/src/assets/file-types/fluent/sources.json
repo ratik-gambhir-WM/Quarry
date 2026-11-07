@@ -1,0 +1,50 @@
+{
+  "csv.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/csv.svg",
+    "sha256": "d23702656437e3620959c052d09e591dd4037fffd4301622b65637dad3f9128e"
+  },
+  "docx.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/docx.svg",
+    "sha256": "7803444050381eb3c35b86fb49eb3e14766a3c1485adba205acc9c7c4072cbdc"
+  },
+  "genericfile.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/genericfile.svg",
+    "sha256": "6e2ffe37329535f765697167eb0f2b7a76411773939d763104535e6435918115"
+  },
+  "md.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/md.svg",
+    "sha256": "b278e342723d5e87790821a28287e39803c55dcb4c89ab21f860a4ca47e7f4dd"
+  },
+  "pdf.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/pdf.svg",
+    "sha256": "d56b20989612d80a42e99e93a80b3a5d636c28e08e34ec5f4d41969ac0815f09"
+  },
+  "photo.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/photo.svg",
+    "sha256": "8571f871c78413b509e3b5922975bee7d2e8e6750972150784ba6b43321e951b"
+  },
+  "pptx.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/pptx.svg",
+    "sha256": "08522cdd3a6f35f3f88965ffa154ae5e1b2335363710e2b8f840d43ee23e8fb1"
+  },
+  "presentation.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/presentation.svg",
+    "sha256": "3944755e36faf13578ea8396eb749c754978b2aa9b7e4a7eb8512f65060f1bde"
+  },
+  "rtf.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/rtf.svg",
+    "sha256": "8fddd1a87c1aa694133f7e16a7fb1313fb75b03fab5f550ac477058c1a025a38"
+  },
+  "spreadsheet.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/spreadsheet.svg",
+    "sha256": "743b0320438539fe99067444761303c55cc94357ce47ce2dbf447c071c958a60"
+  },
+  "txt.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/txt.svg",
+    "sha256": "1388706bea93542ce09c8ddf129526c557a5713a4ac69a36e8ce7268ed2c7111"
+  },
+  "xlsx.svg": {
+    "source": "https://res.cdn.office.net/files/fabric-cdn-prod_20261014.001/assets/item-types/32/xlsx.svg",
+    "sha256": "a280dff33f050d1cec4431b221218edaec6a77b6bf774935ca87b5f886913782"
+  }
+}

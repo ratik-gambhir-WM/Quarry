@@ -1,295 +1,91 @@
 # Quarry
 
-Quarry is a multiplatform diligence application with one shared React/Vite UI, a thin Tauri 2
-desktop shell, an Axum product API, and an optional external Node/Express Diligence Studio service. The
-browser and desktop distributions share their pages, components, routes, contracts, and product
-behavior; only their platform adapters and transport paths differ.
-
-This repository is the current implementation. The canonical detailed architecture reference is
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), with product/data ownership documented in
-[`docs/DOMAIN_MODEL.md`](docs/DOMAIN_MODEL.md).
+Quarry is a diligence workspace for teams evaluating businesses and working through complex
+projects. It brings deal information, source documents, notes, AI conversations, and presentation
+templates into one place, helping teams move from reviewing material to developing a point of view.
 
-## Repository layout
+Quarry runs in a browser and as a desktop application, with a shared experience across both.
+It is under active development: core workflows are usable, while some views still contain
+sample content or unfinished interactions.
 
-```text
-Quarry/
-├── frontend/                 shared React/Vite application
-│   ├── src/                  shared product UI, routes, contracts, and adapters
-│   └── src-tauri/            thin Tauri desktop shell and API relay
-├── backend/                  Axum product API and application core
-│   ├── src/                  configuration, domains, adapters, and HTTP composition
-│   └── tests/                unit and integration suites
-├── docs/                     architecture and domain-model documentation
-├── .agents/skills/           repository-local development guidance
-└── quarry                    root-only local process launcher
-```
+## What you can do
 
-There is no root workspace manifest. `frontend/`, `frontend/src-tauri/`, `backend/`, and
-The optional Diligence Studio service is a separate checkout at `$HOME/diligence-studio-server/`
-by default. Set `QUARRY_DILIGENCE_STUDIO_ROOT` to use another location. Its Node build root is
-independent of this repository.
+### Organize deals and project context
 
-## Set up local development
+Create and browse deals, search the portfolio, and switch between list and board views. Each
+deal has a workspace for its overview, key questions, resource links, team access, and activity.
+Keep supporting material close to the questions the team is trying to answer.
 
-This guide takes a new developer from a fresh checkout to a running web or desktop application. Run each command from the repository root unless the step says otherwise.
+### Review documents in the Data Room
 
-### 1. Install prerequisites
+Upload PDFs, Word documents, spreadsheets, presentations, and images. Browse files, follow
+processing progress, and preview supported documents inside the workspace. Team membership
+controls access, and uploads retain attribution and activity history.
 
-Install these tools before you install project dependencies:
+Search uploaded passages with keyword search or, when enabled by the server, hybrid search
+that combines exact words with related meaning. Results identify Keyword and Semantic matches,
+offer source filters, and can jump to valid pages in the currently open document.
 
-| Tool | Requirement | Download and setup |
-| --- | --- | --- |
-| Git | Required | [Download Git](https://git-scm.com/downloads) |
-| Node.js and npm | Node.js 22.5 or newer | [Download Node.js](https://nodejs.org/en/download) |
-| Rust and Cargo | Current stable toolchain | [Install Rust with rustup](https://www.rust-lang.org/tools/install) |
-| Docker | Docker Desktop on macOS, or a running Docker Engine on Linux | [Install Docker Desktop](https://docs.docker.com/desktop/setup/install/) |
-| Tauri system dependencies | Required for `./quarry desktop` | [Install the Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) |
-| LibreOffice | Optional; required only for supported Office conversion flows | [Download LibreOffice](https://www.libreoffice.org/download/) |
+The file-review grid supports browsing and filtering, but its review findings are currently
+illustrative sample content rather than generated analysis of uploaded files.
 
-On macOS, the Tauri prerequisites require Xcode or the Xcode Command Line Tools. Install the command-line tools with:
+### Work with an AI assistant
 
-```sh
-xcode-select --install
-```
+Create separate conversations, return to saved chats, attach files to the current turn, and
+read responses as they arrive. Stop, retry, and copy responses as you work. AI capabilities
+require server-side provider configuration. The Assistant does not yet retrieve or cite Data Room
+evidence automatically.
 
-The launcher can open Docker Desktop automatically on macOS. On Linux, start the Docker daemon before you run the launcher. The launcher does not automate Docker startup on Windows.
+### Capture working notes
 
-Verify the required command-line tools:
+Write and explicitly save notes in the Notebook, reopen saved work, and receive feedback on
+save progress and revision conflicts. Notes persist across sessions; shared editing, attachments,
+and offline work are future additions.
 
-```sh
-git --version
-node --version
-npm --version
-rustc --version
-cargo --version
-docker --version
-```
+### Explore presentation templates
 
-### 2. Start Quarry
+Import PowerPoint slides or decks into a private template catalog, browse generated previews,
+open templates in the presentation editor, and export the current presentation as a PowerPoint
+file. Editor changes are currently kept only while that view is open; saving deliverables is
+still upcoming. Preview and AI enrichment features depend on the configured local tools and providers.
 
-Quarry uses [HelixDB](https://www.helix-db.com/) for its document graph and search projection. You can read the [HelixDB documentation](https://docs.helix-db.com/) or browse the [HelixDB source repository](https://github.com/HelixDB/helix-db). Quarry starts the compatible Docker container directly, so the Helix command-line interface is optional.
+## A typical workflow
 
-Open Docker Desktop once and complete its setup flow. On Linux, start Docker Engine. Continue when this command succeeds:
+1. Create a deal and collect its key questions and resource links.
+2. Upload source material to the Data Room and review relevant passages.
+3. Capture observations in the Notebook and use separate Assistant conversations to explore ideas.
+4. Use presentation templates to develop and export supporting material.
 
-```sh
-docker info
-```
+These workflows are being connected incrementally. Moving evidence into findings, saved
+deliverables, and reusable institutional knowledge remains part of the product direction.
 
-When you first run `./quarry web` or `./quarry desktop`, the launcher looks for the local
-`helix-quarry-v3-dev` container. If it is absent, the launcher creates it from the digest-pinned
-`ghcr.io/helixdb/helixdb` image in the `[local.dev]` section of
-[`backend/helix.toml`](backend/helix.toml), maps host port `6969` to the image's port `8080`, and
-starts that named container before waiting for its `/healthz` endpoint. This remains a local Docker runtime; Quarry does not use Helix
-Cloud. The Axum service uses the Helix Rust v3 SDK, which sends queries to `/v2/query` beneath the
-configured base URL.
+## Upcoming features and direction
 
-On later runs the launcher reuses an existing container only when it was created from that exact
-image digest. A different image—or a host listener that prevents the named container from
-starting—fails safely without being replaced. Choose another existing
-container with `QUARRY_HELIX_CONTAINER_NAME`, or deliberately replace the old container yourself.
+The following areas describe intended next steps, with no committed release dates or ordering:
 
-If you already have a compatible container under another name, set its name when you start Quarry:
+- **Evidence and findings:** connect source passages to findings, open questions, and diligence outputs.
+- **Saved deliverables:** persist presentation edits and manage deliverable creation and history.
+- **Connected knowledge:** develop the Global and Initiative Vaults beyond staging and sample views,
+  and make saved work easier to find across the workspace.
+- **Deeper document search:** open results across documents, highlight exact terms in previews,
+  improve relevance, and support larger collections efficiently.
+- **SharePoint integration:** connect external document sources to the Data Room; the current
+  connection interface is not a completed import workflow.
+- **Notebook organization and collaboration:** add folders, broader search, attachments, and shared work.
+- **Production readiness:** strengthen organization tenancy, account recovery, identity lifecycle,
+  operational controls, and deployment automation.
 
-```sh
-QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
-```
+## Project status
 
-### 3. Install project dependencies
+Quarry is a development-stage application. Account registration, sign-in, sessions, and per-user
+and deal membership checks are implemented. Production organization tenancy and identity lifecycle
+remain incomplete. Some Hub, Vault, review, and deal-workspace views are samples or placeholders;
+AI output still requires human review.
 
-Install the frontend package. The optional legacy Diligence Studio service is installed separately:
+## Get started
 
-```sh
-cd frontend
-npm ci
-cd "$HOME/diligence-studio-server"
-npm ci
-npx playwright install chromium
-```
+For dependencies, local setup, configuration, development commands, builds, testing, and
+troubleshooting, read [Getting Started](Getting%20Started.md).
 
-`npm ci` uses each package's checked-in lockfile. Do not run `npm install` from the repository root because Quarry has no root npm workspace. Cargo downloads Rust dependencies during the first Rust build or launcher run.
-
-The Playwright command installs the Chromium binary used to generate Diligence Studio template previews.
-
-### 4. Configure optional capabilities
-
-The default local stack does not require an environment file. Add ignored local environment files only when you need an override or optional integration:
-
-- `frontend/.env` contains public Vite settings
-- `backend/.env` contains Axum settings and server-side secrets
-- `$HOME/diligence-studio-server/.env` contains Diligence Studio settings and optional provider secrets
-
-Never put secrets in a `VITE_*` variable. See [Configuration](#configuration) for the supported variables.
-
-## Run the project
-
-Use the root launcher for normal development. It starts dependencies and application processes in the required order.
-
-Start the browser distribution from the repository root:
-
-```sh
-./quarry web
-```
-
-Start the desktop distribution instead:
-
-```sh
-./quarry desktop
-```
-
-Keep the launcher terminal open while you develop. Press `Ctrl-C` once to stop Axum, the selected UI, and Diligence Studio. Docker and Helix remain running because other local projects may use them.
-
-Stop the default Helix container separately when you no longer need it:
-
-```sh
-docker stop helix-quarry-v3-dev
-```
-
-Run the launcher from the repository root. It first checks ports `3001`, `1420`, and `43127`. It then waits for Docker and Helix before it starts Axum, the selected user interface, and Diligence Studio. The launcher stops its three application process groups together when one exits.
-
-The browser and Tauri webview call Axum. They do not call Diligence Studio on port `43127` directly.
-
-### Local URLs
-
-| Service | URL | Notes |
-| --- | --- | --- |
-| Web UI | `http://localhost:1420` | Open this for `./quarry web`; desktop mode uses the Tauri window |
-| Axum API | `http://127.0.0.1:3001` | Health check: `/api/v1/health` |
-| HelixDB | `http://127.0.0.1:6969` | Required before Axum bootstrap |
-| Diligence Studio | `http://127.0.0.1:43127` | Server-side integration; the UI does not call it directly |
-
-### Startup troubleshooting
-
-- `required command not found`: install the missing prerequisite above, restart the terminal, and
-  confirm the command is on `PATH`.
-- Helix container creation failures: confirm `backend/helix.toml` has a valid `[local.dev]` image,
-  tag, and digest, then check Docker's error output and registry access.
-- Helix image mismatch: the named container was created from a different image. The launcher leaves
-  it untouched; set `QUARRY_HELIX_CONTAINER_NAME` or replace that container deliberately.
-- `port ... is already in use`: another development process owns one of ports `3001`, `1420`, or
-  `43127`. Stop that process intentionally; the launcher will not terminate an unknown listener.
-- Docker or Helix startup timeout: open Docker Desktop or start Docker Engine, then check
-  `docker info`, `docker ps -a`, and `docker logs helix-quarry-v3-dev` before retrying.
-- Diligence Studio preview failures: rerun `npx playwright install chromium` from
-  `$QUARRY_DILIGENCE_STUDIO_ROOT` (default `$HOME/diligence-studio-server/`).
-- Desktop-only build failures: revisit the Tauri prerequisites and confirm `xcode-select -p` and
-  `cargo --version` succeed.
-
-The browser uses `BrowserRouter` and Vite's `/api` development proxy. The desktop app uses
-`HashRouter`; its Tauri Rust gateway forwards product HTTP, multipart, binary, and SSE traffic to
-the same Axum API.
-
-## Frontend commands
-
-Run these from `frontend/`:
-
-```sh
-npm test
-npm run typecheck
-npm run check:boundaries
-npm run build:web
-npm run check:web-bundle
-npm run check:bundle-size:web
-npm run build:desktop-ui
-npm run check:bundle-size:desktop
-```
-
-For focused development, use `npm run dev:web` or `npm run dev:desktop`. The shared source tree is
-`frontend/src/`; build-time aliases select the web or desktop router and runtime adapter. Raw
-browser transport belongs under `frontend/src/api/`, and raw Tauri imports belong in the desktop
-runtime boundary.
-
-## Backend commands
-
-Run these from `backend/`:
-
-```sh
-cargo fmt --all -- --check
-cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-```
-
-For local runtime work, `cargo run --locked` starts the API using `backend/.env` and the documented
-defaults. Startup opens or migrates SQLite, connects to Helix, and initializes indexes, so it is a
-runtime operation rather than a routine compile check.
-
-## Diligence Studio server commands
-
-Run these from `$HOME/diligence-studio-server/` (or the directory selected by
-`QUARRY_DILIGENCE_STUDIO_ROOT`):
-
-```sh
-npm run typecheck
-npm test
-npm start
-```
-
-The checked-in catalog seeds an in-memory SQLite repository at startup. Imported templates,
-assets, previews, and optional classifications disappear when this process exits. Preview creation
-launches Playwright Chromium and renders through the frontend's
-`/_internal/template-preview` route without writing uploaded PowerPoint files to disk.
-
-## Desktop shell commands
-
-Run these from `frontend/src-tauri/` when native code or the desktop transport changes:
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-```
-
-The desktop shell owns validated IPC, native dialogs/files, local data-room authorization, and the
-desktop-to-Axum transport hop. Product business rules, durable state, AI orchestration, search, and
-persistence remain in the backend.
-
-## Configuration
-
-For local overrides, use the three ignored environment files defined by the repository:
-
-- `frontend/.env` contains public Vite settings shared by the web and desktop UI builds.
-- `backend/.env` contains Axum settings and server-side secrets.
-- `$HOME/diligence-studio-server/.env` contains its host, port, preview limits, and optional
-  classification provider settings.
-
-The most common frontend settings are:
-
-| Variable | Purpose |
-| --- | --- |
-| `VITE_API_BASE_URL` | Browser API origin; leave empty in local web development to use the Vite proxy |
-| `VITE_WORKSPACE_DATA_SOURCE` | `api` by default, or explicit `demo` workspace data |
-| `QUARRY_API_BASE_URL` | Axum origin used by the desktop Rust gateway |
-
-Backend configuration includes API host/port, CORS origins, SQLite location, Helix, data-room roots,
-document-job limits, and optional external services. See
-[`docs/ARCHITECTURE.md#11-configuration`](docs/ARCHITECTURE.md#11-configuration) for the complete
-environment contract and defaults. Never put secrets in `VITE_*` variables or the browser bundle.
-
-## Runtime and API boundaries
-
-- The browser calls the versioned Axum contract through the web adapter.
-- The desktop UI calls Tauri IPC; the Rust shell relays product traffic to Axum and handles native
-  capabilities at the boundary.
-- Axum owns product routes, domain services, persistence, document processing, search, AI
-  integrations, and background job state.
-- Diligence Studio owns the app-scoped ephemeral template catalog, PowerPoint import/export, and
-  preview generation behind Axum's validated template facade.
-- SQLite is the canonical store for users, deals, files, versions, and blobs. Helix is the document
-  graph/search projection and is required during normal backend bootstrap.
-
-Client code targets `/api/v1`. The `/api` mount remains temporarily available for compatibility and
-is not the target for new client code. See the
-[`API surface`](docs/ARCHITECTURE.md#7-api-surface) and
-[`web and desktop transports`](docs/ARCHITECTURE.md#6-web-and-desktop-transports) sections for the
-full contract.
-
-## Current status
-
-Quarry is a tested development foundation, not a production-secure deployment. Current limitations
-include profile lookup/creation instead of authentication, no server-side tenant authorization,
-local SQLite persistence, Helix-dependent search, in-memory document jobs and caches, and no CI or
-deployment manifest. Treat caller-supplied user and workspace identifiers as development behavior,
-not as a security boundary.
-
-For repository rules, architecture invariants, data-recovery guidance, and the complete verification
-matrix, read [`AGENTS.md`](AGENTS.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For deeper technical context, see the [architecture](docs/ARCHITECTURE.md),
+[domain model](docs/DOMAIN_MODEL.md), and [contributor guidance](AGENTS.md).

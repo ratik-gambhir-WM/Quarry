@@ -112,3 +112,56 @@ fn legacy_user_id_request_field_is_rejected() {
     .unwrap_err();
     assert!(error.to_string().contains("unknown field"));
 }
+
+#[test]
+fn current_vector_query_binds_candidates_before_rank_and_projects_distance() {
+    let query = current_vector_candidates(
+        "DEAL-SYNTHETIC".into(),
+        vec!["synthetic-a".into(), "synthetic-b".into()],
+        vec![1.0, 0.0],
+        5,
+    )
+    .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&query.to_json_string().unwrap()).unwrap();
+    let project = &json["query"]["read"]["entries"][0]["query"]["root"]["project"];
+    let within = &project["input"]["vector_search_nodes_within"];
+    assert_eq!(within["label"], "FileChunk");
+    assert_eq!(within["property"], "embedding");
+    assert_eq!(within["query_vector"]["expr"]["param"], "query_embedding");
+    assert_eq!(within["tenant_value"]["expr"]["param"], "deal_id");
+    assert_eq!(
+        within["input"]["where"]["predicate"]["is_in"]["value"]["property"],
+        "chunk_id"
+    );
+    assert_eq!(
+        within["input"]["where"]["predicate"]["is_in"]["values"]["param"],
+        "chunk_ids"
+    );
+    assert_eq!(
+        within["input"]["where"]["input"]["where"]["predicate"]["eq"]["right"]["param"],
+        "deal_id"
+    );
+    assert_eq!(
+        json["parameters"]["query_embedding"],
+        serde_json::json!([1.0, 0.0])
+    );
+    assert_eq!(
+        json["parameters"]["chunk_ids"],
+        serde_json::json!(["synthetic-a", "synthetic-b"])
+    );
+    assert_eq!(within["k"]["expr"]["param"], "limit");
+    assert!(project["projections"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!({"property":{"alias":"distance","source":"$distance"}})));
+}
+
+#[test]
+fn helix_normalized_cosine_distance_converts_to_actual_similarity() {
+    for (distance, similarity) in [(0.0, 1.0), (0.2, 0.6), (0.5, 0.0), (1.0, -1.0)] {
+        assert!((helix_cosine_similarity(distance).unwrap() - similarity).abs() < 1e-12);
+    }
+    for distance in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.01] {
+        assert!(helix_cosine_similarity(distance).is_none());
+    }
+}

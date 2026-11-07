@@ -165,3 +165,27 @@ describe("shared deal membership contracts", () => {
     ).rejects.toThrow("PATCH transport unavailable");
   });
 });
+
+it("maps hybrid text-in contracts, encoding and cancellation through HTTP and desktop", async () => {
+  const response = { results: [{ chunkId: "c", dealId: "DEAL-1", fileId: "f", versionId: "v",
+    text: "Synthetic passage", chunkIndex: 1, pageStart: 1, pageEnd: 1, sectionPath: "Renewals", matchSources: ["semantic"] }] };
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(Response.json(response)));
+  vi.stubGlobal("fetch", fetch);
+  const input = { queryText: "Renewal risks?", limit: 30 };
+  const controller = new AbortController();
+  expect(await httpQuarryApi.searchDealDocumentChunksHybrid("DEAL /one", input, controller.signal)).toEqual(response);
+  expect(await httpQuarryApi.searchDocumentChunksHybrid(input)).toEqual(response);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+    "/api/v1/deals/DEAL%20%2Fone/documents/search/hybrid", "/api/v1/documents/search/hybrid",
+  ]);
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(input);
+  expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  const transport = { get: vi.fn(), post: vi.fn().mockResolvedValue(response), delete: vi.fn(),
+    getPdf: vi.fn(), postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() };
+  const desktop = createTauriQuarryApi(transport);
+  expect(await desktop.searchDealDocumentChunksHybrid("DEAL /one", input)).toEqual(response);
+  expect(await desktop.searchDocumentChunksHybrid(input)).toEqual(response);
+  expect(transport.post.mock.calls).toEqual([
+    ["/api/v1/deals/DEAL%20%2Fone/documents/search/hybrid", input], ["/api/v1/documents/search/hybrid", input],
+  ]);
+});

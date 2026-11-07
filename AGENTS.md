@@ -20,8 +20,9 @@ When instructions disagree, use this order:
 6. READMEs as historical context.
 7. Files under `plans/` and the retained architecture `.docx` reports as design inputs only.
 
-Code is the final authority. The root README currently lags the implemented desktop API gateway.
-Do not reintroduce its older “save command only” model by accident.
+Code is the final authority. The root README is a product overview; use
+[`Getting Started.md`](Getting%20Started.md) for developer onboarding. Preserve the implemented
+desktop API gateway; do not reintroduce the older “save command only” model.
 
 ## Start every task this way
 

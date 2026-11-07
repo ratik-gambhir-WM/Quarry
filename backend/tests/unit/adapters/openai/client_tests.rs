@@ -7,14 +7,20 @@ use std::{
 
 #[test]
 fn embedding_requests_use_the_configured_vector_dimension() {
-    let request = build_embeddings_request_body(
-        &["document text"],
-        Some("text-embedding-3-small"),
-        NonZeroUsize::new(512).unwrap(),
-    )
-    .unwrap();
+    for (model, dimensions) in [
+        ("text-embedding-3-small", 512),
+        ("text-embedding-3-large", 3072),
+    ] {
+        let request = build_embeddings_request_body(
+            &["document text"],
+            Some(model),
+            NonZeroUsize::new(dimensions).unwrap(),
+        )
+        .unwrap();
 
-    assert_eq!(request["dimensions"], 512);
+        assert_eq!(request["model"], model);
+        assert_eq!(request["dimensions"], dimensions);
+    }
 }
 
 #[test]
@@ -344,4 +350,26 @@ fn test_responses_url_seam_is_constructor_injected() {
         client.responses_url.as_ref(),
         "http://127.0.0.1:1/v1/responses"
     );
+}
+
+#[test]
+fn embedding_response_requires_the_requested_dimensions_before_storage_conversion() {
+    let dimensions = NonZeroUsize::new(2).unwrap();
+    let valid =
+        json!({"data":[{"index":1,"embedding":[0.6,0.8]},{"index":0,"embedding":[1.0,0.0]}]});
+    assert_eq!(
+        extract_embeddings(&valid, 2, dimensions).unwrap(),
+        vec![vec![1.0, 0.0], vec![0.6, 0.8]]
+    );
+    for vector in [
+        json!([]),
+        json!([1.0]),
+        json!([1.0, 0.0, 0.0]),
+        json!([f64::MAX, 0.0]),
+        json!([null, 0.0]),
+    ] {
+        let response = json!({"data":[{"index":0,"embedding":vector}]});
+        assert!(extract_embeddings(&response, 1, dimensions).is_err());
+    }
+    assert!(extract_embeddings(&valid, 2, NonZeroUsize::new(3).unwrap()).is_err());
 }

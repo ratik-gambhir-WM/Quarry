@@ -1,4 +1,6 @@
-import { useCallback, type ReactElement } from "react";
+import { useCallback, useSyncExternalStore, type ReactElement } from "react";
+import { sessionStore } from "@/auth/sessionStore";
+import type { HybridDocumentHit } from "@/contracts/quarryApi";
 import { runtime } from "@quarry/runtime";
 import { keywordSearchExcerpt, keywordSearchMatchRanges } from "@/data/documents/keywordSearch";
 import DocumentSearch from "./DocumentSearch";
@@ -21,25 +23,26 @@ export type DataRoomDocumentSearchProps = {
   trigger?: ReactElement;
 };
 
-export function DataRoomDocumentSearch({
+export function DataRoomDocumentSearch(props: DataRoomDocumentSearchProps) {
+  const session = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getSnapshot);
+  return <ScopedDataRoomDocumentSearch key={`${session.generation}:${props.dealId}`} {...props} />;
+}
+
+function ScopedDataRoomDocumentSearch({
   dealId, currentFileId, currentFileName, currentPageCount, files,
   onActivateResult, onOpenChange, open, hideTrigger, dialogTitle,
   onSelectionFocus, finalFocusEl, boundaryElement, trigger,
 }: DataRoomDocumentSearchProps) {
-  const search = useCallback(async (query: string): Promise<DocumentSearchItem[]> => {
-    const hits = await runtime.api.searchDealDocumentChunksByKeyword(dealId, {
-      queryText: query,
-      limit: 30,
-    });
+  const mapHits = useCallback((hits: HybridDocumentHit[], query: string): DocumentSearchItem[] => {
     return hits.map((hit) => {
-      const fileName = files?.find((file) => file.fileId === hit.file_id)?.name
-        ?? (hit.file_id === currentFileId ? currentFileName : "Uploaded document");
-      const page = hit.page_start;
-      const available = hit.file_id === currentFileId && page !== null
+      const fileName = files?.find((file) => file.fileId === hit.fileId)?.name
+        ?? (hit.fileId === currentFileId ? currentFileName : "Uploaded document");
+      const page = hit.pageStart;
+      const available = hit.fileId === currentFileId && page !== null
         && page >= 1 && page <= currentPageCount;
-      const location = page === null ? `Passage ${hit.chunk_index}`
-        : hit.page_end !== null && hit.page_end !== page
-          ? `Pages ${page}–${hit.page_end}` : `Page ${page}`;
+      const location = page === null ? `Passage ${hit.chunkIndex}`
+        : hit.pageEnd !== null && hit.pageEnd !== page
+          ? `Pages ${page}–${hit.pageEnd}` : `Page ${page}`;
       const excerpt = keywordSearchExcerpt(hit.text, query);
       let offset = 0;
       const secondaryMatchRanges: [number, number][] = [];
@@ -48,20 +51,34 @@ export function DataRoomDocumentSearch({
         offset += part.text.length;
       }
       return {
-        id: hit.chunk_id,
+        id: hit.chunkId,
+        matchSources: hit.matchSources,
         fileName,
         primaryText: fileName,
         primaryMatchRanges: keywordSearchMatchRanges(fileName, query),
         secondaryText: excerpt.map((part) => part.text).join(""),
         secondaryMatchRanges,
-        tertiaryText: [hit.section_path.trim(), location].filter(Boolean).join(" · "),
+        tertiaryText: [hit.sectionPath.trim(), location].filter(Boolean).join(" · "),
         target: available ? { kind: "pdf-page", page } : undefined,
-        disabledReason: available ? undefined : hit.file_id !== currentFileId
+        disabledReason: available ? undefined : hit.fileId !== currentFileId
           ? "Open this document in the Data Room to navigate to this passage."
           : "Page navigation unavailable for this passage.",
       };
     });
-  }, [dealId, currentFileId, currentFileName, currentPageCount, files]);
+  }, [currentFileId, currentFileName, currentPageCount, files]);
+
+  const search = useCallback(async (query: string, signal?: AbortSignal) => {
+    const { results } = await runtime.api.searchDealDocumentChunksHybrid(dealId, { queryText: query, limit: 30 }, signal);
+    return mapHits(results, query);
+  }, [dealId, mapHits]);
+  const keywordFallback = useCallback(async (query: string) => {
+    const hits = await runtime.api.searchDealDocumentChunksByKeyword(dealId, { queryText: query, limit: 30 });
+    return mapHits(hits.map((hit): HybridDocumentHit => ({
+      chunkId: hit.chunk_id, dealId: hit.deal_id, fileId: hit.file_id, versionId: hit.version_id,
+      text: hit.text, chunkIndex: hit.chunk_index, pageStart: hit.page_start, pageEnd: hit.page_end,
+      sectionPath: hit.section_path, matchSources: ["keyword"],
+    })), query);
+  }, [dealId, mapHits]);
 
   function activateItem(item: DocumentSearchItem) {
     if (!item.target || item.disabledReason) return;
@@ -77,17 +94,20 @@ export function DataRoomDocumentSearch({
   return (
     <DocumentSearch
       buttonProps={{ "aria-label": "Search document", iconOnly: true }}
-      dialogDescription="Keyword search across uploaded documents in this deal. Results update as you type."
+      dialogDescription="Hybrid search finds keyword and semantic matches across uploaded passages in this deal. Press Enter or Search to submit."
       dialogTitle={dialogTitle ?? "Search documents"}
       open={open}
       hideTrigger={hideTrigger}
       finalFocusEl={finalFocusEl}
       search={search}
-      sourceLabel="This deal · Keyword"
+      submitSearch
+      filterByMatchSource
+      keywordFallback={keywordFallback}
+      sourceLabel="This deal · Hybrid"
       onOpenChange={onOpenChange}
       onSelect={activateItem}
       onSelectionFocus={onSelectionFocus}
-      placeholder="Search files and excerpts…"
+      placeholder="Ask a question or search passages…"
       boundaryElement={boundaryElement}
       trigger={trigger}
     />
