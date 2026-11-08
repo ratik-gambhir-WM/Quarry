@@ -87,25 +87,10 @@ export type ProcessFileJobEventHandlers = {
   onEvent: (event: ProcessFileJobEvent) => void;
 };
 
-export type ChatContextMessage = {
-  content: string;
-  role: "user" | "assistant";
-};
-
 export type ChatFileReference = {
   dealId: string;
   fileId: string;
   name: string;
-};
-
-export type QueryModelInput = {
-  fileReferences?: ChatFileReference[];
-  fileScopeDealId?: string;
-  context: ChatContextMessage[];
-  files: File[];
-  model?: string;
-  prompt: string;
-  systemInstructions?: string;
 };
 
 export type AssistantThread = {
@@ -381,10 +366,6 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
     dealId: string,
     files: File[],
   ): Promise<ProcessDocumentsResponse>;
-  queryModel(
-    input: QueryModelInput,
-    handlers: SendQueryEventHandlers,
-  ): () => void;
   renameAssistantThread(threadId: string, title: string): Promise<void>;
   runAssistantThread(
     input: RunAssistantThreadInput,

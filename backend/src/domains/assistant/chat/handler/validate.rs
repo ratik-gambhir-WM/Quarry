@@ -28,36 +28,6 @@ pub fn validate_model(value: Option<String>) -> AppResult<Option<String>> {
         .transpose()
 }
 
-pub fn parse_context(value: &str) -> AppResult<Vec<ChatContextMessage>> {
-    let context: Vec<ChatContextMessage> = serde_json::from_str(value)
-        .map_err(|_| AppError::bad_request("context must be a valid JSON message array"))?;
-    if context.len() > MAX_CONTEXT_MESSAGES || !context.len().is_multiple_of(2) {
-        return Err(AppError::bad_request(
-            "context must contain at most 64 messages in complete user/assistant pairs",
-        ));
-    }
-    let mut total_chars = 0usize;
-    for (index, message) in context.iter().enumerate() {
-        let expected_user = index % 2 == 0;
-        if matches!(message.role, ChatContextRole::User) != expected_user {
-            return Err(AppError::bad_request(
-                "context roles must alternate user then assistant",
-            ));
-        }
-        let count = message.content.chars().count();
-        if message.content.trim().is_empty() || count > MAX_MESSAGE_CHARS {
-            return Err(AppError::bad_request("context message content is invalid"));
-        }
-        total_chars = total_chars
-            .checked_add(count)
-            .ok_or_else(|| AppError::bad_request("context is too large"))?;
-    }
-    if total_chars > MAX_CONTEXT_CHARS {
-        return Err(AppError::bad_request("context is too large"));
-    }
-    Ok(context)
-}
-
 fn validate_preserved_text(name: &str, value: String, max_chars: usize) -> AppResult<String> {
     if value.trim().is_empty() || value.chars().count() > max_chars {
         return Err(AppError::bad_request(format!("{name} is invalid")));

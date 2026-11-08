@@ -28,13 +28,13 @@ describe("Home experience", () => {
   });
 
   it("prefills the runtime once without sending or replacing later edits", () => {
-    const queryModel = vi.fn();
-    const api = { queryModel };
+    const runAssistantThread = vi.fn();
+    const api = { runAssistantThread, createAssistantThread: vi.fn() };
     const onContextTruncated = vi.fn();
     const { result, rerender } = renderHook(({ initialDraft }) => useAgentRuntime({ api, userEmail: "", onContextTruncated, initialDraft }), { initialProps: { initialDraft: "Review this draft" } });
     expect(result.current.state.draft).toBe("Review this draft");
     expect(result.current.state.messages).toEqual([]);
-    expect(queryModel).not.toHaveBeenCalled();
+    expect(runAssistantThread).not.toHaveBeenCalled();
     act(() => result.current.setDraft("My edits"));
     rerender({ initialDraft: "Review this draft" });
     expect(result.current.state.draft).toBe("My edits");

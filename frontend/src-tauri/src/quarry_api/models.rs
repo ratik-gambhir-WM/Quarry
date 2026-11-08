@@ -49,20 +49,6 @@ pub struct PowerPointExportPayload {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatContextMessage {
-    pub content: String,
-    pub role: ChatContextRole,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ChatContextRole {
-    User,
-    Assistant,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChatFileReference {
     pub deal_id: String,
@@ -77,8 +63,6 @@ pub struct QueryStreamRequest {
     pub file_references: Vec<ChatFileReference>,
     pub file_scope_deal_id: Option<String>,
     pub assistant_message_id: Option<String>,
-    #[serde(default)]
-    pub context: Vec<ChatContextMessage>,
     pub files: Vec<MultipartFile>,
     pub model: Option<String>,
     pub parent_message_id: Option<String>,

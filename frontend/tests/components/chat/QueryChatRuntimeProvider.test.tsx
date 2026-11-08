@@ -16,7 +16,6 @@ const { api } = vi.hoisted(() => ({
     listAssistantThreads: vi.fn(),
     listDeals: vi.fn(),
     listDealDocuments: vi.fn(),
-    queryModel: vi.fn(),
     runAssistantThread: vi.fn(),
   },
 }));
@@ -36,13 +35,30 @@ afterEach(() => {
   api.deleteAssistantThread.mockReset();
   api.getAssistantThread.mockReset();
   api.listAssistantThreads.mockReset();
-  api.queryModel.mockReset();
   api.listDeals.mockReset();
   api.listDealDocuments.mockReset();
   api.runAssistantThread.mockReset();
 });
 
 describe("QueryChatRuntimeProvider", () => {
+  it("keeps a signed-out draft and attachments without starting a temporary chat", async () => {
+    const user = userEvent.setup();
+    render(
+      <QueryChatRuntimeProvider onContextTruncated={vi.fn()} userEmail="">
+        <QueryChatThread contextTruncated={false} />
+      </QueryChatRuntimeProvider>,
+    );
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    await user.type(input, "Keep this question");
+    await user.upload(screen.getByLabelText("Choose attachments"), new File(["Notes"], "notes.txt", { type: "text/plain" }));
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Sign in to save this chat before sending a message.")).toBeTruthy();
+    expect((input as HTMLTextAreaElement).value).toBe("Keep this question");
+    expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeTruthy();
+    expect(api.createAssistantThread).not.toHaveBeenCalled();
+    expect(api.runAssistantThread).not.toHaveBeenCalled();
+  });
+
   it("loads the selected previous thread's messages", async () => {
     const user = userEvent.setup();
     let resolveThread: ((thread: typeof threadDetail) => void) | undefined;
@@ -151,7 +167,6 @@ describe("QueryChatRuntimeProvider", () => {
     });
     expect(run.assistantMessageId).toBe(run.requestId);
     expect(run.userMessageId).toEqual(expect.any(String));
-    expect(api.queryModel).not.toHaveBeenCalled();
   });
 
   it("keeps a newly created thread when the initial list resolves late", async () => {

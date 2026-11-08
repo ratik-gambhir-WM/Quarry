@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::adapters::openai::client::{ChatMessageInput, ChatRole};
-
 #[derive(Debug)]
 pub struct ChatUpload {
     pub bytes: Vec<u8>,
@@ -23,25 +21,10 @@ pub(super) struct RawUpload {
 }
 
 pub const MAX_CHAT_FILES: usize = 20;
-pub const MAX_CONTEXT_MESSAGES: usize = 64;
 pub const MAX_MESSAGE_CHARS: usize = 100_000;
 pub const MAX_CONTEXT_CHARS: usize = 400_000;
 pub const MAX_SYSTEM_INSTRUCTIONS_CHARS: usize = 50_000;
 pub const MAX_MODEL_CHARS: usize = 128;
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatContextMessage {
-    pub role: ChatContextRole,
-    pub content: String,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ChatContextRole {
-    User,
-    Assistant,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -49,17 +32,6 @@ pub struct ChatFileReference {
     pub deal_id: String,
     pub file_id: String,
     pub name: String,
-}
-
-#[derive(Debug)]
-pub struct QueryModelInput {
-    pub file_references: Vec<ChatFileReference>,
-    pub file_scope_deal_id: Option<String>,
-    pub context: Vec<ChatContextMessage>,
-    pub files: Vec<ChatUpload>,
-    pub model: Option<String>,
-    pub prompt: String,
-    pub system_instructions: Option<String>,
 }
 
 #[derive(Debug)]
@@ -114,19 +86,6 @@ impl SendQueryEvent {
             Self::Failed { .. } => "failed",
         }
     }
-}
-
-pub fn into_provider_context(context: Vec<ChatContextMessage>) -> Vec<ChatMessageInput> {
-    context
-        .into_iter()
-        .map(|message| ChatMessageInput {
-            role: match message.role {
-                ChatContextRole::User => ChatRole::User,
-                ChatContextRole::Assistant => ChatRole::Assistant,
-            },
-            content: message.content,
-        })
-        .collect()
 }
 
 #[cfg(test)]

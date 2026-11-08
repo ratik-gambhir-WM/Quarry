@@ -703,8 +703,8 @@ global state or query-cache library.
   the callback-based stream into cumulative custom thread-message snapshots, treats completion as
   authoritative, and cancels the matching transport exactly once.
   Thread-scoped runs send stable thread/user/assistant message IDs and no client context snapshot;
-  Axum loads bounded canonical completed pairs from SQLite. The legacy `/query_model` adapter path
-  still sends bounded client context for compatibility.
+  Axum loads bounded canonical completed pairs from SQLite for every chat. There is no temporary
+  chat fallback: sending requires a signed-in profile and a saved thread; failures retain the draft.
 - Legacy summarize presentation components and data helpers remain available, but the unused
   `useSummarizeWorkflow` and unsupported server-path API methods have been removed. Uploaded-file
   summaries remain available through both adapters; no summary screen is registered in the product route tree.
@@ -920,7 +920,7 @@ The contract covers:
 - stored document list/PDF/text with uploader attribution
 - synchronous and job-based document processing
 - document job subscriptions
-- persisted assistant threads/messages and thread-scoped streaming, plus legacy ephemeral queries
+- persisted assistant threads/messages and thread-scoped streaming for every chat
 - keyword/vector and opt-in text-in hybrid document search
 - paginated template previews through `listTemplatePreviews`
 - validated hydrated template retrieval through `getTemplate`
@@ -1087,16 +1087,20 @@ Axum's default 2 MB body limit first; this mismatch remains a known contract gap
 
 ### 7.4 Research and summarization
 
-`POST /query_model` is the legacy assistant chat contract. It accepts multipart `prompt`, required JSON
-`context`, optional `model` and `systemInstructions`, and up to 20 current-turn `files`. Context is
-an empty array or at most 64 messages (32 complete alternating user/assistant pairs), with 100,000
-Unicode scalar values per message and 400,000 total; prompts allow 100,000 and instructions 50,000. File bytes are
+`POST /assistant/threads/{thread_id}/runs` is the only assistant generation contract. Every chat
+uses a saved, authenticated thread through `AssistantChatService::ask_with_history`, and Axum
+selects canonical completed prior text pairs from SQLite. Requests cannot supply `context`; the
+former `/query_model` route and both client adapters for temporary chat have been removed. Web, desktop, and backend changes must ship together; older
+clients calling the removed route receive 404 under both `/api/v1` and `/api`.
+The multipart body accepts `prompt`, stable user/assistant message IDs, `requestId`, optional
+`parentMessageId`, `model`, and `systemInstructions`, plus up to 20 current-turn `files`.
+Prompts allow 100,000 Unicode scalar values and instructions 50,000. File bytes are
 limited to 50 MiB each and in aggregate and are validated by extension, MIME consistency, and file
 signature. Accepted images are PNG, JPEG, WebP, and single-frame GIF; accepted document inputs are
 PDF, UTF-8 TXT/Markdown/JSON/HTML/CSV, OLE DOC, and bounded inspected DOCX/PPTX/XLSX ZIPs. The route
 has a scoped 54 MiB body limit.
 
-Both chat multipart contracts also accept optional JSON `fileReferences` (up to 20 combined with
+Thread-run multipart requests also accept optional JSON `fileReferences` (up to 20 combined with
 uploads), each `{dealId, fileId, name}`, plus optional `fileScopeDealId`. The display name never
 selects stored bytes. The Data Room client sends its active scope, which must match each reference
 and the owned thread's deal association; Assistant omits it to permit cross-deal references even
@@ -1118,7 +1122,7 @@ local-path access, schema change or provider-side attachment reuse was introduce
 The response is SSE with `started`, ordered `delta`, and exactly one `completed` or `failed` event,
 a 15-second keepalive, `Content-Encoding: identity`, and proxy buffering disabled. Pre-stream
 validation failures are 400 and missing OpenAI capability is 503. Once HTTP 200 begins, failures
-are sanitized terminal events. The OpenAI adapter manually replays the client-managed textual
+are sanitized terminal events. The OpenAI adapter replays the server-selected textual
 context followed by current-turn files and prompt, repeats instructions, and sends Responses API
 requests with `stream: true` and `store: false`; it carries no provider conversation/response ID.
 Streams have a 45-second provider/desktop idle bound, a 10-minute maximum, bounded event/response
@@ -1152,7 +1156,6 @@ reference data. Freeform runs receive no implicit deal context; context is not d
 
 | Method | Path | Purpose | Dependency |
 | --- | --- | --- | --- |
-| POST | `/query_model` | Stream an ephemeral assistant answer over SSE | OpenAI |
 | GET/POST | `/assistant/threads` | List or create owned assistant threads | SQLite users and assistant tables |
 | GET/DELETE | `/assistant/threads/{thread_id}` | Load messages or delete an owned thread | SQLite |
 | POST | `/assistant/threads/{thread_id}/{rename,archive,unarchive}` | Mutate owned thread metadata | SQLite |
@@ -1499,7 +1502,7 @@ service, model, table, or product capability.
 | `system` | Public shallow health and static capabilities; development diagnostics/demo routes removed |
 | `user_settings` | Partial client-only preferences; backend scaffold only |
 | `connections` | Partial UI and dormant SharePoint adapter; backend domain scaffold only |
-| `assistant::chat` | Implemented SQLite-backed OpenAI text threads when configured, plus the legacy client-context stream contract |
+| `assistant::chat` | Implemented SQLite-backed OpenAI text threads for all chats when configured |
 | `assistant::agent` | Future conceptual owner for tools, reasoning/output-item state, and agent lifecycle; no module or route yet |
 | `identity` | Implemented password verification, sessions and resource-access boundary |
 | `memberships` | Canonical deal roles, capabilities, registered-user access management, teams, revisions and transactional activity |
@@ -2011,8 +2014,8 @@ item offers a menu with a wired Delete action; Archive is displayed but intentio
 The server, rather than the client runtime, selects canonical prior text context. The run endpoint
 retains partial text on an observed failure/cancellation, but there is no token checkpoint or
 stale-`streaming` recovery after
-a backend process crash. Current-turn file bytes are still not retained for reuse. The legacy
-`/query_model` path remains ephemeral and requires a client context snapshot.
+a backend process crash. Current-turn file bytes are still not retained for reuse. Generation always uses the saved
+thread run endpoint; no client-supplied history or temporary generation endpoint is supported.
 
 ## 11. Configuration
 

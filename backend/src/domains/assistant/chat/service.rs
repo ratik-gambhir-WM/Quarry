@@ -25,8 +25,8 @@ pub use super::repository::{AssistantThread, AssistantThreadDetail};
 
 use super::{
     model::{
-        into_provider_context, ChatFileReference, ChatUpload, ChatUploadKind, PersistentQueryInput,
-        QueryModelInput, SendQueryEvent, MAX_CHAT_FILES, MAX_CONTEXT_CHARS,
+        ChatFileReference, ChatUpload, ChatUploadKind, PersistentQueryInput, SendQueryEvent,
+        MAX_CHAT_FILES, MAX_CONTEXT_CHARS,
     },
     repository::{AssistantChatRepository, StartRunInput, StartRunResult},
 };
@@ -113,124 +113,6 @@ impl AssistantChatService {
             async move { load_file_reference(&documents, &access, actor_id, reference).await }
         });
         collect_reference_uploads(files, resolutions).await
-    }
-
-    pub fn ask(&self, input: QueryModelInput) -> ServiceResult<mpsc::Receiver<SendQueryEvent>> {
-        let client = self
-            .openai
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
-        let model = input.model.unwrap_or_else(|| self.model.clone());
-        let instructions = system_instructions_or_default(input.system_instructions, &self.prompts);
-        let context = into_provider_context(input.context);
-        let prompt = input.prompt;
-        let files = input.files;
-        let run_id = uuid::Uuid::new_v4().to_string();
-        tracing::info!(run_id = %run_id, model = %model, context_messages = context.len(), file_count = files.len(), prompt_chars = prompt.chars().count(), "assistant ephemeral run accepted");
-        let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-        event_tx
-            .try_send(SendQueryEvent::Started {
-                model: model.clone(),
-                thread_id: None,
-                user_message_id: None,
-                assistant_message_id: None,
-            })
-            .map_err(|_| ServiceError::internal("failed to initialize query event stream"))?;
-
-        tokio::spawn(async move {
-            let run_started_at = Instant::now();
-            tracing::debug!(run_id = %run_id, "assistant ephemeral file encoding started");
-            let encoded_files = match tokio::task::spawn_blocking(move || {
-                files
-                    .into_iter()
-                    .map(|file| {
-                        (
-                            file.filename,
-                            file.mime_type,
-                            general_purpose::STANDARD.encode(file.bytes),
-                            file.kind,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .await
-            {
-                Ok(files) => files,
-                Err(error) => {
-                    tracing::error!(run_id = %run_id, category = "encoding_worker", error = %error, "assistant ephemeral file encoding failed");
-                    let _ = event_tx
-                        .send(SendQueryEvent::Failed {
-                            error: "query generation failed",
-                        })
-                        .await;
-                    return;
-                }
-            };
-            let inputs = encoded_files
-                .iter()
-                .map(|(filename, mime_type, data_base64, kind)| match kind {
-                    ChatUploadKind::Image => ResponsesFileInput::ImageData {
-                        mime_type,
-                        data_base64,
-                        detail: Some("auto"),
-                    },
-                    ChatUploadKind::File => ResponsesFileInput::FileData {
-                        filename,
-                        mime_type,
-                        data_base64,
-                    },
-                })
-                .collect::<Vec<_>>();
-            let (delta_tx, mut delta_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-            let response = client.gen_chat_response_streaming(
-                &context,
-                &prompt,
-                &instructions,
-                &model,
-                &inputs,
-                delta_tx,
-            );
-            tokio::pin!(response);
-            tracing::info!(run_id = %run_id, "assistant provider stream started");
-
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = event_tx.closed() => {
-                        tracing::info!(run_id = %run_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant client disconnected");
-                        break
-                    },
-                    result = &mut response => {
-                        while let Ok(delta) = delta_rx.try_recv() {
-                            if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
-                                return;
-                            }
-                        }
-                        let terminal = match result {
-                            Ok(response) => {
-                                tracing::info!(run_id = %run_id, response_chars = response.chars().count(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant ephemeral run completed");
-                                SendQueryEvent::Completed { response }
-                            },
-                            Err(error) => {
-                                tracing::error!(run_id = %run_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant ephemeral provider failed");
-                                SendQueryEvent::Failed { error: "query generation failed" }
-                            }
-                        };
-                        let _ = event_tx.send(terminal).await;
-                        break;
-                    }
-                    delta = delta_rx.recv() => {
-                        let Some(delta) = delta else { continue };
-                        if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(event_rx)
     }
 
     pub async fn create_thread(
@@ -330,7 +212,7 @@ impl AssistantChatService {
         Ok(())
     }
 
-    pub async fn ask_persisted(
+    pub async fn ask_with_history(
         &self,
         mut input: PersistentQueryInput,
     ) -> ServiceResult<mpsc::Receiver<SendQueryEvent>> {

@@ -26,7 +26,6 @@ import type {
   ProcessFileJobEventHandlers,
   ProcessFileJobResponse,
   PowerPointExport,
-  QueryModelInput,
   QuarryApi,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
@@ -65,18 +64,17 @@ export type TauriMultipartRequest = {
 
 export type TauriQueryRequest = {
   sessionGeneration?: number;
-  assistantMessageId?: string;
-  context?: QueryModelInput["context"];
-  fileReferences?: QueryModelInput["fileReferences"];
+  assistantMessageId: string;
+  fileReferences?: RunAssistantThreadInput["fileReferences"];
   fileScopeDealId?: string;
   files: TauriMultipartRequest["files"];
   model?: string;
   parentMessageId?: string;
   path: string;
   prompt: string;
-  requestId?: string;
+  requestId: string;
   systemInstructions?: string;
-  userMessageId?: string;
+  userMessageId: string;
 };
 
 export type TauriQueryPayload =
@@ -370,90 +368,6 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
           [],
         ),
       );
-    },
-    queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
-      const sessionGeneration = sessionStore.getSnapshot().generation;
-      let active = true;
-      let settled = false;
-      let stop: (() => void) | undefined;
-      const stopTransport = () => {
-        const cleanup = stop;
-        stop = undefined;
-        cleanup?.();
-      };
-      void Promise.all(
-        input.files.map((file) =>
-          fileToMultipart(file, "application/octet-stream", false),
-        ),
-      )
-        .then((files) => {
-          if (!active) return undefined;
-          if (!transport.startQuery) {
-            throw new Error("The desktop query transport is unavailable.");
-          }
-          return transport.startQuery(
-            {
-              sessionGeneration,
-              context: input.context.map((message) => ({ ...message })),
-              files,
-              model: input.model,
-              path: "/api/v1/query_model",
-              prompt: input.prompt,
-              fileReferences: input.fileReferences,
-              fileScopeDealId: input.fileScopeDealId,
-              systemInstructions: input.systemInstructions,
-            },
-            (payload) => {
-              if (!active || settled) return;
-              if (payload.kind === "connectionError") {
-                settled = true;
-                active = false;
-                stopTransport();
-                handlers.onConnectionError?.(payload.message);
-                return;
-              }
-              try {
-                const event = parseQueryEvent(payload.event);
-                handlers.onEvent(event);
-                if (event.type === "completed" || event.type === "failed") {
-                  settled = true;
-                  active = false;
-                  stopTransport();
-                }
-              } catch (error) {
-                settled = true;
-                active = false;
-                stopTransport();
-                handlers.onConnectionError?.(
-                  error instanceof Error
-                    ? error.message
-                    : "The query stream returned an invalid event.",
-                );
-              }
-            },
-          );
-        })
-        .then((cleanup) => {
-          if (!cleanup) return;
-          if (active) stop = cleanup;
-          else cleanup();
-        })
-        .catch((error) => {
-          if (active && !settled) {
-            settled = true;
-            active = false;
-            handlers.onConnectionError?.(
-              error instanceof Error
-                ? error.message
-                : "The desktop query connection failed.",
-            );
-          }
-        });
-      return () => {
-        if (!active) return;
-        active = false;
-        stopTransport();
-      };
     },
     runAssistantThread(
       input: RunAssistantThreadInput,

@@ -2,13 +2,13 @@ import { useState } from "react";
 import { QueryChatRuntimeProvider } from "./AgentRuntime";
 import { QueryChatThread as Thread } from "./QueryChatThread";
 
-export function QueryChat() {
+export function QueryChat({ userEmail }: { userEmail: string }) {
   const [contextTruncated, setContextTruncated] = useState(false);
 
   return (
     <QueryChatRuntimeProvider
       onContextTruncated={setContextTruncated}
-      userEmail=""
+      userEmail={userEmail}
     >
       <QueryChatThread contextTruncated={contextTruncated} />
     </QueryChatRuntimeProvider>

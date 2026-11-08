@@ -1,5 +1,4 @@
 import type {
-  ChatContextMessage,
   QuarryApi,
   SendQueryEventHandlers,
 } from "../../contracts/quarryApi";
@@ -14,9 +13,8 @@ const SERVER_ERROR_MESSAGE =
 const CONNECTION_ERROR_MESSAGE =
   "The assistant connection was interrupted. Please try again.";
 
-type QueryModelAdapterOptions = {
+type ModelAdapterOptions = {
   onContextTruncated?: (truncated: boolean) => void;
-  userEmail?: string;
 };
 
 type QueueItem =
@@ -24,24 +22,21 @@ type QueueItem =
   | { kind: "done" }
   | { error: Error; kind: "error" };
 
-type CompletedPair = readonly [ChatContextMessage, ChatContextMessage];
+type CompletedPair = readonly [string, string];
 
 export function createModelAdapter(
-  api: Pick<QuarryApi, "queryModel"> &
-    Partial<Pick<QuarryApi, "runAssistantThread">>,
-  options: QueryModelAdapterOptions = {},
+  api: Pick<QuarryApi, "runAssistantThread">,
+  options: ModelAdapterOptions = {},
 ): ModelAdapter {
   return {
     async *run(runOptions) {
       const prompt = readCurrentPrompt(runOptions.messages);
-      const { context, truncated } = buildContext(runOptions.messages);
+      const { messageCount, truncated } = estimateHistory(runOptions.messages);
       options.onContextTruncated?.(truncated);
       console.info("[chat] adapter.prepared", {
-        contextMessageCount: context.length,
+        estimatedContextMessageCount: messageCount,
         truncated,
-        persisted: Boolean(
-          options.userEmail && runOptions.threadId && api.runAssistantThread,
-        ),
+        persisted: Boolean(runOptions.threadId),
         promptChars: [...prompt].length,
       });
 
@@ -80,12 +75,6 @@ export function createModelAdapter(
             previousMessage?.role === "assistant"
               ? previousMessage.id
               : undefined;
-          const usePersistedRun = Boolean(
-            options.userEmail &&
-            runOptions.threadId &&
-            runOptions.assistantMessageId &&
-            api.runAssistantThread,
-          );
           const handlers: SendQueryEventHandlers = {
             onConnectionError: (message) => {
               console.error("[chat] stream.connection_error", { message });
@@ -130,30 +119,25 @@ export function createModelAdapter(
               }
             },
           };
-          cleanup = usePersistedRun
-            ? api.runAssistantThread!(
-                {
-                  assistantMessageId: runOptions.assistantMessageId!,
-                  files: [...currentUser.attachments],
-                  ...(currentUser.fileReferences?.length ? { fileReferences: [...currentUser.fileReferences] } : {}),
-                  ...(currentUser.fileScopeDealId ? { fileScopeDealId: currentUser.fileScopeDealId } : {}),
-                  ...(runOptions.model ? { model: runOptions.model } : {}),
-                  parentMessageId,
-                  prompt,
-                  requestId: runOptions.assistantMessageId!,
-                  threadId: runOptions.threadId!,
-                  userMessageId: currentUser.id,
-                },
-                handlers,
-              )
-            : api.queryModel({
-                context,
-                files: [...currentUser.attachments],
-                ...(currentUser.fileReferences?.length ? { fileReferences: [...currentUser.fileReferences] } : {}),
-                ...(currentUser.fileScopeDealId ? { fileScopeDealId: currentUser.fileScopeDealId } : {}),
-                ...(runOptions.model ? { model: runOptions.model } : {}),
-                prompt,
-              }, handlers);
+          const { threadId, assistantMessageId } = runOptions;
+          if (!threadId || !assistantMessageId) {
+            throw new Error("A saved thread and assistant message ID are required.");
+          }
+          cleanup = api.runAssistantThread(
+            {
+              assistantMessageId,
+              files: [...currentUser.attachments],
+              ...(currentUser.fileReferences?.length ? { fileReferences: [...currentUser.fileReferences] } : {}),
+              ...(currentUser.fileScopeDealId ? { fileScopeDealId: currentUser.fileScopeDealId } : {}),
+              ...(runOptions.model ? { model: runOptions.model } : {}),
+              parentMessageId,
+              prompt,
+              requestId: assistantMessageId,
+              threadId,
+              userMessageId: currentUser.id,
+            },
+            handlers,
+          );
         } catch (error) {
           console.error("[chat] adapter.transport_error", error);
           queue.finish({
@@ -194,7 +178,8 @@ function readCurrentPrompt(messages: readonly Message[]) {
   return text;
 }
 
-function buildContext(messages: readonly Message[]) {
+// This estimate drives the local truncation notice; the server owns actual history selection.
+function estimateHistory(messages: readonly Message[]) {
   const currentUserIndex = findCurrentUserIndex(messages);
   const pairs: CompletedPair[] = [];
 
@@ -212,15 +197,12 @@ function buildContext(messages: readonly Message[]) {
       userText.trim().length > 0 &&
       assistantText.trim().length > 0
     ) {
-      pairs.push([
-        { content: userText, role: "user" },
-        { content: assistantText, role: "assistant" },
-      ]);
+      pairs.push([userText, assistantText]);
       index += 1;
     }
   }
 
-  const selected: CompletedPair[] = [];
+  let selectedPairs = 0;
   let characterCount = 0;
   let truncated = false;
   const maxPairs = MAX_CONTEXT_MESSAGES / 2;
@@ -228,25 +210,22 @@ function buildContext(messages: readonly Message[]) {
   for (let index = pairs.length - 1; index >= 0; index -= 1) {
     const pair = pairs[index];
     if (!pair) continue;
-    const pairCounts = pair.map((message) => countCharacters(message.content));
+    const pairCounts = pair.map(countCharacters);
     const pairCharacterCount = pairCounts[0] + pairCounts[1];
     if (
-      selected.length >= maxPairs ||
+      selectedPairs >= maxPairs ||
       pairCounts.some((count) => count > MAX_MESSAGE_CHARS) ||
       characterCount + pairCharacterCount > MAX_CONTEXT_CHARS
     ) {
       truncated = true;
       break;
     }
-    selected.unshift(pair);
+    selectedPairs += 1;
     characterCount += pairCharacterCount;
   }
 
   return {
-    context: selected.flatMap(([user, assistant]) => [
-      { ...user },
-      { ...assistant },
-    ]),
+    messageCount: selectedPairs * 2,
     truncated,
   };
 }

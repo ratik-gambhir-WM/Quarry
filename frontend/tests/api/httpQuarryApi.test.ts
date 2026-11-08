@@ -415,7 +415,7 @@ describe("httpQuarryApi", () => {
     expect(rawText.text).toBe("Raw report text");
   });
 
-  it("posts preserved chat context and delivers query events before completion", async () => {
+  it("posts thread identifiers without client history and delivers query events before completion", async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -440,12 +440,9 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
     const events: string[] = [];
 
-    httpQuarryApi.queryModel(
+    httpQuarryApi.runAssistantThread(
       {
-        context: [
-          { content: "  question  ", role: "user" },
-          { content: "answer", role: "assistant" },
-        ],
+        threadId: "thread-1", userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1",
         files: [],
         prompt: "  next  ",
       },
@@ -458,12 +455,12 @@ describe("httpQuarryApi", () => {
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     const form = request.body as FormData;
     expect(form.get("prompt")).toBe("  next  ");
-    expect(form.get("context")).toBe(
-      '[{"content":"  question  ","role":"user"},{"content":"answer","role":"assistant"}]',
-    );
+    expect(form.has("context")).toBe(false);
+    expect(form.get("userMessageId")).toBe("user-1");
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/assistant/threads/thread-1/runs");
   });
 
-  it.each(["ephemeral", "persisted"])("sends the selected model and files through %s chat multipart", async (mode) => {
+  it("sends the selected model and files through saved chat multipart", async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('event: started\ndata: {"type":"started","model":"gpt-5.5"}\n\nevent: completed\ndata: {"type":"completed","response":"Done"}\n\n'));
@@ -474,14 +471,10 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
     const file = new File(["Test attachment"], "notes.txt", { type: "text/plain" });
     const handlers = { onEvent: vi.fn() };
-    if (mode === "persisted") {
-      httpQuarryApi.runAssistantThread({
-        assistantMessageId: "assistant-1", userMessageId: "user-1", requestId: "assistant-1", threadId: "thread-1",
-        files: [file], fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }], fileScopeDealId: "DEAL-A", model: "gpt-5.5", prompt: "Review these notes",
-      }, handlers);
-    } else {
-      httpQuarryApi.queryModel({ context: [], files: [file], fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }], fileScopeDealId: "DEAL-A", model: "gpt-5.5", prompt: "Review these notes" }, handlers);
-    }
+    httpQuarryApi.runAssistantThread({
+      assistantMessageId: "assistant-1", userMessageId: "user-1", requestId: "assistant-1", threadId: "thread-1",
+      files: [file], fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }], fileScopeDealId: "DEAL-A", model: "gpt-5.5", prompt: "Review these notes",
+    }, handlers);
     await vi.waitFor(() => expect(handlers.onEvent).toHaveBeenCalledWith({ type: "completed", response: "Done" }));
     const form = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
     expect(form.get("fileReferences")).toBe(JSON.stringify([{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }]));
@@ -491,7 +484,7 @@ describe("httpQuarryApi", () => {
     const uploaded = form.get("files") as File;
     expect(uploaded.name).toBe("notes.txt");
     expect(await uploaded.text()).toBe("Test attachment");
-    expect(form.has("context")).toBe(mode === "ephemeral");
+    expect(form.has("context")).toBe(false);
   });
 
   it("closes the response stream as soon as a terminal query event arrives", async () => {
@@ -519,8 +512,8 @@ describe("httpQuarryApi", () => {
       ),
     );
 
-    httpQuarryApi.queryModel(
-      { context: [], files: [], prompt: "hello" },
+    httpQuarryApi.runAssistantThread(
+      { threadId: "thread-1", userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1", files: [], prompt: "hello" },
       { onEvent: vi.fn() },
     );
 

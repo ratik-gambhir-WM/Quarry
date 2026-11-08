@@ -3,25 +3,6 @@ use super::*;
 use crate::domains::assistant::chat::repository::AssistantMessage;
 
 #[test]
-fn unavailable_capability_fails_before_streaming() {
-    let service = AssistantChatService::new(
-        None,
-        "gpt-5.5".to_string(),
-        crate::integration_support::prompt_catalog(),
-    );
-    let result = service.ask(QueryModelInput {
-        file_references: Vec::new(),
-        file_scope_deal_id: None,
-        context: Vec::new(),
-        files: Vec::new(),
-        model: None,
-        prompt: "hello".to_string(),
-        system_instructions: None,
-    });
-    assert!(matches!(result, Err(ServiceError::Unavailable(_))));
-}
-
-#[test]
 fn uses_the_catalog_default_when_the_client_omits_system_instructions() {
     let prompts = crate::integration_support::prompt_catalog();
 
@@ -165,7 +146,7 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         crate::integration_support::prompt_catalog(),
     );
     let mut events = service
-        .ask_persisted(PersistentQueryInput {
+        .ask_with_history(PersistentQueryInput {
             file_references: Vec::new(),
             file_scope_deal_id: None,
             assistant_message_id: "a1".into(),

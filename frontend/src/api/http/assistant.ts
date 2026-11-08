@@ -4,7 +4,6 @@ import type {
   AssistantThread,
   AssistantThreadDetail,
   AssistantThreadPage,
-  QueryModelInput,
   QuarryApi,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
@@ -17,30 +16,6 @@ import {
 } from "../../lib/activityLog";
 
 import { get, post, requestJson, apiUrl } from "./transport";
-
-function queryModel(input: QueryModelInput, handlers: SendQueryEventHandlers) {
-  const form = new FormData();
-  form.append("prompt", input.prompt);
-  if (input.fileReferences?.length) form.append("fileReferences", JSON.stringify(input.fileReferences));
-  if (input.fileScopeDealId) form.append("fileScopeDealId", input.fileScopeDealId);
-  form.append("context", JSON.stringify(input.context));
-  if (input.model !== undefined) form.append("model", input.model);
-  if (input.systemInstructions !== undefined) {
-    form.append("systemInstructions", input.systemInstructions);
-  }
-  for (const file of input.files) form.append("files", file, file.name);
-  return streamQuery(
-    "/api/v1/query_model",
-    form,
-    {
-      contextMessageCount: input.context.length,
-      fileCount: input.files.length,
-      fileBytes: input.files.reduce((total, file) => total + file.size, 0),
-      model: input.model,
-    },
-    handlers,
-  );
-}
 
 function runAssistantThread(
   input: RunAssistantThreadInput,
@@ -275,7 +250,6 @@ function deleteAssistantThread(threadId: string) {
 
 export const httpAssistantApi: Pick<
   QuarryApi,
-  | "queryModel"
   | "runAssistantThread"
   | "listAssistantThreads"
   | "createAssistantThread"
@@ -285,7 +259,6 @@ export const httpAssistantApi: Pick<
   | "archiveAssistantThread"
   | "unarchiveAssistantThread"
 > = {
-  queryModel,
   runAssistantThread,
   listAssistantThreads,
   createAssistantThread,

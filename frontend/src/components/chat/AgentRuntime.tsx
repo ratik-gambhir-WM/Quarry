@@ -43,16 +43,14 @@ export type ThreadRuntimeState = {
 };
 
 type AgentRuntimeOptions = {
-  api: Pick<QuarryApi, "queryModel"> &
+  api: Pick<QuarryApi, "createAssistantThread" | "runAssistantThread"> &
     Partial<
       Pick<
         QuarryApi,
-        | "createAssistantThread"
         | "deleteAssistantThread"
         | "getAssistantThread"
         | "listAssistantThreads"
         | "renameAssistantThread"
-        | "runAssistantThread"
       >
     >;
   onContextTruncated: (truncated: boolean) => void;
@@ -197,7 +195,6 @@ export function useAgentRuntime({
       try {
         const adapter = createModelAdapter(api, {
           onContextTruncated,
-          userEmail: userEmail || undefined,
         });
         for await (const result of adapter.run({
           abortSignal: controller.signal,
@@ -239,7 +236,7 @@ export function useAgentRuntime({
         update({ isRunning: false });
       }
     },
-    [api, onContextTruncated, replaceAssistantMessage, update, userEmail],
+    [api, onContextTruncated, replaceAssistantMessage, update],
   );
 
   const send = useCallback(
@@ -268,7 +265,7 @@ export function useAgentRuntime({
       const message = userMessageFor(text, current.draftFiles, current.draftReferences, current.scopeDealId);
       const model = current.selectedModel.type === "model" ? current.selectedModel.id.trim() : undefined;
       if (!userEmail) {
-        void startRun(message, "", false, model);
+        update({ sendError: "Sign in to save this chat before sending a message." });
         return;
       }
 
@@ -277,19 +274,14 @@ export function useAgentRuntime({
       const createAssistantThread = api.createAssistantThread;
       const threadId = selectedThreadId
         ? Promise.resolve(selectedThreadId)
-        : createAssistantThread
-          ? createAssistantThread(
-              undefined,
-              scope === "deal" ? dealId : null,
-            ).then((thread) => {
-              if (!mountedRef.current) return null;
-              update({
-                selectedThreadId: thread.threadId,
-                threads: [thread, ...stateRef.current.threads],
-              });
-              return thread.threadId;
-            })
-          : Promise.resolve(null);
+        : createAssistantThread(undefined, scope === "deal" ? dealId : null).then((thread) => {
+            if (!mountedRef.current) return null;
+            update({
+              selectedThreadId: thread.threadId,
+              threads: [thread, ...stateRef.current.threads],
+            });
+            return thread.threadId;
+          });
       void threadId
         .then((id) => {
           if (id) void startRun(message, id, false, model);

@@ -1,12 +1,9 @@
 use super::super::{
-    model::{
-        ChatFileReference, ChatUpload, PersistentQueryInput, QueryModelInput, RawUpload,
-        MAX_CHAT_FILES,
-    },
+    model::{ChatFileReference, ChatUpload, PersistentQueryInput, RawUpload, MAX_CHAT_FILES},
     validate::{validate_filename, validate_upload},
 };
 use super::validate::{
-    parse_context, parse_file_references, validate_identifier, validate_model, validate_prompt,
+    parse_file_references, validate_identifier, validate_model, validate_prompt,
     validate_system_instructions,
 };
 use crate::{
@@ -15,25 +12,12 @@ use crate::{
 };
 use axum::extract::Multipart;
 
-pub async fn collect_query_upload(mut multipart: Multipart) -> AppResult<QueryModelInput> {
-    let fields = collect_fields(&mut multipart, false).await?;
-    Ok(QueryModelInput {
-        file_references: fields.file_references,
-        file_scope_deal_id: fields.file_scope_deal_id,
-        context: parse_context(&required(fields.context, "context")?)?,
-        files: fields.files,
-        model: validate_model(fields.model)?,
-        prompt: validate_prompt(required(fields.prompt, "prompt")?)?,
-        system_instructions: validate_system_instructions(fields.system_instructions)?,
-    })
-}
-
 pub async fn collect_persistent_query_upload(
     mut multipart: Multipart,
     thread_id: String,
     user_email: String,
 ) -> AppResult<PersistentQueryInput> {
-    let fields = collect_fields(&mut multipart, true).await?;
+    let fields = collect_fields(&mut multipart).await?;
     validate_identifier("threadId", &thread_id)?;
     let user_message_id = required(fields.user_message_id, "userMessageId")?;
     let assistant_message_id = required(fields.assistant_message_id, "assistantMessageId")?;
@@ -64,7 +48,6 @@ struct CollectedFields {
     file_references: Vec<ChatFileReference>,
     file_scope_deal_id: Option<String>,
     assistant_message_id: Option<String>,
-    context: Option<String>,
     files: Vec<ChatUpload>,
     model: Option<String>,
     parent_message_id: Option<String>,
@@ -74,11 +57,10 @@ struct CollectedFields {
     user_message_id: Option<String>,
 }
 
-async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResult<CollectedFields> {
+async fn collect_fields(multipart: &mut Multipart) -> AppResult<CollectedFields> {
     let mut file_references = None;
     let mut file_scope_deal_id = None;
     let mut prompt = None;
-    let mut context = None;
     let mut model = None;
     let mut system_instructions = None;
     let mut user_message_id = None;
@@ -107,29 +89,24 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
                 "fileScopeDealId",
             )?,
             "prompt" => set_once(&mut prompt, field.text().await, "prompt")?,
-            "context" => set_once(&mut context, field.text().await, "context")?,
             "model" => set_once(&mut model, field.text().await, "model")?,
             "systemInstructions" => set_once(
                 &mut system_instructions,
                 field.text().await,
                 "systemInstructions",
             )?,
-            "userMessageId" if persistent => {
-                set_once(&mut user_message_id, field.text().await, "userMessageId")?
-            }
-            "assistantMessageId" if persistent => set_once(
+            "userMessageId" => set_once(&mut user_message_id, field.text().await, "userMessageId")?,
+            "assistantMessageId" => set_once(
                 &mut assistant_message_id,
                 field.text().await,
                 "assistantMessageId",
             )?,
-            "parentMessageId" if persistent => set_once(
+            "parentMessageId" => set_once(
                 &mut parent_message_id,
                 field.text().await,
                 "parentMessageId",
             )?,
-            "requestId" if persistent => {
-                set_once(&mut request_id, field.text().await, "requestId")?
-            }
+            "requestId" => set_once(&mut request_id, field.text().await, "requestId")?,
             "files" => {
                 if raw_files.len() >= MAX_CHAT_FILES {
                     return Err(AppError::bad_request("at most 20 files are allowed"));
@@ -166,11 +143,6 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
         }
     }
 
-    if persistent && context.is_some() {
-        return Err(AppError::bad_request(
-            "context is not accepted for persisted threads",
-        ));
-    }
     let file_references = parse_file_references(
         file_references.as_deref(),
         file_scope_deal_id.as_deref(),
@@ -190,7 +162,6 @@ async fn collect_fields(multipart: &mut Multipart, persistent: bool) -> AppResul
         file_references,
         file_scope_deal_id,
         assistant_message_id,
-        context,
         files,
         model,
         parent_message_id,
