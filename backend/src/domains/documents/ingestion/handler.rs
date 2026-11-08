@@ -1,6 +1,8 @@
+use validate::{normalize_required_request_value, validate_document_upload_filename};
+mod validate;
 use crate::domains::identity::model::AuthenticatedUser;
 use axum::Extension;
-use std::{convert::Infallible, path::Path as FilePath, time::Duration};
+use std::{convert::Infallible, time::Duration};
 
 use axum::{
     extract::{Multipart, Path, State},
@@ -17,10 +19,7 @@ use crate::{
         job_service::DocumentJobService,
         service::{DocumentIngestionService, ProcessDocumentsResponse, UploadedDocument},
     },
-    shared::{
-        file_policy::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
-        ids::require_non_empty,
-    },
+    shared::file_policy::{MAX_FILE_BYTES, MAX_TOTAL_REQUEST_FILE_BYTES},
 };
 use std::sync::Arc;
 
@@ -218,30 +217,4 @@ async fn collect_document_upload(
         ));
     }
     Ok((user_id, files))
-}
-
-fn normalize_required_request_value(value: String, field: &str) -> AppResult<String> {
-    require_non_empty(&value, field).map_err(AppError::bad_request)?;
-    Ok(value.trim().to_string())
-}
-
-fn validate_document_upload_filename(filename: &str) -> AppResult<()> {
-    if filename.trim() != filename {
-        return Err(AppError::bad_request(
-            "upload filenames must not contain surrounding whitespace",
-        ));
-    }
-    let extension = FilePath::new(filename)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    if !matches!(
-        extension.as_deref(),
-        Some("pdf" | "docx" | "xlsx" | "pptx" | "png" | "jpg" | "jpeg" | "webp" | "gif")
-    ) {
-        return Err(AppError::bad_request(format!(
-            "upload `{filename}` must be a PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, or GIF file"
-        )));
-    }
-    Ok(())
 }

@@ -88,7 +88,7 @@ impl DealRepository {
         actor: i64,
     ) -> Result<crate::domains::memberships::model::DealAccess, RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| require(tx, &id, actor, Capability::Read))
+            .read_transaction_result_async(move |tx| require(tx, &id, actor, Capability::Read))
             .await
     }
     pub async fn create(
@@ -205,14 +205,14 @@ impl DealRepository {
     }
     pub async fn list_owned(&self, owner: i64) -> Result<Vec<DealWithMetadata>, RepositoryError> {
         self.sqlite
-            .transaction_async(move |tx| load(tx, None, Some(owner)))
+            .read_transaction_async(move |tx| load(tx, None, Some(owner)))
             .await
             .map_err(storage)
     }
     #[cfg(test)]
     pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
         self.sqlite
-            .transaction_async(|tx| load(tx, None, None))
+            .read_transaction_async(|tx| load(tx, None, None))
             .await
             .map_err(storage)
     }
@@ -221,7 +221,7 @@ impl DealRepository {
         id: String,
     ) -> Result<Option<DealWithMetadata>, RepositoryError> {
         self.sqlite
-            .transaction_async(move |tx| load_one(tx, &id))
+            .read_transaction_async(move |tx| load_one(tx, &id))
             .await
             .map_err(storage)
     }

@@ -1,4 +1,9 @@
-use std::{path::Path as FilePath, sync::Arc};
+pub(super) mod auth;
+use validate::{
+    validate_pptx_template_filename, validate_presentation_document, validate_template_id,
+};
+mod validate;
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -14,7 +19,7 @@ use serde::Deserialize;
 
 use crate::app::http::error::{AppError, AppResult};
 
-use super::model::{MAX_TEMPLATE_ID_BYTES, MAX_TEMPLATE_PREVIEW_PAGES};
+use super::model::MAX_TEMPLATE_PREVIEW_PAGES;
 use super::service::{
     PptxTemplateImportMode, PptxTemplateImportResult, PptxTemplateUpload, TemplatePreviewPage,
     TemplateService, MAX_PPTX_TEMPLATE_IMPORT_BYTES, POWERPOINT_CONTENT_TYPE,
@@ -132,29 +137,6 @@ pub(super) async fn export_powerpoint_handler(
         })
 }
 
-fn validate_template_id(template_id: &str) -> AppResult<()> {
-    if template_id.trim().is_empty()
-        || template_id.len() > MAX_TEMPLATE_ID_BYTES
-        || template_id.chars().any(char::is_control)
-    {
-        return Err(AppError::bad_request("template ID is invalid"));
-    }
-    Ok(())
-}
-
-fn validate_presentation_document(document: &serde_json::Value) -> AppResult<()> {
-    if !document
-        .as_object()
-        .and_then(|root| root.get("presentation"))
-        .is_some_and(serde_json::Value::is_object)
-    {
-        return Err(AppError::bad_request(
-            "presentation document is missing a presentation object",
-        ));
-    }
-    Ok(())
-}
-
 async fn collect_pptx_template_upload(mut multipart: Multipart) -> AppResult<PptxTemplateUpload> {
     let mut upload = None;
     while let Some(field) = multipart
@@ -203,21 +185,4 @@ async fn collect_pptx_template_upload(mut multipart: Multipart) -> AppResult<Ppt
         });
     }
     upload.ok_or_else(|| AppError::bad_request("exactly one template file is required"))
-}
-
-fn validate_pptx_template_filename(filename: &str) -> AppResult<()> {
-    let is_path_like = filename.trim() != filename
-        || filename.contains(['/', '\\'])
-        || filename.chars().any(char::is_control)
-        || matches!(filename, "." | "..");
-    let has_pptx_extension = FilePath::new(filename)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("pptx"));
-    if is_path_like || !has_pptx_extension {
-        return Err(AppError::bad_request(
-            "the template filename must be a safe .pptx name",
-        ));
-    }
-    Ok(())
 }

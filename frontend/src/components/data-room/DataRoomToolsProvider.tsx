@@ -11,7 +11,12 @@ import {
 import { WestMonroeMark } from "../brand/WestMonroeMark";
 import { SpeedDial, SpeedDialAction } from "../ui/speed-dial";
 import { AssistantIcon, WorkspaceSearchIcon } from "../ui/workspace-tool-icons";
-import { createSearchRegistry, ToolsContext, type DataRoomTool } from "./dataRoomToolsContext";
+import {
+  createAssistantReferenceSource,
+  createSearchRegistry,
+  ToolsContext,
+  type DataRoomTool,
+} from "./dataRoomToolsContext";
 
 const DataRoomToolPanels = lazy(() => import("./DataRoomToolPanels"));
 export function DataRoomToolsProvider({ active = true, children, dealId, email }: {
@@ -23,6 +28,7 @@ export function DataRoomToolsProvider({ active = true, children, dealId, email }
   // A new route session discards tool state without remounting the workspace shell.
   const session = useMemo(() => ({}), [active]);
   const registry = useMemo(createSearchRegistry, [session]);
+  const assistantReferences = useMemo(createAssistantReferenceSource, [session, dealId, email]);
   const search = useSyncExternalStore(
     registry.subscribe, registry.getSnapshot, registry.getSnapshot,
   );
@@ -35,6 +41,12 @@ export function DataRoomToolsProvider({ active = true, children, dealId, email }
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   function launch(tool: DataRoomTool, trigger: HTMLButtonElement | null) {
     triggerRef.current = trigger;
+    if (tool === "assistant") {
+      const current = registry.getSnapshot();
+      assistantReferences.open(current?.currentFileId && current.currentFileName
+        ? { dealId, fileId: current.currentFileId, name: current.currentFileName }
+        : null);
+    }
     setPanelState({ session, panel: tool });
   }
   return (
@@ -48,6 +60,7 @@ export function DataRoomToolsProvider({ active = true, children, dealId, email }
       {hasOpened ? (
         <Suspense fallback={<span className="sr-only" role="status">Loading Data Room tools…</span>}>
           <DataRoomToolPanels
+            assistantReferences={assistantReferences}
             dealId={dealId}
             email={email}
             finalFocusEl={() => triggerRef.current?.isConnected ? triggerRef.current : null}

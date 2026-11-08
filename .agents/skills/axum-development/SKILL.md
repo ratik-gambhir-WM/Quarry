@@ -31,7 +31,7 @@ request -> router -> handler -> service -> repository/client
 - `state.rs`: cheap-to-clone `Arc<Service>` handles for Axum handlers.
 - `routes/`: route/middleware composition.
 - `handlers/`: extract/validate transport input, invoke service, adapt response.
-- `services/`: use-case validation and orchestration.
+- `services/`: orchestration and preconditions derived from loaded or upstream state.
 - `repository/`: SQLite/Helix persistence and projection operations.
 - `core/clients`, parsers, SQL/query/node modules: concrete infrastructure and pure mechanisms.
 
@@ -43,12 +43,27 @@ introduced.
 
 ## Axum delivery rules
 
+Before adding or moving a check, use the
+[boundary placement decision](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+Name the inputs it needs and its earliest safe execution point. Explain a later check's concrete
+state/lifecycle dependency; do not classify caller-only checks as service logic merely because
+they describe a domain field. Route-level tests must demonstrate early rejection before product
+work and preserve necessary guards at the actual operation.
+
+
 - `/api/v1` is the intended client contract; `/api` is compatibility only.
 - Compose feature routers and keep global request ID, tracing, compression, timeout, CORS, and
   state policy centralized.
 - Use typed Axum extractors. Body-consuming extractors such as `Json`/`Multipart` belong last.
-- Validate path/query/multipart transport facts at the handler boundary; put use-case invariants in
-  services and persistence invariants in repositories/model helpers.
+- Validate client-controlled path/query/header/JSON/multipart facts before product work. Reusable
+  request checks belong in private `handler/validate.rs` modules; multipart streaming bounds may
+  remain in handler-owned `upload.rs`. Keep HTTP errors and request policy out of models/services/
+  adapters. Dedicated validation modules are named `validate.rs`.
+- Authenticate/authorize at the HTTP boundary using shared middleware for common session/path
+  policy and handlers for body-selected resources. Resolve policy through service interfaces.
+  Keep transaction permission checks, persisted/upstream integrity, filesystem containment,
+  worker/stream revocation, and final result authorization at their actual point of use when an
+  earlier check would be stale or lacks the necessary state. Shared pure parsers stay HTTP-free.
 - Keep handlers small. They may coordinate transport-specific extraction but must delegate product
   workflow and job policy.
 - Return intentional statuses and response headers; retain JSON casing and SSE event contracts.

@@ -1,3 +1,5 @@
+mod validate;
+
 use axum::{
     extract::{Path, State},
     Json,
@@ -38,6 +40,7 @@ pub(super) async fn preview_deal_document_handler(
     Path(deal_id): Path<String>,
     Json(payload): Json<PreviewDocumentPayload>,
 ) -> AppResult<Json<DocumentPreview>> {
+    validate::preview_path(&payload.relative_path)?;
     state
         .data_rooms
         .preview(&deal_id, &payload.relative_path)

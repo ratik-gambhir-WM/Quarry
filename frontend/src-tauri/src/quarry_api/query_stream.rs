@@ -6,7 +6,7 @@ use reqwest::multipart::{Form, Part};
 use tokio::sync::oneshot;
 
 use super::{
-    models::{ChatContextRole, QueryEventPayload, QueryServerEvent, QueryStreamRequest},
+    models::{QueryEventPayload, QueryServerEvent, QueryStreamRequest},
     service::QuarryApiService,
 };
 
@@ -14,9 +14,7 @@ const MAX_FILES: usize = 20;
 const MAX_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_BASE64_FILE_CHARS: usize = MAX_FILE_BYTES.div_ceil(3) * 4;
-const MAX_CONTEXT_MESSAGES: usize = 64;
 const MAX_MESSAGE_CHARS: usize = 100_000;
-const MAX_CONTEXT_CHARS: usize = 400_000;
 const MAX_INSTRUCTIONS_CHARS: usize = 50_000;
 const MAX_MODEL_CHARS: usize = 128;
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -77,22 +75,15 @@ async fn build_query_form(request: QueryStreamRequest) -> Result<Form, String> {
 
 fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     validate_text("prompt", &request.prompt, MAX_MESSAGE_CHARS)?;
-    let persistent = request.path.starts_with("/api/v1/assistant/threads/");
-    if persistent {
-        if !request.context.is_empty() {
-            return Err("persisted assistant requests cannot include context".to_string());
-        }
-        validate_identifier_field("userMessageId", request.user_message_id.as_deref())?;
-        validate_identifier_field(
-            "assistantMessageId",
-            request.assistant_message_id.as_deref(),
-        )?;
-        validate_identifier_field("requestId", request.request_id.as_deref())?;
-        if let Some(parent) = request.parent_message_id.as_deref() {
-            validate_identifier("parentMessageId", parent)?;
-        }
-    } else {
-        validate_context(&request.context)?;
+    validate_query_path(&request.path)?;
+    validate_identifier_field("userMessageId", request.user_message_id.as_deref())?;
+    validate_identifier_field(
+        "assistantMessageId",
+        request.assistant_message_id.as_deref(),
+    )?;
+    validate_identifier_field("requestId", request.request_id.as_deref())?;
+    if let Some(parent) = request.parent_message_id.as_deref() {
+        validate_identifier("parentMessageId", parent)?;
     }
     if let Some(model) = request.model.as_deref() {
         let trimmed = model.trim();
@@ -106,31 +97,52 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     if let Some(instructions) = request.system_instructions.as_deref() {
         validate_text("systemInstructions", instructions, MAX_INSTRUCTIONS_CHARS)?;
     }
-    if request.files.len() > MAX_FILES {
+    if let Some(scope) = request.file_scope_deal_id.as_deref() {
+        validate_identifier("fileScopeDealId", scope)?;
+    }
+    let mut seen = std::collections::HashSet::new();
+    for reference in &request.file_references {
+        validate_identifier("dealId", &reference.deal_id)?;
+        validate_identifier("fileId", &reference.file_id)?;
+        if !valid_filename(&reference.name)
+            || request
+                .file_scope_deal_id
+                .as_deref()
+                .is_some_and(|scope| scope != reference.deal_id)
+            || !seen.insert((&reference.deal_id, &reference.file_id))
+        {
+            return Err("file reference metadata is invalid".to_string());
+        }
+    }
+    if request.files.len() + request.file_references.len() > MAX_FILES {
         return Err("at most 20 files are allowed".to_string());
     }
     let mut form = Form::new().text("prompt", request.prompt);
-    if persistent {
-        form = form
-            .text("userMessageId", request.user_message_id.unwrap_or_default())
-            .text(
-                "assistantMessageId",
-                request.assistant_message_id.unwrap_or_default(),
-            )
-            .text("requestId", request.request_id.unwrap_or_default());
-        if let Some(parent) = request.parent_message_id {
-            form = form.text("parentMessageId", parent);
-        }
-    } else {
-        let context = serde_json::to_string(&request.context)
-            .map_err(|_| "context is invalid".to_string())?;
-        form = form.text("context", context);
+    form = form
+        .text("userMessageId", request.user_message_id.unwrap_or_default())
+        .text(
+            "assistantMessageId",
+            request.assistant_message_id.unwrap_or_default(),
+        )
+        .text("requestId", request.request_id.unwrap_or_default());
+    if let Some(parent) = request.parent_message_id {
+        form = form.text("parentMessageId", parent);
     }
     if let Some(model) = request.model {
         form = form.text("model", model);
     }
     if let Some(instructions) = request.system_instructions {
         form = form.text("systemInstructions", instructions);
+    }
+    if !request.file_references.is_empty() {
+        form = form.text(
+            "fileReferences",
+            serde_json::to_string(&request.file_references)
+                .map_err(|_| "file references are invalid".to_string())?,
+        );
+    }
+    if let Some(scope) = request.file_scope_deal_id {
+        form = form.text("fileScopeDealId", scope);
     }
     let mut total = 0usize;
     for file in request.files {
@@ -165,26 +177,6 @@ fn build_query_form_sync(request: QueryStreamRequest) -> Result<Form, String> {
     Ok(form)
 }
 
-fn validate_context(context: &[super::models::ChatContextMessage]) -> Result<(), String> {
-    if context.len() > MAX_CONTEXT_MESSAGES || !context.len().is_multiple_of(2) {
-        return Err("context must contain complete user/assistant pairs".to_string());
-    }
-    let mut total = 0usize;
-    for (index, message) in context.iter().enumerate() {
-        if matches!(message.role, ChatContextRole::User) != (index % 2 == 0) {
-            return Err("context roles must alternate user then assistant".to_string());
-        }
-        validate_text("context message", &message.content, MAX_MESSAGE_CHARS)?;
-        total = total
-            .checked_add(message.content.chars().count())
-            .ok_or_else(|| "context is too large".to_string())?;
-    }
-    if total > MAX_CONTEXT_CHARS {
-        return Err("context is too large".to_string());
-    }
-    Ok(())
-}
-
 fn validate_text(name: &str, value: &str, max: usize) -> Result<(), String> {
     if value.trim().is_empty() || value.chars().count() > max {
         Err(format!("{name} is invalid"))
@@ -215,9 +207,6 @@ fn validate_subscription_id(value: &str) -> Result<(), String> {
 }
 
 fn validate_query_path(path: &str) -> Result<(), String> {
-    if path == "/api/v1/query_model" {
-        return Ok(());
-    }
     let segments = path.split('/').collect::<Vec<_>>();
     if segments.len() == 7
         && segments[1..4] == ["api", "v1", "assistant"]

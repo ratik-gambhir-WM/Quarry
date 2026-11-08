@@ -249,6 +249,14 @@ Some opt-in tests require explicitly selected disposable services and remain ign
 suite. Do not enable them against a live store. Do not use startup, `clear_helix`, or the destructive
 `reset_development` utility as verification commands.
 
+Before adding or moving backend validation or authorization, use the
+[boundary placement decision and review checklist](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+Caller-only checks and initial request authorization belong at the HTTP boundary; checks needing
+loaded state, atomic permissions, or ongoing revocation remain at the operation they protect.
+Use `handler/validate.rs` for reusable request validation and verify rejection order through the
+handler. `cargo test --locked --lib architecture_tests` provides a focused dependency check;
+the full backend suite above includes it.
+
 ### Desktop shell
 
 Run from `frontend/src-tauri/` when native code, capabilities, or transport changes:

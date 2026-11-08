@@ -36,24 +36,6 @@ fn build_create_index_request_body_uses_extracted_documents() {
 }
 
 #[test]
-fn validate_create_index_payload_rejects_empty_text() {
-    let payload = CreateIndexPayload {
-        name: None,
-        files: vec![IndexDocumentInput {
-            file_id: None,
-            filename: "memo.pdf".to_string(),
-            text: " ".to_string(),
-            metadata: Value::Null,
-        }],
-    };
-
-    assert_eq!(
-        validate_create_index_payload(&payload).unwrap_err(),
-        "extracted text cannot be empty for memo.pdf"
-    );
-}
-
-#[test]
 fn build_graph_rag_query_request_body_keeps_application_name_server_side() {
     let payload = GraphRagQueryPayload {
         resource_id: "resource-123".to_string(),
@@ -70,19 +52,6 @@ fn build_graph_rag_query_request_body_keeps_application_name_server_side() {
 }
 
 #[test]
-fn validate_graph_rag_query_payload_rejects_empty_question() {
-    let payload = GraphRagQueryPayload {
-        resource_id: "resource-123".to_string(),
-        question: " ".to_string(),
-    };
-
-    assert_eq!(
-        validate_graph_rag_query_payload(&payload).unwrap_err(),
-        "question cannot be empty"
-    );
-}
-
-#[test]
 fn index_status_response_accepts_capitalized_status_from_service() {
     let parsed: IndexStatusResponse =
         serde_json::from_value(json!({ "Status": "Ready", "resourceId": "graph-123" })).unwrap();
@@ -94,4 +63,19 @@ fn index_status_response_accepts_capitalized_status_from_service() {
             resource_id: Some("graph-123".to_string()),
         }
     );
+}
+
+#[test]
+fn resource_url_encodes_identifiers_without_changing_the_upstream_base_path() {
+    let url = resource_url(
+        "https://services.example.test/dev",
+        &["indexes", "id?next=other#fragment%2F", "status"],
+    )
+    .unwrap();
+    assert_eq!(
+        url.as_str(),
+        "https://services.example.test/dev/indexes/id%3Fnext=other%23fragment%252F/status"
+    );
+    assert_eq!(url.query(), None);
+    assert_eq!(url.fragment(), None);
 }

@@ -23,6 +23,19 @@ style preference are not the standard.
 6. Report findings first, ordered by severity and leverage. End with a clear verdict and concise
    verification assessment.
 
+## Backend boundary review
+
+When backend code adds or changes validation or authorization, apply the
+[placement decision and checklist](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+Treat a caller-only check delayed into a model/service/adapter, an initial access check delayed
+past protected work, or a removed transaction/revocation guard as a Required finding. Explain
+which inputs were available earlier or which state/lifecycle protection was lost.
+
+Check handler-owned `validate.rs`/`auth.rs` ownership and keep route composition separate. Inspect
+behavioral evidence that malformed/unauthorized requests stop before product work; helper tests
+and static architecture guards alone do not establish ordering. A retained later check needs a
+specific loaded-state or freshness reason. Do not move it merely to satisfy a file-location rule.
+
 ## Five review axes
 
 ### Correctness

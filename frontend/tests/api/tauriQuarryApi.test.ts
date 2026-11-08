@@ -449,9 +449,9 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
     const events: string[] = [];
-    api.queryModel(
+    api.runAssistantThread(
       {
-        context: [],
+        threadId: "thread-1", userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1",
         files: [
           new File([new Uint8Array([1, 2, 3])], "image.png", {
             type: "image/png",
@@ -463,11 +463,11 @@ describe("createTauriQuarryApi", () => {
     );
     await vi.waitFor(() => expect(events).toEqual(["started"]));
     expect(startQuery.mock.calls[0][0]).toMatchObject({
-      context: [],
+      userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1",
       files: [
         { dataBase64: "AQID", filename: "image.png", mimeType: "image/png" },
       ],
-      path: "/api/v1/query_model",
+      path: "/api/v1/assistant/threads/thread-1/runs",
       prompt: "hello",
     });
   });
@@ -500,6 +500,8 @@ describe("createTauriQuarryApi", () => {
     api.runAssistantThread(
       {
         assistantMessageId: "assistant-1",
+        fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }],
+        fileScopeDealId: "DEAL-A",
         files: [new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" })],
         model: "gpt-5.5",
         prompt: "hello",
@@ -516,6 +518,8 @@ describe("createTauriQuarryApi", () => {
       files: [{ dataBase64: "AQID", filename: "notes.txt", mimeType: "text/plain" }],
       model: "gpt-5.5",
       path: "/api/v1/assistant/threads/thread-1/runs",
+      fileReferences: [{ dealId: "DEAL-A", fileId: "file-1", name: "Architecture.pdf" }],
+      fileScopeDealId: "DEAL-A",
       requestId: "assistant-1",
       userMessageId: "user-1",
     });
@@ -553,8 +557,8 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    const cancel = api.queryModel(
-      { context: [], files: [], prompt: "hello" },
+    const cancel = api.runAssistantThread(
+      { threadId: "thread-1", userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1", files: [], prompt: "hello" },
       { onEvent: vi.fn() },
     );
     await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
@@ -586,8 +590,8 @@ describe("createTauriQuarryApi", () => {
     });
     const onConnectionError = vi.fn();
 
-    api.queryModel(
-      { context: [], files: [], prompt: "hello" },
+    api.runAssistantThread(
+      { threadId: "thread-1", userMessageId: "user-1", assistantMessageId: "assistant-1", requestId: "assistant-1", files: [], prompt: "hello" },
       { onConnectionError, onEvent: vi.fn() },
     );
     await vi.waitFor(() => expect(deliver).toBeTypeOf("function"));

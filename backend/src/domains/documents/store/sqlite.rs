@@ -68,7 +68,7 @@ impl DocumentStore {
     pub async fn authorize_read(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 crate::domains::memberships::require_deal(
                     tx,
                     &deal,
@@ -82,7 +82,7 @@ impl DocumentStore {
     pub async fn authorize_upload(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 crate::domains::memberships::require_deal(
                     tx,
                     &deal,

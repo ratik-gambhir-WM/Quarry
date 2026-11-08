@@ -34,7 +34,13 @@ pub(crate) async fn authenticate(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(AppError::Unauthorized)?;
-    let actor = boundary.identity.authenticate(token).await?;
+    if token.len() != 43
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(AppError::Unauthorized);
+    }
     let supplied_id = parts
         .headers
         .get("x-user-id")
@@ -42,6 +48,7 @@ pub(crate) async fn authenticate(
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|id| *id > 0)
         .ok_or(AppError::Unauthorized)?;
+    let actor = boundary.identity.authenticate(token).await?;
     if supplied_id != actor.user.id {
         return Err(AppError::Forbidden);
     }

@@ -8,24 +8,34 @@ import type {
   UserMessage,
 } from "@/components/chat/chatModel";
 import type {
-  QueryModelInput,
   RunAssistantThreadInput,
   SendQueryEventHandlers,
 } from "@/contracts/quarryApi";
 import { createModelAdapter } from "@/components/chat/threadModelAdapter";
 
 describe("createModelAdapter", () => {
+  it("does not start transport without a saved thread and assistant message ID", async () => {
+    const runAssistantThread = vi.fn();
+    const adapter = createModelAdapter({ runAssistantThread });
+    for (const missing of [{ threadId: undefined }, { assistantMessageId: undefined }]) {
+      await expect(collect(adapter, { ...runOptions([user("Question")]), ...missing })).rejects.toThrow(
+        "The assistant connection was interrupted. Please try again.",
+      );
+    }
+    expect(runAssistantThread).not.toHaveBeenCalled();
+  });
+
   it("converts ordered deltas to cumulative snapshots and makes completion authoritative", async () => {
     let handlers: SendQueryEventHandlers | undefined;
     const cleanup = vi.fn();
-    const queryModel = vi.fn(
-      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+    const runAssistantThread = vi.fn(
+      (_input: RunAssistantThreadInput, nextHandlers: SendQueryEventHandlers) => {
         handlers = nextHandlers;
         return cleanup;
       },
     );
     const iterator = stream(
-      createModelAdapter({ queryModel }),
+      createModelAdapter({ runAssistantThread }),
       runOptions([user("Draft a brief")]),
     );
 
@@ -43,23 +53,23 @@ describe("createModelAdapter", () => {
     expect(await final).toEqual(snapshot("Authoritative final"));
     expect(await iterator.next()).toEqual({ done: true, value: undefined });
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(queryModel).toHaveBeenCalledWith(
-      { context: [], files: [], prompt: "Draft a brief" },
+    expect(runAssistantThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread-1", files: [], prompt: "Draft a brief" }),
       expect.any(Object),
     );
   });
 
   it("supports a synchronous no-delta completion and disposes exactly once", async () => {
     const cleanup = vi.fn();
-    const queryModel = vi.fn(
-      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+    const runAssistantThread = vi.fn(
+      (_input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
         handlers.onEvent({ response: "Immediate answer", type: "completed" });
         return cleanup;
       },
     );
 
     const output = await collect(
-      createModelAdapter({ queryModel }),
+      createModelAdapter({ runAssistantThread }),
       runOptions([user("Answer now")]),
     );
 
@@ -69,7 +79,7 @@ describe("createModelAdapter", () => {
 
   it("maps server and connection failures to distinct sanitized errors", async () => {
     const serverAdapter = createModelAdapter({
-      queryModel: (_input, handlers) => {
+      runAssistantThread: (_input, handlers) => {
         handlers.onEvent({
           error: "provider body that must not leak",
           type: "failed",
@@ -78,7 +88,7 @@ describe("createModelAdapter", () => {
       },
     });
     const connectionAdapter = createModelAdapter({
-      queryModel: (_input, handlers) => {
+      runAssistantThread: (_input, handlers) => {
         handlers.onConnectionError?.("raw transport detail");
         return () => undefined;
       },
@@ -97,7 +107,7 @@ describe("createModelAdapter", () => {
     await expect(
       collect(
         createModelAdapter({
-          queryModel: () => {
+          runAssistantThread: () => {
             throw new Error("raw synchronous transport detail");
           },
         }),
@@ -113,7 +123,7 @@ describe("createModelAdapter", () => {
     const cleanup = vi.fn();
     const controller = new AbortController();
     const adapter = createModelAdapter({
-      queryModel: (_input, nextHandlers) => {
+      runAssistantThread: (_input, nextHandlers) => {
         handlers = nextHandlers;
         return cleanup;
       },
@@ -136,10 +146,10 @@ describe("createModelAdapter", () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("replays only completed text pairs and omits optional server-owned defaults", async () => {
-    let captured: QueryModelInput | undefined;
-    const queryModel = vi.fn(
-      (input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+  it("sends only the current turn and omits client history and server-owned defaults", async () => {
+    let captured: RunAssistantThreadInput | undefined;
+    const runAssistantThread = vi.fn(
+      (input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
         captured = input;
         handlers.onEvent({ response: "Next", type: "completed" });
         return () => undefined;
@@ -155,16 +165,13 @@ describe("createModelAdapter", () => {
       { ...user("Current prompt", "u3"), attachments: [currentFile] },
     ];
 
-    await collect(createModelAdapter({ queryModel }), runOptions(messages));
+    await collect(createModelAdapter({ runAssistantThread }), runOptions(messages));
 
-    expect(captured).toEqual({
-      context: [
-        { content: "First", role: "user" },
-        { content: "First answer", role: "assistant" },
-      ],
-      files: [currentFile],
-      prompt: "Current prompt",
+    expect(captured).toMatchObject({
+      threadId: "thread-1", userMessageId: "u3", parentMessageId: "a2",
+      files: [currentFile], prompt: "Current prompt",
     });
+    expect(captured).not.toHaveProperty("context");
     expect(captured).not.toHaveProperty("model");
     expect(captured).not.toHaveProperty("systemInstructions");
   });
@@ -176,7 +183,6 @@ describe("createModelAdapter", () => {
         return () => undefined;
       },
     );
-    const queryModel = vi.fn();
     const messages: Message[] = [
       user("Earlier", "u1"),
       assistant("Earlier answer", { type: "complete", reason: "stop" }, "a1"),
@@ -184,10 +190,7 @@ describe("createModelAdapter", () => {
     ];
 
     await collect(
-      createModelAdapter(
-        { queryModel, runAssistantThread },
-        { userEmail: "analyst@example.com" },
-      ),
+      createModelAdapter({ runAssistantThread }),
       runOptions(messages, undefined, {
         assistantMessageId: "a2",
         parentId: "u2",
@@ -195,7 +198,6 @@ describe("createModelAdapter", () => {
       }),
     );
 
-    expect(queryModel).not.toHaveBeenCalled();
     expect(runAssistantThread).toHaveBeenCalledWith(
       {
         assistantMessageId: "a2",
@@ -220,10 +222,7 @@ describe("createModelAdapter", () => {
     const messages: Message[] = [user("First question", "u1")];
 
     await collect(
-      createModelAdapter(
-        { queryModel: vi.fn(), runAssistantThread },
-        { userEmail: "analyst@example.com" },
-      ),
+      createModelAdapter({ runAssistantThread }),
       runOptions(messages, undefined, {
         assistantMessageId: "a1",
         parentId: "u1",
@@ -240,8 +239,8 @@ describe("createModelAdapter", () => {
     );
   });
 
-  it("keeps the newest 32 whole pairs and reports omitted older context", async () => {
-    let captured: QueryModelInput | undefined;
+  it("estimates truncated history for the notice without sending client context", async () => {
+    let captured: RunAssistantThreadInput | undefined;
     const onContextTruncated = vi.fn();
     const history: Message[] = [];
     for (let index = 0; index < 33; index += 1) {
@@ -259,7 +258,7 @@ describe("createModelAdapter", () => {
     await collect(
       createModelAdapter(
         {
-          queryModel: (input, handlers) => {
+          runAssistantThread: (input, handlers) => {
             captured = input;
             handlers.onEvent({ response: "Done", type: "completed" });
             return () => undefined;
@@ -270,21 +269,13 @@ describe("createModelAdapter", () => {
       runOptions(history),
     );
 
-    expect(captured?.context).toHaveLength(64);
-    expect(captured?.context[0]).toEqual({
-      content: "Question 1",
-      role: "user",
-    });
-    expect(captured?.context[(captured?.context.length ?? 0) - 1]).toEqual({
-      content: "Answer 32",
-      role: "assistant",
-    });
+    expect(captured).not.toHaveProperty("context");
     expect(onContextTruncated).toHaveBeenCalledWith(true);
   });
 
   it("rejects blank and non-text current messages before starting transport", async () => {
-    const queryModel = vi.fn();
-    const adapter = createModelAdapter({ queryModel });
+    const runAssistantThread = vi.fn();
+    const adapter = createModelAdapter({ runAssistantThread });
 
     await expect(collect(adapter, runOptions([user("   ")]))).rejects.toThrow(
       "Messages must contain a non-empty text prompt.",
@@ -300,7 +291,7 @@ describe("createModelAdapter", () => {
         ]),
       ),
     ).rejects.toThrow("Messages must contain a non-empty text prompt.");
-    expect(queryModel).not.toHaveBeenCalled();
+    expect(runAssistantThread).not.toHaveBeenCalled();
   });
 });
 
@@ -315,9 +306,9 @@ function runOptions(
 ): ModelRunOptions {
   return {
     abortSignal,
-    assistantMessageId: ids?.assistantMessageId,
+    assistantMessageId: ids?.assistantMessageId ?? "assistant-next",
     messages,
-    threadId: ids?.threadId,
+    threadId: ids?.threadId ?? "thread-1",
   };
 }
 

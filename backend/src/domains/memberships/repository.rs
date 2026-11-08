@@ -23,7 +23,7 @@ impl MembershipRepository {
         capability: Capability,
     ) -> Result<DealAccess, RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| require(tx, &deal, actor, capability))
+            .read_transaction_result_async(move |tx| require(tx, &deal, actor, capability))
             .await
     }
     pub async fn accessible_deals(&self, actor: i64) -> Result<Vec<String>, RepositoryError> {
@@ -49,7 +49,7 @@ impl MembershipRepository {
         limit: usize,
     ) -> Result<Page<Member>, RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 require(tx, &deal, actor, Capability::Read)?;
                 let mut items = tx.read_with(
                     SqlBuilder::select("deal_memberships")
@@ -123,7 +123,7 @@ impl MembershipRepository {
         limit: usize,
     ) -> Result<Page<Team>, RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 require(tx, &deal, actor, Capability::Read)?;
                 let mut items = tx.read_with(
                     SqlBuilder::select("deal_teams")
@@ -183,7 +183,7 @@ impl MembershipRepository {
         limit: usize,
     ) -> Result<Page<Activity>, RepositoryError> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 require(tx, &deal, actor, Capability::Read)?;
                 // Event IDs start with their fixed-width UTC timestamp; lexicographic order is (created_at,event_id).
                 let mut items = tx.read_with(

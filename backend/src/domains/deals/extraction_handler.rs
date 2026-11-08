@@ -4,9 +4,9 @@ use axum::{
 };
 
 use super::{
+    handler::upload::collect_deal_metadata_input,
     handler::{validate_https_link, validate_sharepoint_link, DealsHttpState},
     service::SaveDealMetadataResponse,
-    upload::collect_deal_metadata_input,
 };
 use crate::app::http::error::{AppError, AppResult};
 

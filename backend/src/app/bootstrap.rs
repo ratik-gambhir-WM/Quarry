@@ -305,7 +305,8 @@ pub(crate) fn assemble_api_with_templates(
             user_directory,
             prompts,
         )
-        .with_deal_context(deal_context),
+        .with_deal_context(deal_context)
+        .with_documents(stored_documents.clone()),
     );
 
     let native_routes = embedded

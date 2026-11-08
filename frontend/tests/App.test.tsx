@@ -25,9 +25,9 @@ import App from "@/App";
 import { RootRoutes } from "@/app/RootRoutes";
 import type { PersistedDeal } from "@/contracts/quarryApi";
 
-const { listDeals, queryModel } = vi.hoisted(() => ({
+const { listDeals, runAssistantThread } = vi.hoisted(() => ({
   listDeals: vi.fn(),
-  queryModel: vi.fn(),
+  runAssistantThread: vi.fn(),
 }));
 const lazyRouteWait = { timeout: 5_000 };
 
@@ -37,7 +37,7 @@ vi.mock("@quarry/runtime", () => ({
       listDeals,
       getDeal: async () => persistedDeal,
       listDealActivity: async () => ({ items: [], nextCursor: null }),
-      queryModel,
+      runAssistantThread,
       listNotebooks: async () => ({ notebooks: [], hasMore: false }),
     },
     platform: {},
@@ -68,8 +68,8 @@ describe("App routes", () => {
     sessionStore.set(testSession);
     listDeals.mockReset();
     listDeals.mockResolvedValue([persistedDeal]);
-    queryModel.mockReset();
-    queryModel.mockReturnValue(() => undefined);
+    runAssistantThread.mockReset();
+    runAssistantThread.mockReturnValue(() => undefined);
     window.localStorage.clear();
     window.sessionStorage.clear();
   });

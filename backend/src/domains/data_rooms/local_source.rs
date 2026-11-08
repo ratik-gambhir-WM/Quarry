@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use serde::Serialize;
@@ -129,17 +129,7 @@ fn file_node(name: &str, relative_path: &Path) -> DataRoomTreeNode {
 }
 
 pub fn resolve_relative_file(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    let relative = Path::new(relative_path);
-    if relative_path.trim().is_empty()
-        || relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(
-            "document path must be a non-empty path relative to the deal data room".to_string(),
-        );
-    }
+    let relative = super::validate::relative_document_path(relative_path)?;
     let canonical_candidate = root.join(relative).canonicalize().map_err(|err| {
         format!(
             "the selected document is inaccessible ({}): {err}",

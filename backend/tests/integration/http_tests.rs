@@ -157,37 +157,58 @@ async fn versioned_health_and_capabilities_routes_are_available() {
 }
 
 #[tokio::test]
-async fn query_model_is_available_under_both_prefixes_and_fails_before_stream_when_unconfigured() {
+async fn temporary_chat_routes_are_removed() {
     let app = test_router();
     for path in ["/api/v1/query_model", "/api/query_model"] {
-        let (content_type, body) = query_multipart("hello", "[]");
         let response = app
             .clone()
-            .oneshot(
-                Request::post(path)
-                    .header("content-type", content_type)
-                    .body(Body::from(body))
-                    .unwrap(),
-            )
+            .oneshot(Request::post(path).body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
 
 #[tokio::test]
-async fn query_model_rejects_invalid_context_before_capability_lookup() {
+async fn saved_chat_fails_explicitly_when_provider_is_unconfigured() {
+    let app = test_router();
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/assistant/threads")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"threadId":"thread-1"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::CREATED);
+    let (content_type, body) = thread_run_multipart("hello", None, None);
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/assistant/threads/thread-1/runs")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn saved_chat_rejects_client_context_before_starting_a_run() {
     let app = test_router();
     for context in [
         r#"[{"role":"user","content":"unpaired"}]"#,
         r#"[{"role":"assistant","content":"wrong"},{"role":"user","content":"order"}]"#,
         r#"[{"role":"user","content":"question","extra":true},{"role":"assistant","content":"answer"}]"#,
     ] {
-        let (content_type, body) = query_multipart("hello", context);
+        let (content_type, body) = thread_run_multipart("hello", Some(context), None);
         let response = app
             .clone()
             .oneshot(
-                Request::post("/api/v1/query_model")
+                Request::post("/api/v1/assistant/threads/thread-1/runs")
                     .header("content-type", content_type)
                     .body(Body::from(body))
                     .unwrap(),
@@ -199,10 +220,13 @@ async fn query_model_rejects_invalid_context_before_capability_lookup() {
 }
 
 #[tokio::test]
-async fn query_model_streams_the_typed_lifecycle_without_buffering() {
+async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
     async fn upstream(Json(body): Json<Value>) -> axum::response::Response {
+        assert_eq!(body["input"].as_array().unwrap().len(), 3);
         assert_eq!(body["input"][0]["role"], "user");
+        assert_eq!(body["input"][0]["content"], "first");
         assert_eq!(body["input"][1]["role"], "assistant");
+        assert_eq!(body["input"][1]["content"], "answer");
         assert_eq!(body["input"][2]["content"][0]["text"], "next");
         assert_eq!(body["store"], false);
         axum::response::Response::builder()
@@ -229,9 +253,81 @@ async fn query_model_streams_the_typed_lifecycle_without_buffering() {
         format!("http://{address}/v1/responses"),
         crate::integration_support::prompt_catalog(),
     );
-    let service = crate::domains::assistant::chat::service::AssistantChatService::new(
+    use crate::{
+        adapters::sqlite::client::SqliteClient,
+        domains::{
+            assistant::chat::repository::{AssistantChatRepository, StartRunInput},
+            users::{
+                repository::{AddUserInput, UserRepository},
+                UserDirectory,
+            },
+        },
+    };
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    crate::app::migrations::migrate(&sqlite).unwrap();
+    let users = UserRepository::new(sqlite.clone());
+    let user = users
+        .create(AddUserInput {
+            first_name: "Test".into(),
+            last_name: "User".into(),
+            email: "analyst@example.com".into(),
+            role: "Analyst".into(),
+        })
+        .await
+        .unwrap();
+    let repository = AssistantChatRepository::new(sqlite);
+    repository
+        .create_thread(user.id, "thread-1".into(), None)
+        .await
+        .unwrap();
+    repository
+        .start_run(StartRunInput {
+            assistant_message_id: "a1".into(),
+            user_message_id: "u1".into(),
+            model: "test".into(),
+            parent_message_id: None,
+            prompt: "first".into(),
+            request_id: "r1".into(),
+            thread_id: "thread-1".into(),
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+    repository
+        .finish_run("a1".into(), "completed", "answer".into(), None)
+        .await
+        .unwrap();
+    repository
+        .create_thread(user.id, "other-thread".into(), None)
+        .await
+        .unwrap();
+    repository
+        .start_run(StartRunInput {
+            assistant_message_id: "other-a".into(),
+            user_message_id: "other-u".into(),
+            model: "test".into(),
+            parent_message_id: None,
+            prompt: "Different thread question".into(),
+            request_id: "other-r".into(),
+            thread_id: "other-thread".into(),
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+    repository
+        .finish_run(
+            "other-a".into(),
+            "completed",
+            "Different thread answer".into(),
+            None,
+        )
+        .await
+        .unwrap();
+    let service = crate::domains::assistant::chat::service::AssistantChatService::with_persistence(
         Some(Arc::new(client)),
-        "gpt-5.5".to_string(),
+        "gpt-5.5".into(),
+        repository.clone(),
+        UserDirectory::new(users),
         crate::integration_support::prompt_catalog(),
     );
     let api = crate::domains::assistant::chat::route::routes(Arc::new(service));
@@ -239,11 +335,10 @@ async fn query_model_streams_the_typed_lifecycle_without_buffering() {
         api.layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,
     );
-    let context = r#"[{"role":"user","content":"first"},{"role":"assistant","content":"answer"}]"#;
-    let (content_type, body) = query_multipart("next", context);
+    let (content_type, body) = thread_run_multipart("next", None, Some("a1"));
     let response = app
         .oneshot(
-            Request::post("/api/v1/query_model")
+            Request::post("/api/v1/assistant/threads/thread-1/runs")
                 .header("content-type", content_type)
                 .body(Body::from(body))
                 .unwrap(),
@@ -264,7 +359,15 @@ async fn query_model_streams_the_typed_lifecycle_without_buffering() {
     assert!(body.contains("event: started"));
     assert!(body.contains("event: delta"));
     assert!(body.contains("\"response\":\"complete\""));
+    let saved = repository
+        .get_thread(user.id, "thread-1".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.messages.last().unwrap().content, "complete");
+    assert_eq!(saved.messages.last().unwrap().status, "completed");
     upstream_task.abort();
+    let _ = upstream_task.await;
 }
 
 #[tokio::test]
@@ -473,11 +576,31 @@ fn template_multipart(parts: &[(&str, &str, &[u8])]) -> (String, Vec<u8>) {
     (format!("multipart/form-data; boundary={BOUNDARY}"), body)
 }
 
-fn query_multipart(prompt: &str, context: &str) -> (String, Vec<u8>) {
+fn thread_run_multipart(
+    prompt: &str,
+    context: Option<&str>,
+    parent: Option<&str>,
+) -> (String, Vec<u8>) {
     const BOUNDARY: &str = "quarry-query-boundary";
-    let body = format!(
-        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n{prompt}\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{context}\r\n--{BOUNDARY}--\r\n"
-    );
+    let mut fields = vec![
+        ("prompt", prompt),
+        ("userMessageId", "u2"),
+        ("assistantMessageId", "a2"),
+        ("requestId", "r2"),
+    ];
+    if let Some(context) = context {
+        fields.push(("context", context));
+    }
+    if let Some(parent) = parent {
+        fields.push(("parentMessageId", parent));
+    }
+    let mut body = String::new();
+    for (name, value) in fields {
+        body.push_str(&format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        ));
+    }
+    body.push_str(&format!("--{BOUNDARY}--\r\n"));
     (
         format!("multipart/form-data; boundary={BOUNDARY}"),
         body.into_bytes(),
@@ -1127,4 +1250,123 @@ fn insert_stored_document(
         rusqlite::params![version_id, bytes],
     )?;
     Ok(())
+}
+
+#[tokio::test]
+async fn research_request_checks_run_before_unconfigured_provider_lookup() {
+    let app = test_router();
+    for (method, path, body, expected) in [
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[]}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[{"filename":"memo.pdf","text":" "}]}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "GET",
+            "/api/v1/indexes/bad%5Cid/status",
+            None,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"resource","question":" "}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"../private","question":"Question"}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"..","question":"Question"}"#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "POST",
+            "/api/v1/indexes",
+            Some(r#"{"files":[{"filename":"memo.pdf","text":"Document"}]}"#),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            "POST",
+            "/api/v1/graphrag/query",
+            Some(r#"{"resourceId":"resource","question":"Question"}"#),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    ] {
+        let mut request = Request::builder().method(method).uri(path);
+        if body.is_some() {
+            request = request.header("content-type", "application/json");
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                request
+                    .body(body.map_or_else(Body::empty, Body::from))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn assistant_reference_scope_is_rejected_before_storage_or_provider_lookup() {
+    let boundary = "assistant-reference-boundary";
+    let body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nQuestion\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileScopeDealId\"\r\n\r\nDEAL-A\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileReferences\"\r\n\r\n[{{\"dealId\":\"DEAL-B\",\"fileId\":\"file-1\",\"name\":\"Document.pdf\"}}]\r\n--{boundary}--\r\n");
+    let response = test_router()
+        .oneshot(
+            Request::post("/api/v1/assistant/threads/thread-1/runs")
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes).unwrap()["error"],
+        "referenced file is outside this data room"
+    );
+}
+
+#[tokio::test]
+async fn data_room_relative_paths_are_checked_before_loading_the_configured_source() {
+    let app = test_router();
+    for path in ["", "../outside.pdf", "/absolute.pdf", "./document.pdf"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/deals/DEAL-PATH/data-room/preview")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"relativePath":path}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["error"],
+            "document path must be a non-empty path relative to the deal data room"
+        );
+    }
 }

@@ -122,10 +122,6 @@ impl FileUploadServiceClient {
         &self,
         files: Vec<WmUploadedFile>,
     ) -> Result<FileExtractResponse, String> {
-        if files.is_empty() {
-            return Err("at least one file is required for extraction".to_string());
-        }
-
         let mut form = Form::new();
         for file in files {
             let part = Part::bytes(file.bytes)
@@ -163,7 +159,6 @@ impl IndexServiceClient {
         &self,
         payload: CreateIndexPayload,
     ) -> Result<CreateIndexResponse, String> {
-        validate_create_index_payload(&payload)?;
         let request_body = build_create_index_request_body(&payload);
 
         let response = self
@@ -179,12 +174,12 @@ impl IndexServiceClient {
     }
 
     pub async fn status(&self, index_id: &str) -> Result<IndexStatusResponse, String> {
-        validate_path_segment(index_id, "indexId")?;
-        let path = format!("indexes/{index_id}/status");
-
         let response = self
             .http_client
-            .get(service_url(&self.base_url, &path)?)
+            .get(resource_url(
+                &self.base_url,
+                &["indexes", index_id, "status"],
+            )?)
             .headers(auth_headers(&self.api_key)?)
             .send()
             .await
@@ -213,14 +208,14 @@ impl GraphRagClient {
         &self,
         payload: GraphRagQueryPayload,
     ) -> Result<GraphRagQueryResponse, String> {
-        validate_graph_rag_query_payload(&payload)?;
-        validate_path_segment(&payload.resource_id, "resourceId")?;
-        let path = format!("graph/{}/query", payload.resource_id);
         let request_body = build_graph_rag_query_request_body(&self.application_name, &payload);
 
         let response = self
             .http_client
-            .post(service_url(&self.base_url, &path)?)
+            .post(resource_url(
+                &self.base_url,
+                &["graph", &payload.resource_id, "query"],
+            )?)
             .headers(auth_headers(&self.api_key)?)
             .json(&request_body)
             .send()
@@ -229,37 +224,6 @@ impl GraphRagClient {
 
         parse_json_response(response, "WM GraphRAG").await
     }
-}
-
-pub fn validate_create_index_payload(payload: &CreateIndexPayload) -> Result<(), String> {
-    if payload.files.is_empty() {
-        return Err("at least one extracted file is required".to_string());
-    }
-
-    for file in &payload.files {
-        if file.filename.trim().is_empty() {
-            return Err("filename cannot be empty".to_string());
-        }
-        if file.text.trim().is_empty() {
-            return Err(format!(
-                "extracted text cannot be empty for {}",
-                file.filename
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-pub fn validate_graph_rag_query_payload(payload: &GraphRagQueryPayload) -> Result<(), String> {
-    if payload.resource_id.trim().is_empty() {
-        return Err("resourceId cannot be empty".to_string());
-    }
-    if payload.question.trim().is_empty() {
-        return Err("question cannot be empty".to_string());
-    }
-
-    Ok(())
 }
 
 fn build_create_index_request_body(payload: &CreateIndexPayload) -> Value {
@@ -308,15 +272,13 @@ fn service_url(base_url: &str, path: &str) -> Result<Url, String> {
         .map_err(|err| format!("failed to build WM AI Services URL: {err}"))
 }
 
-fn validate_path_segment(value: &str, name: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        return Err(format!("{name} cannot be empty"));
-    }
-    if value.contains('/') || value.contains('\\') {
-        return Err(format!("{name} cannot contain path separators"));
-    }
-
-    Ok(())
+fn resource_url(base_url: &str, segments: &[&str]) -> Result<Url, String> {
+    let mut url = service_url(base_url, "")?;
+    url.path_segments_mut()
+        .map_err(|_| "WM AI service URL cannot hold path segments".to_string())?
+        .pop_if_empty()
+        .extend(segments.iter().copied());
+    Ok(url)
 }
 
 async fn parse_json_response<T>(

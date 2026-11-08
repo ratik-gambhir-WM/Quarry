@@ -1,3 +1,9 @@
+use upload::collect_persistent_query_upload;
+use validate::validate_identifier;
+use validate::{validate_deal_id, validate_title, validate_user_email};
+mod upload;
+mod validate;
+
 use crate::domains::identity::model::AuthenticatedUser;
 use axum::Extension;
 use std::{convert::Infallible, sync::Arc, time::Duration};
@@ -14,45 +20,11 @@ use uuid::Uuid;
 
 use crate::app::http::error::{AppError, AppResult};
 
-use super::{
-    service::{AssistantChatService, AssistantThread, AssistantThreadDetail, ThreadScope},
-    upload::{collect_persistent_query_upload, collect_query_upload},
-};
+use super::service::{AssistantChatService, AssistantThread, AssistantThreadDetail, ThreadScope};
 
 #[derive(Clone)]
 pub(super) struct AssistantChatHttpState {
     pub assistant_chat: Arc<AssistantChatService>,
-}
-
-pub(super) async fn query_model_handler(
-    Extension(_actor): Extension<AuthenticatedUser>,
-    State(state): State<AssistantChatHttpState>,
-    headers: HeaderMap,
-    multipart: Multipart,
-) -> AppResult<(
-    HeaderMap,
-    Sse<impl Stream<Item = Result<Event, Infallible>>>,
-)> {
-    let started_at = std::time::Instant::now();
-    let http_request_id = request_id(&headers);
-    tracing::info!(request_id = %http_request_id, route = "/query_model", "assistant request received");
-    let input = match collect_query_upload(multipart).await {
-        Ok(input) => input,
-        Err(error) => {
-            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant request rejected while parsing multipart");
-            return Err(error);
-        }
-    };
-    tracing::info!(request_id = %http_request_id, context_messages = input.context.len(), file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant request parsed");
-    let receiver = match state.assistant_chat.ask(input) {
-        Ok(receiver) => receiver,
-        Err(error) => {
-            tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant request rejected while starting run");
-            return Err(AppError::from(error));
-        }
-    };
-    tracing::info!(request_id = %http_request_id, elapsed_ms = started_at.elapsed().as_millis(), "assistant stream opened");
-    Ok(query_sse(receiver))
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,7 +248,7 @@ pub(super) async fn run_thread_handler(
         }
     };
     tracing::info!(request_id = %http_request_id, thread_id = %input.thread_id, client_request_id = %input.request_id, file_count = input.files.len(), prompt_chars = input.prompt.chars().count(), "assistant persisted request parsed");
-    let receiver = match state.assistant_chat.ask_persisted(input).await {
+    let receiver = match state.assistant_chat.ask_with_history(input).await {
         Ok(receiver) => receiver,
         Err(error) => {
             tracing::warn!(request_id = %http_request_id, error = %error, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted request rejected while starting run");
@@ -293,32 +265,6 @@ fn request_id(headers: &HeaderMap) -> String {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("missing")
         .to_string()
-}
-
-fn validate_user_email(email: &str) -> AppResult<()> {
-    if email.trim().is_empty() || email.chars().count() > 320 {
-        return Err(AppError::bad_request("userEmail is invalid"));
-    }
-    Ok(())
-}
-
-fn validate_identifier(name: &str, value: &str) -> AppResult<()> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
-        return Err(AppError::bad_request(format!("{name} is invalid")));
-    }
-    Ok(())
-}
-
-fn validate_title(title: &str) -> AppResult<()> {
-    if title.trim().is_empty() || title.chars().count() > 160 {
-        return Err(AppError::bad_request("title is invalid"));
-    }
-    Ok(())
 }
 
 fn query_sse(
@@ -359,16 +305,4 @@ fn query_sse(
                 .text("keep-alive"),
         ),
     )
-}
-
-fn validate_deal_id(id: &str) -> AppResult<()> {
-    if !id.starts_with("DEAL-")
-        || id.len() > 64
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-    {
-        return Err(AppError::bad_request("invalid dealId"));
-    }
-    Ok(())
 }

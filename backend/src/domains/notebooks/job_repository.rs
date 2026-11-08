@@ -228,7 +228,7 @@ impl NotebookRepository {
     }
     pub(super) async fn job(&self, owner: i64, notebook: String, id: String) -> Result<SaveJob> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 owned(tx, owner, &notebook)?;
                 let job = load(tx, &id)?;
                 if job.notebook_id != notebook {

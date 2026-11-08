@@ -620,7 +620,7 @@ impl SqliteTemplateRepository {
         &self,
         id: &str,
     ) -> anyhow::Result<Option<StoredSlideClassification>> {
-        self.client.transaction_result(|tx| {
+        self.client.read_transaction_result(|tx| {
             if !self.visible(tx, id)? {
                 return Ok(None);
             }
@@ -724,7 +724,7 @@ impl SqliteTemplateRepository {
         &self,
         app_id: &str,
     ) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
-        self.client.transaction_result(|tx| {
+        self.client.read_transaction_result(|tx| {
             let rows = tx.read_result_with(
                 SqlBuilder::select("template_classification_status")
                     .columns(["template_classification_status.*"])

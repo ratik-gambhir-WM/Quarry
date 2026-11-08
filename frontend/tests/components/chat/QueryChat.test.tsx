@@ -11,17 +11,19 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  QueryModelInput,
+  RunAssistantThreadInput,
   SendQueryEventHandlers,
 } from "@/contracts/quarryApi";
 import { QueryChat } from "@/components/chat/QueryChat";
 
-const { queryModel, useReducedMotion } = vi.hoisted(() => ({
-  queryModel: vi.fn(),
+const { runAssistantThread, createAssistantThread, listAssistantThreads, useReducedMotion } = vi.hoisted(() => ({
+  runAssistantThread: vi.fn(),
+  createAssistantThread: vi.fn(),
+  listAssistantThreads: vi.fn(),
   useReducedMotion: vi.fn(() => false),
 }));
 
-vi.mock("@quarry/runtime", () => ({ runtime: { api: { queryModel } } }));
+vi.mock("@quarry/runtime", () => ({ runtime: { api: { runAssistantThread, createAssistantThread, listAssistantThreads } } }));
 vi.mock("motion/react", () => ({
   motion: {
     div: ({
@@ -56,7 +58,9 @@ afterEach(cleanup);
 
 describe("QueryChat", () => {
   beforeEach(() => {
-    queryModel.mockReset();
+    runAssistantThread.mockReset();
+    createAssistantThread.mockReset().mockResolvedValue({threadId: "thread-1"});
+    listAssistantThreads.mockReset().mockResolvedValue({threads: [], nextCursor: null});
     useReducedMotion.mockReturnValue(false);
   });
 
@@ -64,13 +68,13 @@ describe("QueryChat", () => {
     const user = userEvent.setup();
     const cleanupStream = vi.fn();
     let handlers: SendQueryEventHandlers | undefined;
-    queryModel.mockImplementation(
-      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+    runAssistantThread.mockImplementation(
+      (_input: RunAssistantThreadInput, nextHandlers: SendQueryEventHandlers) => {
         handlers = nextHandlers;
         return cleanupStream;
       },
     );
-    render(<QueryChat />);
+    render(<QueryChat userEmail="analyst@example.com" />);
 
     expect(
       screen.getByRole("heading", { name: "How can I help you today?" }),
@@ -92,12 +96,12 @@ describe("QueryChat", () => {
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(queryModel).toHaveBeenCalledWith(
-      {
-        context: [],
+    expect(runAssistantThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
         files: [],
         prompt: "Summarize the most important deal risks and open questions.",
-      },
+      }),
       expect.any(Object),
     );
     expect(
@@ -147,13 +151,13 @@ describe("QueryChat", () => {
 
   it("supports keyboard submission while preserving Shift+Enter and IME composition", async () => {
     const user = userEvent.setup();
-    queryModel.mockImplementation(
-      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+    runAssistantThread.mockImplementation(
+      (_input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
         handlers.onEvent({ response: "Done", type: "completed" });
         return () => undefined;
       },
     );
-    render(<QueryChat />);
+    render(<QueryChat userEmail="analyst@example.com" />);
     const input = screen.getByRole("textbox", { name: "Message input" });
 
     expect(
@@ -166,24 +170,24 @@ describe("QueryChat", () => {
     await user.type(input, "First line");
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     fireEvent.keyDown(input, { isComposing: true, key: "Enter" });
-    expect(queryModel).not.toHaveBeenCalled();
+    expect(runAssistantThread).not.toHaveBeenCalled();
 
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(1));
-    expect(queryModel.mock.calls[0]?.[0].prompt).toContain("First line");
+    await waitFor(() => expect(runAssistantThread).toHaveBeenCalledTimes(1));
+    expect(runAssistantThread.mock.calls[0]?.[0].prompt).toContain("First line");
   });
 
   it("stops a run without discarding partial output", async () => {
     const user = userEvent.setup();
     const cleanupStream = vi.fn();
     let handlers: SendQueryEventHandlers | undefined;
-    queryModel.mockImplementation(
-      (_input: QueryModelInput, nextHandlers: SendQueryEventHandlers) => {
+    runAssistantThread.mockImplementation(
+      (_input: RunAssistantThreadInput, nextHandlers: SendQueryEventHandlers) => {
         handlers = nextHandlers;
         return cleanupStream;
       },
     );
-    render(<QueryChat />);
+    render(<QueryChat userEmail="analyst@example.com" />);
 
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
@@ -204,8 +208,8 @@ describe("QueryChat", () => {
   it("cancels the active transport when the chat unmounts", async () => {
     const user = userEvent.setup();
     const cleanupStream = vi.fn();
-    queryModel.mockReturnValue(cleanupStream);
-    const { unmount } = render(<QueryChat />);
+    runAssistantThread.mockReturnValue(cleanupStream);
+    const { unmount } = render(<QueryChat userEmail="analyst@example.com" />);
 
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
@@ -220,13 +224,13 @@ describe("QueryChat", () => {
   it("shows sanitized failures and retries through the custom AgentRuntime", async () => {
     const user = userEvent.setup();
     const handlerRuns: SendQueryEventHandlers[] = [];
-    queryModel.mockImplementation(
-      (_input: QueryModelInput, handlers: SendQueryEventHandlers) => {
+    runAssistantThread.mockImplementation(
+      (_input: RunAssistantThreadInput, handlers: SendQueryEventHandlers) => {
         handlerRuns.push(handlers);
         return () => undefined;
       },
     );
-    render(<QueryChat />);
+    render(<QueryChat userEmail="analyst@example.com" />);
 
     await user.type(
       screen.getByRole("textbox", { name: "Message input" }),
@@ -245,22 +249,20 @@ describe("QueryChat", () => {
     expect(screen.queryByText("raw provider detail")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
-    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(2));
-    expect(queryModel.mock.calls[1]?.[0]).toEqual({
-      context: [],
-      files: [],
-      prompt: "Retry this",
+    await waitFor(() => expect(runAssistantThread).toHaveBeenCalledTimes(2));
+    expect(runAssistantThread.mock.calls[1]?.[0]).toMatchObject({
+      threadId: "thread-1", files: [], prompt: "Retry this",
     });
   });
 
   it("sends picked files and a chosen model, and preserves the files for retry", async () => {
     const user = userEvent.setup();
     const handlerRuns: SendQueryEventHandlers[] = [];
-    queryModel.mockImplementation((_input, handlers) => {
+    runAssistantThread.mockImplementation((_input, handlers) => {
       handlerRuns.push(handlers);
       return () => undefined;
     });
-    render(<QueryChat />);
+    render(<QueryChat userEmail="analyst@example.com" />);
     const file = new File(["Review notes"], "notes.txt", { type: "text/plain" });
     await user.upload(screen.getByLabelText("Choose attachments"), file);
     expect(screen.getByRole("button", { name: "Remove notes.txt" })).toBeTruthy();
@@ -268,20 +270,20 @@ describe("QueryChat", () => {
     await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
     await user.type(screen.getByRole("textbox", { name: "Message input" }), "Review the attached notes");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(1));
-    expect(queryModel.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+    await waitFor(() => expect(runAssistantThread).toHaveBeenCalledTimes(1));
+    expect(runAssistantThread.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
     expect(screen.queryByRole("button", { name: "Remove notes.txt" })).toBeNull();
     expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
     await act(async () => handlerRuns[0]?.onEvent({ type: "failed", error: "test failure" }));
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(2));
-    expect(queryModel.mock.calls[1]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+    await waitFor(() => expect(runAssistantThread).toHaveBeenCalledTimes(2));
+    expect(runAssistantThread.mock.calls[1]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
   });
 
   it("supports custom model IDs, attachment removal, drop and paste validation", async () => {
     const user = userEvent.setup();
-    queryModel.mockReturnValue(() => undefined);
-    render(<QueryChat />);
+    runAssistantThread.mockReturnValue(() => undefined);
+    render(<QueryChat userEmail="analyst@example.com" />);
     const input = screen.getByRole("textbox", { name: "Message input" });
     const composer = input.closest("form");
     const file = new File(["Content"], "drop.txt", { type: "text/plain" });
@@ -298,15 +300,15 @@ describe("QueryChat", () => {
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
     await user.type(screen.getByRole("textbox", { name: "Custom model ID" }), "custom-model-id");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(queryModel).toHaveBeenCalledTimes(1));
-    expect(queryModel.mock.calls[0]?.[0].model).toBe("custom-model-id");
+    await waitFor(() => expect(runAssistantThread).toHaveBeenCalledTimes(1));
+    expect(runAssistantThread.mock.calls[0]?.[0].model).toBe("custom-model-id");
   });
 
   it("disables composer interpolation when reduced motion is requested", () => {
     useReducedMotion.mockReturnValue(true);
-    queryModel.mockReturnValue(() => undefined);
+    runAssistantThread.mockReturnValue(() => undefined);
 
-    const { container } = render(<QueryChat />);
+    const { container } = render(<QueryChat userEmail="analyst@example.com" />);
 
     expect(
       container

@@ -120,6 +120,10 @@ service, or repository modules:
 Handlers validate transport input and call services. Services own use-case transitions.
 Repositories own persistence/index operations. Adapters implement concrete mechanisms. None of
 these lower layers reads ambient configuration or imports application-wide state.
+Caller-only validation and initial request authorization run at the HTTP boundary; checks that
+need loaded state, atomic permissions, or ongoing revocation remain at their point of use.
+Use the [boundary placement decision](backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check)
+when adding or reviewing a check rather than inferring its owner from a domain name.
 
 ## 4. Canonical relational model
 

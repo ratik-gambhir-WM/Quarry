@@ -17,7 +17,7 @@ function SearchRegistration({ search }: { search: DocumentSearchContext }) {
   useDataRoomDocumentSearch(value);
   return null;
 }
-function ToolsHarness({ dealId, email, documentSearch }: {
+function ToolsHarness({ dealId, email = "analyst@example.com", documentSearch }: {
   dealId: string;
   email?: string;
   documentSearch: DocumentSearchContext;
@@ -39,7 +39,6 @@ const { api } = vi.hoisted(() => ({
     deleteAssistantThread: vi.fn(),
     getAssistantThread: vi.fn(),
     listAssistantThreads: vi.fn(),
-    queryModel: vi.fn(),
     runAssistantThread: vi.fn(),
   },
 }));
@@ -57,11 +56,10 @@ afterEach(cleanup);
 beforeEach(() => {
   api.searchDealDocumentChunksHybrid.mockReset().mockResolvedValue(hybridResponse());
   api.searchDealDocumentChunksByKeyword.mockReset().mockResolvedValue([keywordHit()]);
-  api.createAssistantThread.mockReset();
+  api.createAssistantThread.mockReset().mockResolvedValue({threadId: "thread-1", dealId: "DEAL-000184"});
   api.deleteAssistantThread.mockReset();
   api.getAssistantThread.mockReset();
-  api.listAssistantThreads.mockReset();
-  api.queryModel.mockReset();
+  api.listAssistantThreads.mockReset().mockResolvedValue({threads: [], nextCursor: null});
   api.runAssistantThread.mockReset();
 });
 
@@ -216,13 +214,88 @@ describe("DataRoomTools", () => {
     await waitFor(() => expect(trigger).toBe(document.activeElement));
   });
 
+  it("preselects the active stored file and sends it with the deal-scoped prompt", async () => {
+    const user = userEvent.setup();
+    api.runAssistantThread.mockImplementation((_input, handlers) => {
+      handlers.onEvent({ type: "completed", response: "Active file answer" });
+      return () => undefined;
+    });
+    render(<ToolsHarness dealId="DEAL-000184" documentSearch={{
+      currentFileId: "file-1", currentFileName: "Synthetic_Terms.pdf",
+      currentPageCount: 3, onActivateResult: vi.fn(),
+    }} />);
+    await launch(user, "Assistant");
+    expect(await screen.findByRole("button", { name: "Remove reference Synthetic_Terms.pdf" })).toBeTruthy();
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    expect(document.activeElement).toBe(input);
+    expect((input as HTMLTextAreaElement).value).toBe("");
+    await user.type(input, "Summarize the current file");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Active file answer");
+    expect(api.runAssistantThread.mock.calls[0][0]).toMatchObject({
+      fileReferences: [{ dealId: "DEAL-000184", fileId: "file-1", name: "Synthetic_Terms.pdf" }],
+      fileScopeDealId: "DEAL-000184", prompt: "Summarize the current file",
+    });
+  });
+
+  it("keeps a removed default removed while open and snapshots the active tab on reopen", async () => {
+    const user = userEvent.setup();
+    const fileA = { currentFileId: "file-1", currentFileName: "Synthetic_Terms.pdf", currentPageCount: 3, onActivateResult: vi.fn() };
+    const fileB = { ...fileA, currentFileId: "file-2", currentFileName: "Architecture.pdf" };
+    const { rerender } = render(<ToolsHarness dealId="DEAL-000184" documentSearch={fileA} />);
+    // Opening Search first must not capture an outdated default for the later chat mount.
+    await launch(user, "Workspace Search");
+    await screen.findByRole("dialog", { name: "Workspace Search" });
+    rerender(<ToolsHarness dealId="DEAL-000184" documentSearch={fileB} />);
+    await launch(user, "Assistant");
+    expect(await screen.findByRole("button", { name: "Remove reference Architecture.pdf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove reference Synthetic_Terms.pdf" })).toBeNull();
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    await user.type(input, "Keep this draft");
+    const upload = new File(["Notes"], "manual.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachments"), upload);
+    await user.click(screen.getByRole("button", { name: "Remove reference Architecture.pdf" }));
+    rerender(<ToolsHarness dealId="DEAL-000184" documentSearch={fileA} />);
+    expect(screen.queryByRole("button", { name: /Remove reference/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close Assistant" }));
+    await launch(user, "Assistant");
+    expect(await screen.findByRole("button", { name: "Remove reference Synthetic_Terms.pdf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove reference Architecture.pdf" })).toBeNull();
+    expect((input as HTMLTextAreaElement).value).toBe("Keep this draft");
+    expect(screen.getByRole("button", { name: "Remove manual.txt" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close Assistant" }));
+    await launch(user, "Assistant");
+    expect(await screen.findAllByRole("button", { name: "Remove reference Synthetic_Terms.pdf" })).toHaveLength(1);
+  });
+
+  it("preserves existing references when reopening from another active tab", async () => {
+    const user = userEvent.setup();
+    const fileA = { currentFileId: "file-1", currentFileName: "Synthetic_Terms.pdf", currentPageCount: 3, onActivateResult: vi.fn() };
+    const { rerender } = render(<ToolsHarness dealId="DEAL-000184" documentSearch={fileA} />);
+    await launch(user, "Assistant");
+    await screen.findByRole("button", { name: "Remove reference Synthetic_Terms.pdf" });
+    await user.click(screen.getByRole("button", { name: "Close Assistant" }));
+    rerender(<ToolsHarness dealId="DEAL-000184" documentSearch={{ ...fileA, currentFileId: "file-2", currentFileName: "Architecture.pdf" }} />);
+    await launch(user, "Assistant");
+    expect(await screen.findByRole("button", { name: "Remove reference Architecture.pdf" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove reference Synthetic_Terms.pdf" })).toBeTruthy();
+  });
+
+  it.each(["", "Local_only.pdf"])("does not invent a reference without a stored file ID (%s)", async (currentFileName) => {
+    const user = userEvent.setup();
+    render(<ToolsHarness dealId="DEAL-000184" documentSearch={{ currentFileName, currentPageCount: 0, onActivateResult: vi.fn() }} />);
+    await launch(user, "Assistant");
+    await screen.findByRole("textbox", { name: "Message input" });
+    expect(screen.queryByRole("button", { name: /Remove reference/ })).toBeNull();
+  });
+
   it("uses the model picker and file upload inside the Assistant panel", async () => {
     const user = userEvent.setup();
-    api.queryModel.mockImplementation((_input, handlers) => {
+    api.runAssistantThread.mockImplementation((_input, handlers) => {
       handlers.onEvent({ type: "completed", response: "Panel answer" });
       return () => undefined;
     });
-    render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    render(<DataRoomToolsProvider dealId="DEAL-000184" email="analyst@example.com">Files</DataRoomToolsProvider>);
     await launch(user, "Assistant");
     await user.click(await screen.findByRole("combobox", { name: "Model" }));
     await user.click(await screen.findByRole("option", { name: /GPT-5.5/ }));
@@ -231,15 +304,15 @@ describe("DataRoomTools", () => {
     await user.type(screen.getByRole("textbox", { name: "Message input" }), "Review the file");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(await screen.findByText("Panel answer")).toBeTruthy();
-    expect(api.queryModel.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
+    expect(api.runAssistantThread.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-5.5", files: [file] });
     expect(screen.getByRole("button", { name: "Close Assistant" })).toBeTruthy();
   });
 
   it("stops generation with Escape before closing the Assistant panel", async () => {
     const user = userEvent.setup();
     const stop = vi.fn();
-    api.queryModel.mockReturnValue(stop);
-    render(<DataRoomToolsProvider dealId="DEAL-000184">Files</DataRoomToolsProvider>);
+    api.runAssistantThread.mockReturnValue(stop);
+    render(<DataRoomToolsProvider dealId="DEAL-000184" email="analyst@example.com">Files</DataRoomToolsProvider>);
     await launch(user, "Assistant");
     const input = await screen.findByRole("textbox", { name: "Message input" });
     await user.type(input, "Review this deal");

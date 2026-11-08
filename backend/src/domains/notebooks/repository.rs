@@ -113,7 +113,7 @@ impl NotebookRepository {
     }
     pub(super) async fn get(&self, owner: i64, id: String) -> Result<Notebook> {
         self.sqlite
-            .transaction_result_async(move |tx| owned(tx, owner, &id))
+            .read_transaction_result_async(move |tx| owned(tx, owner, &id))
             .await
     }
     pub(super) async fn update(
@@ -143,7 +143,7 @@ impl NotebookRepository {
     }
     pub(super) async fn list(&self, owner: i64, options: ListOptions) -> Result<Page<Notebooks>> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 let mut q = Q::select("notebooks").and_where(C::equal("user_id", owner));
                 if let Some(deal) = &options.relationship {
                     if deal == "none" {
@@ -238,7 +238,7 @@ impl NotebookRepository {
         id: String,
     ) -> Result<Folder> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 owned(tx, owner, &notebook)?;
                 folder(tx, &notebook, &id)
             })
@@ -273,7 +273,7 @@ impl NotebookRepository {
         options: ListOptions,
     ) -> Result<Page<Folders>> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 owned(tx, owner, &notebook)?;
                 let rows = tx.read_with(
                     Q::select("notebook_folders")
@@ -312,7 +312,7 @@ impl NotebookRepository {
     }
     pub(super) async fn get_note(&self, owner: i64, notebook: String, id: String) -> Result<Note> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 owned(tx, owner, &notebook)?;
                 note(tx, &notebook, &id)
             })
@@ -325,7 +325,7 @@ impl NotebookRepository {
         options: ListOptions,
     ) -> Result<Page<Notes>> {
         self.sqlite
-            .transaction_result_async(move |tx| {
+            .read_transaction_result_async(move |tx| {
                 owned(tx, owner, &notebook)?;
                 let mut q = Q::select("notebook_notes")
                     .columns(SUMMARY)

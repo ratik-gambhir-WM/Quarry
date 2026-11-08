@@ -1,3 +1,5 @@
+use validate::validate_common;
+mod validate;
 use crate::domains::identity::model::AuthenticatedUser;
 use axum::Extension;
 use axum::{extract::State, Json};
@@ -7,7 +9,6 @@ use crate::{
     domains::documents::{
         graph::query::{
             FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
-            MAX_FILE_CHUNK_SEARCH_LIMIT,
         },
         search::service::DocumentSearchService,
     },
@@ -64,18 +65,6 @@ pub(super) async fn keyword_search_handler(
         .await
         .map(Json)
         .map_err(AppError::from)
-}
-
-fn validate_common(limit: usize) -> AppResult<()> {
-    if limit == 0 {
-        return Err(AppError::bad_request("limit must be greater than zero"));
-    }
-    if limit > MAX_FILE_CHUNK_SEARCH_LIMIT {
-        return Err(AppError::bad_request(format!(
-            "limit must not exceed {MAX_FILE_CHUNK_SEARCH_LIMIT}"
-        )));
-    }
-    Ok(())
 }
 
 pub(super) async fn hybrid_search_handler(

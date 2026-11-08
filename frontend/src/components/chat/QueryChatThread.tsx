@@ -171,12 +171,15 @@ function ComposerBar({
   condensed: boolean;
 }) {
   const runtime = useAgentRuntimeContext();
-  const { draft, draftFiles, attachmentError, selectedModel, sendError, isPreparingThread, isRunning, isThreadLoading } = useThreadRuntimeState(
+  const { draft, draftFiles, draftReferences, scopeDealId, attachmentError, selectedModel, sendError, isPreparingThread, isRunning, isThreadLoading } = useThreadRuntimeState(
     (state) => state,
   );
   return (
     <PromptInput
       value={draft}
+      references={draftReferences}
+      onReferencesChange={runtime.setReferences}
+      scopeDealId={scopeDealId}
       onValueChange={runtime.setDraft}
       onSend={() => runtime.send()}
       onStop={runtime.stop}
@@ -211,6 +214,7 @@ function UserMessageView({ message }: { message: Message & { role: "user" } }) {
     >
       <div className="max-w-[min(80%,42rem)] rounded-2xl rounded-br-sm bg-surface-container px-4 py-2.5 text-[14px] leading-6 text-on-surface wrap-break-word">
         {textOf(message)}
+        {message.fileReferences?.map((file) => <span key={`${file.dealId}:${file.fileId}`} className="m-1 inline-block rounded-md bg-file-mention px-2 py-1 text-xs text-on-file-mention">{file.name}</span>)}
         <AttachmentList files={message.attachments} />
       </div>
     </div>
@@ -248,7 +252,7 @@ function AssistantMessageView({ message }: { message: AssistantMessage }) {
       )}
       {failed ? (
         <div className="mt-3 rounded-xl border border-error/35 bg-error-container/35 p-3 text-sm text-error">
-          The assistant could not complete the response. Please try again.
+          {message.error ?? "The assistant could not complete the response. Please try again."}
           <div className="mt-2">
             <Button
               disabled={threadRunning}

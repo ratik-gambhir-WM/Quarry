@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
 import {
   useAgentRuntimeContext,
@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { DataRoomDocumentSearch } from "./document-search/DataRoomDocumentSearch";
-import type { DocumentSearchContext } from "./dataRoomToolsContext";
+import type { AssistantReferenceSource, DocumentSearchContext } from "./dataRoomToolsContext";
 
 const SYNTHESIS_PANEL_DEFAULT_SIZE = { width: 520, height: 512 };
 const SYNTHESIS_PANEL_DEFAULT_INSET = { right: 72, bottom: 48 };
@@ -49,6 +49,7 @@ function getInitialSynthesisPanelSize() {
 }
 
 export default function DataRoomToolPanels({
+  assistantReferences,
   search,
   dealId,
   email,
@@ -57,6 +58,7 @@ export default function DataRoomToolPanels({
   onAssistantOpenChange,
   onSearchOpenChange,
 }: {
+  assistantReferences: AssistantReferenceSource;
   search: DocumentSearchContext | null;
   dealId: string;
   email?: string;
@@ -103,11 +105,13 @@ export default function DataRoomToolPanels({
         <FloatingPanelContent>
           <QueryChatRuntimeProvider
             dealId={dealId}
+            initialFileReference={assistantReferences.getSnapshot() ?? undefined}
             scope="deal"
             key={`${email ?? ""}:${dealId}`}
             onContextTruncated={setContextTruncated}
             userEmail={email ?? ""}
           >
+            <AssistantOpenReference source={assistantReferences} />
             <FloatingPanelHeader>
               <FloatingPanelTitle>Assistant</FloatingPanelTitle>
               <SynthesisChatPicker />
@@ -149,6 +153,14 @@ export default function DataRoomToolPanels({
       />
     </>
   );
+}
+
+function AssistantOpenReference({ source }: { source: AssistantReferenceSource }) {
+  const { addReference } = useAgentRuntimeContext();
+  useEffect(() => source.subscribe((reference) => {
+    if (reference) addReference(reference);
+  }), [addReference, source]);
+  return null;
 }
 
 function SynthesisChatPicker() {

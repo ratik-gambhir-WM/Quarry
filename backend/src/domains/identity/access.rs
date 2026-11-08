@@ -118,7 +118,7 @@ impl ResourceAccess {
         let deal = deal.to_string();
         let result = self
             .sqlite
-            .transaction_result_async::<_, RepositoryError, _>(move |tx| {
+            .read_transaction_result_async::<_, RepositoryError, _>(move |tx| {
                 crate::domains::memberships::require_deal(tx, &deal, actor, Capability::Read)?;
                 let versions = tx.read_with(
                     SqlBuilder::select("quarry_files")

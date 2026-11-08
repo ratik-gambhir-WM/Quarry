@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect } from "react";
+import type { ChatFileReference } from "../../contracts/quarryApi";
 import type { DataRoomDocumentSearchProps } from "./document-search/DataRoomDocumentSearch";
 
 export type DocumentSearchContext = Omit<
@@ -42,3 +43,22 @@ export function useDataRoomDocumentSearch(value: DocumentSearchContext | null) {
   }, [registry, value]);
 }
 
+// Opening Assistant is an event, not a live binding to tab selection. Keep its latest
+// reference available for the lazy first mount, then notify the retained chat on reopen.
+export function createAssistantReferenceSource() {
+  let reference: ChatFileReference | null = null;
+  const listeners = new Set<(reference: ChatFileReference | null) => void>();
+  return {
+    getSnapshot: () => reference,
+    subscribe(listener: (reference: ChatFileReference | null) => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    open(next: ChatFileReference | null) {
+      reference = next;
+      listeners.forEach((listener) => listener(next));
+    },
+  };
+}
+
+export type AssistantReferenceSource = ReturnType<typeof createAssistantReferenceSource>;

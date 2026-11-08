@@ -1,14 +1,18 @@
+#[path = "handler/upload.rs"]
+mod upload;
+
 use axum::{
     extract::{Multipart, State},
     Json,
 };
 
-use super::{service::ResearchService, upload::collect_wm_upload_files};
+use super::service::ResearchService;
 use crate::{
     app::http::error::{AppError, AppResult},
     domains::research::service::FileExtractResponse,
 };
 use std::sync::Arc;
+use upload::collect_wm_upload_files;
 
 #[derive(Clone)]
 pub(super) struct ResearchHttpState {

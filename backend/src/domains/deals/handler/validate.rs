@@ -1,0 +1,169 @@
+use super::{DealFields, SaveDealInput};
+use crate::app::http::error::{AppError, AppResult};
+use chrono::NaiveDate;
+
+pub(super) fn validate_target_rule(fields: &DealFields) -> AppResult<()> {
+    use super::super::model::{PartyRole, TransactionType};
+    if fields.status.requires_acquisition_target()
+        && matches!(
+            fields.transaction_type,
+            TransactionType::PlatformAcquisition
+                | TransactionType::AddOnAcquisition
+                | TransactionType::StrategicAcquisition
+        )
+        && fields
+            .parties
+            .iter()
+            .filter(|p| p.role == PartyRole::Target)
+            .count()
+            != 1
+    {
+        return Err(AppError::bad_request(
+            "working-stage or closed acquisitions require exactly one target",
+        ));
+    }
+    Ok(())
+}
+pub(crate) fn validate_deal_id(id: &str) -> AppResult<()> {
+    if !id.starts_with("DEAL-")
+        || id.len() > 64
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err(AppError::bad_request("invalid dealId"));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_deal_input(input: &SaveDealInput) -> AppResult<()> {
+    validate_deal_id(&input.deal_id)?;
+    validate_text("userEmail", &input.user_email, 320)?;
+    validate_fields(&input.fields)?;
+    if let Some(path) = &input.local_path {
+        validate_text("localPath", path, 4096)?;
+    }
+    let local_path = trim_optional(input.local_path.as_deref());
+    let sharepoint_link = trim_optional(input.sharepoint_link.as_deref());
+    if local_path.is_some() && sharepoint_link.is_some() {
+        return Err(AppError::bad_request(
+            "localPath and sharepointLink cannot both be provided",
+        ));
+    }
+    validate_sharepoint_link(sharepoint_link)
+}
+
+pub(crate) fn validate_text(field: &str, value: &str, max: usize) -> AppResult<()> {
+    if value.trim().is_empty() || value.chars().count() > max || value.chars().any(char::is_control)
+    {
+        return Err(AppError::bad_request(format!("{field} is invalid")));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_fields(fields: &DealFields) -> AppResult<()> {
+    validate_target_rule(fields)?;
+    validate_text("dealName", &fields.deal_name, 300)?;
+    if let Some(code) = &fields.deal_code {
+        validate_text("dealCode", code, 100)?;
+    }
+    for (name, date) in [
+        ("startDate", &fields.start_date),
+        ("expectedCloseDate", &fields.expected_close_date),
+        ("actualCloseDate", &fields.actual_close_date),
+        ("engagementCompletedDate", &fields.engagement_completed_date),
+    ] {
+        if let Some(date) = date {
+            parse_date(name, date)?;
+        }
+    }
+    if let (Some(start), Some(completed)) = (&fields.start_date, &fields.engagement_completed_date)
+    {
+        if completed < start {
+            return Err(AppError::bad_request(
+                "engagementCompletedDate cannot be before startDate",
+            ));
+        }
+    }
+    if fields.parties.len() > 100 || fields.scopes.len() > 7 {
+        return Err(AppError::bad_request("too many parties or scopes"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for party in &fields.parties {
+        uuid::Uuid::parse_str(&party.company_id)
+            .map_err(|_| AppError::bad_request("invalid companyId"))?;
+        if !seen.insert((&party.company_id, party.role)) {
+            return Err(AppError::bad_request("duplicate party assignment"));
+        }
+        if let Some(notes) = &party.notes {
+            validate_text("notes", notes, 2000)?;
+        }
+    }
+    if fields
+        .scopes
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len()
+        != fields.scopes.len()
+    {
+        return Err(AppError::bad_request("duplicate scope"));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_sharepoint_link(link: Option<&str>) -> AppResult<()> {
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text("sharepointLink", link, 2048)?;
+        let parsed = reqwest::Url::parse(link)
+            .map_err(|_| AppError::bad_request("sharepointLink must be an HTTPS SharePoint URL"))?;
+        let is_sharepoint = parsed
+            .host_str()
+            .is_some_and(|host| host.to_ascii_lowercase().ends_with(".sharepoint.com"));
+        if parsed.scheme() != "https"
+            || !is_sharepoint
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(AppError::bad_request(
+                "sharepointLink must be an HTTPS SharePoint URL",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_date(field: &str, value: &str) -> AppResult<NaiveDate> {
+    if value.len() != 10 || value.as_bytes()[4] != b'-' || value.as_bytes()[7] != b'-' {
+        return Err(AppError::bad_request(format!(
+            "{field} must use YYYY-MM-DD format"
+        )));
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| AppError::bad_request(format!("{field} must use YYYY-MM-DD format")))
+}
+
+pub(crate) fn validate_https_link(field: &str, link: Option<&str>) -> AppResult<()> {
+    if let Some(link) = link.filter(|value| !value.trim().is_empty()) {
+        validate_text(field, link, 2048)?;
+        let parsed = reqwest::Url::parse(link)
+            .map_err(|_| AppError::bad_request(format!("{field} must be an HTTPS URL")))?;
+        if parsed.scheme() != "https"
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(AppError::bad_request(format!(
+                "{field} must be an HTTPS URL"
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn trim_optional(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/domains/deals/handler/validate_tests.rs"]
+mod tests;
