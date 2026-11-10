@@ -184,6 +184,11 @@ request -> router -> handler -> service -> repository/client
   Do not edit generated `dist` output or bypass semantic theme tokens with a parallel style system.
 - Preserve semantic HTML, accessible names, keyboard/focus behavior, reduced-motion behavior,
   and visible async feedback.
+- Include purposeful motion when building or changing UI. Read
+  [`docs/interface-motion.md`](docs/interface-motion.md), reuse the existing timing/easing tokens
+  and shared controls, keep keyboard-triggered changes instant, and implement reduced-motion and
+  interruption behavior in the same change. Preserve state, focus, and scroll rather than remounting
+  content to replay an animation. Verify the animated and immediate paths before handoff.
 - Put all runtime mock, demo, placeholder, and development-fixture product data under
   `frontend/src/fixtures/`, grouped by feature and split into clearly named fixture files. Pages,
   components, hooks, and `data/` modules must import fixtures explicitly rather than defining mock

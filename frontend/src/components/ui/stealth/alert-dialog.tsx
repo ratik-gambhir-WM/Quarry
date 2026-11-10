@@ -10,11 +10,11 @@ export function AlertDialogContent({
 }: Omit<BaseAlertDialog.Popup.Props, "className"> & { className?: string }) {
   return (
     <BaseAlertDialog.Portal>
-      <BaseAlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/30 transition-opacity duration-200 ease-out data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none" />
+      <BaseAlertDialog.Backdrop className="quarry-dialog-motion fixed inset-0 z-50 bg-black/30 transition-opacity duration-200 ease-out data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none" />
       <BaseAlertDialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4 max-sm:items-end max-sm:p-2 max-sm:pb-[max(8px,env(safe-area-inset-bottom))]">
         <BaseAlertDialog.Popup
           className={cn(
-            "relative flex w-full max-w-[400px] flex-col rounded-2xl border border-outline-variant bg-surface-container-lowest p-5 text-on-surface shadow-xl outline-none origin-center transition-[opacity,scale,translate] duration-[260ms] ease-out data-starting-style:translate-y-1.5 data-starting-style:scale-[0.97] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-ending-style:duration-[160ms] motion-reduce:transition-none",
+            "quarry-dialog-motion relative flex w-full max-w-[400px] flex-col rounded-2xl border border-outline-variant bg-surface-container-lowest p-5 text-on-surface shadow-xl outline-none origin-center transition-[opacity,scale,translate] duration-[260ms] ease-out data-starting-style:translate-y-1.5 data-starting-style:scale-[0.97] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-ending-style:duration-[160ms] motion-reduce:transition-none",
             className,
           )}
           {...props}

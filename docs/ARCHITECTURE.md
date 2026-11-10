@@ -853,9 +853,18 @@ limit inside the mutation transaction and returns HTTP 409 for a second team, in
 name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
 but cannot add more. The paginated team API and schema are unchanged.
 
-The live working tree includes React canary View Transition wrappers and CSS transition recipes.
-Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
-`prefers-reduced-motion` behavior.
+Interface motion follows [the maintained motion guide](interface-motion.md). Shared Radix menus,
+popovers, select popups, and tooltips use 180 ms entrances and 120 ms exits; shared dialog surfaces
+use 260/160 ms. Existing primitives retain presence/unmounting and focus ownership. Pointer-driven
+Deal Room section and Assistant sidebar-view changes use a cancellable 180 ms native content
+transition on the existing container, without introducing keyed remounts or additional request/state
+resets. Shared tab panels use the matching short CSS entrance, and sidebar width changes take 220 ms. React canary
+View Transition recipes retain their fallback wrapper, use shorter opacity/transform transitions,
+and avoid delayed entrances and large-area blur. The product root tracks pointer/keyboard input
+through document capture listeners; keyboard-triggered motion is suppressed for these shared
+surfaces and view-transition snapshots. Reduced-motion styles clear delays as well as durations;
+the content hook also cancels when the preference changes. Native animation support is optional.
+These controls are shared by the web and desktop UI; they do not alter the transport boundary.
 
 The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its `Assistant` title, and
 uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains the
@@ -1445,8 +1454,15 @@ canonical candidate filtering, final-result checks and stream revocation also co
 Normal bootstrap holds a database-side writer file lock through the router and detached
 SQLite-owning worker lifetimes. Multiple writers with different databases/hosts are unsupported. The rollout must drain older binaries/outstanding
 remote writes; the lock does not retrofit older releases. Client adapters expose acceptance/polling
-and session-scoped invalidation for workspace/document/chat caches and notebook links. A visible
-Delete action remains deferred. See [deletion contracts, rollout and recovery](deal-permanent-deletion.md)
+and session-scoped invalidation for workspace/document/chat caches and notebook links. The shared
+Deals table shows owners a three-dot menu beside the project name. Its Delete deal confirmation
+requires the exact, case-sensitive phrase `delete {dealName}` before calling the existing adapter.
+Demo and non-owner rows have no delete action; the server remains the authorization authority.
+The page owns the dialog so acceptance can remove the row without losing cleanup progress.
+The dialog distinguishes acceptance from completion, supports status-check retries without another
+DELETE, and reports blocked cleanup with an operation reference. Closing after acceptance stops
+local polling while durable work continues; cancelling before submission sends no request.
+See [deletion contracts, rollout and recovery](deal-permanent-deletion.md)
 for ownership, batching, retention limits and backup/rollback constraints.
 
 ## 8. Backend architecture

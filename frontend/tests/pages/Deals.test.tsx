@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   afterEach,
+  afterAll,
   beforeAll,
   beforeEach,
   describe,
@@ -24,19 +25,30 @@ import {
 import { WorkspaceProvider } from "@/app/WorkspaceProvider";
 import { Deals } from "@/pages/Deals";
 import { testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
+import { acceptDealDeletion } from "@/data/dealDeletion/lifecycle";
+import type { DealDeletion } from "@/contracts/quarryApi";
 
-const { listDeals } = vi.hoisted(() => ({ listDeals: vi.fn() }));
+const { listDeals, deleteDeal, getDealDeletion } = vi.hoisted(() => ({ listDeals: vi.fn(), deleteDeal: vi.fn(), getDealDeletion: vi.fn() }));
 
 vi.mock("@quarry/runtime", () => ({
   runtime: {
     api: {
       listDeals,
+      deleteDeal,
+      getDealDeletion,
       listCompanies: async () => ({ companies: [], hasMore: false }),
     },
     platform: {},
     target: "web",
   },
 }));
+
+// Use Motion's JS fallback: happy-dom rejects canceled Web Animations promises.
+const animationDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+beforeAll(() => { Reflect.deleteProperty(Element.prototype, "animate"); });
+afterAll(() => {
+  if (animationDescriptor) Object.defineProperty(Element.prototype, "animate", animationDescriptor);
+});
 
 describe("Deals", () => {
   it("keeps loading distinct from an empty portfolio", () => {
@@ -78,7 +90,63 @@ describe("Deals", () => {
     sessionStore.set(testSession);
     listDeals.mockClear();
     listDeals.mockResolvedValue([]);
+    deleteDeal.mockReset();
+    getDealDeletion.mockReset();
     window.sessionStorage.clear();
+  });
+
+  it("offers deletion beside owner project names, without changing project navigation", async () => {
+    listDeals.mockResolvedValue([
+      { ...testDeal(), metadata: null },
+      { ...testDeal({ dealId: "VIEWER-DEAL", dealName: "Read only", role: "viewer" }), metadata: null },
+      { ...testDeal({ dealId: "UNKNOWN-DEAL", dealName: "Unknown access", role: undefined }), metadata: null },
+    ]);
+    renderDeals("api");
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: "Actions for Project Alpha" });
+    const cell = trigger.closest("td");
+    expect(cell && within(cell).getByRole("link", { name: "Open Project Alpha" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Actions for Read only" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for Unknown access" })).toBeNull();
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("delete Project Alpha");
+    expect(screen.getByTestId("location").textContent).toBe("/hub/deals");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(deleteDeal).not.toHaveBeenCalled();
+  });
+
+  it("keeps progress mounted after acceptance removes the last row and restores focus safely", async () => {
+    const operation: DealDeletion = {
+      deletionId: "operation-1", dealId: "DEAL-000184", status: "pending", phase: "draining",
+      retryable: false, statusUrl: "/api/v1/deal-deletions/operation-1", errorCode: null,
+      createdAt: "2026-11-10T00:00:00Z", updatedAt: "2026-11-10T00:00:00Z", completedAt: null,
+    };
+    listDeals.mockResolvedValue([{ ...testDeal(), metadata: null }]);
+    deleteDeal.mockImplementation((id: string) => acceptDealDeletion(id, async () => operation));
+    getDealDeletion.mockReturnValue(new Promise(() => {}));
+    renderDeals("api");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Project Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete deal" }));
+    await user.type(screen.getByRole("textbox", { name: "Deletion confirmation" }), "delete Project Alpha");
+    await user.click(screen.getByRole("button", { name: "Delete deal" }));
+    expect(await screen.findByText("Deletion is in progress…")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open Project Alpha" })).toBeNull();
+    expect(screen.getByText("No deals yet")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Continue in background" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement?.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement?.contains(screen.getByText("No deals yet"))).toBe(true);
+  });
+
+  it("does not offer destructive server actions for demo deals", async () => {
+    renderDeals("demo");
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: /^Actions for / })).toBeNull();
   });
 
   it("shows project details and safe quick links, with N/A for missing values", async () => {

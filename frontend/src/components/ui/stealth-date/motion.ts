@@ -1,6 +1,6 @@
 // Motion tokens for Stealth UI. Components import these instead of writing
 // numbers inline, so the whole library shares one feel. The CSS side lives in
-// globals.css as --ease-out-expo, --ease-in-out-quart and --ease-drawer.
+// index.css as --ease-out-expo, --ease-in-out-quart and --ease-drawer.
 
 export const ease = {
   /** Entrances. Strong deceleration: the first 50ms carry the motion. */
@@ -38,6 +38,7 @@ export const dur = {
   menu: 0.18,
   indicator: 0.22,
   dialog: 0.26,
+  content: 0.18,
   toast: 0.28,
   page: 0.38,
   reveal: 0.8,

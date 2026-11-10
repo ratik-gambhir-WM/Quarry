@@ -139,7 +139,19 @@ Acceptance publishes a session-scoped invalidation event. Workspace lists/direct
 previews and raw text, Data Room contents and chat state suppress late responses; active linked
 chat streams stop. Notebook catalogs clear the link while retaining private drafts. Other tabs,
 other members and offline clients revalidate on access; the server does not erase their copies.
-A visible delete/confirmation/progress action is a separate consumer increment.
+The shared Deals table exposes a three-dot menu beside server-backed project names for owners.
+Delete deal opens a confirmation describing removed and retained data. Submission requires the
+exact, case-sensitive phrase `delete {dealName}`; whitespace is not normalized. Cancelling sends no
+request, and pending acceptance prevents duplicate submission or dismissal. Authorization remains
+server-enforced even if membership changes while the dialog is open.
+
+The page owns the dialog independently of table rows. Acceptance removes the deal through the
+existing invalidation event while the dialog polls the receipt until completed or blocked. A
+polling failure offers Check status, which repeats only GET, never DELETE. Blocked cleanup shows
+the operation reference for administrator attention. Closing after acceptance stops local polling
+without cancelling durable work; session changes and unmount discard late results. Focus returns
+to the row menu, or the remaining portfolio content if the row has gone. Demo data has no delete
+action. The same UI and runtime contract serve web and desktop; no transport changes are needed.
 
 Use the repository backend/frontend/desktop verification gates. The ignored deletion tests require
 an explicitly disposable `QUARRY_HELIX_COMPAT_URL` and verify prepared late-write fencing, scoped
