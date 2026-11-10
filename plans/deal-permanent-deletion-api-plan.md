@@ -1,16 +1,14 @@
 # Deal archive and permanent deletion API plan
 
-Date: 2026-10-15. Updated: 2026-10-27. Status: proposed deletion work; archive API already implemented.
-This planning update makes no runtime, schema, or API changes.
-
-This plan is grounded in the current working tree, including its uncommitted deal/company and
-chat changes. [Architecture](../docs/ARCHITECTURE.md) describes the implemented product; this
-document describes proposed work. Preserve existing changes. Earlier plans are design inputs,
-and their references to authorized development resets do not authorize a reset for this work.
-
-Reviewed against the live working tree on 2026-10-27, including the document/template graph
-rename, immutable ingestion preflight, and Helix SDK v3 transport. Permanent deal deletion,
-its durable ledger, and late-write fencing remain proposed; the archive endpoint is implemented.
+Date: 2026-10-15. Updated: 2026-11-10. Status: implemented API/workflow; visible Delete action remains a separate consumer task.
+Implementation record (2026-11-10): the API, schema-18 ledger, worker, remote fences, web/desktop
+transports and client invalidation are implemented. The sections below retain the reviewed design
+baseline; [permanent deletion and recovery](../docs/deal-permanent-deletion.md) and
+[Architecture](../docs/ARCHITECTURE.md) describe the current implementation. Canonical purge and
+file/thread target capture commit together after the remote fence; file identities cover every
+version/generation without copying content-bearing canonical manifests. Private notebook links
+are detached, and their contents/jobs/projections survive. A visible action/confirmation screen
+is outside this API increment. No reset or valuable local data operation was performed.
 
 ## 1. Outcome and recommended approach
 
@@ -29,9 +27,10 @@ create durable work, prevent further use of the deal, and return an operation to
 that operation complete after physical application records and search projections are gone.
 This is permanent deletion, with a temporary cleanup phase and no restore/archive substitute.
 
-Add `deal_id` to Helix file, version, and chunk nodes, alongside their current identities. This
-supports direct deal-scoped search and cleanup. Retain a durable file-identity manifest so cleanup
-can also remove legacy or partially indexed nodes whose deal property is missing or incorrect.
+Reuse the existing `deal_id` on Helix file, version, and chunk nodes and the canonical document
+identity checkpoints. Add a separate durable deletion-target manifest so cleanup remains possible
+after canonical files disappear, including partial or inconsistent graph writes. Ownership transfer
+must not change document IDs or graph scope.
 
 Do not implement this as one SQL DELETE, an archive flag, a process-local background task alone,
 or a global Helix clear. Do not delete shared company records or source files outside Quarry.
@@ -40,32 +39,29 @@ or a global Helix clear. Do not delete shared company records or source files ou
 
 | Current implementation | Design consequence |
 | --- | --- |
-| [Schema marker 10](../backend/src/app/migrations.rs) cascades deal metadata, parties, scopes, files, versions, and blobs. | Use those cascades inside one canonical deletion transaction, including historical and soft-deleted files. |
-| `assistant_threads.deal_id` uses `ON DELETE RESTRICT`; messages cascade from threads. | Explicitly delete all deal-linked threads before deleting the deal, in the same transaction. Retain RESTRICT as a guard against an incomplete workflow. |
-| [Helix nodes](../backend/src/domains/documents/graph/model.rs) carry workspace/file/version identities, without deal identity. | Add deal identity and backfill it from canonical SQLite ownership. Do not replace stable file/version IDs. |
-| [Ingestion persistence](../backend/src/domains/documents/ingestion/persistence.rs) builds an immutable, exact-size-preflighted graph request before SQLite, verifies the committed identity, then sends setup, chunk batches, and publication. | Carry deal identity/fencing through the retained plan as well as fresh requests; drain already-prepared work and remove unpublished/partial graph nodes. Preserve preflight-before-commit and identity checks. |
-| [Graph repository](../backend/src/domains/documents/graph/repository.rs) exposes `DocumentGraphWriter`, `DocumentGraphReader`, and `DocumentGraphSearch`; templates use a separate `TemplateGraph`. | Put document cleanup/fencing in the document graph owner. Preserve app-wide template data and database indexes; do not recreate the removed `documents/index/` module. |
-| [Helix client](../backend/src/adapters/helix/client.rs) serializes individual writes, requests writer-only durable execution, and treats SDK v3 write errors as terminal because they lack safe replay classification. | A mutex is not a multi-request graph transaction or durable deletion fence. Reconcile ambiguous outcomes and retry only proven-idempotent deletion phases; do not introduce generic transport write retries. |
-| [Document jobs](../backend/src/domains/documents/ingestion/job_service.rs) retain only watch senders by job ID and lose state on restart. | Add deal ownership and cancellation/drain handles to running jobs; use a separate SQLite-backed deletion ledger for durable cleanup. |
-| [Persisted chat runs](../backend/src/domains/assistant/chat/service.rs) spawn provider-stream work. | Stop linked streams and prevent their final callbacks from writing after deletion. Include archived threads, not just the current thread list. |
-| [Search](../backend/src/domains/documents/search/service.rs) currently returns Helix results without canonical SQLite liveness checks. | Filter against live canonical ownership before returning results or supplying context, including while Helix cleanup is unavailable. |
-| [Data Room lookup](../backend/src/domains/data_rooms/service.rs) can fall back to a configured root when its source reader returns no path. | Check deal existence/deletion state before any source resolution; deleting metadata must never reopen a configured folder through fallback. |
-| Preview bytes are cached in memory; client annotations are also retained in memory. | Evict server previews and provide client invalidation hooks; an API cannot retract copies already downloaded or held by offline clients. |
-| The [desktop DELETE relay](../frontend/src-tauri/src/quarry_api/client.rs) accepts only `204` and discards bodies. | Add a typed JSON DELETE path for the new `202` operation response without breaking existing thread/template deletion. |
-| [CORS middleware](../backend/src/app/http/middleware.rs) already allows DELETE. | Preserve origin restrictions; no broad CORS expansion is needed for the verb. |
-| Current profiles/caller-supplied emails are not authentication. | Bind destructive requests and operation polling to a trusted actor and owner policy before public exposure. |
+| [Schema marker 17](../backend/src/app/migrations.rs) supports validated, data-preserving upgrades from markers 12–16. | Add the next unused marker, provisionally 18, without resetting either store; extend every supported upgrade path. |
+| Deal metadata, parties, scopes, memberships, access revisions, teams, activity, and document children cascade. Linked assistant threads and notebooks use `ON DELETE RESTRICT`. | Delete all linked threads and detach personal notebook links explicitly before deleting the deal in one transaction. |
+| [Membership policy](../backend/src/domains/memberships/model.rs) owns roles/capabilities. `deals.user_id` is immutable creator provenance. | Only the current owner membership may accept deletion, including after ownership transfer. Add a deletion capability; do not authorize by creator or uploader. |
+| [Archive repository](../backend/src/domains/deals/repository.rs) rechecks owner access transactionally and returns existing archive state without changing timestamps. | Verify the existing authenticated API; add only deletion coordination and demonstrated coverage gaps. |
+| [Graph nodes](../backend/src/domains/documents/graph/model.rs) already carry deal/file/version identities; ingestion preflights immutable graph requests before SQLite commits. | Preserve identities, request-size preflight, and canonical checkpoint verification. Add deletion fences to every executable setup/chunk/publication request. |
+| [Graph repository](../backend/src/domains/documents/graph/repository.rs) owns document capabilities; templates and notebooks have separate graph owners. | Keep document purges here and preserve global indexes, private templates, and notebook projections. |
+| [Helix client](../backend/src/adapters/helix/client.rs) serializes writer-only durable writes and treats SDK v3 write errors as terminal. | Local serialization cannot prove a remote late-write fence. Reconcile ambiguous deletion outcomes; do not add generic write retries. |
+| [Search](../backend/src/domains/documents/search/service.rs) already scopes by accessible deals, filters canonical current identities, and reauthorizes final results. | Extend the existing access/filtering paths with deletion-barrier checks, including cached hybrid results; do not build a second search authorization system. |
+| [Document jobs](../backend/src/domains/documents/ingestion/job_service.rs) remain process-local; authenticated job/stream access already exists. | Audit existing scope/cancellation tracking, then add real task drain and deletion-specific retained-result eviction. Use a separate durable ledger for cleanup. |
+| [Chat service](../backend/src/domains/assistant/chat/service.rs) has persisted branching histories and provider streams. | Drain all linked runs across users, reject late callbacks, and delete archived as well as active threads. |
+| [Notebook repository](../backend/src/domains/notebooks/repository.rs) stores private owner-scoped notebooks with optional deal links and durable save/cleanup jobs. | A link is context, not deal ownership of note contents. Preserve notebooks, notes, jobs, and graph data; clear matching links atomically and fence new/relinked associations after acceptance. |
+| [Data Room service](../backend/src/domains/data_rooms/service.rs) can use a configured root when metadata supplies no path. Existing HTTP policy also restricts local-source access. | Retain that policy and filesystem containment; extend it with deletion liveness checks before fallback and before returning in-flight bytes. |
+| Preview bytes and client annotations are cached in memory. | Evict server previews and expose scoped client invalidation; downloaded/offline copies cannot be recalled. |
+| The [desktop DELETE relay](../frontend/src-tauri/src/quarry_api/client.rs) accepts only `204` and discards bodies. | Add a typed `202` JSON DELETE path while preserving existing delete callers. |
+| [Bearer identity and resource access](../backend/src/domains/identity/access.rs) are implemented; organization tenancy remains incomplete. | Reuse verified identity, session revocation, and membership policy. No new identity framework or caller-email trust. |
 
-The Axum skill contains an older schema-reset description. The live schema code, root guide,
-and architecture take precedence: marker 10 is current, with an additive, data-preserving
-schema-9 upgrade already implemented for templates. The Data Room
-fallback code also needs particular attention rather than relying on older narrative assumptions.
-
-The newer diligence-status, Notebook, and branching-chat plans do not change the current schema
-or APIs. Do not make deletion depend on those proposals. If implemented first, re-audit their
-actual ownership/foreign keys and coordinate the next schema marker. A future Pencils Down or
-Closed status must not substitute for archive or deletion. Notes should join deletion scope only
-through an explicit persisted deal-ownership relationship, never a textual mention or source link.
-The current chat service's file-reference TODO is not an implemented retrieval/attachment store.
+The local Axum skill still describes schema marker 11 and older reset behavior. Live migration
+code, the root guide, and architecture take precedence: marker 17 and validated additive upgrades
+are current. Diligence stages, branching chat, notebooks, and shared projects are implemented;
+treat their actual foreign keys and lifecycle contracts as dependencies, not future proposals.
+Pencils Down, Closed, archive, and permanent deletion remain separate operations. Chat file
+references are resolved through canonical authorization; do not treat them as a separate reusable
+attachment store or infer ownership from a textual mention.
 
 ## 3. Deletion ownership and limits
 
@@ -73,7 +69,10 @@ The current chat service's file-reference TODO is not an implemented retrieval/a
 | --- | --- |
 | `deals`, `deal_metadata` including extracted questions/source links, `deal_parties`, `deal_scopes` | Permanently delete. |
 | Every `quarry_files` row for the deal, all `quarry_file_versions`, and `quarry_file_blobs` | Permanently delete, including non-current versions and rows already marked deleted. |
-| Every `assistant_threads` row with this exact `deal_id`, including archived threads, and all their messages | Permanently delete. Do not detach them into freeform chats. |
+| Every `assistant_threads` row with this exact `deal_id`, including other members’ private threads, archived threads, and all messages | Proposed policy: permanently delete through internal deal-scoped cleanup without exposing transcripts to the requesting owner. Do not detach into freeform chats. |
+| `deal_memberships`, `deal_access_revisions`, teams/assignments, and `deal_activity_events` | Cascade with the deal; retain only the minimal deletion receipt outside that aggregate. |
+| `quarry_current_content`, document identity/chunk manifests, and `document_image_recovery` | Cascade through the document aggregate; snapshot required non-content purge identities first. |
+| Personal notebooks linked through `notebooks.deal_id` | Proposed policy: clear that exact link in the purge transaction; preserve private notebook/folder/note contents, save jobs, cleanup jobs, and notebook graph projections. |
 | Helix `QuarryFile`, `FileVersion`, `FileChunk`, embeddings, text, and connecting edges for those files | Permanently delete all versions/generations and partial graph writes. |
 | Running ingestion/extraction/chat/preview work and retained document-job events for this deal | Cancel or drain; purge retained results; reject late publication. |
 | Server preview cache | Evict affected bytes. Its current key lacks deal identity; clearing the bounded cache is an acceptable initial implementation. |
@@ -84,7 +83,11 @@ The current chat service's file-reference TODO is not an implemented retrieval/a
 | Diligence Studio's app-wide templates | Preserve. There is no current durable deal-owned deliverable/template relationship to cascade. |
 | `reminders.deal` | It is unused free text, not a deal foreign key. Do not delete by name matching. Add a real relationship before promising reminder cleanup. |
 
-Keep only minimal operational deletion receipts/fences after completion: resource IDs, owner ID,
+The notebook and cross-user chat policies above are proposed product contracts, not existing
+deal-deletion behavior. Any future consumer must disclose their scope. A notebook link does not
+authorize reading its contents, and the deletion worker needs no notebook content access.
+
+Keep only minimal operational deletion receipts/fences after completion: resource IDs, accepting owner ID,
 operation state, and timestamps. Delete per-file/thread manifests when no longer needed for
 recovery. Never retain names, document/chat contents, links, or source paths in the ledger.
 These receipts cannot reconstruct a deal and are distinct from the deleted `deal_metadata`.
@@ -113,7 +116,8 @@ Preserve and verify this contract:
 - The handler validates the encoded path identifier. Clients currently send an empty JSON object;
   there is no caller-controlled archive timestamp or engagement-status change in the request.
 - Return `200 OK` with the updated `SavedDeal` in camelCase JSON, including `archivedAt` and
-  `updatedAt`. Invalid identifiers return `400`; missing deals return `404`. Storage failures use
+  `updatedAt`. Invalid identifiers return `400`; unauthenticated requests return `401`; missing or hidden deals
+  return `404`, and visible non-owner requests follow the current permission-denied mapping. Storage failures use
   existing sanitized error mapping and must not be reported as success.
 - Set `archived_at` and `updated_at` only when `archived_at IS NULL`, inside the existing SQLite
   transaction. Repeated/concurrent archive requests return the already archived deal without
@@ -136,10 +140,10 @@ Preserve failure/retry feedback and ignore stale list responses that could reint
 Keep demo fixtures visibly separate. A visible Archive action is a separate consumer task unless
 explicitly included; this plan does not require a new archive screen or UI redesign.
 
-The current archive route has no trusted actor/owner authorization. Apply the identity prerequisite
-below to archive before public exposure as well as deletion; do not describe that protection as
-already implemented. Recheck ownership and the deletion barrier in the archive transaction once
-deletion exists. If deletion was accepted first, return `409 deal_deletion_in_progress` while
+The archive handler already receives `AuthenticatedUser`; its repository uses the owner-only
+transfer capability so repeated calls on an archived deal can return the existing state. Preserve
+this behavior and the single `deal_archived` activity event. Recheck current membership ownership
+and the deletion barrier in the archive transaction once deletion exists. If deletion was accepted first, return `409 deal_deletion_in_progress` while
 pending, then `404` after completion; never resurrect a deleted deal. If archive commits first,
 DELETE can still accept the archived deal. Serializing these SQLite checks is sufficient for
 archive; do not give it the deletion worker's cross-store workflow.
@@ -147,14 +151,15 @@ archive; do not give it the deletion worker's cross-store workflow.
 ### Permanent deletion requests and responses
 
 `DELETE /api/v1/deals/{dealId}` has no request body. Use the existing identifier constraints and
-URL encoding. Resolve the owner from a trusted request actor; do not use a body/query `userEmail`
+URL encoding. Resolve the current owner membership from the existing authenticated actor; do not use a body/query `userEmail`
 or `workspaceId` as proof of permission.
 
 - `202 Accepted`: durable deletion is registered or still pending. Return JSON and a `Location`
   header pointing to `/api/v1/deal-deletions/{deletionId}`.
 - `204 No Content`: a retained receipt proves this actor's same deal was already fully deleted.
-- `400`: invalid identifier. `401`: no trusted actor. `404`: absent/not-owned resource or receipt,
-  without revealing another owner's data. `503`: deletion could not be durably registered.
+- `400`: invalid identifier. `401`: no trusted actor. `404`: absent/hidden resource or receipt. A visible non-owner receives the existing permission-denied
+  status (`403`); receipt lookup remains accepting-actor-only and hides others’ receipts with `404`.
+  `503`: deletion could not be durably registered. Preserve sanitized error mapping for other failures.
 - An archived deal can be deleted directly. Archiving is not a prerequisite.
 - Repeated/concurrent requests for the same owned deal return the same operation; a lost `202`
   response is recovered by repeating DELETE. Do not require a new generic idempotency framework.
@@ -187,54 +192,53 @@ ID. This avoids an old DELETE retry or delayed worker acting on a newly created 
 ID. Use a new ID for a new deal. Receipt retention/ID-reuse changes require an explicit future
 generation scheme, not deletion of the receipt as an incidental cleanup.
 
-### Identity prerequisite
+### Identity and access integration
 
-Introduce a narrow trusted-actor extractor and deletion access policy, injected through bootstrap.
-Check ownership in both the acceptance transaction and status lookup. Current profile lookup does
-not supply this trust boundary. Integrate actual session/token identity before enabling these
-routes outside isolated development; when no trusted actor resolver is configured, fail closed.
-Tests may inject a deterministic actor. Do not put server provider keys into clients or mistake
-Tauri origin validation/CORS for owner authorization. Define CSRF protection if cookie sessions
-are selected. This plan does not relabel the existing login as authenticated.
+Reuse the existing HTTP bearer authentication boundary and `AuthenticatedUser`. Add an owner-only
+`Delete` capability that permits deletion of archived deals. Validate identifiers and prove initial
+access through the membership policy before product work. Repeat current-owner and deletion-barrier
+checks in the acceptance transaction because ownership may change after HTTP preflight. Neither
+`deals.user_id`, uploader attribution, nor a supplied `X-User-Id` grants deletion permission.
 
-## 5. Add deal identity to Helix safely
+Freeze membership changes, ownership transfer, and new notebook links after acceptance. Bind the
+receipt to the verified accepting actor so repeat DELETE and status polling remain authorized after
+memberships and the deal row are gone. Polling must still require a current valid session; a receipt
+is not a bearer credential. Other former members do not gain operation access from knowing its ID.
+For repeat DELETE, resolve an existing accepting-actor receipt before requiring a live deal
+membership; otherwise retries would fail after the deal is purged. Apply the same receipt policy
+at the HTTP boundary and in the transaction.
+Normal access for every member is denied while cleanup runs. Keep owner-only notebook privacy and
+existing session/stream revocation checks. Organization tenancy is outside this increment.
 
-1. Add `deal_id` to `FileNode`, `FileVersionNode`, `FileChunkNode`, prepared graph identities,
-   write parameters, projections, and decoded results. Populate it from the SQLite-validated
-   ingestion input, never a separately trusted client property. Enforce agreement across nodes.
-   Extend the existing `PreparedDocumentPersistence`/`PreparedDocumentGraph` identity checks and
-   `PersistedFileIdentity` contract as needed so the committed SQLite owner and retained graph plan
-   agree on the deal too. Update setup/chunk/publication builders together; none may publish an
-   old prepared request that bypasses the deletion fence. Include every added parameter/fence
-   clause in the existing exact serialized-size preflight before committing SQLite.
-2. Keep `workspace_id`, `file_id`, `version_id`, and deterministic chunk/version identities.
-   Deal identity is an ownership/scope property, not a replacement primary key. Never delete
-   by content hash: identical bytes can belong to another deal with a different logical file ID.
-3. Add suitable workspace/deal lookup indexes for all three node labels and include them in
-   index-readiness checks. Preserve existing vector/keyword index behavior.
-   Extend the current `DOCUMENT_INDEX_NAMES` receipt/readiness validation and its queued/running/
-   succeeded/blocked/aborted handling. DDL acceptance alone does not make a new index usable.
-4. Add an optional validated `dealId` filter to existing search requests. Workspace-wide search
-   remains supported; a scoped query must enforce both owner workspace and deal. Update Rust
-   DTOs, TypeScript contracts, web/desktop mappings, and tests together. Preserve current wire
-   casing for existing Helix result fields rather than silently renaming that contract.
-5. Roll out reader compatibility first, then writers that always supply deal identity. During
-   transition, tolerate a missing property only while resolving ownership from SQLite and never
-   trust missing/mismatched ownership for authorization or search visibility.
-6. With writers drained, backfill every existing node from `quarry_files` ownership, across all
-   versions/chunks, including nodes without published edges. Change properties in place; do not
-   regenerate embeddings or reset either database. Make the bounded backfill resumable and
-   idempotent, and verify workspace/file/deal consistency. Remove transitional tolerance after
-   verification. Keep the deletion feature disabled until backfill/validation completes.
-7. Reconcile graph nodes with no canonical file separately: they cannot be assigned a deal by
-   guessing from text/hash. Suppress them from search, report non-content counts, and investigate
-   the selected environment before any broader purge. The saved deletion manifest remains
-   sufficient to clean files removed by a registered operation.
+## 5. Preserve implemented graph scope and add deletion safety
 
-Use a deal predicate for normal cleanup, plus exact manifest-scoped file predicates for legacy or
-inconsistent projections. Verify every candidate belongs to the captured canonical file set before
-deleting; a bad `deal_id` property must not cause another deal's file to be removed. Detect and
-report unmatched/misowned graph records instead of calling the operation complete.
+1. Reuse current `deal_id`, `file_id`, `version_id`, generation, and deterministic chunk identities.
+   Document IDs are deal-scoped; migrated identities remain governed by canonical checkpoints.
+   No workspace property is required in current graph nodes. Never delete by creator, uploader,
+   content hash, or display name; identical bytes may belong to another deal.
+2. Extend `PreparedDocumentPersistence`/`PreparedDocumentGraph` so retained setup, every chunk
+   batch, and publication atomically reject the durable remote deal fence. Preserve agreement with
+   `PersistedFileIdentity`, canonical manifests, and accepted image checkpoints. Include all added
+   parameters and fence clauses in exact serialized-size preflight before SQLite commit.
+3. Reuse existing deal-scoped lookup/search queries and index-readiness checks. Verify scoped purge
+   predicates against the captured canonical file set. Add an index only if required by the purge
+   implementation, with readiness and upgrade tests; DDL acceptance alone is insufficient.
+4. Extend membership/access filtering with the deletion barrier in candidate preparation, current
+   identity refresh, and final result authorization, including cached hybrid work. Keep existing
+   scoped and global search contracts, bounds, and per-deal authorization; no new search DTO is
+   required just to introduce deletion.
+5. Require the existing completed document identity/graph-scope migration at startup. Do not repeat
+   the removed one-time migration or invent a backfill/reset for normal current stores. Audit partial,
+   unpublished, or inconsistent projections using exact file/version/generation manifests. Missing
+   or mismatched canonical ownership must suppress results and block unsafe cleanup, never trigger
+   a guessed assignment or deletion of another deal’s nodes.
+6. Prove remote fence ordering and bounded scoped purge in an explicitly disposable Helix instance
+   before enabling DELETE. The application mutex alone does not prove either guarantee.
+
+Use deal predicates plus exact deletion-manifest file identities to reach unpublished/partial
+records. Verify candidates against the canonical target set before removing them. Detect and
+report unmatched/misowned records instead of reporting completion. Preserve notebook and template
+namespaces and global indexes.
 
 ## 6. Durable workflow and concurrency
 
@@ -243,7 +247,9 @@ report unmatched/misowned graph records instead of calling the operation complet
 Add `deal_deletions` with a unique deal ID, owner, operation UUID, state/phase, attempts,
 retry scheduling, timestamps, and a sanitized error code. It must survive deletion of `deals`;
 do not give it a cascading foreign key to that row. Add bounded per-operation target rows for
-workspace/file identities and linked thread IDs, with no document or chat content.
+deal/file/version/generation identities, exact chunk IDs where needed, and linked thread IDs,
+with no document or chat content. These are independent snapshots, not foreign keys that cascade
+with canonical files or threads.
 
 Add a focused `domains/deals/deletion/` service/repository module, a narrow lifecycle gate exported
 by the deals domain for its consumers, and collaborator interfaces for documents/chat/cache cleanup. The deletion service
@@ -260,7 +266,8 @@ existing bound query builder/client and blocking work in its established async o
    barrier; all normal reads/writes consult it. Signal the worker after commit and return `202`.
    If signalling is lost, startup/periodic ledger scanning still discovers the work.
 2. **Stop producers.** Close admission for deal mutations, uploads, metadata extraction, chat
-   creation/runs, source previews, and graph publication. Cancel queued/provider work where safe;
+   creation/runs, membership/team changes, notebook create/relink operations, source previews,
+   and graph publication. Cancel queued/provider work where safe;
    wait for already issued side effects and blocking conversions to settle. Track jobs by deal and
    their real task lifetime, not just the request/stream lifetime. Do not hold a SQL transaction
    while waiting. Never assume dropping a future stops `spawn_blocking` or a remote write.
@@ -270,29 +277,34 @@ existing bound query builder/client and blocking work in its established async o
 3. **Drain and snapshot.** Acquire the exclusive per-deal lifecycle gate. Operations admitted
    earlier must hold a shared guard through persistence/publication, including spawned workers.
    Within a short SQLite transaction, recheck ownership/barrier, capture every file and linked
-   thread, and persist the complete manifest before deleting any canonical data. Snapshot all
-   files regardless of `deleted_at`, and include every version when checking counts/invariants.
+   thread across all actors, and persist the complete manifest before deleting canonical data.
+   Snapshot all files regardless of `deleted_at`, and include every version when checking counts/invariants.
 4. **Block late Helix writes.** Establish an idempotent, minimal Helix deal-deletion fence. Setup,
-   chunk insertion, and publication must atomically refuse a fenced workspace/deal in their
+   chunk insertion, and publication must atomically refuse a fenced deal in their
    server-side write transaction. Keep this control record separate from file/document nodes.
    Verify the pinned SDK/server can enforce the condition and ordering; application-only checks
    cannot prevent an already-sent remote request from arriving late. If this guarantee cannot be
    proven, leave the operation blocked rather than claim completion; resolving that mechanism
    is an implementation prerequisite. Never blindly retry a non-idempotent ingestion write.
 5. **Purge SQLite.** With producers drained and the manifest/fence durable, delete linked threads
-   by exact `deal_id` and then delete the owned deal in one transaction. Messages cascade from
-   threads; metadata/parties/scopes/files/versions/blobs cascade from the deal. Commit the phase
+   by exact `deal_id`, clear matching `notebooks.deal_id` links, and then delete the deal in one
+   transaction. Link detachment is an internal referential operation, not permission to read or
+   edit private note content. Serialize it with notebook create/relink operations and make those
+   transactions reject a deleting deal; a save-job checkpoint must not restore a stale link.
+   Messages cascade from threads; metadata/parties/scopes, membership/team/activity rows, and files/versions/blobs plus
+   content claims/identity/image checkpoints cascade from the deal. Commit the phase
    checkpoint atomically with that deletion. Keep foreign keys enabled. Verify parent-message
    constraints using branching chat histories; diagnose inconsistent cross-thread references
    rather than deleting unrelated threads to bypass a constraint.
 6. **Purge Helix.** In bounded, repeatable writes, delete chunks, versions, files, and their edges
-   by validated workspace/deal ownership and manifest file identities. Property predicates must
+   by validated deal ownership and manifest file identities. Property predicates must
    reach orphaned/unpublished versions/chunks without traversing only CURRENT_VERSION edges.
    Treat already-absent records as success, preserve global indexes, and respect the existing
    2 MiB request cap. Checkpoint batches so a large deal does not require one request-sized purge.
 7. **Evict and verify.** Purge retained job events/results and server previews; terminate linked
-   streams. Verify no canonical children, graph nodes/edges, keyword/vector hits, or active
-   producers remain. Verify both deal predicates and manifest identities. Filter every search
+   streams. Verify no canonical deal children, notebook deal links, document graph nodes/edges,
+   keyword/vector hits, or active deal producers remain. Preserved personal notebook save workers
+   may continue without reattaching the deleted deal. Verify both deal predicates and manifest identities. Filter every search
    hit against canonical live ownership throughout cleanup, even if Helix is down.
 8. **Complete.** Mark completed only after verification. Remove temporary manifests once their
    recovery duty ends, retaining only the minimal receipt and durable late-write fence. Preserve
@@ -333,24 +345,22 @@ Never silently broaden the existing process-local coordination guarantee.
 
 | Phase | Work and primary anchors | Exit criterion |
 | --- | --- | --- |
-| 0. Archive verification/integration | Existing archive route/service/repository, `QuarryApi.archiveDeal`, HTTP/Tauri adapters, workspace resource invalidation if a consumer is included. | Idempotent timestamps, retained data, list omission/direct lookup, safe failures, and explicit authorization/deletion-barrier gaps are verified; no archive migration or Helix worker. |
-| 1. Contracts and proof | Deletion DTOs/access policy; disposable Helix tests for scoped drops, edge/index cleanup, and atomic late-write fences; existing timeout/error mapping. | Accepted/completed semantics, trusted-actor integration, and the remote fence mechanism are explicit and testable. |
+| 0. Archive verification/integration | Existing archive route/service/repository, `QuarryApi.archiveDeal`, HTTP/Tauri adapters, workspace resource invalidation if a consumer is included. | Idempotent timestamps, retained data, list omission/direct lookup, safe failures, and existing owner authorization and future deletion-barrier integration are verified; no archive migration or Helix worker. |
+| 1. Contracts and proof | Deletion DTOs/access policy; disposable Helix tests for scoped drops, edge/index cleanup, and atomic late-write fences; existing timeout/error mapping. | Accepted/completed semantics, existing authenticated-owner policy integration, and the remote fence mechanism are explicit and testable. |
 | 2. Additive persistence | [migrations](../backend/src/app/migrations.rs), [SQLite query/client](../backend/src/adapters/sqlite/client.rs), deletion repository, recovery tests. | Ledger/barrier/manifest survive rollback and restart without discarding existing application records. |
-| 3. Helix ownership | [models](../backend/src/domains/documents/graph/model.rs), [writer](../backend/src/domains/documents/graph/writer.rs), [queries](../backend/src/domains/documents/graph/query.rs), [repository](../backend/src/domains/documents/graph/repository.rs), immutable ingestion identity/preflight, bounded backfill tooling. | Prepared and committed identities agree on deal ownership; all retained document nodes have validated deal identity; lookup/search filters, DDL readiness, and fences work. |
-| 4. Runtime safety | Ingestion [service](../backend/src/domains/documents/ingestion/service.rs)/jobs, [chat service](../backend/src/domains/assistant/chat/service.rs)/repository, [Data Room](../backend/src/domains/data_rooms/service.rs), document viewing/search, metadata extraction. | In-flight work cannot recreate or return deleted data; missing/deleting deals cannot resolve source-root fallback. |
+| 3. Helix ownership | [models](../backend/src/domains/documents/graph/model.rs), [writer](../backend/src/domains/documents/graph/writer.rs), [queries](../backend/src/domains/documents/graph/query.rs), [repository](../backend/src/domains/documents/graph/repository.rs), immutable ingestion identity/preflight, existing identity checkpoints and scoped cleanup. | Prepared and committed identities agree on deal ownership; existing deal identity/checkpoints remain valid; deletion-aware filters, any required DDL readiness, and fences work. |
+| 4. Runtime safety | Ingestion [service](../backend/src/domains/documents/ingestion/service.rs)/jobs, [chat service](../backend/src/domains/assistant/chat/service.rs)/repository, [Data Room](../backend/src/domains/data_rooms/service.rs), document viewing/search, metadata extraction, memberships and notebook-link transactions. | In-flight work cannot recreate or return deleted data; missing/deleting deals cannot resolve source-root fallback. |
 | 5. Orchestration/API | Deletion module, [deal handlers/routes](../backend/src/domains/deals/route.rs), [bootstrap](../backend/src/app/bootstrap.rs), service errors and operation lookup. | DELETE is idempotent, status is owner-scoped, and restart recovery converges across stores. |
 | 6. Shared clients | [QuarryApi](../frontend/src/contracts/quarryApi.ts), HTTP/Tauri adapters, native JSON DELETE transport, runtime.desktop, adapter/native tests. | Both distributions can receive acceptance, poll status, and distinguish pending cleanup from completion. |
 | 7. Consumer lifecycle/docs | Workspace removal/invalidation, chat/document cache hooks, architecture and a scoped deletion/recovery design record. | Stale requests cannot repopulate a deleted deal, and operational limits are documented. |
 
-For phase 2, start from the current **schema marker 10** and propose the next unused marker
-(reconfirm it at implementation time), adding only deletion ledger/target structures. Preserve
-the existing additive schema-9 template upgrade, fresh-schema definition, and schema validation;
-test every supported upgrade path to the new marker transactionally. Archive needs no schema
-change. Document/test the new targeted upgrade without inventing a general historical conversion
-ladder. Older or unknown layouts still fail safely. Never use `reset_development`, edit local
-databases, or reuse an earlier plan's reset authorization as an implementation shortcut.
-Reconfirm the marker and constraints if another feature migration lands first; the separate
-Notebook/status plans are not evidence that a newer marker already exists.
+For phase 2, start from **schema marker 17**; reserve the next unused marker (provisionally 18)
+only after reconfirming concurrent migrations. Add the ledger/targets and any required constraints
+without dropping canonical data. Preserve fresh-schema validation and all supported validated
+12/13/14/15/16/17 upgrade paths, including notebooks, membership/file scope, image recovery,
+classification leases, and private template ownership. Test each path transactionally and retain
+unsupported/damaged-schema rejection. No archive migration or general graph backfill is needed.
+Never run `reset_development`, `clear_helix`, or edit local databases for this implementation.
 
 For phase 6, preserve `delete(path): Promise<void>` and existing 204-only callers. Add a separate
 typed JSON DELETE operation that handles `202` and a completed `204` deliberately; update its
@@ -376,22 +386,27 @@ Add tests that exercise failure boundaries and ownership, not just generated SQL
   [HTTP suite](../backend/tests/integration/http_tests.rs), and
   [migration retention tests](../backend/tests/integration/app/migrations_tests.rs) rather than
   claiming there is no coverage. Verify encoded IDs, `200` JSON mapping, and errors in both client
-  adapters. Test trusted-actor checks and archive/delete ordering when those prerequisites land.
+  adapters. Retain authenticated owner/non-owner coverage and add archive/delete ordering when
+  deletion lands.
   If a consumer is added, verify shared list/count/sidebar invalidation, retained failure state,
   and stale-response handling. No live Helix/provider integration is needed for archive-only work.
 - SQL aggregate deletion: populated metadata/roles/scopes; several files and versions, old/soft-
-  deleted files; regular/archived linked chats with branching messages. All children disappear
+  deleted files; content/identity/image checkpoints; membership/team/activity rows; regular/archived
+  linked chats across users with branching messages; private notebooks with accepted save jobs.
+  Deal children disappear and notebook links clear while private contents/jobs/projections survive
   atomically; foreign-key checks stay clean. Inject a transaction failure and verify rollback.
-- Isolation: shared companies, same bytes attached to a second deal, another owner's files/chats,
-  and freeform threads survive. Unmatched graph ownership blocks unsafe cleanup.
+- Isolation: shared companies, same bytes attached to a second deal, other deals’ files/chats, private notebook contents,
+  private templates, and freeform threads survive. Linked chats from other members are deleted
+  without exposing them to the accepting owner. Unmatched graph ownership blocks unsafe cleanup.
 - Helix: current/historical/partial/orphaned nodes and embeddings disappear; unrelated nodes and
   global indexes remain. Delete replay is safe. Verify actual keyword/vector results and late
   write-fence behavior against an explicitly selected disposable Helix runtime.
-- Backfill: repeated batches, missing properties, inconsistent identities, interrupted progress,
-  and absent canonical mappings. No embedding re-generation or global graph reset.
+- Graph-scope readiness: existing migration checkpoints, inconsistent identities, missing
+  canonical mappings, and partial graph writes. No embedding regeneration or global graph reset.
 - Races: delete versus upload SQLite commit, setup/chunk/publish, queued jobs, metadata extraction,
   streamed chat completion, Office preview, search response, update/archive, new linked thread,
-  concurrent DELETE, and attempted deal-ID reuse. Use controlled barriers instead of timing sleeps.
+  membership removal/transfer, notebook create/relink/save, concurrent DELETE, and attempted deal-ID
+  reuse. Use controlled barriers instead of timing sleeps.
   Explicitly pause an immutable prepared graph before SQLite commit, after commit, and while
   queued behind the Helix write lock. Prove none can publish after the deletion fence. Extend
   [ingestion persistence tests](../backend/tests/integration/domains/documents/ingestion/persistence_tests.rs)
@@ -402,13 +417,15 @@ Add tests that exercise failure boundaries and ownership, not just generated SQL
 - Recovery: crash after acceptance, manifest commit, fence creation, SQLite purge, each Helix batch,
   remote success before checkpoint, cache eviction, and completion. Recover after restart and
   outage; never lose an accepted operation or report success with remaining content.
-- HTTP/access: malformed IDs, missing actor, non-owner, archived deal, repeated request, status
+- HTTP/access: malformed IDs, missing/revoked actor, each non-owner role, ownership transfer,
+  archived deal, repeated request, accepting-actor receipt privacy, status
   lookup after deal deletion, safe errors, and root-fallback rejection. Both `/api/v1` and the
   existing compatibility mount behave intentionally; new clients use only `/api/v1`.
 - Adapters/native: encoded IDs, `202` JSON, `204` without JSON parsing, polling errors, cancellation
   of local polling without cancelling deletion, and unchanged thread/template DELETE semantics.
 - Client hooks: stale portfolio/chat/document requests cannot restore deleted state; cleanup is
-  scoped to the correct deal and server/demo data remains distinct. A UI consumer, if added,
+  scoped to the correct deal and server/demo data remains distinct. Notebook catalogs must
+  revalidate detached links without discarding private edit buffers or exposing them to other users. A UI consumer, if added,
   also gets keyboard/focus, loading/error/retry, viewport, and theme inspection.
 
 Include new backend test modules through the crate's existing `#[path]` inclusion pattern;
@@ -459,17 +476,15 @@ document projections, or active producers; pending operations survive restart an
 inaccessible; unrelated/shared data survives; both client runtimes honor the same contract; and
 the architecture and deletion/recovery record match tested behavior.
 
-## 9. Architecture impact of this planning change
+## 9. Implementation architecture impact
 
-No implemented route, runtime boundary, schema, or behavior changes in this commit/task.
-The architecture was rechecked against the code; no architecture edit is needed for the plan.
-During implementation, document any archive authorization, lifecycle, or consumer behavior changes;
-the existing archive endpoint is already documented. Update the canonical API table, state ownership, schema/migration policy,
-Helix shape/backfill, cross-store recovery, jobs/caches, identity limitations, and deletion
-operations sections. Record the new permanent-deletion and control-record retention decisions
-in a scoped document under `docs/`; do not make this `plans/` document a current product contract.
-The architecture already documents the graph rename, immutable ingestion request preflight,
-and SDK v3 error/durability behavior, so this review updates the plan to match rather than
-changing canonical runtime documentation. `docs/DOMAIN_MODEL.md` still contains an older claim
-that archiving sets status to Archived; code and `ARCHITECTURE.md` instead preserve status and
-set `archivedAt`. Correct that existing drift during archive/deletion implementation.
+`docs/ARCHITECTURE.md` now describes schema 18, the deletion routes and worker, the remote control
+namespace, single-writer enforcement, private notebook detachment, and client invalidation.
+[Permanent deletion and recovery](../docs/deal-permanent-deletion.md) records the API, retained data,
+batching, rollout, failure/retry, backup and rollback contracts. The root agent guide's current
+schema references were advanced to 18. No feature-specific local skill copies were introduced.
+
+Verification uses the gates in section 8, including explicitly disposable Helix tests for prepared
+late writes, current/historical graph/search cleanup and restart recovery. A visible Delete action
+remains a separate consumer increment. Accepted deletion never promises erasure of existing
+provider, backup, exported or offline copies.

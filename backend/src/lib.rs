@@ -74,3 +74,7 @@ mod shared_document_search_tests;
 #[cfg(test)]
 #[path = "../tests/integration/slide_templates/user_scope_tests.rs"]
 mod slide_templates_user_scope_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/deal_deletion_http_tests.rs"]
+mod deal_deletion_http_tests;

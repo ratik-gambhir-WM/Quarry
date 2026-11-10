@@ -69,6 +69,8 @@ pub enum BootstrapError {
     SqliteDirectory(std::io::Error),
     #[error("failed to open SQLite database: {0}")]
     SqliteOpen(SqliteClientError),
+    #[error("another Quarry writer is active or the writer lease is unavailable")]
+    WriterLease(std::io::Error),
     #[error("SQLite initialization worker failed: {0}")]
     SqliteWorker(tokio::task::JoinError),
     #[error("failed to migrate SQLite database: {0}")]
@@ -88,10 +90,12 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         PromptCatalog::load(&config.prompts.directory).map_err(BootstrapError::PromptCatalog)?,
     );
     let path = config.sqlite.path.clone();
-    let sqlite = tokio::task::spawn_blocking(move || {
+    let (sqlite, writer_lease) = tokio::task::spawn_blocking(move || {
         let sqlite = open_sqlite(&path)?;
+        let lease = acquire_writer_lease(&path)?;
+        let sqlite = sqlite.with_writer_lease(lease.clone());
         migrations::migrate(&sqlite).map_err(BootstrapError::Migration)?;
-        Ok::<_, BootstrapError>(sqlite)
+        Ok::<_, BootstrapError>((sqlite, lease))
     })
     .await
     .map_err(BootstrapError::SqliteWorker)??;
@@ -139,7 +143,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         embedded.clone(),
     );
     let bind_address = config.http.bind_address;
-    let router = create_router(api, &config.http);
+    let router = create_router(api, &config.http).layer(axum::Extension(writer_lease));
     Ok(Application {
         router,
         bind_address,
@@ -181,7 +185,7 @@ pub(crate) fn assemble_api_with_templates(
     let notebooks = NotebookService::new(
         NotebookRepository::new(sqlite.clone()),
         Arc::new(NotebookPipeline::new(
-            document_graph,
+            document_graph.clone(),
             openai.clone(),
             config.helix.vector_dimension,
             config
@@ -241,23 +245,26 @@ pub(crate) fn assemble_api_with_templates(
             .unwrap_or_else(|| "gpt-5.5".into()),
         prompts.clone(),
     ));
-    let document_ingestion = Arc::new(DocumentIngestionService::new(
-        document_files.clone(),
-        document_graph_reader,
-        document_graph_writer,
-        openai.clone(),
-        config
-            .openai
-            .as_ref()
-            .map(|config| config.embedding_model.clone())
-            .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
-        config
-            .openai
-            .as_ref()
-            .map(|config| config.image_description_model.clone())
-            .unwrap_or_else(|| DEFAULT_IMAGE_DESCRIPTION_MODEL.to_string()),
-        config.documents.max_concurrent_documents,
-    ));
+    let document_ingestion = Arc::new(
+        DocumentIngestionService::new(
+            document_files.clone(),
+            document_graph_reader,
+            document_graph_writer.clone(),
+            openai.clone(),
+            config
+                .openai
+                .as_ref()
+                .map(|config| config.embedding_model.clone())
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
+            config
+                .openai
+                .as_ref()
+                .map(|config| config.image_description_model.clone())
+                .unwrap_or_else(|| DEFAULT_IMAGE_DESCRIPTION_MODEL.to_string()),
+            config.documents.max_concurrent_documents,
+        )
+        .with_lifecycle(memberships.lifecycle().clone()),
+    );
     let document_jobs = Arc::new(DocumentJobService::new(
         document_ingestion.clone(),
         config.documents.completed_job_retention,
@@ -303,9 +310,18 @@ pub(crate) fn assemble_api_with_templates(
             prompts,
         )
         .with_deal_context(deal_context)
-        .with_documents(stored_documents.clone()),
+        .with_documents(stored_documents.clone())
+        .with_lifecycle(memberships.lifecycle().clone()),
     );
 
+    let deletions = deals::deletion::service::DealDeletionService::new(
+        deals::deletion::DeletionRepository::new(sqlite.clone()),
+        document_graph_writer,
+        memberships.lifecycle().clone(),
+        document_jobs.clone(),
+        stored_documents.clone(),
+    );
+    deletions.start();
     let native_routes = embedded
         .map(templates::slide_templates::route::routes)
         .unwrap_or_default();
@@ -313,6 +329,7 @@ pub(crate) fn assemble_api_with_templates(
         .merge(identity::route::protected(identity.clone()))
         .merge(native_routes)
         .merge(deals::route::routes(deals))
+        .merge(deals::deletion::route::routes(deletions))
         .merge(crate::domains::memberships::route::routes(memberships))
         .merge(companies::route::routes(companies))
         .merge(notebooks::route::routes(notebooks))
@@ -335,6 +352,21 @@ pub(crate) fn assemble_api_with_templates(
         .merge(protected)
         .merge(system::route::routes())
         .merge(identity::route::public(identity))
+}
+
+fn acquire_writer_lease(path: &Path) -> Result<Arc<fs::File>, BootstrapError> {
+    let canonical = fs::canonicalize(path).map_err(BootstrapError::WriterLease)?;
+    let lease = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(canonical.with_added_extension("writer-lock"))
+        .map_err(BootstrapError::WriterLease)?;
+    lease
+        .try_lock()
+        .map_err(|error| BootstrapError::WriterLease(error.into()))?;
+    Ok(Arc::new(lease))
 }
 
 fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {

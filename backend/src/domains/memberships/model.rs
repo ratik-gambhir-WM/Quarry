@@ -27,6 +27,7 @@ pub enum Capability {
     ManageMembers,
     Transfer,
     Archive,
+    Delete,
     LocalSource,
     RemoveMember,
     Leave,
@@ -82,6 +83,7 @@ impl DealAccess {
 
     pub fn permits(&self, capability: Capability) -> bool {
         match capability {
+            Capability::Delete => self.role == DealRole::Owner,
             Capability::Read => true,
             Capability::Upload => self.capabilities.upload,
             Capability::Edit => self.capabilities.edit,

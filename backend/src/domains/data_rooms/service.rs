@@ -1,3 +1,4 @@
+use crate::domains::deals::deletion::lifecycle::DealAdmission;
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose, Engine as _};
@@ -54,7 +55,11 @@ impl DataRoomService {
         }
     }
 
-    pub async fn list(&self, deal_id: String) -> ServiceResult<DealDataRoom> {
+    pub async fn list(
+        &self,
+        deal_id: String,
+        admission: Option<DealAdmission>,
+    ) -> ServiceResult<DealDataRoom> {
         let Some(configured_root) = self.deal_data_room_root(&deal_id).await? else {
             return Ok(DealDataRoom {
                 deal_id,
@@ -64,6 +69,7 @@ impl DataRoomService {
             });
         };
         tokio::task::spawn_blocking(move || {
+            let _admission = admission;
             let root = canonicalize_data_room_root(configured_root)?;
             let root_name = root
                 .file_name()
@@ -87,11 +93,13 @@ impl DataRoomService {
         &self,
         deal_id: &str,
         relative_path: &str,
+        admission: Option<DealAdmission>,
     ) -> ServiceResult<DocumentPreview> {
         let root = self.canonical_deal_root(deal_id).await?;
         let relative_path = relative_path.to_string();
         let office = self.office.clone();
         tokio::task::spawn_blocking(move || {
+            let _admission = admission;
             let file_path = resolve_relative_file(&root, &relative_path)?;
             let file_name = file_path
                 .file_name()

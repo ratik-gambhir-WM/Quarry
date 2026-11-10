@@ -1,3 +1,4 @@
+import { isDealDeleted, subscribeDealDeletion } from "../data/dealDeletion/lifecycle";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import type { DataRoomTreeNode } from "../data/dataRoom";
@@ -48,7 +49,9 @@ class DocumentSession {
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
+    const stop = subscribeDealDeletion((id) => { if (id === this.dealId) { this.release(); this.publish({ status: "closed" }); } });
     return () => {
+      stop();
       this.listeners.delete(listener);
     };
   };
@@ -77,6 +80,7 @@ class DocumentSession {
   }
 
   selectDocument = async (document: DataRoomTreeNode) => {
+    if (isDealDeleted(this.dealId)) return;
     const current = this.snapshot.state;
     if (
       current.status === "open" &&

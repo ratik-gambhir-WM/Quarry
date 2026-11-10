@@ -27,6 +27,9 @@ pub struct DocumentJobService {
 }
 
 impl DocumentJobService {
+    pub(crate) async fn evict_deal(&self, deal: &str) {
+        self.jobs.write().await.retain(|_, (id, _, _)| id != deal);
+    }
     pub fn new(ingestion: Arc<DocumentIngestionService>, completed_retention: Duration) -> Self {
         Self {
             ingestion,
@@ -41,6 +44,7 @@ impl DocumentJobService {
         user_id: i64,
         file: UploadedDocument,
     ) -> ServiceResult<StartedDocumentJob> {
+        let _registration = self.ingestion.admit_deal(&deal_id).await;
         self.ingestion.authorize_upload(&deal_id, user_id).await?;
         let filename = file.filename.clone();
         let job_id = Uuid::new_v4().to_string();

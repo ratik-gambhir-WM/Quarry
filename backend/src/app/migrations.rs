@@ -2,7 +2,7 @@
 use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 17;
+const LATEST_SCHEMA_VERSION: i64 = 18;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error(transparent)]
@@ -37,7 +37,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         transaction.execute_batch(TEMPLATE_SCHEMA)?;
         transaction.execute_batch(NOTEBOOK_SCHEMA)?;
     } else {
-        if ![12, 13, 14, 15, 16, LATEST_SCHEMA_VERSION].contains(&version) {
+        if ![12, 13, 14, 15, 16, 17, LATEST_SCHEMA_VERSION].contains(&version) {
             return Err(MigrationError::UnsupportedSchemaVersion {
                 found: version,
                 supported: LATEST_SCHEMA_VERSION,
@@ -106,6 +106,22 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
         )?;
         transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
     }
+    if version < 18 {
+        validate_owned_schema(
+            &transaction,
+            &[
+                SCHEMA,
+                TEMPLATE_SCHEMA,
+                NOTEBOOK_SCHEMA,
+                MEMBERSHIP_SCHEMA,
+                DOCUMENT_SCOPE_UPGRADE,
+                IMAGE_RECOVERY_SCHEMA,
+                CLASSIFICATION_STATUS_UPGRADE,
+                TEMPLATE_OWNERSHIP_UPGRADE,
+            ],
+        )?;
+        transaction.execute_batch(DELETION_SCHEMA)?;
+    }
     validate_template_schema(&transaction, false)?;
     validate_owned_schema(
         &transaction,
@@ -118,6 +134,7 @@ fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationErro
             IMAGE_RECOVERY_SCHEMA,
             CLASSIFICATION_STATUS_UPGRADE,
             TEMPLATE_OWNERSHIP_UPGRADE,
+            DELETION_SCHEMA,
         ],
     )?;
     let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
@@ -226,6 +243,9 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
              DROP TABLE IF EXISTS template_previews;
              DROP TABLE IF EXISTS template_metadata;
              DROP TABLE IF EXISTS templates;
+             DROP TABLE IF EXISTS deal_deletion_threads;
+             DROP TABLE IF EXISTS deal_deletion_files;
+             DROP TABLE IF EXISTS deal_deletions;
              DROP TABLE IF EXISTS assistant_messages;
              DROP TABLE IF EXISTS assistant_threads;
              DROP TABLE IF EXISTS quarry_file_blobs;
@@ -249,6 +269,7 @@ fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
         transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
         transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
         transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
+        transaction.execute_batch(DELETION_SCHEMA)?;
         check_foreign_keys(&transaction)?;
         transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -775,4 +796,32 @@ UPDATE template_classification_status SET status = 'pending', attempt_count = 0,
 const TEMPLATE_OWNERSHIP_UPGRADE: &str = r#"
 ALTER TABLE templates ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
 CREATE INDEX templates_owner_user_id_idx ON templates(owner_user_id, template_id);
+"#;
+
+const DELETION_SCHEMA: &str = r#"
+CREATE TABLE deal_deletions (
+    deletion_id TEXT PRIMARY KEY NOT NULL,
+    deal_id TEXT NOT NULL UNIQUE,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK(status IN ('pending','running','retrying','blocked','completed')),
+    phase TEXT NOT NULL CHECK(phase IN ('draining','fencing','sqlite','graph','verifying','completed')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+    next_attempt INTEGER NOT NULL DEFAULT 0,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX idx_deal_deletions_pending ON deal_deletions(status,next_attempt);
+CREATE TABLE deal_deletion_files (
+    deletion_id TEXT NOT NULL REFERENCES deal_deletions(deletion_id) ON DELETE CASCADE,
+    file_id TEXT NOT NULL,
+    purged INTEGER NOT NULL DEFAULT 0 CHECK(purged IN (0,1)),
+    PRIMARY KEY(deletion_id,file_id)
+);
+CREATE TABLE deal_deletion_threads (
+    deletion_id TEXT NOT NULL REFERENCES deal_deletions(deletion_id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL,
+    PRIMARY KEY(deletion_id,thread_id)
+);
 "#;

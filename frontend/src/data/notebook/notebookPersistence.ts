@@ -1,3 +1,4 @@
+import { isDealDeleted, subscribeDealDeletion } from "../dealDeletion/lifecycle";
 import type {
   NotebookApi,
   Notebook,
@@ -265,7 +266,7 @@ export function createNotebookPersistence(
           for (let offset = 0; ; offset += 100) {
             const page = await api.listNotebooks({ limit: 100, offset });
             if (!active) return;
-            notebooks.push(...page.notebooks);
+            notebooks.push(...page.notebooks.map((book) => book.dealId && isDealDeleted(book.dealId) ? { ...book, dealId: null } : book));
             if (!page.hasMore) break;
             if (offset >= 100000)
               throw new Error("Too many notebooks to load.");
@@ -473,8 +474,12 @@ export function createNotebookPersistence(
       listeners.forEach((listener) => listener());
       listeners.clear();
       unwatch();
+      stopDeletion();
     },
   };
+  const stopDeletion = subscribeDealDeletion((id) => {
+    publish({ notebooks: state.notebooks.map((book) => book.dealId === id ? { ...book, dealId: null } : book) });
+  });
   const unwatch = sessionStore.subscribe(() => {
     if (sessionStore.getSnapshot().generation !== generation) store.dispose();
   });

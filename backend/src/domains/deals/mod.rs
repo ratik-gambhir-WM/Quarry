@@ -1,3 +1,4 @@
+pub(crate) mod deletion;
 pub(crate) mod extraction_handler;
 pub(crate) mod handler;
 pub(crate) mod model;
@@ -21,11 +22,7 @@ impl DataRoomSourceReader {
         &self,
         deal_id: String,
     ) -> Result<Option<String>, crate::shared::error::ServiceError> {
-        Ok(self
-            .repository
-            .metadata(deal_id)
-            .await?
-            .and_then(|metadata| metadata.local_path))
+        Ok(self.repository.local_source_root(deal_id).await?)
     }
 }
 
@@ -37,6 +34,14 @@ pub struct DealContextReader {
 impl DealContextReader {
     pub(crate) fn new(repository: DealRepository) -> Self {
         Self { repository }
+    }
+    pub(crate) async fn ensure_live(
+        &self,
+        id: &str,
+        actor: i64,
+    ) -> crate::shared::error::ServiceResult<()> {
+        self.repository.access(id.to_string(), actor).await?;
+        Ok(())
     }
     pub async fn read(&self, id: &str, owner: i64) -> crate::shared::error::ServiceResult<String> {
         use crate::shared::error::ServiceError;

@@ -1,5 +1,6 @@
+import { acceptDealDeletion } from "../../data/dealDeletion/lifecycle";
 import type { DealFields } from "../../data/dealModel";
-import type { PersistedDeal, QuarryApi } from "../../contracts/quarryApi";
+import type { DealDeletion, PersistedDeal, QuarryApi } from "../../contracts/quarryApi";
 import type {
   SaveDealInput,
   SaveDealMetadataInput,
@@ -8,7 +9,7 @@ import type {
   SavedDeal,
 } from "../../data/dealExtraction";
 
-import { get, post, postForm, appendFiles } from "./transport";
+import { get, post, postForm, appendFiles, requestJson } from "./transport";
 
 function createDeal(input: SaveDealInput) {
   return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
@@ -61,6 +62,8 @@ export const httpDealsApi: Pick<
   | "listDeals"
   | "getDeal"
   | "archiveDeal"
+  | "deleteDeal"
+  | "getDealDeletion"
 > = {
   createDeal,
   updateDeal,
@@ -68,4 +71,6 @@ export const httpDealsApi: Pick<
   listDeals,
   getDeal,
   archiveDeal,
+  deleteDeal: (id) => acceptDealDeletion(id, async () => (await requestJson<DealDeletion | undefined>(`/api/v1/deals/${encodeURIComponent(id)}`, { method: "DELETE" }, undefined, false, [202, 204])) ?? null),
+  getDealDeletion: (id) => requestJson<DealDeletion>(`/api/v1/deal-deletions/${encodeURIComponent(id)}`, { cache: "no-store" }, undefined, false, [200]),
 };

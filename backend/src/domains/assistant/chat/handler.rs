@@ -239,7 +239,12 @@ pub(super) async fn run_thread_handler(
     let started_at = std::time::Instant::now();
     let http_request_id = request_id(&headers);
     tracing::info!(request_id = %http_request_id, thread_id = %thread_id, route = "/assistant/threads/{thread_id}/runs", "assistant persisted request received");
-    let input = match collect_persistent_query_upload(multipart, thread_id, actor.user.email).await
+    let input = match collect_persistent_query_upload(
+        multipart,
+        thread_id.clone(),
+        actor.user.email,
+    )
+    .await
     {
         Ok(input) => input,
         Err(error) => {
@@ -256,7 +261,12 @@ pub(super) async fn run_thread_handler(
         }
     };
     tracing::info!(request_id = %http_request_id, elapsed_ms = started_at.elapsed().as_millis(), "assistant persisted stream opened");
-    Ok(query_sse(receiver))
+    Ok(query_sse(
+        receiver,
+        state.assistant_chat,
+        actor.user.id,
+        thread_id,
+    ))
 }
 
 fn request_id(headers: &HeaderMap) -> String {
@@ -269,24 +279,34 @@ fn request_id(headers: &HeaderMap) -> String {
 
 fn query_sse(
     receiver: tokio::sync::mpsc::Receiver<super::model::SendQueryEvent>,
+    service: Arc<AssistantChatService>,
+    actor: i64,
+    thread: String,
 ) -> (
     HeaderMap,
     Sse<impl Stream<Item = Result<Event, Infallible>>>,
 ) {
-    let events = stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|event| {
-            tracing::debug!(event = event.event_name(), "assistant SSE event emitted");
-            let encoded = Event::default()
-                .event(event.event_name())
-                .json_data(&event)
-                .unwrap_or_else(|_| {
-                    Event::default()
-                        .event("failed")
-                        .data(r#"{"type":"failed","error":"query generation failed"}"#)
-                });
-            (Ok(encoded), receiver)
-        })
-    });
+    let events = stream::unfold(
+        (receiver, service, thread),
+        move |(mut receiver, service, thread)| async move {
+            let event = receiver.recv().await?;
+            if !service.stream_is_live(actor, thread.clone()).await {
+                return None;
+            }
+            Some({
+                tracing::debug!(event = event.event_name(), "assistant SSE event emitted");
+                let encoded = Event::default()
+                    .event(event.event_name())
+                    .json_data(&event)
+                    .unwrap_or_else(|_| {
+                        Event::default()
+                            .event("failed")
+                            .data(r#"{"type":"failed","error":"query generation failed"}"#)
+                    });
+                (Ok(encoded), (receiver, service, thread))
+            })
+        },
+    );
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CACHE_CONTROL,

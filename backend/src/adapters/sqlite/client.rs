@@ -214,6 +214,8 @@ pub struct SqliteClient {
     readers: Option<Arc<ReadPool>>,
     writer: Arc<Mutex<Connection>>,
     path: Arc<PathBuf>,
+    // Keep the process writer lease until detached workers and blocking DB tasks release it.
+    _writer_lease: Option<Arc<std::fs::File>>,
 }
 
 impl SqliteClient {
@@ -245,7 +247,13 @@ impl SqliteClient {
             readers,
             writer: Arc::new(Mutex::new(connection)),
             path: Arc::new(path.into()),
+            _writer_lease: None,
         })
+    }
+
+    pub(crate) fn with_writer_lease(mut self, lease: Arc<std::fs::File>) -> Self {
+        self._writer_lease = Some(lease);
+        self
     }
 
     pub fn path(&self) -> &Path {

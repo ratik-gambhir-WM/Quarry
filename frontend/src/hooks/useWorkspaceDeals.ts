@@ -1,3 +1,4 @@
+import { isDealDeleted, subscribeDealDeletion } from "../data/dealDeletion/lifecycle";
 import type { Company } from "../data/dealModel";
 import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
@@ -48,7 +49,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
     for (const listener of listeners) listener();
   };
   const cache = (deal: WorkspaceDeal) => {
-    if (forgotten.has(deal.room.id)) return;
+    if (forgotten.has(deal.room.id) || isDealDeleted(deal.room.id)) return;
     if (pendingLoad) writesDuringLoad.set(deal.room.id, deal);
     const existing = resource.status === "success" ? resource.deals : [];
     const previous = existing.find((d) => d.room.id === deal.room.id);
@@ -110,6 +111,7 @@ function createDealsStore(dataSourceValue: string | undefined) {
         if (request !== generation) return;
         pendingLoad = false;
         const authorized = next.deals.filter((deal) => {
+          if (next.source === "server" && isDealDeleted(deal.room.id)) return false;
           const revision = revoked.get(deal.room.id);
           if (
             revision !== undefined &&
@@ -140,8 +142,8 @@ function createDealsStore(dataSourceValue: string | undefined) {
           });
       });
   };
-  return {
-    forget: (id: string) => {
+  let stopDeletion: (() => void) | undefined;
+  const forget = (id: string) => {
       revoked.set(id, ++revocationRevision);
       forgotten.add(id);
       writesDuringLoad.delete(id);
@@ -150,15 +152,17 @@ function createDealsStore(dataSourceValue: string | undefined) {
           ...resource,
           deals: resource.deals.filter((d) => d.room.id !== id),
         });
-    },
+  };
+  return {
+    forget,
     load,
     getSnapshot: () => resource,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
-      if (listeners.size === 1) load();
+      if (listeners.size === 1) { stopDeletion = subscribeDealDeletion(forget); load(); }
       return () => {
         listeners.delete(listener);
-        if (listeners.size === 0) generation++;
+        if (listeners.size === 0) { generation++; stopDeletion?.(); }
       };
     },
     saveCompany: (company: Company) => {
@@ -168,9 +172,10 @@ function createDealsStore(dataSourceValue: string | undefined) {
       publish({ ...resource, deals: updated });
     },
     loadDeal: async (id: string) => {
+      if (isDealDeleted(id)) throw new Error("This deal is unavailable while permanent deletion is processed.");
       const revision = revoked.get(id);
       const aggregate = await runtime.api.getDeal(id);
-      if (revoked.get(id) !== revision) {
+      if (revoked.get(id) !== revision || isDealDeleted(id)) {
         throw new Error("Deal access changed. Try again.");
       }
       // Keep revocation revisions even after access is restored so older requests

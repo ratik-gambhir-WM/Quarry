@@ -108,6 +108,15 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         .await
         .unwrap();
     sqlite.with_connection(|c| c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now')", [user.id])).unwrap();
+    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [user.id])).unwrap();
+    sqlite
+        .with_connection(|c| {
+            c.execute(
+                "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",
+                [],
+            )
+        })
+        .unwrap();
     let repository = AssistantChatRepository::new(sqlite.clone());
     repository
         .create_thread(user.id, "thread-a".into(), Some("DEAL-A".into()))

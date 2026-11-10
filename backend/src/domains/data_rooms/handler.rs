@@ -1,8 +1,9 @@
+use crate::domains::deals::deletion::lifecycle::DealAdmission;
 mod validate;
 
 use axum::{
     extract::{Path, State},
-    Json,
+    Extension, Json,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -26,10 +27,11 @@ pub(crate) struct PreviewDocumentPayload {
 pub(super) async fn list_deal_data_room_handler(
     State(state): State<DataRoomsHttpState>,
     Path(deal_id): Path<String>,
+    admission: Option<Extension<DealAdmission>>,
 ) -> AppResult<Json<DealDataRoom>> {
     state
         .data_rooms
-        .list(deal_id)
+        .list(deal_id, admission.map(|Extension(guard)| guard))
         .await
         .map(Json)
         .map_err(AppError::from)
@@ -38,12 +40,17 @@ pub(super) async fn list_deal_data_room_handler(
 pub(super) async fn preview_deal_document_handler(
     State(state): State<DataRoomsHttpState>,
     Path(deal_id): Path<String>,
+    admission: Option<Extension<DealAdmission>>,
     Json(payload): Json<PreviewDocumentPayload>,
 ) -> AppResult<Json<DocumentPreview>> {
     validate::preview_path(&payload.relative_path)?;
     state
         .data_rooms
-        .preview(&deal_id, &payload.relative_path)
+        .preview(
+            &deal_id,
+            &payload.relative_path,
+            admission.map(|Extension(guard)| guard),
+        )
         .await
         .map(Json)
         .map_err(AppError::from)

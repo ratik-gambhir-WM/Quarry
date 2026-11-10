@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { useAgentRuntime } from "@/components/chat/AgentRuntime";
+import { acceptDealDeletion } from "@/data/dealDeletion/lifecycle";
 import { QueryChatRuntimeProvider } from "@/components/chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "@/components/chat/QueryChat";
 import { AssistantWorkspaceSidebar } from "@/components/hub/sidebar/AssistantWorkspaceSidebar";
@@ -553,4 +555,51 @@ it("sends the active data room scope with references", async () => {
   await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledOnce());
   expect(api.runAssistantThread.mock.calls[0][0]).toMatchObject({ fileScopeDealId: "DEAL-A", fileReferences: [{ dealId: "DEAL-A", fileId: "file-a", name: "Architecture.pdf" }] });
   expect(api.listDeals).not.toHaveBeenCalled();
+});
+
+it("clears a deleted selection and ignores its pending history response", async () => {
+  const dealId = "DEAL-RUNTIME-HISTORY";
+  const thread = { ...threadMetadata, dealId };
+  const history = deferred<typeof threadDetail>();
+  api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [thread] });
+  api.getAssistantThread.mockReturnValue(history.promise);
+  const { result } = renderHook(() => useAgentRuntime({ api, onContextTruncated: vi.fn(), userEmail: "analyst@example.com" }));
+  await waitFor(() => expect(result.current.state.threads).toHaveLength(1));
+  let loading: Promise<void> | undefined;
+  act(() => { loading = result.current.selectThread(thread.threadId); });
+  expect(result.current.state.isThreadLoading).toBe(true);
+  act(() => result.current.setDraft("Private draft"));
+  await act(async () => { await acceptDealDeletion(dealId, async () => null); });
+  expect(result.current.state).toMatchObject({ selectedThreadId: null, messages: [], draft: "", draftFiles: [], draftReferences: [], threads: [], isThreadLoading: false });
+  await act(async () => { history.resolve(threadDetail); await loading; });
+  expect(result.current.state.messages).toEqual([]);
+  expect(result.current.state.selectedThreadId).toBeNull();
+});
+
+it("cancels a running deleted-deal stream through the store subscription", async () => {
+  const dealId = "DEAL-RUNTIME-STREAM";
+  const cancel = vi.fn();
+  api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockResolvedValue({ ...threadMetadata, dealId });
+  api.runAssistantThread.mockReturnValue(cancel);
+  const { result } = renderHook(() => useAgentRuntime({ api, onContextTruncated: vi.fn(), userEmail: "analyst@example.com", scope: "deal", dealId }));
+  act(() => result.current.send("Private question"));
+  await waitFor(() => expect(result.current.state.isRunning).toBe(true));
+  await act(async () => { await acceptDealDeletion(dealId, async () => null); });
+  await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+  expect(result.current.state).toMatchObject({ selectedThreadId: null, messages: [], draft: "", isRunning: false, isPreparingThread: false });
+});
+
+it("does not start a run when thread creation resolves after deal deletion", async () => {
+  const dealId = "DEAL-RUNTIME-CREATION";
+  const creation = deferred<typeof threadMetadata & { dealId: string }>();
+  api.listAssistantThreads.mockResolvedValue({ nextCursor: null, threads: [] });
+  api.createAssistantThread.mockReturnValue(creation.promise);
+  const { result } = renderHook(() => useAgentRuntime({ api, onContextTruncated: vi.fn(), userEmail: "analyst@example.com", scope: "deal", dealId }));
+  act(() => result.current.send("Private question"));
+  await act(async () => { await acceptDealDeletion(dealId, async () => null); });
+  await act(async () => { creation.resolve({ ...threadMetadata, dealId }); await creation.promise; });
+  expect(api.runAssistantThread).not.toHaveBeenCalled();
+  expect(result.current.state.messages).toEqual([]);
+  expect(result.current.state.selectedThreadId).toBeNull();
 });

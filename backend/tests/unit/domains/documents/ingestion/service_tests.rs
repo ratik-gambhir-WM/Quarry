@@ -19,7 +19,10 @@ async fn retries_repair_published_versions_before_skipping() {
     use std::{collections::VecDeque, io::Cursor};
 
     let replies = Arc::new(Mutex::new(VecDeque::from(vec![
-        (StatusCode::OK, json!({}));
+        (
+            StatusCode::OK,
+            json!({"deletion_fence": []})
+        );
         3
     ])));
     let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
@@ -156,9 +159,9 @@ async fn retries_repair_published_versions_before_skipping() {
             queue.push_back((StatusCode::OK, headers));
         }
         queue.extend([
-            (StatusCode::OK, json!({})),
-            (StatusCode::OK, json!({})),
-            (StatusCode::OK, json!({})),
+            (StatusCode::OK, json!({"deletion_fence": []})),
+            (StatusCode::OK, json!({"deletion_fence": []})),
+            (StatusCode::OK, json!({"deletion_fence": []})),
         ]);
         drop(queue);
         let result = service
@@ -526,7 +529,10 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
                         Json(json!({"error":"unavailable"})),
                     )
                 } else {
-                    (axum::http::StatusCode::OK, Json(json!({})))
+                    (
+                        axum::http::StatusCode::OK,
+                        Json(json!({"deletion_fence": []})),
+                    )
                 }
             }
         }),

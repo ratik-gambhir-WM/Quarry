@@ -88,6 +88,22 @@ impl QuarryApiService {
         self.client.get(path).await
     }
 
+    pub async fn delete_json(&self, path: &str) -> Result<Option<Value>, String> {
+        validate_api_path(path)?;
+        let id = path
+            .strip_prefix("/api/v1/deals/")
+            .ok_or("Quarry deletion path is not allowed")?;
+        if id.is_empty()
+            || id.len() > 64
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err("Quarry deletion path is not allowed".into());
+        }
+        self.client.delete_json(path).await
+    }
+
     pub async fn delete(&self, path: &str) -> Result<(), String> {
         validate_api_path(path)?;
         self.client.delete(path).await

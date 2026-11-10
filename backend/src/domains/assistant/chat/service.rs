@@ -35,6 +35,7 @@ const EVENT_CHANNEL_CAPACITY: usize = 32;
 const MAX_CONCURRENT_FILE_REFERENCES: usize = 4;
 
 pub struct AssistantChatService {
+    lifecycle: Option<crate::domains::deals::deletion::lifecycle::DealLifecycle>,
     documents: Option<Arc<StoredDocumentService>>,
     deal_context: Option<DealContextReader>,
     repository: Option<AssistantChatRepository>,
@@ -51,6 +52,7 @@ impl AssistantChatService {
         prompts: Arc<PromptCatalog>,
     ) -> Self {
         Self {
+            lifecycle: None,
             documents: None,
             deal_context: None,
             repository: None,
@@ -69,6 +71,7 @@ impl AssistantChatService {
         prompts: Arc<PromptCatalog>,
     ) -> Self {
         Self {
+            lifecycle: None,
             documents: None,
             deal_context: None,
             repository: Some(repository),
@@ -79,6 +82,13 @@ impl AssistantChatService {
         }
     }
 
+    pub(crate) fn with_lifecycle(
+        mut self,
+        gate: crate::domains::deals::deletion::lifecycle::DealLifecycle,
+    ) -> Self {
+        self.lifecycle = Some(gate);
+        self
+    }
     pub fn with_deal_context(mut self, reader: DealContextReader) -> Self {
         self.deal_context = Some(reader);
         self
@@ -156,6 +166,15 @@ impl AssistantChatService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn stream_is_live(&self, actor: i64, thread: String) -> bool {
+        match self.repository() {
+            Ok(repository) => repository
+                .thread_by_id(actor, thread)
+                .await
+                .is_ok_and(|thread| thread.is_some()),
+            Err(_) => false,
+        }
+    }
     pub async fn get_thread(
         &self,
         email: &str,
@@ -218,6 +237,16 @@ impl AssistantChatService {
     ) -> ServiceResult<mpsc::Receiver<SendQueryEvent>> {
         let repository = self.repository()?.clone();
         let user_id = self.user_id(&input.user_email).await?;
+        let linked_thread = repository
+            .thread_by_id(user_id, input.thread_id.clone())
+            .await?
+            .ok_or_else(|| ServiceError::not_found("assistant thread not found"))?;
+        let linked_deal = linked_thread.deal_id;
+        let lifetime = match (&self.lifecycle, &linked_deal) {
+            (Some(gate), Some(deal)) => Some(gate.admit(deal).await),
+            _ => None,
+        };
+        let deal_access = self.deal_context.clone();
         let model = input.model.unwrap_or_else(|| self.model.clone());
         let instructions = system_instructions_or_default(input.system_instructions, &self.prompts);
         let client_request_id = input.request_id.clone();
@@ -340,6 +369,7 @@ impl AssistantChatService {
         let assistant_message_id = input.assistant_message_id;
         let thread_id = input.thread_id;
         tokio::spawn(async move {
+            let _lifetime = lifetime;
             let run_started_at = Instant::now();
             tracing::info!(client_request_id = %client_request_id, thread_id = %thread_id, assistant_message_id = %assistant_message_id, "assistant persisted provider stream started");
             let encoded_files = match tokio::task::spawn_blocking(move || {
@@ -391,61 +421,78 @@ impl AssistantChatService {
                     },
                 })
                 .collect::<Vec<_>>();
-            let (delta_tx, mut delta_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-            let response = client.gen_chat_response_streaming(
-                &context,
-                &prompt,
-                &instructions,
-                &model,
-                &inputs,
-                delta_tx,
-            );
-            tokio::pin!(response);
-            let mut buffer = String::new();
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = event_tx.closed() => {
-                        tracing::info!(client_request_id = %client_request_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted client disconnected");
-                        let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
-                        break;
-                    }
-                    result = &mut response => {
-                        while let Ok(delta) = delta_rx.try_recv() {
-                            buffer.push_str(&delta);
-                            if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
-                                let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
-                                return;
-                            }
-                        }
-                        match result {
-                            Ok(response) => {
-                                tracing::info!(client_request_id = %client_request_id, response_chars = response.chars().count(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider completed");
-                                if repository.finish_run(assistant_message_id, "completed", response.clone(), None).await.is_err() {
-                                    tracing::error!(client_request_id = %client_request_id, "assistant persisted completion failed to save");
-                                    let _ = event_tx.send(SendQueryEvent::Failed { error: "query persistence failed" }).await;
-                                } else {
-                                    let _ = event_tx.send(SendQueryEvent::Completed { response }).await;
-                                }
-                            }
-                            Err(error) => {
-                                tracing::error!(client_request_id = %client_request_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider failed");
-                                let _ = repository.finish_run(assistant_message_id, "failed", buffer, Some("provider_failed")).await;
-                                let _ = event_tx.send(SendQueryEvent::Failed { error: "query generation failed" }).await;
-                            }
-                        }
-                        break;
-                    }
-                    delta = delta_rx.recv() => {
-                        let Some(delta) = delta else { continue };
-                        buffer.push_str(&delta);
-                        if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
+            // Keep revocation independent of provider/SSE backpressure: a blocked send must
+            // not keep a deletion waiting indefinitely for this task's admission guard.
+            let run = async {
+                let (delta_tx, mut delta_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+                let response = client.gen_chat_response_streaming(
+                    &context,
+                    &prompt,
+                    &instructions,
+                    &model,
+                    &inputs,
+                    delta_tx,
+                );
+                tokio::pin!(response);
+                let mut buffer = String::new();
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = event_tx.closed() => {
+                            tracing::info!(client_request_id = %client_request_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted client disconnected");
                             let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
                             break;
                         }
+                        result = &mut response => {
+                            while let Ok(delta) = delta_rx.try_recv() {
+                                buffer.push_str(&delta);
+                                if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
+                                    let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
+                                    return;
+                                }
+                            }
+                            match result {
+                                Ok(response) => {
+                                    tracing::info!(client_request_id = %client_request_id, response_chars = response.chars().count(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider completed");
+                                    if repository.finish_run(assistant_message_id, "completed", response.clone(), None).await.is_err() {
+                                        tracing::error!(client_request_id = %client_request_id, "assistant persisted completion failed to save");
+                                        let _ = event_tx.send(SendQueryEvent::Failed { error: "query persistence failed" }).await;
+                                    } else {
+                                        let _ = event_tx.send(SendQueryEvent::Completed { response }).await;
+                                    }
+                                }
+                                Err(error) => {
+                                    tracing::error!(client_request_id = %client_request_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider failed");
+                                    let _ = repository.finish_run(assistant_message_id, "failed", buffer, Some("provider_failed")).await;
+                                    let _ = event_tx.send(SendQueryEvent::Failed { error: "query generation failed" }).await;
+                                }
+                            }
+                            break;
+                        }
+                        delta = delta_rx.recv() => {
+                            let Some(delta) = delta else { continue };
+                            buffer.push_str(&delta);
+                            if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
+                                let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
+                                break;
+                            }
+                        }
                     }
                 }
-            }
+            };
+            let revoked = async {
+                let (Some(access), Some(deal)) = (&deal_access, &linked_deal) else {
+                    return std::future::pending::<()>().await;
+                };
+                let mut recheck = tokio::time::interval(std::time::Duration::from_secs(1));
+                loop {
+                    recheck.tick().await;
+                    if access.ensure_live(deal, user_id).await.is_err() {
+                        return;
+                    }
+                }
+            };
+            tokio::select! { biased; _ = revoked => {}, _ = run => {} }
         });
         Ok(event_rx)
     }

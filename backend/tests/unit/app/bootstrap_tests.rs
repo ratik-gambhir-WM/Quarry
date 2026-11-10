@@ -86,3 +86,33 @@ async fn serve_disposable_slide_template_validation_api() {
         .await
         .unwrap();
 }
+
+#[test]
+fn writer_lease_rejects_a_second_writer_until_all_router_clones_are_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("synthetic.sqlite");
+    let sqlite = open_sqlite(&path).unwrap();
+    drop(sqlite);
+    let lease = acquire_writer_lease(&path).unwrap();
+    let router_clone = lease.clone();
+    assert!(acquire_writer_lease(&path).is_err());
+    drop(lease);
+    assert!(acquire_writer_lease(&path).is_err());
+    drop(router_clone);
+    assert!(acquire_writer_lease(&path).is_ok());
+}
+
+#[test]
+fn detached_sqlite_workers_retain_the_writer_lease_after_router_shutdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("worker.sqlite");
+    let sqlite = open_sqlite(&path).unwrap();
+    let lease = acquire_writer_lease(&path).unwrap();
+    let sqlite = sqlite.with_writer_lease(lease.clone());
+    let detached = sqlite.clone();
+    drop(lease);
+    drop(sqlite);
+    assert!(acquire_writer_lease(&path).is_err());
+    drop(detached);
+    assert!(acquire_writer_lease(&path).is_ok());
+}

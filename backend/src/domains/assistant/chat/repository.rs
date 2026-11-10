@@ -110,10 +110,21 @@ impl AssistantChatRepository {
             .value("deal_id", deal_id.as_deref())
             .on_conflict_do_nothing(["thread_id"])
             .build();
+        let inserted_deal = deal_id.clone();
         self.sqlite
-            .write_async(insert)
-            .await
-            .map_err(storage("create assistant thread"))?;
+            .transaction_result_async(move |tx| {
+                if let Some(deal) = &inserted_deal {
+                    crate::domains::memberships::require_deal(
+                        tx,
+                        deal,
+                        user_id,
+                        crate::domains::memberships::model::Capability::Read,
+                    )?;
+                }
+                tx.write(insert)?;
+                Ok::<_, RepositoryError>(())
+            })
+            .await?;
         let thread = self
             .thread_by_id(user_id, thread_id)
             .await?
@@ -137,11 +148,19 @@ impl AssistantChatRepository {
         scope: ThreadScope,
     ) -> Result<Vec<AssistantThread>, RepositoryError> {
         let mut builder = SqlBuilder::select("assistant_threads")
-            .columns(THREAD_COLUMNS)
-            .and_where(Condition::equal("user_id", user_id))
-            .and_where(Condition::equal("status", &status))
-            .order_by("last_message_at", SortDirection::Descending)
-            .order_by("thread_id", SortDirection::Descending)
+            .columns(THREAD_COLUMNS.map(|c| format!("assistant_threads.{c}")))
+            .left_join(
+                "deal_deletions",
+                "assistant_threads.deal_id",
+                "deal_deletions.deal_id",
+            )
+            .and_where(Condition::equal("assistant_threads.user_id", user_id))
+            .and_where(Condition::equal("assistant_threads.status", &status))
+            .order_by(
+                "assistant_threads.last_message_at",
+                SortDirection::Descending,
+            )
+            .order_by("assistant_threads.thread_id", SortDirection::Descending)
             .limit(limit);
         builder = apply_scope(builder, &scope);
         if let Some(before) = before {
@@ -149,29 +168,32 @@ impl AssistantChatRepository {
                 if !last_message_at.is_empty() && !thread_id.is_empty() {
                     builder = builder
                         .and_where(Condition::compare(
-                            "last_message_at",
+                            "assistant_threads.last_message_at",
                             ComparisonOperator::LessThan,
                             last_message_at,
                         ))
-                        .or_where(Condition::equal("user_id", user_id))
-                        .and_where(Condition::equal("status", &status))
-                        .and_where(Condition::equal("last_message_at", last_message_at))
+                        .or_where(Condition::equal("assistant_threads.user_id", user_id))
+                        .and_where(Condition::equal("assistant_threads.status", &status))
+                        .and_where(Condition::equal(
+                            "assistant_threads.last_message_at",
+                            last_message_at,
+                        ))
                         .and_where(Condition::compare(
-                            "thread_id",
+                            "assistant_threads.thread_id",
                             ComparisonOperator::LessThan,
                             thread_id,
                         ));
                     builder = apply_scope(builder, &scope);
                 } else {
                     builder = builder.and_where(Condition::compare(
-                        "last_message_at",
+                        "assistant_threads.last_message_at",
                         ComparisonOperator::LessThan,
                         before,
                     ));
                 }
             } else {
                 builder = builder.and_where(Condition::compare(
-                    "last_message_at",
+                    "assistant_threads.last_message_at",
                     ComparisonOperator::LessThan,
                     before,
                 ));
@@ -196,7 +218,7 @@ impl AssistantChatRepository {
         };
         let query = SqlBuilder::select("assistant_messages")
             .columns(MESSAGE_COLUMNS)
-            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("thread_id", &thread_id))
             .order_by("sequence", SortDirection::Ascending)
             .build();
         let rows = self
@@ -209,6 +231,9 @@ impl AssistantChatRepository {
             .map(message_from_row)
             .collect::<Result<Vec<_>, _>>()?;
         normalize_legacy_user_parents(&mut messages);
+        if self.thread_by_id(user_id, thread_id).await?.is_none() {
+            return Ok(None);
+        }
         Ok(Some(AssistantThreadDetail { thread, messages }))
     }
 
@@ -242,14 +267,16 @@ impl AssistantChatRepository {
         let update = SqlBuilder::update("assistant_threads")
             .set(column, value)
             .set("updated_at", updated_at)
-            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("thread_id", &thread_id))
             .and_where(Condition::equal("user_id", user_id))
             .build();
         let result = self
             .sqlite
-            .write_async(update)
-            .await
-            .map_err(storage("update assistant thread"))?;
+            .transaction_result_async(move |tx| {
+                ensure_thread_live(tx, &thread_id, Some(user_id))?;
+                Ok::<_, RepositoryError>(tx.write(update)?)
+            })
+            .await?;
         Ok(result.rows_affected == 1)
     }
 
@@ -259,20 +286,25 @@ impl AssistantChatRepository {
         thread_id: String,
     ) -> Result<bool, RepositoryError> {
         let delete = SqlBuilder::delete_from("assistant_threads")
-            .and_where(Condition::equal("thread_id", thread_id))
+            .and_where(Condition::equal("thread_id", &thread_id))
             .and_where(Condition::equal("user_id", user_id))
             .build();
         let result = self
             .sqlite
-            .write_async(delete)
-            .await
-            .map_err(storage("delete assistant thread"))?;
+            .transaction_result_async(move |tx| {
+                ensure_thread_live(tx, &thread_id, Some(user_id))?;
+                Ok::<_, RepositoryError>(tx.write(delete)?)
+            })
+            .await?;
         Ok(result.rows_affected == 1)
     }
 
     pub async fn start_run(&self, input: StartRunInput) -> Result<StartRunResult, RepositoryError> {
         self.sqlite
             .transaction_async(move |transaction| {
+                ensure_thread_live(transaction, &input.thread_id, Some(input.user_id)).map_err(
+                    |_| SqliteClientError::transaction_aborted("deal_deletion_in_progress"),
+                )?;
                 let owned_query = SqlBuilder::select("assistant_threads")
                     .columns(["thread_id", "title"])
                     .and_where(Condition::equal("thread_id", &input.thread_id))
@@ -456,14 +488,25 @@ impl AssistantChatRepository {
             .set("status", status)
             .set("error_code", error_code)
             .set("completed_at", completed_at)
-            .and_where(Condition::equal("message_id", message_id))
+            .and_where(Condition::equal("message_id", &message_id))
             .and_where(Condition::equal("status", "streaming"))
             .build();
         let result = self
             .sqlite
-            .write_async(update)
-            .await
-            .map_err(storage("finish assistant run"))?;
+            .transaction_result_async(move |tx| {
+                let thread = tx.read_one_with(
+                    SqlBuilder::select("assistant_messages")
+                        .columns(["thread_id"])
+                        .and_where(Condition::equal("message_id", message_id))
+                        .build(),
+                    |r| r.get::<_, String>(0),
+                )?;
+                if let Some(thread) = thread {
+                    ensure_thread_live(tx, &thread, None)?;
+                }
+                Ok::<_, RepositoryError>(tx.write(update)?)
+            })
+            .await?;
         if result.rows_affected != 1 {
             return Err(RepositoryError::storage("assistant run was not pending"));
         }
@@ -476,9 +519,15 @@ impl AssistantChatRepository {
         thread_id: String,
     ) -> Result<Option<AssistantThread>, RepositoryError> {
         let query = SqlBuilder::select("assistant_threads")
-            .columns(THREAD_COLUMNS)
-            .and_where(Condition::equal("thread_id", thread_id))
-            .and_where(Condition::equal("user_id", user_id))
+            .columns(THREAD_COLUMNS.map(|c| format!("assistant_threads.{c}")))
+            .left_join(
+                "deal_deletions",
+                "assistant_threads.deal_id",
+                "deal_deletions.deal_id",
+            )
+            .and_where(Condition::is_null("deal_deletions.deal_id"))
+            .and_where(Condition::equal("assistant_threads.thread_id", thread_id))
+            .and_where(Condition::equal("assistant_threads.user_id", user_id))
             .build();
         self.sqlite
             .read_one_async(query)
@@ -487,6 +536,30 @@ impl AssistantChatRepository {
             .map(thread_from_row)
             .transpose()
     }
+}
+
+fn ensure_thread_live(
+    tx: &crate::adapters::sqlite::client::SqliteTransaction<'_>,
+    thread: &str,
+    actor: Option<i64>,
+) -> Result<(), RepositoryError> {
+    let mut query = SqlBuilder::select("assistant_threads")
+        .columns(["deal_id"])
+        .and_where(Condition::equal("thread_id", thread));
+    if let Some(actor) = actor {
+        query = query.and_where(Condition::equal("user_id", actor));
+    }
+    let deal = tx
+        .read_one_with(query.build(), |r| r.get::<_, Option<String>>(0))?
+        .flatten();
+    if let Some(deal) = deal {
+        if crate::domains::deals::deletion::barrier(tx, &deal)? {
+            return Err(RepositoryError::Conflict(
+                "deal_deletion_in_progress".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn storage(context: &'static str) -> impl FnOnce(SqliteClientError) -> RepositoryError {
@@ -597,9 +670,12 @@ fn apply_scope(
     builder: crate::adapters::sqlite::query::SelectBuilder,
     scope: &ThreadScope,
 ) -> crate::adapters::sqlite::query::SelectBuilder {
+    let builder = builder.and_where(Condition::is_null("deal_deletions.deal_id"));
     match scope {
         ThreadScope::All => builder,
-        ThreadScope::Freeform => builder.and_where(Condition::is_null("deal_id")),
-        ThreadScope::Deal(id) => builder.and_where(Condition::equal("deal_id", id)),
+        ThreadScope::Freeform => builder.and_where(Condition::is_null("assistant_threads.deal_id")),
+        ThreadScope::Deal(id) => {
+            builder.and_where(Condition::equal("assistant_threads.deal_id", id))
+        }
     }
 }

@@ -498,7 +498,7 @@ fn schema_nine_requires_explicit_reset_and_retains_records_on_rejection() {
         run_migrations(&mut connection),
         Err(MigrationError::UnsupportedSchemaVersion {
             found: 9,
-            supported: 17
+            supported: 18
         })
     ));
     assert_eq!(product_snapshot(&connection), before);
@@ -1007,7 +1007,7 @@ fn template_ownership_upgrade_preserves_shared_records_unassigned_and_enforces_u
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        LATEST_SCHEMA_VERSION
     );
 }
 
@@ -1030,4 +1030,41 @@ fn template_ownership_upgrade_rejects_damaged_marker_sixteen_without_partial_cha
         16
     );
     assert_eq!(table_count(&connection, "templates"), 1);
+}
+
+#[test]
+fn deletion_upgrade_preserves_marker_seventeen_data_and_validates_receipt_schema() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    run_migrations(&mut connection).unwrap();
+    seed_deal(&connection, "DELETE-UPGRADE", "pipeline");
+    connection.execute_batch("DROP TABLE deal_deletion_threads; DROP TABLE deal_deletion_files; DROP TABLE deal_deletions;").unwrap();
+    connection.pragma_update(None, "user_version", 17).unwrap();
+    run_migrations(&mut connection).unwrap();
+    run_migrations(&mut connection).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM deals WHERE deal_id='DELETE-UPGRADE'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        18
+    );
+    connection
+        .execute_batch("DROP INDEX idx_deal_deletions_pending;")
+        .unwrap();
+    assert!(run_migrations(&mut connection).is_err());
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM deals", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

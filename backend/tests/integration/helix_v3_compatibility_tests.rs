@@ -355,3 +355,207 @@ fn metric_stored_vectors(deal: String) -> ReadBatch {
         )
         .returning(["chunks"])
 }
+
+#[tokio::test]
+#[ignore = "requires an explicitly supplied disposable QUARRY_HELIX_COMPAT_URL"]
+async fn deletion_fence_rejects_prepared_setup_chunks_and_publication() {
+    use crate::domains::documents::graph::{deletion, writer::insert_file_version_graph};
+    let url = env::var(HELIX_COMPAT_URL_ENV).expect("explicit disposable Helix URL");
+    let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
+    let writer = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
+    writer.initialize().await.unwrap();
+    let deal = format!("delete-{}", uuid::Uuid::new_v4());
+    let file = FileNode {
+        deal_id: deal.clone(),
+        file_id: format!("{deal}-file"),
+        display_name: "synthetic".into(),
+    };
+    let version = FileVersionNode {
+        deal_id: deal.clone(),
+        file_id: file.file_id.clone(),
+        version_id: format!("{deal}-version"),
+        mime_type: "text/plain".into(),
+        content_sha256: "synthetic".into(),
+        byte_size: 1,
+        index_generation: "generation".into(),
+        indexed_at: "2026-11-10T00:00:00Z".into(),
+    };
+    let mut chunk = file_chunk(
+        &deal,
+        &file.file_id,
+        &version.version_id,
+        &format!("{deal}-chunk"),
+        0,
+        "synthetic fence proof",
+    );
+    chunk.index_generation = "generation".into();
+    let prepared =
+        insert_file_version_graph(file.clone(), version.clone(), vec![chunk.clone()]).unwrap();
+    for _ in 0..2 {
+        let result: serde_json::Value = helix
+            .execute_write_query("test.fence", deletion::fence(deal.clone()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["fence"].as_array().unwrap().len(), 1);
+    }
+    let mut requests = vec![prepared.setup_query];
+    requests.extend(prepared.chunk_queries);
+    requests.push(prepared.publish_query);
+    for request in requests {
+        let result: serde_json::Value = helix
+            .execute_write_query("test.late_write", request)
+            .await
+            .unwrap();
+        assert_eq!(result["deletion_fence"].as_array().unwrap().len(), 1);
+    }
+    assert!(writer
+        .insert_graph(file.clone(), version, vec![chunk])
+        .await
+        .is_err());
+    let result: serde_json::Value = helix
+        .execute_read_query(
+            "test.absent",
+            QueryRequest::read(
+                read_batch()
+                    .var_as(
+                        "files",
+                        g().n_with_label("QuarryFile")
+                            .where_(Predicate::eq("deal_id", deal.clone())),
+                    )
+                    .var_as(
+                        "versions",
+                        g().n_with_label("FileVersion")
+                            .where_(Predicate::eq("deal_id", deal.clone())),
+                    )
+                    .var_as(
+                        "chunks",
+                        g().n_with_label("FileChunk")
+                            .where_(Predicate::eq("deal_id", deal)),
+                    )
+                    .returning(["files", "versions", "chunks"]),
+            ),
+        )
+        .await
+        .unwrap();
+    for key in ["files", "versions", "chunks"] {
+        assert!(result[key].as_array().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an explicitly supplied disposable QUARRY_HELIX_COMPAT_URL"]
+async fn deletion_purges_scoped_nodes_edges_and_search_indexes_without_touching_other_deals() {
+    let url = env::var(HELIX_COMPAT_URL_ENV).expect("explicit disposable Helix URL");
+    let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
+    let writer = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
+    writer.initialize().await.unwrap();
+    let deal = format!("purge-{}", uuid::Uuid::new_v4());
+    let other = format!("other-{}", uuid::Uuid::new_v4());
+    for scope in [&deal, &other] {
+        let file = FileNode {
+            deal_id: scope.clone(),
+            file_id: format!("{scope}-file"),
+            display_name: "synthetic".into(),
+        };
+        for generation in ["old", "current", "partial"] {
+            let id = format!("{scope}-{generation}");
+            let version = FileVersionNode {
+                deal_id: scope.clone(),
+                file_id: file.file_id.clone(),
+                version_id: id.clone(),
+                mime_type: "text/plain".into(),
+                content_sha256: id.clone(),
+                byte_size: 1,
+                index_generation: id.clone(),
+                indexed_at: "2026-11-10T00:00:00Z".into(),
+            };
+            let mut chunk = file_chunk(
+                scope,
+                &file.file_id,
+                &id,
+                &format!("{id}-chunk"),
+                0,
+                "synthetic cleanup searchable",
+            );
+            chunk.index_generation = id;
+            if generation == "partial" {
+                let prepared = crate::domains::documents::graph::writer::insert_file_version_graph(
+                    file.clone(),
+                    version,
+                    vec![chunk],
+                )
+                .unwrap();
+                let _: serde_json::Value = helix
+                    .execute_write_query("test.partial_setup", prepared.setup_query)
+                    .await
+                    .unwrap();
+                for query in prepared.chunk_queries {
+                    let _: serde_json::Value = helix
+                        .execute_write_query("test.partial_chunks", query)
+                        .await
+                        .unwrap();
+                }
+            } else {
+                writer
+                    .insert_graph(file.clone(), version, vec![chunk])
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+    assert!(
+        writer
+            .purge_deal_file(&deal, &format!("{other}-file"))
+            .await
+            .is_err(),
+        "a mismatched file owner must block cleanup"
+    );
+    writer.fence_deal(&deal).await.unwrap();
+    // Bounded, repeatable sweeps remove current and historical versions and all edges.
+    while !writer
+        .purge_deal_file(&deal, &format!("{deal}-file"))
+        .await
+        .unwrap()
+    {}
+    assert!(writer
+        .purge_deal_file(&deal, &format!("{deal}-file"))
+        .await
+        .unwrap());
+    writer.verify_deal_absent(&deal).await.unwrap();
+    let reader = DocumentGraphReader::new(helix.clone());
+    assert!(reader
+        .current_document(&deal, &format!("{deal}-file"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(reader
+        .current_document(&other, &format!("{other}-file"))
+        .await
+        .unwrap()
+        .is_some());
+    let search = DocumentGraphSearch::new(helix.clone());
+    assert!(search
+        .keyword_current(
+            FileChunkKeywordSearch {
+                deal_id: deal.clone(),
+                query_text: "synthetic".into(),
+                limit: 10
+            },
+            vec![format!("{deal}-current")]
+        )
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(search
+        .vector_current(
+            FileChunkVectorSearch {
+                deal_id: deal.clone(),
+                query_embedding: vec![1.0, 0.0],
+                limit: 10
+            },
+            vec![format!("{deal}-current")]
+        )
+        .await
+        .unwrap()
+        .is_empty());
+}

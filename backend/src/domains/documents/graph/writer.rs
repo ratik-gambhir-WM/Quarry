@@ -12,7 +12,8 @@ pub const HAS_VERSION_LABEL: &str = "HAS_VERSION";
 pub const CURRENT_VERSION_LABEL: &str = "CURRENT_VERSION";
 pub const HAS_CHUNK_LABEL: &str = "HAS_CHUNK";
 
-pub const DOCUMENT_INDEX_NAMES: [&str; 13] = [
+pub const DOCUMENT_INDEX_NAMES: [&str; 14] = [
+    "deal_lifecycle_unique",
     "file_id_unique",
     "file_deal_id",
     "file_display_name",
@@ -80,73 +81,75 @@ fn setup_file_version_graph_route(
         &indexed_at,
     );
 
-    write_batch()
-        .var_as(
-            "existing_file",
-            g().n_with_label(QUARRY_FILE_LABEL)
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("deal_id", "deal_id")),
-        )
-        .var_as_if(
-            "created_file",
-            BatchCondition::VarEmpty("existing_file".to_string()),
-            g().add_n(
-                QUARRY_FILE_LABEL,
-                vec![
-                    ("deal_id", PropertyInput::param("deal_id")),
-                    ("file_id", PropertyInput::param("file_id")),
-                    ("display_name", PropertyInput::param("display_name")),
-                ],
-            ),
-        )
-        .var_as(
-            "canonical_file",
-            g().n_with_label(QUARRY_FILE_LABEL)
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("deal_id", "deal_id")),
-        )
-        .var_as(
-            "file",
-            g().n(NodeRef::var("canonical_file"))
-                .set_property("display_name", PropertyInput::param("display_name"))
-                .project(file_projection()),
-        )
-        .var_as("existing_version", version_by_immutable_identity())
-        .var_as_if(
-            "created_version",
-            BatchCondition::VarEmpty("existing_version".to_string()),
-            g().add_n(
-                FILE_VERSION_LABEL,
-                vec![
-                    ("deal_id", PropertyInput::param("deal_id")),
-                    ("file_id", PropertyInput::param("file_id")),
-                    ("version_id", PropertyInput::param("version_id")),
-                    ("mime_type", PropertyInput::param("mime_type")),
-                    ("content_sha256", PropertyInput::param("content_sha256")),
-                    ("byte_size", PropertyInput::param("byte_size")),
-                    ("index_generation", PropertyInput::param("index_generation")),
-                    ("indexed_at", PropertyInput::param("indexed_at")),
-                ],
-            ),
-        )
-        .var_as("canonical_version", version_by_immutable_identity())
-        .var_as(
-            "version",
-            g().n(NodeRef::var("canonical_version"))
-                .set_property("index_generation", PropertyInput::param("index_generation"))
-                .set_property("indexed_at", PropertyInput::param("indexed_at"))
-                .project(file_version_projection()),
-        )
-        .var_as(
-            "removed_version_chunks",
-            g().n_with_label(FILE_CHUNK_LABEL)
-                .where_(Predicate::eq_param("deal_id", "deal_id"))
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("version_id", "version_id"))
-                .where_(Predicate::eq_param("index_generation", "index_generation"))
-                .drop(),
-        )
-        .returning(["file", "version", "removed_version_chunks"])
+    super::deletion::guard(
+        write_batch()
+            .var_as(
+                "existing_file",
+                g().n_with_label(QUARRY_FILE_LABEL)
+                    .where_(Predicate::eq_param("file_id", "file_id"))
+                    .where_(Predicate::eq_param("deal_id", "deal_id")),
+            )
+            .var_as_if(
+                "created_file",
+                BatchCondition::VarEmpty("existing_file".to_string()),
+                g().add_n(
+                    QUARRY_FILE_LABEL,
+                    vec![
+                        ("deal_id", PropertyInput::param("deal_id")),
+                        ("file_id", PropertyInput::param("file_id")),
+                        ("display_name", PropertyInput::param("display_name")),
+                    ],
+                ),
+            )
+            .var_as(
+                "canonical_file",
+                g().n_with_label(QUARRY_FILE_LABEL)
+                    .where_(Predicate::eq_param("file_id", "file_id"))
+                    .where_(Predicate::eq_param("deal_id", "deal_id")),
+            )
+            .var_as(
+                "file",
+                g().n(NodeRef::var("canonical_file"))
+                    .set_property("display_name", PropertyInput::param("display_name"))
+                    .project(file_projection()),
+            )
+            .var_as("existing_version", version_by_immutable_identity())
+            .var_as_if(
+                "created_version",
+                BatchCondition::VarEmpty("existing_version".to_string()),
+                g().add_n(
+                    FILE_VERSION_LABEL,
+                    vec![
+                        ("deal_id", PropertyInput::param("deal_id")),
+                        ("file_id", PropertyInput::param("file_id")),
+                        ("version_id", PropertyInput::param("version_id")),
+                        ("mime_type", PropertyInput::param("mime_type")),
+                        ("content_sha256", PropertyInput::param("content_sha256")),
+                        ("byte_size", PropertyInput::param("byte_size")),
+                        ("index_generation", PropertyInput::param("index_generation")),
+                        ("indexed_at", PropertyInput::param("indexed_at")),
+                    ],
+                ),
+            )
+            .var_as("canonical_version", version_by_immutable_identity())
+            .var_as(
+                "version",
+                g().n(NodeRef::var("canonical_version"))
+                    .set_property("index_generation", PropertyInput::param("index_generation"))
+                    .set_property("indexed_at", PropertyInput::param("indexed_at"))
+                    .project(file_version_projection()),
+            )
+            .var_as(
+                "removed_version_chunks",
+                g().n_with_label(FILE_CHUNK_LABEL)
+                    .where_(Predicate::eq_param("deal_id", "deal_id"))
+                    .where_(Predicate::eq_param("file_id", "file_id"))
+                    .where_(Predicate::eq_param("version_id", "version_id"))
+                    .where_(Predicate::eq_param("index_generation", "index_generation"))
+                    .drop(),
+            )
+            .returning(["file", "version", "removed_version_chunks"]),
+    )
 }
 
 #[query]
@@ -157,57 +160,59 @@ fn publish_file_version_graph_route(
 ) -> WriteBatch {
     let _ = (&deal_id, &file_id, &version_id);
 
-    write_batch()
-        .var_as(
-            "canonical_file",
-            g().n_with_label(QUARRY_FILE_LABEL)
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("deal_id", "deal_id")),
-        )
-        .var_as(
-            "canonical_version",
-            g().n_with_label(FILE_VERSION_LABEL)
-                .where_(Predicate::eq_param("deal_id", "deal_id"))
-                .where_(Predicate::eq_param("file_id", "file_id"))
-                .where_(Predicate::eq_param("version_id", "version_id")),
-        )
-        .var_as(
-            "removed_has_version",
-            g().n(NodeRef::var("canonical_file"))
-                .drop_edge_labeled(NodeRef::var("canonical_version"), HAS_VERSION_LABEL),
-        )
-        .var_as(
-            "added_has_version",
-            g().n(NodeRef::var("canonical_file")).add_e(
-                HAS_VERSION_LABEL,
-                NodeRef::var("canonical_version"),
-                Vec::<(&str, PropertyInput)>::new(),
-            ),
-        )
-        .var_as(
-            "old_current_versions",
-            g().n(NodeRef::var("canonical_file"))
-                .out(Some(CURRENT_VERSION_LABEL)),
-        )
-        .var_as(
-            "removed_current_version",
-            g().n(NodeRef::var("canonical_file"))
-                .drop_edge_labeled(NodeRef::var("old_current_versions"), CURRENT_VERSION_LABEL),
-        )
-        .var_as(
-            "added_current_version",
-            g().n(NodeRef::var("canonical_file")).add_e(
-                CURRENT_VERSION_LABEL,
-                NodeRef::var("canonical_version"),
-                Vec::<(&str, PropertyInput)>::new(),
-            ),
-        )
-        .returning([
-            "removed_has_version",
-            "added_has_version",
-            "removed_current_version",
-            "added_current_version",
-        ])
+    super::deletion::guard(
+        write_batch()
+            .var_as(
+                "canonical_file",
+                g().n_with_label(QUARRY_FILE_LABEL)
+                    .where_(Predicate::eq_param("file_id", "file_id"))
+                    .where_(Predicate::eq_param("deal_id", "deal_id")),
+            )
+            .var_as(
+                "canonical_version",
+                g().n_with_label(FILE_VERSION_LABEL)
+                    .where_(Predicate::eq_param("deal_id", "deal_id"))
+                    .where_(Predicate::eq_param("file_id", "file_id"))
+                    .where_(Predicate::eq_param("version_id", "version_id")),
+            )
+            .var_as(
+                "removed_has_version",
+                g().n(NodeRef::var("canonical_file"))
+                    .drop_edge_labeled(NodeRef::var("canonical_version"), HAS_VERSION_LABEL),
+            )
+            .var_as(
+                "added_has_version",
+                g().n(NodeRef::var("canonical_file")).add_e(
+                    HAS_VERSION_LABEL,
+                    NodeRef::var("canonical_version"),
+                    Vec::<(&str, PropertyInput)>::new(),
+                ),
+            )
+            .var_as(
+                "old_current_versions",
+                g().n(NodeRef::var("canonical_file"))
+                    .out(Some(CURRENT_VERSION_LABEL)),
+            )
+            .var_as(
+                "removed_current_version",
+                g().n(NodeRef::var("canonical_file"))
+                    .drop_edge_labeled(NodeRef::var("old_current_versions"), CURRENT_VERSION_LABEL),
+            )
+            .var_as(
+                "added_current_version",
+                g().n(NodeRef::var("canonical_file")).add_e(
+                    CURRENT_VERSION_LABEL,
+                    NodeRef::var("canonical_version"),
+                    Vec::<(&str, PropertyInput)>::new(),
+                ),
+            )
+            .returning([
+                "removed_has_version",
+                "added_has_version",
+                "removed_current_version",
+                "added_current_version",
+            ]),
+    )
 }
 
 #[query]
@@ -219,59 +224,61 @@ fn insert_file_version_chunk_batch_route(
 ) -> WriteBatch {
     let _ = (&deal_id, &file_id, &version_id, &chunks);
 
-    write_batch()
-        .for_each_param(
-            "chunks",
-            write_batch()
-                .var_as(
-                    "chunk_version",
-                    g().n_with_label(FILE_VERSION_LABEL)
-                        .where_(Predicate::eq_param("deal_id", "deal_id"))
-                        .where_(Predicate::eq_param("file_id", "file_id"))
-                        .where_(Predicate::eq_param("version_id", "version_id")),
-                )
-                .var_as_if(
-                    "chunk",
-                    BatchCondition::VarNotEmpty("chunk_version".to_string()),
-                    g().add_n(
-                        FILE_CHUNK_LABEL,
-                        vec![
-                            ("chunk_id", PropertyInput::param("chunk_id")),
-                            ("deal_id", PropertyInput::param("deal_id")),
-                            ("file_id", PropertyInput::param("file_id")),
-                            ("version_id", PropertyInput::param("version_id")),
-                            ("index_generation", PropertyInput::param("index_generation")),
-                            ("chunk_index", PropertyInput::param("chunk_index")),
-                            ("text", PropertyInput::param("text")),
-                            ("embedding", PropertyInput::param("embedding")),
-                            ("chunk_sha256", PropertyInput::param("chunk_sha256")),
-                            ("token_count", PropertyInput::param("token_count")),
-                            ("page_start", PropertyInput::param("page_start")),
-                            ("page_end", PropertyInput::param("page_end")),
-                            ("char_start", PropertyInput::param("char_start")),
-                            ("char_end", PropertyInput::param("char_end")),
-                            ("section_path", PropertyInput::param("section_path")),
-                            ("created_at", PropertyInput::param("created_at")),
-                        ],
+    super::deletion::guard(
+        write_batch()
+            .for_each_param(
+                "chunks",
+                write_batch()
+                    .var_as(
+                        "chunk_version",
+                        g().n_with_label(FILE_VERSION_LABEL)
+                            .where_(Predicate::eq_param("deal_id", "deal_id"))
+                            .where_(Predicate::eq_param("file_id", "file_id"))
+                            .where_(Predicate::eq_param("version_id", "version_id")),
+                    )
+                    .var_as_if(
+                        "chunk",
+                        BatchCondition::VarNotEmpty("chunk_version".to_string()),
+                        g().add_n(
+                            FILE_CHUNK_LABEL,
+                            vec![
+                                ("chunk_id", PropertyInput::param("chunk_id")),
+                                ("deal_id", PropertyInput::param("deal_id")),
+                                ("file_id", PropertyInput::param("file_id")),
+                                ("version_id", PropertyInput::param("version_id")),
+                                ("index_generation", PropertyInput::param("index_generation")),
+                                ("chunk_index", PropertyInput::param("chunk_index")),
+                                ("text", PropertyInput::param("text")),
+                                ("embedding", PropertyInput::param("embedding")),
+                                ("chunk_sha256", PropertyInput::param("chunk_sha256")),
+                                ("token_count", PropertyInput::param("token_count")),
+                                ("page_start", PropertyInput::param("page_start")),
+                                ("page_end", PropertyInput::param("page_end")),
+                                ("char_start", PropertyInput::param("char_start")),
+                                ("char_end", PropertyInput::param("char_end")),
+                                ("section_path", PropertyInput::param("section_path")),
+                                ("created_at", PropertyInput::param("created_at")),
+                            ],
+                        ),
+                    )
+                    .var_as_if(
+                        "file_chunk",
+                        BatchCondition::VarNotEmpty("chunk".to_string()),
+                        g().n(NodeRef::var("chunk"))
+                            .project(file_chunk_projection()),
+                    )
+                    .var_as_if(
+                        "version_has_chunk",
+                        BatchCondition::VarNotEmpty("chunk".to_string()),
+                        g().n(NodeRef::var("chunk_version")).add_e(
+                            HAS_CHUNK_LABEL,
+                            NodeRef::var("chunk"),
+                            Vec::<(&str, PropertyInput)>::new(),
+                        ),
                     ),
-                )
-                .var_as_if(
-                    "file_chunk",
-                    BatchCondition::VarNotEmpty("chunk".to_string()),
-                    g().n(NodeRef::var("chunk"))
-                        .project(file_chunk_projection()),
-                )
-                .var_as_if(
-                    "version_has_chunk",
-                    BatchCondition::VarNotEmpty("chunk".to_string()),
-                    g().n(NodeRef::var("chunk_version")).add_e(
-                        HAS_CHUNK_LABEL,
-                        NodeRef::var("chunk"),
-                        Vec::<(&str, PropertyInput)>::new(),
-                    ),
-                ),
-        )
-        .returning(["file_chunk", "version_has_chunk"])
+            )
+            .returning(["file_chunk", "version_has_chunk"]),
+    )
 }
 
 fn setup_file_version_graph_query(
@@ -642,6 +649,13 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
     QueryRequest::write(
         write_batch()
             .var_as(
+                "deal_lifecycle_unique",
+                g().create_index_if_not_exists(IndexSpec::node_unique_equality(
+                    super::deletion::CONTROL,
+                    "deal_id",
+                )),
+            )
+            .var_as(
                 "file_id_unique",
                 g().create_index_if_not_exists(IndexSpec::node_unique_equality(
                     QUARRY_FILE_LABEL,
@@ -738,6 +752,7 @@ pub fn create_document_indexes(vector_dimension: NonZeroUsize) -> QueryRequest {
                 )),
             )
             .returning([
+                "deal_lifecycle_unique",
                 "file_id_unique",
                 "file_deal_id",
                 "file_display_name",

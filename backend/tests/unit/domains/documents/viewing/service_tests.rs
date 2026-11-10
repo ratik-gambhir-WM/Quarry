@@ -63,13 +63,16 @@ async fn returns_the_canonical_raw_text_for_a_stored_docx() {
         .push(Paragraph::default().push_text("Canonical raw text from the stored DOCX."));
     let bytes = docx.write(Cursor::new(Vec::new())).unwrap().into_inner();
 
-    let response = render_stored_document_as_text(StoredDocumentBlob {
-        display_name: "raw.docx".to_string(),
-        file_bytes: bytes,
-        file_id: "file-raw".to_string(),
-        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            .to_string(),
-    })
+    let response = render_stored_document_as_text(
+        StoredDocumentBlob {
+            display_name: "raw.docx".to_string(),
+            file_bytes: bytes,
+            file_id: "file-raw".to_string(),
+            mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                .to_string(),
+        },
+        None,
+    )
     .await
     .unwrap();
 

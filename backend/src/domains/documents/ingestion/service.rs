@@ -88,6 +88,7 @@ pub struct ProcessDocumentsResponse {
 
 #[derive(Clone)]
 pub struct DocumentIngestionService {
+    lifecycle: Option<crate::domains::deals::deletion::lifecycle::DealLifecycle>,
     files: DocumentStore,
     graph_reader: DocumentGraphReader,
     graph_writer: DocumentGraphWriter,
@@ -111,6 +112,7 @@ impl DocumentIngestionService {
         max_concurrent_documents: usize,
     ) -> Self {
         Self {
+            lifecycle: None,
             files,
             graph_reader,
             graph_writer,
@@ -126,6 +128,22 @@ impl DocumentIngestionService {
         }
     }
 
+    pub(crate) async fn admit_deal(
+        &self,
+        deal: &str,
+    ) -> Option<crate::domains::deals::deletion::lifecycle::DealAdmission> {
+        match &self.lifecycle {
+            Some(gate) => Some(gate.admit(deal).await),
+            None => None,
+        }
+    }
+    pub(crate) fn with_lifecycle(
+        mut self,
+        lifecycle: crate::domains::deals::deletion::lifecycle::DealLifecycle,
+    ) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
+    }
     pub async fn authorize_upload(&self, deal: &str, actor: i64) -> ServiceResult<()> {
         self.files
             .authorize_upload(deal, actor)
@@ -203,6 +221,11 @@ impl DocumentIngestionService {
         deal_id: String,
         actor_id: i64,
     ) -> ServiceResult<ProcessedDocument> {
+        let _lifetime = match &self.lifecycle {
+            Some(gate) => Some(gate.admit(&deal_id).await),
+            None => None,
+        };
+        self.files.authorize_upload(&deal_id, actor_id).await?;
         let filename = file.filename.clone();
         let content_hash = uploaded_document_content_hash(&file);
         let document_id = document_id_from_content(&deal_id, &content_hash);
