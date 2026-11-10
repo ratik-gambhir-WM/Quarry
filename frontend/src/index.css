@@ -41,6 +41,7 @@
   --color-secondary-container: var(--theme-secondary-surface);
   --color-on-secondary-container: var(--theme-text-strong);
   --color-tertiary: var(--theme-tertiary);
+  --color-success: var(--theme-success);
   --color-error: var(--theme-error);
   --color-error-container: var(--theme-error-surface);
   --color-primary-fixed: var(--theme-focus);
@@ -179,6 +180,7 @@
     --theme-sidebar-text: #4b4b4b;
 
     /* Status */
+    --theme-success: #287b4b;
     --theme-error: #ba1a1a;
     --theme-error-surface: #ffdad6;
 
@@ -253,6 +255,7 @@
     --theme-sidebar-text: #d4d4d4;
 
     /* Status */
+    --theme-success: #8acb9c;
     --theme-error: #ff6b6b;
     --theme-error-surface: #4c1118;
 

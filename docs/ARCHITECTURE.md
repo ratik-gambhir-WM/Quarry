@@ -658,9 +658,11 @@ global state or query-cache library.
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
   section enables Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents.
   Deal Activity shows persisted activity for saved deals through a Quarry-themed Stealth activity
-  feed with day groups, event icons, exact timestamp labels, and a responsive timeline. It retains
-  the API’s oldest-first cursor order; loading, empty, retry, and paginated states remain owned by
-  the existing request resource. Site Visits follows it and restores the
+  feed with day groups, event icons, exact timestamp labels, and a responsive timeline. Icons use
+  semantic colors: green for uploads/additions/creation, red for removal/deletion, amber for edits,
+  purple for ownership transfers, and blue for other history; action labels retain the meaning
+  independently of color. It retains the API’s oldest-first cursor order; loading, empty, retry,
+  and paginated states remain owned by the existing request resource. Site Visits follows it and restores the
   existing editable calendar, timeline, and tasks beneath the persistent tab header; demo Deal
   Activity retains its fixture timeline. Site Visits calendar edits remain session-only and do not
   create persisted activity events or durable visit records. Enabled tabs use the `section` query parameter, with Overview
