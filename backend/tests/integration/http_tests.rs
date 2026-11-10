@@ -224,9 +224,9 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
     async fn upstream(Json(body): Json<Value>) -> axum::response::Response {
         assert_eq!(body["input"].as_array().unwrap().len(), 3);
         assert_eq!(body["input"][0]["role"], "user");
-        assert_eq!(body["input"][0]["content"], "first");
+        assert_eq!(body["input"][0]["content"][0]["text"], "first");
         assert_eq!(body["input"][1]["role"], "assistant");
-        assert_eq!(body["input"][1]["content"], "answer");
+        assert_eq!(body["input"][1]["content"][0]["text"], "answer");
         assert_eq!(body["input"][2]["content"][0]["text"], "next");
         assert_eq!(body["store"], false);
         axum::response::Response::builder()
@@ -248,7 +248,6 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         .unwrap();
     });
     let client = crate::adapters::openai::client::OpenAiClient::with_responses_url(
-        reqwest::Client::new(),
         "test-key",
         format!("http://{address}/v1/responses"),
         crate::integration_support::prompt_catalog(),

@@ -1,14 +1,38 @@
 use std::{
     fmt, fs,
+    future::Future,
     num::NonZeroUsize,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
 use base64::{engine::general_purpose, Engine as _};
-use chrono::Utc;
+use futures_util::StreamExt;
+use rig::{
+    catalog::{Catalog, ModelFacts},
+    completion::CompletionRequest,
+    message::Message,
+    observe::{Action, AdapterContext, AdapterEvent, Observation, Subject, Witness},
+    providers::openai::{
+        embedding::EncodingFormat,
+        extension::{OpenAiOptions, OpenAiResponsesOptions},
+        responses_api::wire::Responses,
+        OpenAI, OpenAIConfig as RigOpenAiConfig,
+    },
+    streaming::{Item, StreamEvent},
+    Model, ProviderError,
+};
+#[cfg(test)]
+use rig::{
+    providers::openai::wire::Embeddings,
+    wire::{Body, Encoded, Mode, Wire},
+};
 use serde_json::{json, Value};
+use tracing::instrument::WithSubscriber;
 
 use crate::{
     app::config::OpenAiConfig,
@@ -19,23 +43,16 @@ const DEFAULT_RESPONSES_MODEL: &str = "gpt-5.5";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const DEFAULT_EMBEDDING_DIMENSIONS: NonZeroUsize =
     NonZeroUsize::new(1536).expect("default embedding dimensions are non-zero");
-const OPENAI_EMBEDDINGS_URL: &str = "https://api.openai.com/v1/embeddings";
-const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
 const OPENAI_EMBEDDINGS_API: &str = "openai.embeddings";
 const OPENAI_RESPONSES_API: &str = "openai.responses";
-const MAX_LOGGED_ERROR_REASON_CHARS: usize = 1_000;
-const CHAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+pub(super) const CHAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 const CHAT_MAX_DURATION: Duration = Duration::from_secs(10 * 60);
-const MAX_PROVIDER_EVENT_BYTES: usize = 1024 * 1024;
 const MAX_CHAT_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct OpenAiClient {
-    http_client: reqwest::Client,
-    api_key: Arc<str>,
-    responses_url: Arc<str>,
-    embeddings_url: Arc<str>,
+    provider: OpenAI,
     embedding_dimensions: NonZeroUsize,
     prompts: Arc<PromptCatalog>,
 }
@@ -94,16 +111,9 @@ pub enum ResponsesFileInput<'a> {
 }
 
 impl OpenAiClient {
-    pub fn new(
-        http_client: reqwest::Client,
-        api_key: impl Into<String>,
-        prompts: Arc<PromptCatalog>,
-    ) -> Self {
+    pub fn new(api_key: impl Into<String>, prompts: Arc<PromptCatalog>) -> Self {
         Self {
-            http_client,
-            api_key: Arc::from(api_key.into()),
-            responses_url: Arc::from(OPENAI_RESPONSES_URL),
-            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
+            provider: RigOpenAiConfig::new(api_key.into()).client(),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
             prompts,
         }
@@ -111,31 +121,27 @@ impl OpenAiClient {
 
     #[cfg(test)]
     pub(crate) fn with_responses_url(
-        http_client: reqwest::Client,
         api_key: impl Into<String>,
         responses_url: impl Into<String>,
         prompts: Arc<PromptCatalog>,
     ) -> Self {
+        let responses_url = responses_url.into();
         Self {
-            http_client,
-            api_key: Arc::from(api_key.into()),
-            responses_url: Arc::from(responses_url.into()),
-            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
+            provider: RigOpenAiConfig::new(api_key.into())
+                .with_base_url(
+                    responses_url
+                        .strip_suffix("/responses")
+                        .expect("test Responses endpoint has a suffix"),
+                )
+                .client(),
             embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
             prompts,
         }
     }
 
-    pub fn from_config(
-        http_client: reqwest::Client,
-        config: &OpenAiConfig,
-        prompts: Arc<PromptCatalog>,
-    ) -> Self {
+    pub fn from_config(config: &OpenAiConfig, prompts: Arc<PromptCatalog>) -> Self {
         Self {
-            http_client,
-            api_key: Arc::from(config.api_key.expose()),
-            responses_url: Arc::from(OPENAI_RESPONSES_URL),
-            embeddings_url: Arc::from(OPENAI_EMBEDDINGS_URL),
+            provider: RigOpenAiConfig::new(config.api_key.expose()).client(),
             embedding_dimensions: config.embedding_dimensions,
             prompts,
         }
@@ -147,15 +153,138 @@ impl OpenAiClient {
 
     #[cfg(test)]
     pub(crate) fn with_embeddings_url(
-        http_client: reqwest::Client,
         embeddings_url: String,
         prompts: Arc<PromptCatalog>,
         dimensions: NonZeroUsize,
     ) -> Self {
-        let mut client = Self::new(http_client, "unused-test-key", prompts);
-        client.embeddings_url = Arc::from(embeddings_url);
+        let mut client = Self::new("unused-test-key", prompts);
+        client.provider = RigOpenAiConfig::new("unused-test-key")
+            .with_base_url(
+                embeddings_url
+                    .strip_suffix("/embeddings")
+                    .expect("test embedding endpoint has a suffix"),
+            )
+            .client();
         client.embedding_dimensions = dimensions;
         client
+    }
+
+    fn prepare_responses_request(
+        &self,
+        prompt: Option<&str>,
+        system_instructions: Option<&str>,
+        model: Option<&str>,
+        file_inputs: Option<&[ResponsesFileInput<'_>]>,
+    ) -> Result<(Model<Responses>, CompletionRequest), String> {
+        let prompt = prompt
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultResponse))
+            .trim();
+        let instructions = system_instructions
+            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultInstructions))
+            .trim();
+        let model = model.unwrap_or(DEFAULT_RESPONSES_MODEL).trim();
+        if prompt.is_empty() {
+            return Err("prompt cannot be empty".into());
+        }
+        if instructions.is_empty() {
+            return Err("system instructions cannot be empty".into());
+        }
+        if model.is_empty() {
+            return Err("model cannot be empty".into());
+        }
+        Ok((
+            self.responses_model(model),
+            completion_request(&[], prompt, instructions, file_inputs, false)?,
+        ))
+    }
+
+    fn responses_model(&self, model: &str) -> Model<Responses> {
+        rig_responses_model(&self.provider, model).with_idle_timeout(Some(CHAT_IDLE_TIMEOUT))
+    }
+
+    async fn stream_response<F, Fut>(
+        model: Model<Responses>,
+        request: CompletionRequest,
+        mut on_delta: F,
+    ) -> Result<(String, String), ChatStreamError>
+    where
+        F: FnMut(String) -> Fut + Send,
+        Fut: Future<Output = Result<(), ChatStreamError>> + Send,
+    {
+        let connection = Arc::new(StreamConnection::default());
+        let observation = AdapterContext::new(
+            connection.clone(),
+            Subject::scoped("openai.responses"),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let mut stream = tracing::subscriber::with_default(
+            tracing::subscriber::NoSubscriber::default(),
+            || {
+                model
+                    .stream_observed(request, observation)
+                    .map_err(chat_provider_error)
+            },
+        )?;
+        let mut streamed = String::new();
+        let connect_deadline = tokio::time::Instant::now() + CHAT_CONNECT_TIMEOUT;
+        loop {
+            let next = stream.next().with_subscriber(tracing::Dispatch::none());
+            tokio::pin!(next);
+            let item = if connection.received_headers.load(Ordering::Relaxed) {
+                next.await
+            } else {
+                tokio::select! {
+                    item = &mut next => item,
+                    _ = tokio::time::sleep_until(connect_deadline) => {
+                        if !connection.received_headers.load(Ordering::Relaxed) {
+                            return Err(ChatStreamError::new("connect_timeout", "OpenAI chat connection timed out"));
+                        }
+                        next.await
+                    }
+                }
+            };
+            let Some(item) = item else { break };
+            let item = item.map_err(chat_provider_error)?;
+            if let Item::Event(StreamEvent::Text { text, .. }) = item {
+                if streamed.len().saturating_add(text.len()) > MAX_CHAT_RESPONSE_BYTES {
+                    return Err(ChatStreamError::new(
+                        "provider_stream",
+                        "OpenAI chat response exceeded its size limit",
+                    ));
+                }
+                streamed.push_str(&text);
+                on_delta(text).await?;
+            }
+        }
+        let response = stream
+            .finish()
+            .with_subscriber(tracing::Dispatch::none())
+            .await
+            .map_err(chat_provider_error)?;
+        if matches!(
+            response.raw["status"].as_str(),
+            Some("failed" | "incomplete" | "cancelled")
+        ) {
+            return Err(ChatStreamError::new(
+                "provider_stream",
+                "OpenAI chat stream reported a provider failure",
+            ));
+        }
+        let completed =
+            extract_response_text_preserved(&response.raw).unwrap_or_else(|| response.text());
+        if completed.len() > MAX_CHAT_RESPONSE_BYTES {
+            return Err(ChatStreamError::new(
+                "provider_stream",
+                "OpenAI chat response exceeded its size limit",
+            ));
+        }
+        if completed.trim().is_empty() && streamed.trim().is_empty() {
+            return Err(ChatStreamError::new(
+                "provider_stream",
+                "OpenAI chat stream completed without output text",
+            ));
+        }
+        Ok((streamed, completed))
     }
 
     pub async fn gen_model_response(
@@ -175,73 +304,20 @@ impl OpenAiClient {
         model: Option<&str>,
         file_inputs: Option<&[ResponsesFileInput<'_>]>,
     ) -> Result<String, String> {
-        let prompt = prompt
-            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultResponse))
-            .trim();
-        let system_instructions = system_instructions
-            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultInstructions))
-            .trim();
-        let model = model.unwrap_or(DEFAULT_RESPONSES_MODEL).trim();
-
-        if prompt.is_empty() {
-            return Err("prompt cannot be empty".to_string());
-        }
-
-        if system_instructions.is_empty() {
-            return Err("system instructions cannot be empty".to_string());
-        }
-
-        if model.is_empty() {
-            return Err("model cannot be empty".to_string());
-        }
-
-        let request_body =
-            build_responses_request_body(model, system_instructions, prompt, file_inputs)?;
-        let started_at = Instant::now();
-
-        let response = match self
-            .http_client
-            .post(self.responses_url.as_ref())
-            .bearer_auth(self.api_key.as_ref())
-            .json(&request_body)
-            .send()
+        let (model, request) =
+            self.prepare_responses_request(prompt, system_instructions, model, file_inputs)?;
+        let started = Instant::now();
+        let response = model
+            .call(request)
+            .with_subscriber(tracing::Dispatch::none())
             .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                log_openai_transport_error(OPENAI_RESPONSES_API, None, None, &error, started_at);
-                return Err(format!("failed to call OpenAI responses API: {error}"));
-            }
-        };
-
-        let status = response.status();
-        let response_body = match response.text().await {
-            Ok(response_body) => response_body,
-            Err(error) => {
-                log_openai_transport_error(OPENAI_RESPONSES_API, None, None, &error, started_at);
-                return Err(format!("failed to read OpenAI responses response: {error}"));
-            }
-        };
-        log_openai_response(
-            OPENAI_RESPONSES_API,
-            None,
-            None,
-            status,
-            Some(&response_body),
-            started_at,
-        );
-
-        if !status.is_success() {
-            return Err(format!(
-                "OpenAI responses API returned {status}: {response_body}"
-            ));
-        }
-
-        let response_json: Value = serde_json::from_str(&response_body)
-            .map_err(|err| format!("failed to parse OpenAI responses response: {err}"))?;
-
-        extract_response_text(&response_json)
-            .ok_or_else(|| "OpenAI responses API did not include output text".to_string())
+            .map_err(|error| provider_error("responses", error, None, None, false, started))?;
+        log_openai_success(OPENAI_RESPONSES_API, None, None, started);
+        extract_response_text(&response.raw)
+            .or_else(|| {
+                (!response.text().trim().is_empty()).then(|| response.text().trim().to_owned())
+            })
+            .ok_or_else(|| "OpenAI responses API did not include output text".into())
     }
 
     pub async fn gen_model_response_with_files_streaming<F>(
@@ -255,124 +331,23 @@ impl OpenAiClient {
     where
         F: FnMut(&str) + Send,
     {
-        let prompt = prompt
-            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultResponse))
-            .trim();
-        let system_instructions = system_instructions
-            .unwrap_or_else(|| self.prompts.prompt(PromptId::DefaultInstructions))
-            .trim();
-        let model = model.unwrap_or(DEFAULT_RESPONSES_MODEL).trim();
-
-        if prompt.is_empty() {
-            return Err("prompt cannot be empty".to_string());
-        }
-
-        if system_instructions.is_empty() {
-            return Err("system instructions cannot be empty".to_string());
-        }
-
-        if model.is_empty() {
-            return Err("model cannot be empty".to_string());
-        }
-
-        let mut request_body =
-            build_responses_request_body(model, system_instructions, prompt, file_inputs)?;
-        request_body["stream"] = json!(true);
-        let started_at = Instant::now();
-
-        let mut response = match self
-            .http_client
-            .post(self.responses_url.as_ref())
-            .bearer_auth(self.api_key.as_ref())
-            .json(&request_body)
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                log_openai_transport_error(OPENAI_RESPONSES_API, None, None, &error, started_at);
-                return Err(format!("failed to call OpenAI responses API: {error}"));
-            }
-        };
-
-        let status = response.status();
-        if !status.is_success() {
-            let response_body = match response.text().await {
-                Ok(response_body) => response_body,
-                Err(error) => {
-                    log_openai_transport_error(
-                        OPENAI_RESPONSES_API,
-                        None,
-                        None,
-                        &error,
-                        started_at,
-                    );
-                    return Err(format!("failed to read OpenAI responses response: {error}"));
-                }
-            };
-            log_openai_response(
-                OPENAI_RESPONSES_API,
-                None,
-                None,
-                status,
-                Some(&response_body),
-                started_at,
-            );
-            return Err(format!(
-                "OpenAI responses API returned {status}: {response_body}"
-            ));
-        }
-
-        let mut pending = String::new();
-        let mut streamed_text = String::new();
-        let mut completed_text = None;
-
-        loop {
-            let chunk = match response.chunk().await {
-                Ok(Some(chunk)) => chunk,
-                Ok(None) => break,
-                Err(error) => {
-                    log_openai_transport_error(
-                        OPENAI_RESPONSES_API,
-                        None,
-                        None,
-                        &error,
-                        started_at,
-                    );
-                    return Err(format!(
-                        "failed to read OpenAI responses stream chunk: {error}"
-                    ));
-                }
-            };
-            let chunk_text = std::str::from_utf8(&chunk)
-                .map_err(|err| format!("OpenAI responses stream contained invalid UTF-8: {err}"))?;
-            pending.push_str(chunk_text);
-            process_sse_events(
-                &mut pending,
-                &mut streamed_text,
-                &mut completed_text,
-                &mut on_text_delta,
-            )?;
-        }
-
-        if !pending.trim().is_empty() {
-            process_sse_event(
-                &pending,
-                &mut streamed_text,
-                &mut completed_text,
-                &mut on_text_delta,
-            )?;
-        }
-
-        let response_text = if !streamed_text.trim().is_empty() {
-            streamed_text
+        let (model, request) =
+            self.prepare_responses_request(prompt, system_instructions, model, file_inputs)?;
+        let (streamed, completed) = tokio::time::timeout(
+            CHAT_MAX_DURATION,
+            Self::stream_response(model, request, |text| {
+                on_text_delta(&text);
+                std::future::ready(Ok(()))
+            }),
+        )
+        .await
+        .map_err(|_| "OpenAI response exceeded its maximum duration".to_string())?
+        .map_err(|error| error.to_string())?;
+        Ok(if streamed.trim().is_empty() {
+            completed
         } else {
-            completed_text
-                .filter(|text| !text.trim().is_empty())
-                .ok_or_else(|| "OpenAI responses stream did not include output text".to_string())?
-        };
-        log_openai_response(OPENAI_RESPONSES_API, None, None, status, None, started_at);
-        Ok(response_text)
+            streamed
+        })
     }
 
     pub async fn gen_chat_response_streaming(
@@ -390,88 +365,39 @@ impl OpenAiClient {
         {
             return Err(ChatStreamError::new("validation", "chat input is invalid"));
         }
-        let request_body =
-            build_chat_request_body(context, prompt, system_instructions, model, file_inputs)
-                .map_err(|error| ChatStreamError::new("validation", error))?;
-        let started_at = Instant::now();
-        let response = tokio::time::timeout(
-            CHAT_CONNECT_TIMEOUT,
-            self.http_client
-                .post(self.responses_url.as_ref())
-                .bearer_auth(self.api_key.as_ref())
-                .json(&request_body)
-                .send(),
+        let model = self.responses_model(model);
+        let request = completion_request(
+            context,
+            prompt,
+            system_instructions,
+            Some(file_inputs),
+            true,
+        )
+        .map_err(|error| ChatStreamError::new("validation", error))?;
+        let (streamed, completed) = tokio::time::timeout(
+            CHAT_MAX_DURATION,
+            Self::stream_response(model, request, |text| {
+                let sender = delta_sender.clone();
+                async move {
+                    sender
+                        .send(text)
+                        .await
+                        .map_err(|_| ChatStreamError::new("cancelled", "chat receiver closed"))
+                }
+            }),
         )
         .await
-        .map_err(|_| ChatStreamError::new("connect_timeout", "OpenAI chat connection timed out"))?
-        .map_err(|error| {
-            ChatStreamError::new("transport", format!("OpenAI chat request failed: {error}"))
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            tracing::error!(api = OPENAI_RESPONSES_API, status = %status, "OpenAI chat request failed");
-            return Err(ChatStreamError::new(
-                "provider_status",
-                format!("OpenAI chat returned {status}"),
-            ));
-        }
-
-        let deadline = tokio::time::Instant::now() + CHAT_MAX_DURATION;
-        let mut response = response;
-        let mut state = ProviderChatStream::default();
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(ChatStreamError::new(
-                    "max_duration",
-                    "OpenAI chat stream exceeded its maximum duration",
-                ));
-            }
-            let chunk_timeout = CHAT_IDLE_TIMEOUT.min(remaining);
-            let chunk = tokio::time::timeout(chunk_timeout, response.chunk())
-                .await
-                .map_err(|_| {
-                    ChatStreamError::new("idle_timeout", "OpenAI chat stream was idle for too long")
-                })?
-                .map_err(|error| {
-                    ChatStreamError::new("transport", format!("OpenAI chat stream failed: {error}"))
-                })?;
-            let Some(chunk) = chunk else { break };
-            for delta in state
-                .push(&chunk)
-                .map_err(|error| ChatStreamError::new("provider_stream", error))?
-            {
-                if delta_sender.send(delta).await.is_err() {
-                    return Err(ChatStreamError::new("cancelled", "chat receiver closed"));
-                }
-            }
-        }
-        let result = state
-            .finish()
-            .map_err(|error| ChatStreamError::new("provider_stream", error))?;
-        tracing::info!(
-            api = OPENAI_RESPONSES_API,
-            elapsed_seconds = started_at.elapsed().as_secs_f64(),
-            "OpenAI chat completed"
-        );
-        Ok(result)
-    }
-
-    pub async fn gen_file_embeddings(&self, content: &str) -> Result<(), String> {
-        let embedding = self.gen_embedding(content, None).await?;
-        let embedded_at = Utc::now().to_rfc3339();
-        println!(
-            "embedded document at {embedded_at}; vector dimensions: {}",
-            embedding.len()
-        );
-
-        for embed in embedding {
-            let string = embed.to_string();
-            println!("embedded document at {string}");
-        }
-
-        Ok(())
+        .map_err(|_| {
+            ChatStreamError::new(
+                "max_duration",
+                "OpenAI chat stream exceeded its maximum duration",
+            )
+        })??;
+        Ok(if completed.trim().is_empty() {
+            streamed
+        } else {
+            completed
+        })
     }
 
     pub async fn gen_embedding(
@@ -535,260 +461,256 @@ impl OpenAiClient {
         file_size_bytes: Option<u64>,
         private: bool,
     ) -> Result<Vec<Vec<f64>>, String> {
-        let request_body =
-            build_embeddings_request_body(contents, model, self.embedding_dimensions)?;
-        let started_at = Instant::now();
-
-        let response = match self
-            .http_client
-            .post(self.embeddings_url.as_ref())
-            .bearer_auth(self.api_key.as_ref())
-            .json(&request_body)
-            .send()
+        let model = embedding_model_name(contents, model)?;
+        let mut embedder = self
+            .provider
+            .embedding(model, Some(self.embedding_dimensions.get()));
+        embedder.wire = embedder.wire.with_encoding_format(EncodingFormat::Float);
+        let started = Instant::now();
+        let response = embedder
+            .call(
+                contents
+                    .iter()
+                    .map(|text| (*text).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+            .with_subscriber(tracing::Dispatch::none())
             .await
+            .map_err(|error| {
+                provider_error(
+                    "embeddings",
+                    error,
+                    filename,
+                    file_size_bytes,
+                    private,
+                    started,
+                )
+            })?;
+        log_openai_success(OPENAI_EMBEDDINGS_API, filename, file_size_bytes, started);
+        // Rig currently drops upstream indices when normalizing vectors. Check
+        // the preserved reply to reject duplicates/missing indices and restore
+        // input order, in addition to the index's finite f32 storage invariant.
+        extract_embeddings(&response.raw, contents.len(), self.embedding_dimensions)
+    }
+}
+
+pub(crate) fn rig_responses_model(provider: &OpenAI, model: &str) -> Model<Responses> {
+    let mut model = provider.responses(model);
+    // Quarry requires arbitrary_precision; Rig's builtin catalog cannot decode it.
+    model.wire.facts = ModelFacts::default().with_catalog(&Catalog::default());
+    model
+}
+
+/// Rig's response-header observation separates connection timeout from model
+/// thinking time without replacing or wrapping Rig's HTTP client.
+#[derive(Default)]
+struct StreamConnection {
+    received_headers: AtomicBool,
+}
+
+impl Witness for StreamConnection {
+    fn observe(&self, observation: Observation) {
+        if matches!(observation.action, Action::Adapter { observation } if matches!(observation.event, AdapterEvent::Response { .. }))
         {
-            Ok(response) => response,
-            Err(error) => {
-                log_openai_transport_error(
-                    OPENAI_EMBEDDINGS_API,
-                    filename,
-                    file_size_bytes,
-                    &if private {
-                        "embedding transport failed".to_owned()
-                    } else {
-                        error.to_string()
-                    },
-                    started_at,
-                );
-                return Err(format!("failed to call OpenAI embeddings API: {error}"));
-            }
-        };
-
-        let status = response.status();
-        let response_body = match response.text().await {
-            Ok(response_body) => response_body,
-            Err(error) => {
-                log_openai_transport_error(
-                    OPENAI_EMBEDDINGS_API,
-                    filename,
-                    file_size_bytes,
-                    &if private {
-                        "embedding transport failed".to_owned()
-                    } else {
-                        error.to_string()
-                    },
-                    started_at,
-                );
-                return Err(format!(
-                    "failed to read OpenAI embeddings response: {error}"
-                ));
-            }
-        };
-        log_openai_response(
-            OPENAI_EMBEDDINGS_API,
-            filename,
-            file_size_bytes,
-            status,
-            if private { None } else { Some(&response_body) },
-            started_at,
-        );
-
-        if !status.is_success() {
-            return Err(format!(
-                "OpenAI embeddings API returned {status}: {response_body}"
-            ));
+            self.received_headers.store(true, Ordering::Relaxed);
         }
-
-        let response_json: Value = serde_json::from_str(&response_body)
-            .map_err(|err| format!("failed to parse OpenAI embeddings response: {err}"))?;
-
-        extract_embeddings(&response_json, contents.len(), self.embedding_dimensions)
     }
 }
 
-fn log_openai_response(
-    api: &str,
-    filename: Option<&str>,
-    file_size_bytes: Option<u64>,
-    status: reqwest::StatusCode,
-    response_body: Option<&str>,
-    started_at: Instant,
-) {
-    let filename = filename.unwrap_or("-");
-    let file_size_bytes = file_size_bytes.unwrap_or_default();
-    if status.is_success() {
-        tracing::info!(
-            api,
-            filename,
-            file_size_bytes,
-            elapsed_seconds = started_at.elapsed().as_secs_f64(),
-        );
-    } else {
-        let reason = openai_error_reason(status, response_body.unwrap_or_default());
-        tracing::error!(
-            api,
-            filename,
-            file_size_bytes,
-            status = %status,
-            reason = %reason,
-            elapsed_seconds = started_at.elapsed().as_secs_f64(),
-        );
-    }
-}
-
-fn log_openai_transport_error(
-    api: &str,
-    filename: Option<&str>,
-    file_size_bytes: Option<u64>,
-    reason: &impl std::fmt::Display,
-    started_at: Instant,
-) {
-    let filename = filename.unwrap_or("-");
-    let file_size_bytes = file_size_bytes.unwrap_or_default();
-    tracing::error!(
-        api,
-        filename,
-        file_size_bytes,
-        reason = %reason,
-        elapsed_seconds = started_at.elapsed().as_secs_f64(),
-    );
-}
-
-fn openai_error_reason(status: reqwest::StatusCode, response_body: &str) -> String {
-    let reason = serde_json::from_str::<Value>(response_body)
-        .ok()
-        .and_then(|body| {
-            body.pointer("/error/message")
-                .or_else(|| body.get("message"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|message| !message.is_empty())
-                .map(ToString::to_string)
-        })
-        .or_else(|| {
-            let response_body = response_body.trim();
-            (!response_body.is_empty()).then(|| response_body.to_string())
-        })
-        .unwrap_or_else(|| {
-            status
-                .canonical_reason()
-                .unwrap_or("OpenAI request failed")
-                .to_string()
-        });
-
-    truncate_error_reason(reason)
-}
-
-fn truncate_error_reason(reason: String) -> String {
-    if reason.chars().count() <= MAX_LOGGED_ERROR_REASON_CHARS {
-        return reason;
-    }
-
-    let mut truncated = reason
-        .chars()
-        .take(MAX_LOGGED_ERROR_REASON_CHARS)
-        .collect::<String>();
-    truncated.push('…');
-    truncated
-}
-
-fn build_embeddings_request_body(
-    contents: &[&str],
-    model: Option<&str>,
-    dimensions: NonZeroUsize,
-) -> Result<Value, String> {
+fn embedding_model_name<'a>(contents: &[&str], model: Option<&'a str>) -> Result<&'a str, String> {
     let model = model.unwrap_or(DEFAULT_EMBEDDING_MODEL).trim();
     if contents.is_empty() {
-        return Err("cannot embed an empty list of document contents".to_string());
+        return Err("cannot embed an empty list of document contents".into());
     }
-    if let Some(index) = contents
-        .iter()
-        .position(|content| content.trim().is_empty())
-    {
+    if let Some(index) = contents.iter().position(|text| text.trim().is_empty()) {
         return Err(format!(
             "cannot embed empty document content at input index {index}"
         ));
     }
     if model.is_empty() {
-        return Err("model cannot be empty".to_string());
+        return Err("model cannot be empty".into());
     }
-
-    Ok(json!({
-        "model": model,
-        "input": contents,
-        "encoding_format": "float",
-        "dimensions": dimensions.get(),
-    }))
+    Ok(model)
 }
 
+fn provider_error(
+    api: &str,
+    error: ProviderError,
+    filename: Option<&str>,
+    file_size_bytes: Option<u64>,
+    private: bool,
+    started: Instant,
+) -> String {
+    tracing::error!(api, filename, file_size_bytes, kind = ?error.kind(), elapsed_seconds = started.elapsed().as_secs_f64(), "OpenAI call failed");
+    if let ProviderError::MismatchedDimensions { .. } = error {
+        return "OpenAI embedding dimension does not match the configured index".into();
+    }
+    if let Some(status) = error.provider_response_status() {
+        return if private {
+            format!("OpenAI {api} API returned {status}")
+        } else {
+            format!(
+                "OpenAI {api} API returned {status}: {}",
+                error.provider_response_body().unwrap_or_default()
+            )
+        };
+    }
+    format!("failed to call OpenAI {api} API")
+}
+
+fn chat_provider_error(error: ProviderError) -> ChatStreamError {
+    let category = if error.provider_response_status().is_some() {
+        "provider_status"
+    } else if matches!(error, ProviderError::Stalled(_)) {
+        "idle_timeout"
+    } else {
+        "provider_stream"
+    };
+    let detail = if let Some(status) = error.provider_response_status() {
+        format!(
+            "OpenAI responses API returned {status}: {}",
+            error.provider_response_body().unwrap_or_default()
+        )
+    } else {
+        "OpenAI response stream failed".into()
+    };
+    ChatStreamError::new(category, detail)
+}
+
+fn log_openai_success(
+    api: &str,
+    filename: Option<&str>,
+    file_size_bytes: Option<u64>,
+    started_at: Instant,
+) {
+    tracing::info!(
+        api,
+        filename = filename.unwrap_or("-"),
+        file_size_bytes = file_size_bytes.unwrap_or_default(),
+        elapsed_seconds = started_at.elapsed().as_secs_f64(),
+    );
+}
+
+#[cfg(test)]
+fn build_embeddings_request_body(
+    provider: &RigOpenAiConfig,
+    contents: &[&str],
+    model: Option<&str>,
+    dimensions: NonZeroUsize,
+) -> Result<Value, String> {
+    let model = embedding_model_name(contents, model)?;
+
+    encoded_json(
+        Embeddings::new(provider.clone(), model, Some(dimensions.get()))
+            .with_encoding_format(EncodingFormat::Float)
+            .encode(
+                contents
+                    .iter()
+                    .map(|content| (*content).to_owned())
+                    .collect(),
+                Mode::Unary,
+            ),
+    )
+}
+
+#[cfg(test)]
 fn build_responses_request_body(
+    provider: &RigOpenAiConfig,
     model: &str,
     system_instructions: &str,
     prompt: &str,
     file_inputs: Option<&[ResponsesFileInput<'_>]>,
 ) -> Result<Value, String> {
-    Ok(json!({
-        "model": model,
-        "instructions": system_instructions,
-        "input": [
-            {
-                "role": "user",
-                "content": build_user_input_content(prompt, file_inputs)?,
-            }
-        ],
-    }))
+    let request = completion_request(&[], prompt, system_instructions, file_inputs, false)?;
+    encode_completion(provider, model, request, Mode::Unary)
 }
 
+#[cfg(test)]
 fn build_chat_request_body(
+    provider: &RigOpenAiConfig,
     context: &[ChatMessageInput],
     prompt: &str,
     system_instructions: &str,
     model: &str,
     file_inputs: &[ResponsesFileInput<'_>],
 ) -> Result<Value, String> {
-    let mut input = context
-        .iter()
-        .map(|message| {
-            json!({
-                "role": match message.role {
-                    ChatRole::User => "user",
-                    ChatRole::Assistant => "assistant",
-                },
-                "content": message.content,
-            })
-        })
-        .collect::<Vec<_>>();
-    input.push(json!({
-        "role": "user",
-        "content": build_user_input_content(prompt, Some(file_inputs))?,
-    }));
-    Ok(json!({
-        "model": model,
-        "instructions": system_instructions,
-        "input": input,
-        "stream": true,
-        "store": false,
-    }))
+    encode_completion(
+        provider,
+        model,
+        completion_request(
+            context,
+            prompt,
+            system_instructions,
+            Some(file_inputs),
+            true,
+        )?,
+        Mode::Streaming,
+    )
 }
 
-fn build_user_input_content(
+/// Rig's typed Responses input extension carries the file formats and original
+/// names that its generic document type cannot yet represent. No HTTP mapping is
+/// needed: Rig encodes, sends, and decodes this request through its normal model.
+fn completion_request(
+    context: &[ChatMessageInput],
     prompt: &str,
-    file_inputs: Option<&[ResponsesFileInput<'_>]>,
-) -> Result<Vec<Value>, String> {
-    let mut content = Vec::new();
-
-    if let Some(file_inputs) = file_inputs {
-        for file_input in file_inputs {
-            content.push(build_input_item(file_input)?);
-        }
+    instructions: &str,
+    files: Option<&[ResponsesFileInput<'_>]>,
+    private: bool,
+) -> Result<CompletionRequest, String> {
+    let mut options = OpenAiOptions::new();
+    if private {
+        options = options.store(false);
     }
+    let request = if let Some(files) = files.filter(|files| !files.is_empty()) {
+        let mut input = context.iter().map(|message| json!({
+            "type": "message",
+            "role": match message.role { ChatRole::User => "user", ChatRole::Assistant => "assistant" },
+            "content": [{"type": match message.role { ChatRole::User => "input_text", ChatRole::Assistant => "output_text" }, "text": message.content}],
+        })).collect::<Vec<_>>();
+        let mut content = files
+            .iter()
+            .map(build_input_item)
+            .collect::<Result<Vec<_>, _>>()?;
+        content.push(json!({"type": "input_text", "text": prompt}));
+        input.push(json!({"type": "message", "role": "user", "content": content}));
+        options = options.responses(OpenAiResponsesOptions::default().input(input));
+        // Rig lifts this system message into top-level instructions. The typed
+        // provider input above already contains the complete ordered conversation.
+        CompletionRequest::new(Message::system(instructions))
+    } else {
+        CompletionRequest::new(prompt)
+            .preamble(instructions)
+            .messages(context.iter().map(|message| match message.role {
+                ChatRole::User => Message::user(message.content.clone()),
+                ChatRole::Assistant => Message::assistant(message.content.clone()),
+            }))
+    };
+    Ok(request.provider_option(options))
+}
 
-    content.push(json!({
-        "type": "input_text",
-        "text": prompt,
-    }));
+#[cfg(test)]
+fn encode_completion(
+    provider: &RigOpenAiConfig,
+    model: &str,
+    request: CompletionRequest,
+    mode: Mode,
+) -> Result<Value, String> {
+    let wire = Responses::new(provider.clone(), model)
+        .with_facts(ModelFacts::default().with_catalog(&Catalog::default()));
+    tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
+        encoded_json(wire.encode(request, mode))
+    })
+}
 
-    Ok(content)
+#[cfg(test)]
+fn encoded_json(encoded: Result<Encoded, rig::error::EncodeError>) -> Result<Value, String> {
+    let encoded = encoded.map_err(|_| "failed to encode OpenAI request with Rig".to_string())?;
+    match encoded.request.into_body() {
+        Body::Bytes(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|_| "Rig did not encode a JSON request".to_string()),
+        Body::Multipart(_) => Err("Rig encoded an unexpected multipart request".to_string()),
+    }
 }
 
 fn build_input_item(file_input: &ResponsesFileInput<'_>) -> Result<Value, String> {
@@ -893,138 +815,6 @@ fn build_base64_data_url(mime_type: &str, data_base64: &str) -> String {
     format!("data:{mime_type};base64,{data_base64}")
 }
 
-#[derive(Default)]
-struct ProviderChatStream {
-    accumulated: String,
-    completed: Option<String>,
-    pending: Vec<u8>,
-    saw_completed: bool,
-}
-
-impl ProviderChatStream {
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, String> {
-        self.pending.extend_from_slice(bytes);
-        let mut deltas = Vec::new();
-        while let Some((end, separator_len)) = find_sse_bytes_boundary(&self.pending) {
-            if end > MAX_PROVIDER_EVENT_BYTES {
-                return Err("OpenAI chat stream event exceeded its size limit".to_string());
-            }
-            let frame = self.pending[..end].to_vec();
-            self.pending.drain(..end + separator_len);
-            if let Some(delta) = self.process_frame(&frame)? {
-                deltas.push(delta);
-            }
-        }
-        if self.pending.len() > MAX_PROVIDER_EVENT_BYTES {
-            return Err("OpenAI chat stream event exceeded its size limit".to_string());
-        }
-        Ok(deltas)
-    }
-
-    fn finish(mut self) -> Result<String, String> {
-        if !self.pending.iter().all(u8::is_ascii_whitespace) {
-            return Err("OpenAI chat stream ended with an incomplete event".to_string());
-        }
-        if !self.saw_completed {
-            return Err("OpenAI chat stream ended before completion".to_string());
-        }
-        if let Some(completed) = self.completed.take() {
-            if !completed.trim().is_empty() {
-                return Ok(completed);
-            }
-        }
-        if self.accumulated.trim().is_empty() {
-            Err("OpenAI chat stream completed without output text".to_string())
-        } else {
-            Ok(self.accumulated)
-        }
-    }
-
-    fn process_frame(&mut self, frame: &[u8]) -> Result<Option<String>, String> {
-        let frame = std::str::from_utf8(frame)
-            .map_err(|_| "OpenAI chat stream contained invalid UTF-8".to_string())?;
-        let mut event_name = None;
-        let mut data_lines = Vec::new();
-        for line in frame.lines() {
-            let line = line.trim_end_matches('\r');
-            if line.starts_with(':') {
-                continue;
-            }
-            if let Some(value) = line.strip_prefix("event:") {
-                event_name = Some(value.trim());
-            } else if let Some(value) = line.strip_prefix("data:") {
-                data_lines.push(value.strip_prefix(' ').unwrap_or(value));
-            }
-        }
-        let data = data_lines.join("\n");
-        if data.trim().is_empty() || data.trim() == "[DONE]" {
-            return Ok(None);
-        }
-        let value: Value = serde_json::from_str(&data)
-            .map_err(|_| "OpenAI chat stream contained malformed JSON".to_string())?;
-        let kind = value
-            .get("type")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "OpenAI chat stream event omitted its type".to_string())?;
-        if event_name.is_some_and(|name| name != kind) {
-            return Err("OpenAI chat stream event name did not match its payload".to_string());
-        }
-        match kind {
-            "response.output_text.delta" | "response.refusal.delta" => {
-                if self.saw_completed {
-                    return Err("OpenAI chat stream sent text after completion".to_string());
-                }
-                let delta = value
-                    .get("delta")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "OpenAI chat delta omitted text".to_string())?;
-                if self.accumulated.len().saturating_add(delta.len()) > MAX_CHAT_RESPONSE_BYTES {
-                    return Err("OpenAI chat response exceeded its size limit".to_string());
-                }
-                self.accumulated.push_str(delta);
-                Ok(Some(delta.to_string()))
-            }
-            "response.completed" => {
-                if self.saw_completed {
-                    return Err("OpenAI chat stream completed more than once".to_string());
-                }
-                self.saw_completed = true;
-                self.completed = value
-                    .get("response")
-                    .and_then(extract_response_text_preserved);
-                if self
-                    .completed
-                    .as_ref()
-                    .is_some_and(|text| text.len() > MAX_CHAT_RESPONSE_BYTES)
-                {
-                    return Err("OpenAI chat response exceeded its size limit".to_string());
-                }
-                Ok(None)
-            }
-            "error" | "response.failed" | "response.incomplete" => {
-                Err("OpenAI chat stream reported a provider failure".to_string())
-            }
-            _ => Ok(None),
-        }
-    }
-}
-
-fn find_sse_bytes_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
-    let lf = bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|index| (index, 2));
-    let crlf = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| (index, 4));
-    match (lf, crlf) {
-        (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
-
 fn extract_response_text_preserved(response: &Value) -> Option<String> {
     if let Some(text) = response.get("output_text").and_then(Value::as_str) {
         return (!text.trim().is_empty()).then(|| text.to_string());
@@ -1046,89 +836,6 @@ fn extract_response_text_preserved(response: &Value) -> Option<String> {
         }
     }
     (!result.trim().is_empty()).then_some(result)
-}
-
-fn process_sse_events<F>(
-    pending: &mut String,
-    streamed_text: &mut String,
-    completed_text: &mut Option<String>,
-    on_text_delta: &mut F,
-) -> Result<(), String>
-where
-    F: FnMut(&str),
-{
-    while let Some((event_end, separator_len)) = find_sse_event_boundary(pending) {
-        let raw_event = pending[..event_end].to_string();
-        pending.drain(..event_end + separator_len);
-        process_sse_event(&raw_event, streamed_text, completed_text, on_text_delta)?;
-    }
-
-    Ok(())
-}
-
-fn find_sse_event_boundary(pending: &str) -> Option<(usize, usize)> {
-    match (pending.find("\n\n"), pending.find("\r\n\r\n")) {
-        (Some(lf_index), Some(crlf_index)) if crlf_index < lf_index => Some((crlf_index, 4)),
-        (Some(lf_index), _) => Some((lf_index, 2)),
-        (None, Some(crlf_index)) => Some((crlf_index, 4)),
-        (None, None) => None,
-    }
-}
-
-fn process_sse_event<F>(
-    raw_event: &str,
-    streamed_text: &mut String,
-    completed_text: &mut Option<String>,
-    on_text_delta: &mut F,
-) -> Result<(), String>
-where
-    F: FnMut(&str),
-{
-    let data = raw_event
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim_end_matches('\r');
-            line.strip_prefix("data:").map(str::trim_start)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    if data.trim().is_empty() || data.trim() == "[DONE]" {
-        return Ok(());
-    }
-
-    let event_json: Value = serde_json::from_str(&data)
-        .map_err(|err| format!("failed to parse OpenAI responses stream event: {err}"))?;
-
-    if let Some(delta) = extract_response_stream_delta(&event_json) {
-        streamed_text.push_str(&delta);
-        on_text_delta(&delta);
-    }
-
-    if matches!(
-        event_json.get("type").and_then(Value::as_str),
-        Some("response.completed")
-    ) {
-        if let Some(text) = event_json
-            .get("response")
-            .and_then(extract_response_text)
-            .filter(|text| !text.trim().is_empty())
-        {
-            *completed_text = Some(text);
-        }
-    }
-
-    Ok(())
-}
-
-fn extract_response_stream_delta(event_json: &Value) -> Option<String> {
-    match event_json.get("type").and_then(Value::as_str) {
-        Some("response.output_text.delta") | Some("response.refusal.delta") => event_json
-            .get("delta")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-        _ => None,
-    }
 }
 
 fn infer_file_mime_type(path: &Path) -> &'static str {
@@ -1188,7 +895,6 @@ fn extract_response_text(response_json: &Value) -> Option<String> {
         None
     } else {
         let text = text_parts.join("\n");
-        println!("{}", text);
         Some(text)
     }
 }

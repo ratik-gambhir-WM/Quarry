@@ -18,6 +18,12 @@ manifests, migrations, and tests remain authoritative when either document drift
 Here, **model** means the product and data model, not an OpenAI or other AI model selection.
 Configured AI models are infrastructure concerns described in the architecture guide.
 
+Rig is likewise an infrastructure dependency: it builds and executes OpenAI requests inside the
+existing adapter. It introduces no durable product entity and does not own authentication,
+conversation persistence, or the stream lifecycle. See
+[the OpenAI integration](ARCHITECTURE.md#114-optional-openai-capability-group) for the builder
+pattern, attachment compatibility, and execution responsibilities.
+
 ## 1. How to read the domain tree
 
 Quarry's Axum backend is a modular monolith. A domain is a product capability boundary, not a
@@ -51,6 +57,7 @@ and tests first.
 | `data_rooms` | Browse and preview a deal's configured local filesystem source | None of its own | Reads a local root from deal metadata or server configuration; does not own stored document blobs or activate SharePoint |
 | `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | SQLite is canonical; Helix is a search projection; jobs and locks are process-local |
 | `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
+| `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | SQLite-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
 | `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared SQLite catalog and Helix projection in default embedded mode | Explicit legacy mode uses the independent Diligence Studio service; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
@@ -73,7 +80,7 @@ capabilities each domain receives and merges already-state-bound feature routers
 | `vaults` | Durable knowledge collections and access rules | Reserved; current vault screens are presentation/staging experiences |
 | `notebooks` | Owner-scoped notebooks, folders, native notes, durable save jobs and Helix projection | Durable API, both transports and explicit-save editor; folder UI deferred |
 | `unified_search` | Authorized cross-domain search composition | Reserved; implemented search is document-chunk search only |
-| `assistant` | Conversations, messages, citations, and interaction orchestration | Reserved; no assistant conversation API or durable thread model |
+| Future `assistant::agent` | Tool execution and reasoning lifecycle | Not implemented; Rig Agent and AgentRunner remain deferred, independently of implemented `assistant::chat` |
 | `activity` | Durable product activity history | Reserved; frontend activity logs are session-local and separate |
 | `notifications` | Preferences, delivery requests, attempts, and retry policy | Reserved; no notification queue or delivery adapter is active |
 

@@ -1,3 +1,5 @@
+use super::error::IngestionError;
+
 use crate::domains::documents::{
     graph::{
         model::{FileChunkNode, FileNode, FileVersionNode},
@@ -39,7 +41,7 @@ pub(crate) async fn persist_document_and_chunks(
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
-) -> Result<DocumentPersistenceResult, String> {
+) -> Result<DocumentPersistenceResult, IngestionError> {
     let mut prepared = prepare_document_persistence(
         graph_writer,
         deal_id,
@@ -156,42 +158,55 @@ async fn persist_prepared_document_and_chunks(
     files: &DocumentStore,
     graph_writer: &DocumentGraphWriter,
     prepared: PreparedDocumentPersistence,
-) -> Result<DocumentPersistenceResult, String> {
+) -> Result<DocumentPersistenceResult, IngestionError> {
     let insert_blob_result = files
         .persist(prepared.file_persistence)
         .await
         .map_err(|error| error.to_string())?;
-    if insert_blob_result != prepared.expected_identity {
-        return Err(
-            "committed SQLite identity does not match the prepared ingestion plan".to_string(),
-        );
-    }
-    if !prepared.graph.matches_identity(
-        &insert_blob_result.deal_id,
-        &insert_blob_result.file_id,
-        &insert_blob_result.display_name,
-        &insert_blob_result.version_id,
-    ) {
-        return Err(
-            "prepared Helix graph identity does not match the committed SQLite identity"
-                .to_string(),
-        );
-    }
+    verify_committed_identity(
+        &prepared.expected_identity,
+        &prepared.graph,
+        &insert_blob_result,
+    )?;
     let insert_document_chunk_result = graph_writer
         .insert_prepared_graph(prepared.graph)
         .await
         .map_err(|error| error.to_string())
     .map_err(|error| {
-        format!(
+        IngestionError::AfterCommit(format!(
             "Helix indexing failed after SQLite committed file_id `{}` and version_id `{}`: {error}",
             insert_blob_result.file_id, insert_blob_result.version_id
-        )
+        ))
     })?;
 
     Ok(DocumentPersistenceResult {
         insert_blob_result,
         insert_document_chunk_result,
     })
+}
+
+// These guards need the actual result of the canonical transaction, so they remain after commit.
+fn verify_committed_identity(
+    expected: &PersistedFileIdentity,
+    graph: &PreparedDocumentGraph,
+    committed: &PersistedFileIdentity,
+) -> Result<(), IngestionError> {
+    if committed != expected {
+        return Err(IngestionError::AfterCommit(
+            "committed SQLite identity does not match the prepared ingestion plan".into(),
+        ));
+    }
+    if !graph.matches_identity(
+        &committed.deal_id,
+        &committed.file_id,
+        &committed.display_name,
+        &committed.version_id,
+    ) {
+        return Err(IngestionError::AfterCommit(
+            "prepared Helix graph identity does not match the committed SQLite identity".into(),
+        ));
+    }
+    Ok(())
 }
 
 // These are persistence invariants over parser-derived data, not HTTP request validation.

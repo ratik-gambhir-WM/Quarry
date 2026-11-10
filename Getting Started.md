@@ -13,7 +13,7 @@ Run commands from the repository root unless a section names a different directo
 | --- | --- |
 | Git | Required to clone and work with the repository |
 | Node.js and npm | Use Node.js 22.12 or newer in the Node 22 line, or a newer supported LTS; the current Vite dependency requires `^20.19.0` or `>=22.12.0` |
-| Rust and Cargo | Rust 1.94 or newer, with `rustfmt` and Clippy; the backend declares this minimum |
+| Rust and Cargo | Rust 1.97.1 or newer, with `rustfmt` and Clippy; the backend declares this minimum for Rig 0.46 |
 | Docker | Docker Desktop on macOS, or a running Docker Engine on Linux |
 | Bash and curl | Required by the root launcher |
 | Tauri system dependencies | Required for the native desktop app; follow the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform |

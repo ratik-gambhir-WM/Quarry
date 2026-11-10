@@ -174,13 +174,10 @@ pub(crate) fn assemble_api_with_templates(
     let document_graph_writer =
         DocumentGraphWriter::new(document_graph.clone(), config.helix.vector_dimension);
     let document_graph_search = DocumentGraphSearch::new(document_graph.clone());
-    let openai = config.openai.as_ref().map(|openai_config| {
-        Arc::new(OpenAiClient::from_config(
-            http.clone(),
-            openai_config,
-            prompts.clone(),
-        ))
-    });
+    let openai = config
+        .openai
+        .as_ref()
+        .map(|openai_config| Arc::new(OpenAiClient::from_config(openai_config, prompts.clone())));
     let notebooks = NotebookService::new(
         NotebookRepository::new(sqlite.clone()),
         Arc::new(NotebookPipeline::new(
@@ -397,35 +394,25 @@ async fn build_templates(
         None => Arc::new(native::DisabledTemplatePreviewGenerator),
     };
     let preview = Arc::new(NativePreview(native_preview));
-    let provider_http = reqwest::Client::builder()
-        .retry(reqwest::retry::never())
-        .build()
-        .map_err(BootstrapError::HttpClient)?;
     let classification = settings.classification.as_ref().map(|c| {
         Arc::new(SlideClassificationService::new(
             SlideClassificationServiceOptions {
-                classifier: Arc::new(OpenAISlideClassifier::new(
-                    provider_http.clone(),
-                    OpenAISlideClassifierOptions {
-                        api_key: c.key.expose().into(),
-                        base_url: None,
-                        model: c.model.clone(),
-                        timeout: c.timeout,
-                        max_output_tokens: c.max_output_tokens,
-                    },
-                )),
+                classifier: Arc::new(OpenAISlideClassifier::new(OpenAISlideClassifierOptions {
+                    api_key: c.key.expose().into(),
+                    base_url: None,
+                    model: c.model.clone(),
+                    timeout: c.timeout,
+                    max_output_tokens: c.max_output_tokens,
+                })),
                 classification_model: c.model.clone(),
-                embedder: Arc::new(OpenAISlideEmbedder::new(
-                    provider_http.clone(),
-                    OpenAISlideEmbedderOptions {
-                        api_key: c.key.expose().into(),
-                        base_url: None,
-                        model: c.embedding_model.clone(),
-                        timeout: c.timeout,
-                        dimensions: Some(c.dimensions.get()),
-                        max_input_bytes: c.max_embedding_text_bytes,
-                    },
-                )),
+                embedder: Arc::new(OpenAISlideEmbedder::new(OpenAISlideEmbedderOptions {
+                    api_key: c.key.expose().into(),
+                    base_url: None,
+                    model: c.embedding_model.clone(),
+                    timeout: c.timeout,
+                    dimensions: Some(c.dimensions.get()),
+                    max_input_bytes: c.max_embedding_text_bytes,
+                })),
                 embedding_dimensions: Some(c.dimensions.get()),
                 embedding_max_text_bytes: c.max_embedding_text_bytes,
                 embedding_model: c.embedding_model.clone(),

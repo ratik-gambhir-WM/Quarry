@@ -1,3 +1,5 @@
+use super::error::IngestionError;
+
 use std::{
     collections::HashMap,
     path::Path,
@@ -220,62 +222,11 @@ impl DocumentIngestionService {
             }
         };
         if let Some(existing) = &existing_attachment {
-            match self
-                .graph_reader
-                .current_document(&deal_id, &existing.file_id)
-                .await
+            if let Some(outcome) = self
+                .existing_attachment_outcome(&deal_id, existing, &content_hash, &filename)
+                .await?
             {
-                Ok(Some(indexed))
-                    if indexed.version.version_id == existing.version_id
-                        && indexed.version.content_sha256 == content_hash =>
-                {
-                    let manifest = self
-                        .files
-                        .manifest(existing.version_id.clone())
-                        .await?
-                        .ok_or_else(|| ServiceError::internal("identity manifest missing"))?;
-                    let active = manifest
-                        .chunks
-                        .iter()
-                        .filter(|c| c.index_generation == manifest.active_generation)
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    match self
-                        .graph_reader
-                        .has_complete_chunks(&deal_id, &active)
-                        .await
-                    {
-                        Ok(true)
-                            if indexed.version.index_generation == manifest.active_generation =>
-                        {
-                            return Ok(ProcessedDocument {
-                                filename,
-                                document_id: Some(manifest.document_id),
-                                chunk_count: 0,
-                                success: true,
-                                sqlite_committed: true,
-                                skipped: true,
-                                error: None,
-                            });
-                        }
-                        Ok(_) => {} // Repair the existing immutable version through the normal retry path.
-                        Err(error) => {
-                            return Ok(failed_document(
-                                filename,
-                                format!(
-                                    "failed to verify the existing deal attachment index: {error}"
-                                ),
-                            ))
-                        }
-                    }
-                }
-                Ok(Some(_)) | Ok(None) => {}
-                Err(error) => {
-                    return Ok(failed_document(
-                        filename,
-                        format!("failed to check the existing deal attachment index: {error}"),
-                    ));
-                }
+                return Ok(outcome);
             }
         }
 
@@ -308,6 +259,72 @@ impl DocumentIngestionService {
         )
     }
 
+    /// Only a complete projection of the canonical immutable version can skip processing.
+    /// Missing or stale graph state falls through to repair; an unavailable graph fails closed.
+    async fn existing_attachment_outcome(
+        &self,
+        deal_id: &str,
+        existing: &PersistedFileIdentity,
+        content_hash: &str,
+        filename: &str,
+    ) -> ServiceResult<Option<ProcessedDocument>> {
+        let indexed = match self
+            .graph_reader
+            .current_document(deal_id, &existing.file_id)
+            .await
+        {
+            Ok(Some(indexed))
+                if indexed.version.version_id == existing.version_id
+                    && indexed.version.content_sha256 == content_hash =>
+            {
+                indexed
+            }
+            Ok(_) => return Ok(None),
+            Err(error) => {
+                return Ok(Some(failed_document(
+                    filename.to_owned(),
+                    format!("failed to check the existing deal attachment index: {error}"),
+                )))
+            }
+        };
+        let manifest = self
+            .files
+            .manifest(existing.version_id.clone())
+            .await?
+            .ok_or_else(|| ServiceError::internal("identity manifest missing"))?;
+        let active = manifest
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.index_generation == manifest.active_generation)
+            .cloned()
+            .collect::<Vec<_>>();
+        let complete = match self
+            .graph_reader
+            .has_complete_chunks(deal_id, &active)
+            .await
+        {
+            Ok(complete) => complete,
+            Err(error) => {
+                return Ok(Some(failed_document(
+                    filename.to_owned(),
+                    format!("failed to verify the existing deal attachment index: {error}"),
+                )))
+            }
+        };
+        if !complete || indexed.version.index_generation != manifest.active_generation {
+            return Ok(None);
+        }
+        Ok(Some(ProcessedDocument {
+            filename: filename.to_owned(),
+            document_id: Some(manifest.document_id),
+            chunk_count: 0,
+            success: true,
+            sqlite_committed: true,
+            skipped: true,
+            error: None,
+        }))
+    }
+
     async fn process_document(
         &self,
         file: UploadedDocument,
@@ -315,7 +332,7 @@ impl DocumentIngestionService {
         actor_id: i64,
         existing_attachment: Option<&PersistedFileIdentity>,
         openai: &OpenAiClient,
-    ) -> Result<(String, usize), String> {
+    ) -> Result<(String, usize), IngestionError> {
         let filename = file.filename.clone();
         let recovery = match existing_attachment {
             Some(existing)
@@ -374,8 +391,7 @@ impl DocumentIngestionService {
             graph.chunks,
             graph.file_bytes,
         )
-        .await
-        .map_err(|error| format!("failed to persist `{filename}`: {error}"))?;
+        .await?;
         Ok((document_id, chunk_count))
     }
 
@@ -517,8 +533,8 @@ fn embedding_batches(chunks: &[DocumentChunk]) -> Result<Vec<EmbeddingBatch>, St
     Ok(batches)
 }
 
-fn failed_document(filename: String, error: String) -> ProcessedDocument {
-    let sqlite_committed = error.contains("after SQLite committed");
+fn failed_document(filename: String, error: impl Into<IngestionError>) -> ProcessedDocument {
+    let sqlite_committed = error.into().sqlite_committed();
     let message = if sqlite_committed {
         "Document was stored, but indexing failed. Refresh documents and retry the same file to recover indexing."
     } else {

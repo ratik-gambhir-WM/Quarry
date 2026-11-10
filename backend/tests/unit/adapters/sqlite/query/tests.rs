@@ -224,6 +224,74 @@ fn equal_null_uses_sql_null_semantics() {
 }
 
 #[test]
+fn join_and_where_comparisons_share_null_and_parameter_semantics() {
+    for (operator, sql_operator) in [
+        (ComparisonOperator::Equal, "="),
+        (ComparisonOperator::NotEqual, "!="),
+        (ComparisonOperator::GreaterThan, ">"),
+        (ComparisonOperator::GreaterThanOrEqual, ">="),
+        (ComparisonOperator::LessThan, "<"),
+        (ComparisonOperator::LessThanOrEqual, "<="),
+        (ComparisonOperator::Like, "LIKE"),
+        (ComparisonOperator::NotLike, "NOT LIKE"),
+    ] {
+        for value in [SqlValue::Null, SqlValue::Integer(7), "' OR 1=1 --".into()] {
+            let query = SqlBuilder::select("users")
+                .join(JoinClause::left("memberships").on(JoinCondition::value(
+                    "memberships.role",
+                    operator,
+                    value.clone(),
+                )))
+                .and_where(Condition::compare("users.role", operator, value.clone()))
+                .build()
+                .unwrap();
+            let (comparison, parameters) = match (operator, &value) {
+                (ComparisonOperator::Equal, SqlValue::Null) => ("IS NULL".to_owned(), vec![]),
+                (ComparisonOperator::NotEqual, SqlValue::Null) => {
+                    ("IS NOT NULL".to_owned(), vec![])
+                }
+                _ => (format!("{sql_operator} ?"), vec![value.clone(), value]),
+            };
+            assert_eq!(query.sql(), format!(
+                "SELECT * FROM \"users\" LEFT JOIN \"memberships\" ON (\"memberships\".\"role\" {comparison}) WHERE (\"users\".\"role\" {comparison})"
+            ));
+            assert_eq!(query.parameters(), parameters);
+        }
+    }
+}
+
+#[test]
+fn updates_keep_assignments_increments_and_conditions_in_parameter_order() {
+    let query = SqlBuilder::update("notes")
+        .increment("revision")
+        .set("title", "Changed")
+        .increment("access_revision")
+        .set("content", "Body")
+        .and_where(Condition::equal("id", "note-1"))
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"title\" = ?, \"content\" = ?, \"revision\" = \"revision\" + 1, \"access_revision\" = \"access_revision\" + 1 WHERE (\"id\" = ?)");
+    assert_eq!(
+        query.parameters(),
+        &["Changed".into(), "Body".into(), "note-1".into()]
+    );
+
+    for builder in [
+        SqlBuilder::update("notes")
+            .set("revision", 1)
+            .increment("revision"),
+        SqlBuilder::update("notes")
+            .increment("revision")
+            .increment("revision"),
+    ] {
+        assert_eq!(
+            build_error(builder.allow_all_rows().build()),
+            SqlBuilderError::DuplicateColumn("revision".into())
+        );
+    }
+}
+
+#[test]
 fn builds_simple_joins_with_qualified_wildcards() {
     let query = SqlBuilder::select("users")
         .columns(["users.*", "profiles.bio"])

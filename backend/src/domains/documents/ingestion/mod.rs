@@ -1,3 +1,4 @@
+mod error;
 pub mod handler;
 pub mod job_service;
 pub mod jobs;
