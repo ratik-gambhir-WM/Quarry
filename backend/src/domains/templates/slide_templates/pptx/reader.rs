@@ -147,53 +147,7 @@ fn read_inner(
         ));
     }
     let parse = |(index, slide_path): (usize, String)| {
-        super::super::check_cancelled(cancellation)?;
-        let mut warnings = Vec::new();
-        let slide_xml = utf8_part(&parts, &slide_path)?;
-        let rels_path = relationship_part_path(&slide_path);
-        let slide_relationships = match parts.get(&rels_path) {
-            Some(bytes) => relationships(
-                std::str::from_utf8(bytes).map_err(|_| invalid_powerpoint())?,
-                &slide_path,
-            )?,
-            None => HashMap::new(),
-        };
-        let theme_colors = ThemeColors::for_slide(&parts, &slide_relationships);
-        let text_styles =
-            InheritedTextStyles::for_slide(&parts, &slide_relationships, &theme_colors);
-        let warning_start = warnings.len();
-        let mut context = SlideParseContext {
-            parts: &parts,
-            relationships: &slide_relationships,
-            slide_index: index,
-            source_path: &slide_path,
-            theme_colors: &theme_colors,
-            text_styles: &text_styles,
-            warnings: &mut warnings,
-            inherited: false,
-        };
-        let mut slide = parse_slide(slide_xml, (width, height), &mut context)?;
-        let slide_document = parse_xml(slide_xml)?;
-        if !slide_document
-            .descendants()
-            .any(|node| node.has_tag_name((PRESENTATION_NS, "bg")))
-        {
-            if let Some(color) =
-                inherited_background_color(&parts, &slide_relationships, &theme_colors)
-            {
-                slide.background_color = color;
-            }
-        }
-        let local_warnings = context.warnings.split_off(warning_start);
-        let mut inherited = inherited_drawables(&mut context, slide_xml, (width, height))?;
-        context.warnings.extend(local_warnings);
-        inherited.append(&mut slide.elements);
-        slide.elements = inherited;
-        if slide.elements.is_empty() {
-            context.warnings.push(format!("slide {}: shapeTree.elements: No exportable slide elements were found. The PowerPoint will be empty.", index + 1));
-        }
-        slide.name = slide_title(&slide.elements, index);
-        Ok((slide, warnings))
+        parse_slide_part(&parts, &slide_path, index, (width, height), cancellation)
     };
     let indexed = slide_paths.into_iter().enumerate().collect::<Vec<_>>();
     let parsed = if parallel {
@@ -220,6 +174,60 @@ fn read_inner(
         },
         warnings,
     })
+}
+
+/// Resolve one slide's relationships and inheritance independently of deck scheduling.
+fn parse_slide_part(
+    parts: &HashMap<String, Vec<u8>>,
+    slide_path: &str,
+    index: usize,
+    size: (f64, f64),
+    cancellation: Option<&super::super::RequestCancellation>,
+) -> SlideResult<(Slide, Vec<String>)> {
+    super::super::check_cancelled(cancellation)?;
+    let mut warnings = Vec::new();
+    let slide_xml = utf8_part(parts, slide_path)?;
+    let rels_path = relationship_part_path(slide_path);
+    let slide_relationships = match parts.get(&rels_path) {
+        Some(bytes) => relationships(
+            std::str::from_utf8(bytes).map_err(|_| invalid_powerpoint())?,
+            slide_path,
+        )?,
+        None => HashMap::new(),
+    };
+    let theme_colors = ThemeColors::for_slide(parts, &slide_relationships);
+    let text_styles = InheritedTextStyles::for_slide(parts, &slide_relationships, &theme_colors);
+    let mut context = SlideParseContext {
+        parts,
+        relationships: &slide_relationships,
+        slide_index: index,
+        source_path: slide_path,
+        theme_colors: &theme_colors,
+        text_styles: &text_styles,
+        warnings: &mut warnings,
+        inherited: false,
+    };
+    let mut slide = parse_slide(slide_xml, size, &mut context)?;
+    let slide_document = parse_xml(slide_xml)?;
+    if !slide_document
+        .descendants()
+        .any(|node| node.has_tag_name((PRESENTATION_NS, "bg")))
+    {
+        if let Some(color) = inherited_background_color(parts, &slide_relationships, &theme_colors)
+        {
+            slide.background_color = color;
+        }
+    }
+    let local_warnings = std::mem::take(context.warnings);
+    let mut inherited = inherited_drawables(&mut context, slide_xml, size)?;
+    context.warnings.extend(local_warnings);
+    inherited.append(&mut slide.elements);
+    slide.elements = inherited;
+    if slide.elements.is_empty() {
+        context.warnings.push(format!("slide {}: shapeTree.elements: No exportable slide elements were found. The PowerPoint will be empty.", index + 1));
+    }
+    slide.name = slide_title(&slide.elements, index);
+    Ok((slide, warnings))
 }
 
 #[derive(Default)]
@@ -1911,51 +1919,8 @@ fn parse_table_with_geometry(
             if column_span == 0 {
                 continue;
             }
-            let properties = cell
-                .children()
-                .find(|child| child.tag_name().name() == "tcPr");
-            let fill = properties.and_then(|properties| {
-                properties
-                    .children()
-                    .find(|child| child.tag_name().name() == "solidFill")
-            });
-            let border = properties.and_then(table_cell_border).or(fallback_border);
-            let border_xml = border
-                .map(|border| {
-                    let raw = node_xml(border);
-                    for name in ["lnB", "lnT", "lnL", "lnR"] {
-                        if border.tag_name().name() == name {
-                            return raw.replace(&format!("a:{name}"), "a:ln");
-                        }
-                    }
-                    raw.to_owned()
-                })
-                .unwrap_or_default();
-            let text_body = cell
-                .children()
-                .find(|child| child.tag_name().name() == "txBody")
-                .map(node_xml)
-                .unwrap_or("");
-            let fallback_color = fill
-                .and_then(|fill| {
-                    if let Some(scheme) = fill
-                        .descendants()
-                        .find(|node| node.tag_name().name() == "schemeClr")
-                    {
-                        return Some(
-                            scheme_color(scheme.attribute("val").unwrap_or("")).to_owned(),
-                        );
-                    }
-                    descendant_color(fill, theme_colors)
-                })
-                .and_then(|color| parse_rgb(&color))
-                .filter(|rgb| rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114 < 145.0)
-                .map_or("111827", |_| "FFFFFF");
             let id = id_base.saturating_add(row_index * 100 + column_index + 1);
-            let xml = format!(
-                r#"<p:sp{namespace_xml}><p:nvSpPr><p:cNvPr id="{id}" name="Table cell"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:prstGeom prst="rect"/>{}{border_xml}</p:spPr><p:style><a:fontRef><a:srgbClr val="{fallback_color}"/></a:fontRef></p:style>{text_body}</p:sp>"#,
-                fill.map(node_xml).unwrap_or("<a:noFill/>")
-            );
+            let xml = table_cell_shape_xml(cell, fallback_border, theme_colors, &namespace_xml, id);
             if let Ok(document) = Document::parse(&xml) {
                 let mut element =
                     parse_shape(document.root_element(), id, theme_colors, text_styles);
@@ -1985,6 +1950,58 @@ fn parse_table_with_geometry(
         }
     }
     elements
+}
+
+/// Reuse shape parsing for table-cell fills, borders, and text styling.
+fn table_cell_shape_xml(
+    cell: Node<'_, '_>,
+    fallback_border: Option<Node<'_, '_>>,
+    theme_colors: &ThemeColors,
+    namespace_xml: &str,
+    id: usize,
+) -> String {
+    let properties = cell
+        .children()
+        .find(|child| child.tag_name().name() == "tcPr");
+    let fill = properties.and_then(|properties| {
+        properties
+            .children()
+            .find(|child| child.tag_name().name() == "solidFill")
+    });
+    let border = properties.and_then(table_cell_border).or(fallback_border);
+    let border_xml = border
+        .map(|border| {
+            let raw = node_xml(border);
+            for name in ["lnB", "lnT", "lnL", "lnR"] {
+                if border.tag_name().name() == name {
+                    return raw.replace(&format!("a:{name}"), "a:ln");
+                }
+            }
+            raw.to_owned()
+        })
+        .unwrap_or_default();
+    let text_body = cell
+        .children()
+        .find(|child| child.tag_name().name() == "txBody")
+        .map(node_xml)
+        .unwrap_or("");
+    let fallback_color = fill
+        .and_then(|fill| {
+            if let Some(scheme) = fill
+                .descendants()
+                .find(|node| node.tag_name().name() == "schemeClr")
+            {
+                return Some(scheme_color(scheme.attribute("val").unwrap_or("")).to_owned());
+            }
+            descendant_color(fill, theme_colors)
+        })
+        .and_then(|color| parse_rgb(&color))
+        .filter(|rgb| rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114 < 145.0)
+        .map_or("111827", |_| "FFFFFF");
+    format!(
+        r#"<p:sp{namespace_xml}><p:nvSpPr><p:cNvPr id="{id}" name="Table cell"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:prstGeom prst="rect"/>{}{border_xml}</p:spPr><p:style><a:fontRef><a:srgbClr val="{fallback_color}"/></a:fontRef></p:style>{text_body}</p:sp>"#,
+        fill.map(node_xml).unwrap_or("<a:noFill/>")
+    )
 }
 
 fn node_xml<'a, 'input>(node: Node<'a, 'input>) -> &'input str {

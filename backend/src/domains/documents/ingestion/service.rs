@@ -429,54 +429,18 @@ impl DocumentIngestionService {
             return Ok(());
         }
         let batches = embedding_batches(chunks)?;
-        let total_chunks = chunks.len();
         let total_batches = batches.len();
+        let input_chunks = &*chunks;
         let batch_results = stream::iter(batches)
             .map(|batch| {
-                let contents = chunks[batch.start..batch.end]
-                    .iter()
-                    .map(|chunk| chunk.text.as_str())
-                    .collect::<Vec<_>>();
-                let embedding_request_semaphore = Arc::clone(&self.embedding_request_semaphore);
-                async move {
-                    let _permit = embedding_request_semaphore.acquire().await.map_err(|_| {
-                        "embedding request concurrency control is shutting down".to_string()
-                    })?;
-                    tracing::info!(
-                        api = "document.embed",
-                        filename,
-                        batch_start = batch.start + 1,
-                        batch_end = batch.end,
-                        batch_input_count = batch.input_count(),
-                        batch_token_count = batch.token_count,
-                        total_batches,
-                        "embedding document chunk batch",
-                    );
-                    let embeddings = openai
-                        .gen_embeddings_for_file(
-                            &contents,
-                            Some(&self.embedding_model),
-                            filename,
-                            file_size_bytes,
-                        )
-                        .await
-                        .map_err(|error| {
-                            format!(
-                                "failed to embed chunks {}-{} of {total_chunks} for `{filename}`: {error}",
-                                batch.start + 1,
-                                batch.end,
-                            )
-                        })?;
-                    if batch.input_count() != embeddings.len() {
-                        return Err(format!(
-                            "OpenAI returned {} embeddings for chunks {}-{} of {total_chunks} in `{filename}`",
-                            embeddings.len(),
-                            batch.start + 1,
-                            batch.end,
-                        ));
-                    }
-                    Ok((batch, embeddings))
-                }
+                self.embed_batch(
+                    batch,
+                    input_chunks,
+                    openai,
+                    filename,
+                    file_size_bytes,
+                    total_batches,
+                )
             })
             .buffer_unordered(MAX_CONCURRENT_EMBEDDING_REQUESTS)
             .try_collect::<Vec<_>>()
@@ -488,6 +452,61 @@ impl DocumentIngestionService {
             }
         }
         Ok(())
+    }
+
+    async fn embed_batch(
+        &self,
+        batch: EmbeddingBatch,
+        chunks: &[DocumentChunk],
+        openai: &OpenAiClient,
+        filename: &str,
+        file_size_bytes: u64,
+        total_batches: usize,
+    ) -> Result<(EmbeddingBatch, Vec<Vec<f64>>), String> {
+        let total_chunks = chunks.len();
+        let contents = chunks[batch.start..batch.end]
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>();
+        let _permit = self
+            .embedding_request_semaphore
+            .acquire()
+            .await
+            .map_err(|_| "embedding request concurrency control is shutting down".to_string())?;
+        tracing::info!(
+            api = "document.embed",
+            filename,
+            batch_start = batch.start + 1,
+            batch_end = batch.end,
+            batch_input_count = batch.input_count(),
+            batch_token_count = batch.token_count,
+            total_batches,
+            "embedding document chunk batch",
+        );
+        let embeddings = openai
+            .gen_embeddings_for_file(
+                &contents,
+                Some(&self.embedding_model),
+                filename,
+                file_size_bytes,
+            )
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to embed chunks {}-{} of {total_chunks} for `{filename}`: {error}",
+                    batch.start + 1,
+                    batch.end,
+                )
+            })?;
+        if batch.input_count() != embeddings.len() {
+            return Err(format!(
+                "OpenAI returned {} embeddings for chunks {}-{} of {total_chunks} in `{filename}`",
+                embeddings.len(),
+                batch.start + 1,
+                batch.end,
+            ));
+        }
+        Ok((batch, embeddings))
     }
 
     async fn lock_processing(&self, document_id: &str) -> OwnedMutexGuard<()> {
@@ -600,54 +619,12 @@ async fn parse_document(
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
     let result = async {
-        let (document, chunks) = if infer_supported_image_mime_type(Path::new(&file.filename))
-            .is_some()
-        {
-            let validated = validate_image_by_bytes(file.bytes, &file.filename).await?;
-            let description = describe_image(
-                &validated.bytes,
-                validated.mime_type,
-                openai,
-                image_description_model,
-            )
-            .await?;
-            let assembly =
-                build_image_assembly(validated.bytes, None, file.filename, &deal_id, &description)?;
-            (assembly.document, assembly.chunks)
-        } else {
-            let requires_office_permit = matches!(
-                Path::new(&file.filename)
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .map(str::to_ascii_lowercase)
-                    .as_deref(),
-                Some("xlsx" | "pptx")
-            );
-            let office_permit = if requires_office_permit {
-                Some(
-                    office_parse_semaphore
-                        .acquire_owned()
-                        .await
-                        .map_err(|_| "Office document parsing is shutting down".to_string())?,
-                )
+        let (document, chunks) =
+            if infer_supported_image_mime_type(Path::new(&file.filename)).is_some() {
+                parse_image_document(file, &deal_id, openai, image_description_model).await?
             } else {
-                None
+                parse_file_document(file, &deal_id, office_parse_semaphore).await?
             };
-            let parser_filename = file.filename;
-            let parser_deal_id = deal_id.clone();
-            let parsed = tokio::task::spawn_blocking(move || {
-                let _office_permit = office_permit;
-                QuarryFile::from_bytes(parser_filename, file.bytes)?.parse(&parser_deal_id)
-            })
-            .await
-            .map_err(|_| "document parsing worker failed".to_string())??;
-            match parsed {
-                ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
-                ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
-                ParsedQuarryFile::Powerpoint(assembly) => (assembly.document, assembly.chunks),
-                ParsedQuarryFile::Spreadsheet(assembly) => (assembly.document, assembly.chunks),
-            }
-        };
         Ok(ParsedDocumentGraph {
             document,
             chunks,
@@ -671,6 +648,64 @@ async fn parse_document(
         ),
     }
     result
+}
+
+async fn parse_image_document(
+    file: UploadedDocument,
+    deal_id: &str,
+    openai: &OpenAiClient,
+    image_description_model: &str,
+) -> Result<(Document, Vec<DocumentChunk>), String> {
+    let validated = validate_image_by_bytes(file.bytes, &file.filename).await?;
+    let description = describe_image(
+        &validated.bytes,
+        validated.mime_type,
+        openai,
+        image_description_model,
+    )
+    .await?;
+    let assembly =
+        build_image_assembly(validated.bytes, None, file.filename, deal_id, &description)?;
+    Ok((assembly.document, assembly.chunks))
+}
+
+async fn parse_file_document(
+    file: UploadedDocument,
+    deal_id: &str,
+    office_parse_semaphore: Arc<Semaphore>,
+) -> Result<(Document, Vec<DocumentChunk>), String> {
+    let requires_office_permit = matches!(
+        Path::new(&file.filename)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("xlsx" | "pptx")
+    );
+    let office_permit = if requires_office_permit {
+        Some(
+            office_parse_semaphore
+                .acquire_owned()
+                .await
+                .map_err(|_| "Office document parsing is shutting down".to_string())?,
+        )
+    } else {
+        None
+    };
+    let parser_filename = file.filename;
+    let parser_deal_id = deal_id.to_owned();
+    let parsed = tokio::task::spawn_blocking(move || {
+        let _office_permit = office_permit;
+        QuarryFile::from_bytes(parser_filename, file.bytes)?.parse(&parser_deal_id)
+    })
+    .await
+    .map_err(|_| "document parsing worker failed".to_string())??;
+    Ok(match parsed {
+        ParsedQuarryFile::Pdf(assembly) => (assembly.document, assembly.chunks),
+        ParsedQuarryFile::Docx(assembly) => (assembly.document, assembly.chunks),
+        ParsedQuarryFile::Powerpoint(assembly) => (assembly.document, assembly.chunks),
+        ParsedQuarryFile::Spreadsheet(assembly) => (assembly.document, assembly.chunks),
+    })
 }
 
 async fn describe_image(

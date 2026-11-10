@@ -3168,30 +3168,23 @@ function PdfEditorInner({
               <TooltipProvider delay={TOOLTIP_DELAY_MS}>
                 <fieldset disabled={controlsDisabled} className="contents">
                   <div
-                    data-slot="pdf-editor-toolbar"
-                    className="flex min-h-12 items-center gap-2 border-b bg-background px-3 py-2"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <PdfEditorToolButton
-                        label="Pages sidebar"
-                        active={leftPanel !== null}
-                        disabled={controlsDisabled}
-                        onClick={() => toggleLeftPanel("thumbnails")}
-                      >
-                        <PanelLeftGlyph className="size-4" />
-                      </PdfEditorToolButton>
-                      <PdfEditorPageControl
-                        activePage={activePage}
-                        numPages={numPages}
-                        disabled={controlsDisabled}
-                        onPageChange={(pageNumber) => scrollToPage(pageNumber)}
-                      />
-                    </div>
-                  </div>
-                  <div
                     data-slot="pdf-editor-ribbon"
                     className="flex min-h-10 items-center gap-1 border-b bg-surface-container-low px-3 py-1.5"
                   >
+                    <PdfEditorToolButton
+                      label="Pages sidebar"
+                      active={leftPanel !== null}
+                      disabled={controlsDisabled}
+                      onClick={() => toggleLeftPanel("thumbnails")}
+                    >
+                      <PanelLeftGlyph className="size-4" />
+                    </PdfEditorToolButton>
+                    <PdfEditorPageControl
+                      activePage={activePage}
+                      numPages={numPages}
+                      disabled={controlsDisabled}
+                      onPageChange={(pageNumber) => scrollToPage(pageNumber)}
+                    />
                     <PdfEditorModeSwitch
                       mode={mode}
                       features={features}

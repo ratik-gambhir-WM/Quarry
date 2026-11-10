@@ -550,8 +550,9 @@ global state or query-cache library.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
-  Annotate modes through a mode dropdown. The top toolbar contains the pages sidebar and page
-  navigation; document controls and preview actions appear in the horizontally scrollable ribbon.
+  Annotate modes through a mode dropdown. A single toolbar row starts with the pages sidebar
+  toggle, page navigation, and mode dropdown. Document controls and preview actions appear in
+  the horizontally scrollable remainder of the ribbon.
   The zoom selector sizes to its current percentage and dropdown arrow instead of a fixed width.
   The loaded PDF toolbar omits the raw-text toggle and duplicate Close action; document tabs own
   closing. Loading/error shells retain their accessible Close action.

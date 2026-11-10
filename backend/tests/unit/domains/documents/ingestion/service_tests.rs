@@ -689,3 +689,74 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     let _ = server.await;
     assert!(tokio::net::TcpStream::connect(address).await.is_err());
 }
+
+#[tokio::test]
+async fn parsing_keeps_docx_available_when_office_parsing_is_shut_down() {
+    use docx_rust::{document::Paragraph, Docx};
+    use std::io::Cursor;
+
+    let client = OpenAiClient::new("test-key", crate::integration_support::prompt_catalog());
+    let semaphore = Arc::new(Semaphore::new(0));
+    semaphore.close();
+    for filename in ["evidence.XLSX", "evidence.PpTx"] {
+        let result = parse_document(
+            UploadedDocument {
+                filename: filename.into(),
+                bytes: vec![],
+            },
+            "DEAL-TEST".into(),
+            &client,
+            "unused",
+            semaphore.clone(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            result.err().unwrap(),
+            "Office document parsing is shutting down"
+        );
+    }
+
+    let mut source = Docx::default();
+    source
+        .document
+        .push(Paragraph::default().push_text("Synthetic document evidence."));
+    let bytes = source.write(Cursor::new(Vec::new())).unwrap().into_inner();
+    let result = parse_document(
+        UploadedDocument {
+            filename: "evidence.docx".into(),
+            bytes: bytes.clone(),
+        },
+        "DEAL-TEST".into(),
+        &client,
+        "unused",
+        semaphore,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.file_bytes, bytes);
+    assert_eq!(result.document.file_name, "evidence.docx");
+    assert_eq!(result.document.deal_id, "DEAL-TEST");
+    assert!(!result.chunks.is_empty());
+}
+
+#[tokio::test]
+async fn failed_office_parsing_releases_its_concurrency_permit() {
+    let client = OpenAiClient::new("test-key", crate::integration_support::prompt_catalog());
+    let semaphore = Arc::new(Semaphore::new(1));
+    let result = parse_document(
+        UploadedDocument {
+            filename: "evidence.xlsx".into(),
+            bytes: b"invalid workbook".to_vec(),
+        },
+        "DEAL-TEST".into(),
+        &client,
+        "unused",
+        semaphore.clone(),
+        None,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(semaphore.available_permits(), 1);
+}

@@ -755,3 +755,31 @@ fn export_rejects_invalid_paragraph_layout_instead_of_losing_it() {
         assert!(crate::domains::templates::slide_templates::normalize::normalize(&input).is_err());
     }
 }
+
+#[test]
+fn sequential_and_parallel_reads_preserve_slide_and_warning_order() {
+    for fixture in [
+        "styled",
+        "table",
+        "fallback-warnings",
+        "inherited",
+        "nested-transform",
+        "hidden-master",
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/slide_templates/pptx")
+            .join(format!("{fixture}.pptx"));
+        let source = std::fs::read(path).unwrap();
+        let sequential = read(&source).unwrap();
+        let parallel = read_parallel(
+            &source,
+            &super::super::super::RequestCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            parallel.template_json, sequential.template_json,
+            "{fixture}"
+        );
+        assert_eq!(parallel.warnings, sequential.warnings, "{fixture}");
+    }
+}
