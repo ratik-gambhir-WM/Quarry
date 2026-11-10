@@ -198,6 +198,14 @@ request -> router -> handler -> service -> repository/client
 ## Backend development rules
 
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
+- Keep all backend Rust tests and test-only support code under `backend/tests/`, including
+  mock constructors, fixture types, helper functions, and test-only inherent implementations.
+  Unit suites mirror `backend/src/` under `tests/unit/`; cross-module suites and shared support
+  live under `tests/integration/`. Source files may retain only test-gated `#[path = "..."]`
+  module declarations pointing into `backend/tests/`. Do not inline test bodies or helpers in
+  `backend/src/`, widen production visibility for tests, or enable unused helpers in production.
+  Because `autotests = false`, wire every test/support module into the crate's test-only module
+  tree and verify it is compiled; the architecture suite enforces this separation.
 - Before adding, moving, or reviewing a backend check, apply the
   [boundary placement decision](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
   State the loaded-state or lifecycle reason for any check kept later; a business-logic label

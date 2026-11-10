@@ -3,7 +3,7 @@ use crate::{
     app::migrations::migrate,
     domains::{
         companies::{model::CompanyInput, repository::CompanyRepository},
-        users::repository::{AddUserInput, UserRepository},
+        users::repository::{test_support::AddUserInput, UserRepository},
     },
 };
 
@@ -344,4 +344,13 @@ async fn archive_is_idempotent_retains_status_and_nullable_dates_sort_last() {
     );
     assert_eq!(repo.list().await.unwrap().len(), 1);
     assert!(repo.with_metadata("DEAL-A".into()).await.unwrap().is_some());
+}
+
+impl DealRepository {
+    pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
+        self.sqlite
+            .read_transaction_async(|tx| load(tx, None, None))
+            .await
+            .map_err(storage)
+    }
 }

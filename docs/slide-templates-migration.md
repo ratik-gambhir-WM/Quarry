@@ -52,7 +52,9 @@ rename a live table manually. Restoring a backup discards post-backup changes an
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
 The supplied directory has no Git metadata. The checked-in
 `backend/tests/fixtures/slide_templates/source-inventory.json` records source hashes
-and destination ownership before adaptation. No environment files or databases were copied.
+and destination ownership before adaptation. Those historical destination paths include the
+retired built-in catalog; its copied assets and seeding tests have since been removed. No
+environment files or databases were copied.
 The source manifest declares MIT; no root license/notice file was supplied. Existing
 catalog art remains in the separate Diligence Studio checkout.
 

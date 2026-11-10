@@ -24,6 +24,14 @@ fn rust_sources(relative_directory: &str) -> Vec<(String, String)> {
 
 #[test]
 fn tests_are_kept_out_of_the_source_tree() {
+    let test_cfg = regex::Regex::new(r"#\[cfg\([^\n]*\btest\b[^\n]*\)\]\s*").unwrap();
+    let path_module =
+        regex::Regex::new(r#"^#\[path = "([^"]+)"\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+;"#)
+            .unwrap();
+    let tests_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .canonicalize()
+        .unwrap();
     for (path, source) in rust_sources("src") {
         assert!(
             !path.ends_with("_tests.rs") && !path.ends_with("/tests.rs"),
@@ -33,6 +41,21 @@ fn tests_are_kept_out_of_the_source_tree() {
             !source.contains("#[test]") && !source.contains("#[tokio::test]"),
             "test body is stored under the production source tree: {path}"
         );
+        for attribute in test_cfg.find_iter(&source) {
+            let captures = path_module
+                .captures(&source[attribute.end()..])
+                .unwrap_or_else(|| panic!("{path}: test-only code must live under backend/tests; only path module hooks belong in source"));
+            let target = Path::new(&path)
+                .parent()
+                .unwrap()
+                .join(&captures[1])
+                .canonicalize()
+                .expect("test module path must exist");
+            assert!(
+                target.starts_with(&tests_root),
+                "{path}: test-only module must point into backend/tests"
+            );
+        }
     }
 }
 

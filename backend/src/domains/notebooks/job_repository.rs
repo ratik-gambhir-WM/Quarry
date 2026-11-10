@@ -84,17 +84,6 @@ fn fence(tx: &SqliteTransaction<'_>, claim: &ClaimedJob) -> Result<SaveJob> {
     Ok(job)
 }
 impl NotebookRepository {
-    #[cfg(test)]
-    pub(super) async fn admit(
-        &self,
-        owner: i64,
-        notebook: String,
-        note_id: Option<String>,
-        input: SaveInput,
-    ) -> Result<SaveJob> {
-        self.admit_with_pipeline(owner, notebook, note_id, input, PIPELINE.into())
-            .await
-    }
     pub(super) async fn admit_with_pipeline(
         &self,
         owner: i64,
@@ -590,3 +579,7 @@ fn clone_claim(c: &ClaimedJob) -> ClaimedJob {
         input: c.input.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/integration/domains/notebooks/job_repository_support.rs"]
+mod test_support;

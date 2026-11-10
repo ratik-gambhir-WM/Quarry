@@ -213,9 +213,7 @@ async fn retry_validates_transport_missing_templates_and_configuration() {
     *request.body_mut() = Body::from("x".repeat(1025));
     assert_eq!(send(&app, request).await.0, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(
-        send(&routes(support::studio(false)), retry("missing"))
-            .await
-            .0,
+        send(&routes(support::studio()), retry("missing")).await.0,
         StatusCode::SERVICE_UNAVAILABLE
     );
     studio.shutdown();

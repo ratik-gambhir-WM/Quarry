@@ -1,4 +1,4 @@
-pub use crate::domains::users::repository::{AddUserInput, User};
+pub use crate::domains::users::repository::{test_support::AddUserInput, User};
 
 use crate::shared::error::ServiceResult;
 

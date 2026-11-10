@@ -257,7 +257,7 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         domains::{
             assistant::chat::repository::{AssistantChatRepository, StartRunInput},
             users::{
-                repository::{AddUserInput, UserRepository},
+                repository::{test_support::AddUserInput, UserRepository},
                 UserDirectory,
             },
         },

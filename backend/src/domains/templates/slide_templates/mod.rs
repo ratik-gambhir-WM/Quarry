@@ -1,6 +1,4 @@
 //! In-process Slide Templates Studio, adapted from the supplied Rust implementation.
-#[cfg(test)]
-pub(crate) mod catalog;
 pub(super) mod error;
 mod facade;
 pub mod graph;

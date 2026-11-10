@@ -179,12 +179,12 @@ async fn live_helix_templates_metadata_dual_vectors_and_deletion() {
 }
 
 #[test]
-fn builtins_project_preview_metadata_without_copying_binary_preview_data() {
+fn imported_templates_project_preview_metadata_without_copying_binary_preview_data() {
     let repository = Arc::new(support::repository(Path::new(":memory:")).unwrap());
-    crate::domains::templates::slide_templates::catalog::seed(repository.as_ref()).unwrap();
+    let imported = support::import_fixture(repository.clone(), TemplateKind::Diagram);
     let importer = ImportService::new(repository);
     let record = importer
-        .projection_record("layered-architecture")
+        .projection_record(&imported.template_id)
         .unwrap()
         .unwrap();
     let preview = record.preview.as_ref().unwrap();
@@ -193,5 +193,6 @@ fn builtins_project_preview_metadata_without_copying_binary_preview_data() {
     assert_eq!(preview.url.matches("appId=").count(), 1);
     let projected = serde_json::to_value(&record).unwrap();
     assert!(projected["preview"].get("bytes").is_none());
-    assert!(projected["metadata"]["catalog_checksum"].is_string());
+    assert_eq!(projected["metadata"]["source"], "import");
+    assert!(projected["metadata"]["catalog_checksum"].is_null());
 }

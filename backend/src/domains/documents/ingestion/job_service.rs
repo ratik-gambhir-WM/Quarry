@@ -128,20 +128,6 @@ impl DocumentJobService {
             .ok_or_else(|| ServiceError::not_found("document job not found"))?;
         self.ingestion.authorize_read(&deal, actor).await
     }
-    #[cfg(test)]
-    pub async fn subscribe(
-        &self,
-        job_id: &str,
-    ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
-        self.jobs
-            .read()
-            .await
-            .get(job_id)
-            .map(|(_, _, sender)| sender.subscribe())
-            .ok_or_else(|| {
-                ServiceError::not_found(format!("document job `{job_id}` was not found"))
-            })
-    }
 }
 
 #[cfg(test)]

@@ -1280,6 +1280,8 @@ unsupported or damaged layouts fail without deletion. There is no separate templ
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
 transactionally. New databases start with an empty catalog; startup no longer seeds built-in templates.
+The retired built-in catalog assets, seeder, and catalog-specific tests have been removed;
+current template behavior tests use imported PPTX fixtures under `backend/tests/fixtures/`.
 Each new import records `templates.owner_user_id` from the verified bearer-session identity.
 Both facade and native route middleware derive immutable request scopes from that identity;
 clients cannot select another owner. Catalogs and pagination, documents, previews, image assets,
@@ -2427,9 +2429,12 @@ There is no browser end-to-end suite or visual regression suite.
 `backend/tests/unit/` in a tree that mirrors `backend/src/`. Persistence, local-server transport,
 and cross-module suites live under `backend/tests/integration/`. Owning source modules retain only
 `#[cfg(test)] #[path = ...] mod tests;` hooks where tests need private items; router and architecture
-suites are included from the crate root. The architecture suite verifies
-the source/test separation and mirrored unit-test layout; adding a file under `backend/tests/`
-without an inclusion hook will not make Cargo execute it.
+suites are included from the crate root. Test-only constructors, fixture types, helpers, and
+inherent implementations also live under `backend/tests/`; shared support modules are loaded
+through named test-only path hooks. The architecture suite rejects test-only implementations
+and inline test bodies under `backend/src/`, requires test-gated modules to point into
+`backend/tests/`, and verifies the mirrored unit-test layout. Adding a file under
+`backend/tests/` without an inclusion hook will not make Cargo execute it.
 
 Local-server transport tests bind ephemeral ports on `127.0.0.1` and connect to their own mock
 servers. The full backend suite therefore requires permission to listen and connect on loopback,

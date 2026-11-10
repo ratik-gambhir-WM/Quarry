@@ -1,6 +1,4 @@
 use rusqlite::Row;
-#[cfg(test)]
-use serde::Deserialize;
 use serde::Serialize;
 
 use crate::{
@@ -21,16 +19,6 @@ pub(crate) const USER_COLUMNS: [&str; 8] = [
     "created_at",
     "updated_at",
 ];
-
-#[cfg(test)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddUserInput {
-    pub first_name: String,
-    pub last_name: String,
-    pub email: String,
-    pub role: String,
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,31 +41,6 @@ pub struct UserRepository {
 impl UserRepository {
     pub fn new(sqlite: SqliteClient) -> Self {
         Self { sqlite }
-    }
-
-    #[cfg(test)]
-    pub async fn create(&self, input: AddUserInput) -> Result<User, RepositoryError> {
-        let insert = SqlBuilder::insert_into("users")
-            .value("first_name", input.first_name.trim())
-            .value("last_name", input.last_name.trim())
-            .value("email", input.email.trim())
-            .value("username", input.email.trim().to_ascii_lowercase())
-            .value("password_hash", "test-only-unusable-password")
-            .value("job_title", input.role.trim())
-            .build();
-        let inserted =
-            self.sqlite.write_async(insert).await.map_err(|error| {
-                RepositoryError::storage(format!("failed to create user: {error}"))
-            })?;
-
-        self.by_id(inserted.last_insert_row_id)
-            .await?
-            .ok_or_else(|| {
-                RepositoryError::storage(format!(
-                    "inserted user `{}` could not be loaded",
-                    inserted.last_insert_row_id
-                ))
-            })
     }
 
     pub async fn by_email(&self, email: String) -> Result<Option<User>, RepositoryError> {
@@ -115,3 +78,7 @@ pub(crate) fn user_from_row(row: &Row<'_>) -> rusqlite::Result<User> {
         updated_at: row.get("updated_at")?,
     })
 }
+
+#[cfg(test)]
+#[path = "../../../tests/integration/domains/users/repository_support.rs"]
+pub(crate) mod test_support;

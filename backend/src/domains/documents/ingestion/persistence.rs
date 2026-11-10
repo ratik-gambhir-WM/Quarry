@@ -299,20 +299,6 @@ pub(crate) fn build_file_persistence_input(
     })
 }
 
-#[cfg(test)]
-fn build_helix_graph_nodes(
-    insert_blob_result: &PersistedFileIdentity,
-    document: &Document,
-    chunks: &[DocumentChunk],
-) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
-    build_helix_graph_nodes_at(
-        insert_blob_result,
-        document,
-        chunks,
-        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-    )
-}
-
 fn build_helix_graph_nodes_at(
     insert_blob_result: &PersistedFileIdentity,
     document: &Document,
@@ -350,18 +336,6 @@ fn build_file_node(insert_blob_result: &PersistedFileIdentity) -> FileNode {
         file_id: insert_blob_result.file_id.clone(),
         display_name: insert_blob_result.display_name.clone(),
     }
-}
-
-#[cfg(test)]
-fn build_file_version_node(
-    insert_blob_result: &PersistedFileIdentity,
-    document: &Document,
-) -> Result<FileVersionNode, String> {
-    build_file_version_node_at(
-        insert_blob_result,
-        document,
-        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-    )
 }
 
 fn build_file_version_node_at(

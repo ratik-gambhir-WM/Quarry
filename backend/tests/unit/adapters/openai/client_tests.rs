@@ -1,4 +1,8 @@
 use super::*;
+use rig::{
+    providers::openai::wire::Embeddings,
+    wire::{Body, Encoded, Mode, Wire},
+};
 use std::{
     env,
     num::NonZeroUsize,
@@ -905,4 +909,118 @@ async fn rig_stream_accepts_large_provider_events_without_a_local_event_limit() 
     .await;
     assert_eq!(result.unwrap(), "answer");
     assert!(deltas.is_empty());
+}
+
+impl OpenAiClient {
+    pub(crate) fn with_responses_url(
+        api_key: impl Into<String>,
+        responses_url: impl Into<String>,
+        prompts: Arc<PromptCatalog>,
+    ) -> Self {
+        let responses_url = responses_url.into();
+        Self {
+            provider: RigOpenAiConfig::new(api_key.into())
+                .with_base_url(
+                    responses_url
+                        .strip_suffix("/responses")
+                        .expect("test Responses endpoint has a suffix"),
+                )
+                .client(),
+            embedding_dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            prompts,
+        }
+    }
+
+    pub(crate) fn with_embeddings_url(
+        embeddings_url: String,
+        prompts: Arc<PromptCatalog>,
+        dimensions: NonZeroUsize,
+    ) -> Self {
+        let mut client = Self::new("unused-test-key", prompts);
+        client.provider = RigOpenAiConfig::new("unused-test-key")
+            .with_base_url(
+                embeddings_url
+                    .strip_suffix("/embeddings")
+                    .expect("test embedding endpoint has a suffix"),
+            )
+            .client();
+        client.embedding_dimensions = dimensions;
+        client
+    }
+}
+
+fn build_embeddings_request_body(
+    provider: &RigOpenAiConfig,
+    contents: &[&str],
+    model: Option<&str>,
+    dimensions: NonZeroUsize,
+) -> Result<Value, String> {
+    let model = embedding_model_name(contents, model)?;
+
+    encoded_json(
+        Embeddings::new(provider.clone(), model, Some(dimensions.get()))
+            .with_encoding_format(EncodingFormat::Float)
+            .encode(
+                contents
+                    .iter()
+                    .map(|content| (*content).to_owned())
+                    .collect(),
+                Mode::Unary,
+            ),
+    )
+}
+
+fn build_responses_request_body(
+    provider: &RigOpenAiConfig,
+    model: &str,
+    system_instructions: &str,
+    prompt: &str,
+    file_inputs: Option<&[ResponsesFileInput<'_>]>,
+) -> Result<Value, String> {
+    let request = completion_request(&[], prompt, system_instructions, file_inputs, false)?;
+    encode_completion(provider, model, request, Mode::Unary)
+}
+
+fn build_chat_request_body(
+    provider: &RigOpenAiConfig,
+    context: &[ChatMessageInput],
+    prompt: &str,
+    system_instructions: &str,
+    model: &str,
+    file_inputs: &[ResponsesFileInput<'_>],
+) -> Result<Value, String> {
+    encode_completion(
+        provider,
+        model,
+        completion_request(
+            context,
+            prompt,
+            system_instructions,
+            Some(file_inputs),
+            true,
+        )?,
+        Mode::Streaming,
+    )
+}
+
+fn encode_completion(
+    provider: &RigOpenAiConfig,
+    model: &str,
+    request: CompletionRequest,
+    mode: Mode,
+) -> Result<Value, String> {
+    let wire = Responses::new(provider.clone(), model)
+        .with_facts(ModelFacts::default().with_catalog(&Catalog::default()));
+    tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
+        encoded_json(wire.encode(request, mode))
+    })
+}
+
+fn encoded_json(encoded: Result<Encoded, rig::error::EncodeError>) -> Result<Value, String> {
+    let encoded = encoded.map_err(|_| "failed to encode OpenAI request with Rig".to_string())?;
+    match encoded.request.into_body() {
+        Body::Bytes(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|_| "Rig did not encode a JSON request".to_string()),
+        Body::Multipart(_) => Err("Rig encoded an unexpected multipart request".to_string()),
+    }
 }

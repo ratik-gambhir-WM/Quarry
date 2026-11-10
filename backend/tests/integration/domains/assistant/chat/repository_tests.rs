@@ -4,7 +4,7 @@ use crate::{
     app::migrations,
     domains::{
         assistant::chat::repository::{AssistantChatRepository, StartRunInput, StartRunResult},
-        users::repository::{AddUserInput, UserRepository},
+        users::repository::{test_support::AddUserInput, UserRepository},
     },
 };
 

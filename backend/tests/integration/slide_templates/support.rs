@@ -19,11 +19,20 @@ pub fn repository(path: &Path) -> anyhow::Result<SqliteTemplateRepository> {
     repository.ensure_app("Quarry_WestMonroe", None)?;
     Ok(repository)
 }
-pub fn studio(seed: bool) -> Arc<SlideTemplates> {
+pub fn import_fixture(
+    repository: Arc<dyn TemplateRepository>,
+    kind: TemplateKind,
+) -> ImportResponse {
+    ImportService::with_preview_generator(repository, Arc::new(FixturePreview))
+        .import(
+            include_bytes!("../../fixtures/slide_templates/pptx/styled.pptx"),
+            kind,
+        )
+        .unwrap()
+}
+
+pub fn studio() -> Arc<SlideTemplates> {
     let repository = Arc::new(repository(std::path::Path::new(":memory:")).unwrap());
-    if seed {
-        crate::domains::templates::slide_templates::catalog::seed(repository.as_ref()).unwrap();
-    }
     Arc::new(SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),

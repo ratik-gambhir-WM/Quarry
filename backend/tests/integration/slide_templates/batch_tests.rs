@@ -306,7 +306,7 @@ async fn batch_classified_validates_inputs_and_capability_without_writes() {
         );
     }
     assert!(repository.list(None).unwrap().is_empty());
-    let disabled = routes(support::studio(false));
+    let disabled = routes(support::studio());
     assert_eq!(
         send(
             &disabled,

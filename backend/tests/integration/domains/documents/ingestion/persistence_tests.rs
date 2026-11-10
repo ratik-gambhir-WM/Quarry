@@ -470,3 +470,27 @@ fn committed_identity_guards_preserve_commit_status_without_message_matching() {
     )
     .unwrap();
 }
+
+fn build_helix_graph_nodes(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+    chunks: &[DocumentChunk],
+) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
+    build_helix_graph_nodes_at(
+        insert_blob_result,
+        document,
+        chunks,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+}
+
+fn build_file_version_node(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+) -> Result<FileVersionNode, String> {
+    build_file_version_node_at(
+        insert_blob_result,
+        document,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+}

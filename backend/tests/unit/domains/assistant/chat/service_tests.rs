@@ -89,7 +89,7 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         domains::{
             assistant::chat::repository::{AssistantChatRepository, StartRunInput},
             users::{
-                repository::{AddUserInput, UserRepository},
+                repository::{test_support::AddUserInput, UserRepository},
                 UserDirectory,
             },
         },

@@ -128,3 +128,19 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
         .is_none());
     assert!(jobs.authorize_job("job-test", 2).await.is_err());
 }
+
+impl DocumentJobService {
+    pub async fn subscribe(
+        &self,
+        job_id: &str,
+    ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
+        self.jobs
+            .read()
+            .await
+            .get(job_id)
+            .map(|(_, _, sender)| sender.subscribe())
+            .ok_or_else(|| {
+                ServiceError::not_found(format!("document job `{job_id}` was not found"))
+            })
+    }
+}
