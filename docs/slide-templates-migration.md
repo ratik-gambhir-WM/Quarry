@@ -52,7 +52,9 @@ rename a live table manually. Restoring a backup discards post-backup changes an
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
 The supplied directory has no Git metadata. The checked-in
 `backend/tests/fixtures/slide_templates/source-inventory.json` records source hashes
-and destination ownership before adaptation. No environment files or databases were copied.
+and destination ownership before adaptation. Those historical destination paths include the
+retired built-in catalog; its copied assets and seeding tests have since been removed. No
+environment files or databases were copied.
 The source manifest declares MIT; no root license/notice file was supplied. Existing
 catalog art remains in the separate Diligence Studio checkout.
 
@@ -167,8 +169,9 @@ production deployment remain outside this change.
 
 ## Intentional source adaptations
 
-- Keep Quarry edition 2021, adapting let chains; declare Rust 1.94 minimum. Validation uses the
-  installed Rust 1.99 compiler.
+- The initial import kept Quarry edition 2021, adapting let chains, and declared Rust 1.94 minimum.
+  The subsequent Rig 0.46 integration raised the backend minimum to Rust 1.97.1; see
+  [Getting Started](../Getting%20Started.md#prerequisites). Validation uses the installed Rust 1.99 compiler.
 - Use Quarry's `SqliteClient`, bound builders, transaction ownership, and typed repository errors;
   all schema DDL lives in `app/migrations.rs`. Add typed row-count, FTS MATCH, and parameterized BM25 builder operations; ranking
   weights and template joins remain in the domain repository. No arbitrary SQL escape hatch is exposed.

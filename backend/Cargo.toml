@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Quarry Axum product API"
 authors = ["Quarry contributors"]
 edition = "2021"
-rust-version = "1.94"
+rust-version = "1.97.1"
 default-run = "quarry-backend"
 autotests = false
 
@@ -21,6 +21,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value", "arbitrary_precision"] }
 base64 = "0.23.1"
 reqwest = { version = "0.13.4", features = ["json", "multipart", "stream", "blocking"] }
+# Rig owns provider requests, execution, and its bundled HTTP transport.
+rig = { package = "rig-core", version = "0.46.0", default-features = false, features = ["reqwest", "rustls"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = [

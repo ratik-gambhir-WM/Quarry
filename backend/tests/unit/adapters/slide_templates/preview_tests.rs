@@ -1,6 +1,10 @@
 use super::*;
 use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering};
 
+// Successful process fixtures need startup/I/O headroom under the full parallel
+// suite. Timeout behavior is tested separately with a deliberately stalled child.
+const FIXTURE_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn shell_path(path: &std::path::Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
@@ -99,6 +103,22 @@ fn quicklook_cancellation_kills_reaps_and_cleans_up_running_child() {
 }
 
 #[test]
+fn quicklook_timeout_stops_and_reaps_a_stalled_child() {
+    let directory = tempdir().unwrap();
+    let script = executable(directory.path(), "exec /bin/sleep 30");
+    let generator =
+        QuickLookTemplatePreviewGenerator::new(script, 1024, 100, 100, Duration::from_secs(2));
+    let started = Instant::now();
+    // Call the fallible implementation so a spawn error cannot masquerade as
+    // successful timeout handling through the best-effort public fallback.
+    assert!(generator.try_generate(b"pptx", None).unwrap().is_none());
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the stalled child must be killed and its output readers joined before its 30-second sleep ends"
+    );
+}
+
+#[test]
 fn quicklook_accepts_uppercase_png_extension_and_honors_byte_limit() {
     let directory = tempdir().unwrap();
     let png = directory.path().join("source.png");
@@ -110,20 +130,15 @@ fn quicklook_accepts_uppercase_png_extension_and_honors_byte_limit() {
         directory.path(),
         &format!("cp {} \"$5/result.PNG\"", shell_path(&png)),
     );
-    let generator = QuickLookTemplatePreviewGenerator::new(
-        executable.clone(),
-        1024,
-        100,
-        100,
-        Duration::from_secs(2),
-    );
+    let generator =
+        QuickLookTemplatePreviewGenerator::new(executable.clone(), 1024, 100, 100, FIXTURE_TIMEOUT);
     assert_eq!(generator.generate(b"pptx").unwrap().unwrap().bytes, bytes);
     let oversized = QuickLookTemplatePreviewGenerator::new(
         executable,
         bytes.len() - 1,
         100,
         100,
-        Duration::from_secs(2),
+        FIXTURE_TIMEOUT,
     );
     assert!(oversized.generate(b"pptx").unwrap().is_none());
 }
@@ -143,8 +158,7 @@ fn quicklook_enforces_independent_stdout_and_stderr_buffer_limits() {
             shell_path(&png),
         ),
     );
-    let generator =
-        QuickLookTemplatePreviewGenerator::new(script, 1024, 100, 100, Duration::from_secs(2));
+    let generator = QuickLookTemplatePreviewGenerator::new(script, 1024, 100, 100, FIXTURE_TIMEOUT);
     assert!(
         generator.generate(b"pptx").unwrap().is_some(),
         "each stream may reach exactly 32 KiB independently"

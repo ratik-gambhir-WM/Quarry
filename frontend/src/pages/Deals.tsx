@@ -51,7 +51,9 @@ export function Deals() {
   return (
     <WorkspaceHomeShell
       activeHomeSection="deals"
-      contentClassName="px-4 pt-2 pb-8 sm:px-8"
+      contentClassName={
+        view === "table" ? "px-0 pt-2 pb-8" : "px-4 pt-2 pb-8 sm:px-8"
+      }
       header={
         <WorkspaceHeader
           actions={

@@ -89,7 +89,7 @@ async fn handlers_reject_transport_validation_failures_before_service_calls() {
             Request::post("/api/v1/deals")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"dealId":"DEAL-000184","dealName":"Acme","dealCode":null,"status":"pipeline","engagementType":"buy_side","startDate":"2026-05-01","expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":"2026-01-01","transactionType":"unknown","parties":[],"scopes":[],"userEmail":"analyst@example.com"}"#,
+                    r#"{"dealName":"Acme","dealCode":null,"status":"pipeline","engagementType":"buy_side","startDate":"2026-05-01","expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":"2026-01-01","transactionType":"unknown","parties":[],"scopes":[],"userEmail":"analyst@example.com"}"#,
                 ))
                 .unwrap(),
         )
@@ -224,15 +224,15 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
     async fn upstream(Json(body): Json<Value>) -> axum::response::Response {
         assert_eq!(body["input"].as_array().unwrap().len(), 3);
         assert_eq!(body["input"][0]["role"], "user");
-        assert_eq!(body["input"][0]["content"], "first");
+        assert_eq!(body["input"][0]["content"][0]["text"], "first");
         assert_eq!(body["input"][1]["role"], "assistant");
-        assert_eq!(body["input"][1]["content"], "answer");
+        assert_eq!(body["input"][1]["content"][0]["text"], "answer");
         assert_eq!(body["input"][2]["content"][0]["text"], "next");
         assert_eq!(body["store"], false);
         axum::response::Response::builder()
             .header("content-type", "text/event-stream")
             .body(Body::from(
-                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"complete\"}}\n\n",
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"complete\"}]}]}}\n\n",
             ))
             .unwrap()
     }
@@ -248,7 +248,6 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         .unwrap();
     });
     let client = crate::adapters::openai::client::OpenAiClient::with_responses_url(
-        reqwest::Client::new(),
         "test-key",
         format!("http://{address}/v1/responses"),
         crate::integration_support::prompt_catalog(),
@@ -258,7 +257,7 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         domains::{
             assistant::chat::repository::{AssistantChatRepository, StartRunInput},
             users::{
-                repository::{AddUserInput, UserRepository},
+                repository::{test_support::AddUserInput, UserRepository},
                 UserDirectory,
             },
         },
@@ -637,7 +636,6 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     r#"{
-                        "dealId":"DEAL-000184",
                         "dealName":"Acme acquisition of WidgetCo",
                         "status":"pipeline", "dealCode":null, "engagementType":"buy_side",
                         "startDate":null, "expectedCloseDate":null, "actualCloseDate":null, "engagementCompletedDate":null,
@@ -655,13 +653,15 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     let created_deal: Value =
         serde_json::from_slice(&to_bytes(create_deal.into_body(), usize::MAX).await.unwrap())
             .unwrap();
+    let deal_id = created_deal["deal"]["dealId"].as_str().unwrap();
+    assert_eq!(uuid::Uuid::parse_str(deal_id).unwrap().get_version_num(), 4);
     assert_eq!(created_deal["deal"]["userId"], user_id);
     assert!(created_deal["metadata"].get("userId").is_none());
 
     let get_deal = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-000184")
+            Request::get(format!("/api/v1/deals/{deal_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -686,7 +686,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     let empty_data_room = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-000184/data-room")
+            Request::get(format!("/api/v1/deals/{deal_id}/data-room"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -699,13 +699,13 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(empty_data_room["dealId"], "DEAL-000184");
+    assert_eq!(empty_data_room["dealId"], deal_id);
     assert_eq!(empty_data_room["tree"], serde_json::json!([]));
 
     let save_metadata = app
         .clone()
         .oneshot(
-            Request::post("/api/v1/deals/DEAL-000184/metadata")
+            Request::post(format!("/api/v1/deals/{deal_id}/metadata"))
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -728,7 +728,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(saved["deal"]["dealId"], "DEAL-000184");
+    assert_eq!(saved["deal"]["dealId"], deal_id);
     assert_eq!(saved["deal"]["userId"], user_id);
     assert!(saved["metadata"].get("userId").is_none());
     assert_eq!(saved["metadata"]["keyQuestionsJson"], "[]");
@@ -750,7 +750,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     let persisted_metadata = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-000184")
+            Request::get(format!("/api/v1/deals/{deal_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -783,7 +783,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
     let invalid_metadata = app
         .clone()
         .oneshot(
-            Request::post("/api/v1/deals/DEAL-000184/metadata")
+            Request::post(format!("/api/v1/deals/{deal_id}/metadata"))
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -800,7 +800,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
 
     let archive_deal = app
         .oneshot(
-            Request::post("/api/v1/deals/DEAL-000184/archive")
+            Request::post(format!("/api/v1/deals/{deal_id}/archive"))
                 .header("content-type", "application/json")
                 .body(Body::from("{}"))
                 .unwrap(),

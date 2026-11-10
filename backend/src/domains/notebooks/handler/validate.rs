@@ -11,13 +11,7 @@ pub(super) fn uuid(value: &str) -> AppResult<()> {
 }
 
 pub(super) fn deal(value: &str) -> AppResult<()> {
-    if value.starts_with("DEAL-")
-        && value.len() > 5
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
+    if crate::shared::ids::is_deal_id(value) {
         Ok(())
     } else {
         Err(AppError::bad_request("invalid dealId"))

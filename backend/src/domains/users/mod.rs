@@ -1,5 +1,6 @@
 pub(crate) mod repository;
 #[cfg(test)]
+#[path = "../../../tests/integration/domains/users/service_support.rs"]
 pub(crate) mod service;
 
 pub(crate) use repository::UserRepository;

@@ -14,7 +14,6 @@ use crate::{
 
 fn input() -> SaveDealInput {
     SaveDealInput {
-        deal_id: "DEAL-000184".to_string(),
         fields: serde_json::from_value(serde_json::json!({
             "dealName": "Acme acquisition of WidgetCo", "dealCode": null,
             "engagementType": "buy_side", "transactionType": "unknown", "status": "pipeline",
@@ -53,7 +52,15 @@ async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
 
     let response = deals.create(input()).await.unwrap();
 
-    assert_eq!(response.deal.deal_id, "DEAL-000184");
+    assert_eq!(
+        uuid::Uuid::parse_str(&response.deal.deal_id)
+            .unwrap()
+            .get_version_num(),
+        4
+    );
+    assert_eq!(response.metadata.deal_id, response.deal.deal_id);
+    let second = deals.create(input()).await.unwrap();
+    assert_ne!(second.deal.deal_id, response.deal.deal_id);
     assert_eq!(response.deal.user_id, user.id);
     assert_eq!(response.metadata.key_questions_json, "[]");
     assert_eq!(
@@ -92,11 +99,12 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
         .unwrap();
     let mut deal_input = input();
     deal_input.local_path = None;
-    deals.create(deal_input).await.unwrap();
+    let created = deals.create(deal_input).await.unwrap();
+    let deal_id = created.deal.deal_id;
 
     let error = deals
         .save_metadata(
-            "DEAL-000184",
+            &deal_id,
             SaveDealMetadataInput {
                 uploaded_files: vec![UploadedDealFile {
                     relative_path: "Acme SOW.txt".to_string(),
@@ -118,11 +126,7 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
         error,
         ServiceError::unavailable("OpenAI capability is not configured")
     );
-    let metadata = deals_repository
-        .metadata("DEAL-000184".to_string())
-        .await
-        .unwrap()
-        .unwrap();
+    let metadata = deals_repository.metadata(deal_id).await.unwrap().unwrap();
     assert_eq!(
         metadata.sharepoint_link.as_deref(),
         Some("https://northwind.sharepoint.com/sites/acme")

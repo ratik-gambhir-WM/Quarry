@@ -175,7 +175,6 @@ describe("DealRoomPage", () => {
       metadata,
     });
     renderDealRoutes("/hub/deals");
-    await user.type(screen.getByLabelText("Deal ID"), deal.dealId);
     await user.type(screen.getByLabelText("Deal name"), deal.dealName);
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Next" }));

@@ -53,7 +53,10 @@ async fn retries_repair_published_versions_before_skipping() {
                     .enumerate()
                     .map(|(index, _)| json!({"index": index, "embedding": [0.25, 0.75]}))
                     .collect::<Vec<_>>();
-                Json(json!({"data": data}))
+                Json(json!({
+                    "data": data,
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1}
+                }))
             }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -109,7 +112,6 @@ async fn retries_repair_published_versions_before_skipping() {
         DocumentGraphReader::new(helix),
         writer,
         Some(Arc::new(OpenAiClient::with_embeddings_url(
-            reqwest::Client::new(),
             format!("http://{address}/embeddings"),
             crate::integration_support::prompt_catalog(),
             std::num::NonZeroUsize::new(2).unwrap(),
@@ -137,14 +139,28 @@ async fn retries_repair_published_versions_before_skipping() {
         .is_err());
     let mut corrupt = manifest.chunks.clone();
     corrupt[0].chunk_sha256 = "f".repeat(64);
-    for headers in [json!({"chunks": []}), json!({"chunks": corrupt})] {
-        replies.lock().await.extend([
-            (StatusCode::OK, published.clone()),
-            (StatusCode::OK, headers),
+    let mut stale_version = published.clone();
+    stale_version["version"][0]["version_id"] = json!("stale-version");
+    let mut stale_generation = published.clone();
+    stale_generation["version"][0]["index_generation"] = json!("stale-generation");
+    for (current, headers) in [
+        (published.clone(), Some(json!({"chunks": []}))),
+        (published.clone(), Some(json!({"chunks": corrupt}))),
+        (json!({"file": [], "version": []}), None),
+        (stale_version, None),
+        (stale_generation, Some(json!({"chunks": manifest.chunks}))),
+    ] {
+        let mut queue = replies.lock().await;
+        queue.push_back((StatusCode::OK, current));
+        if let Some(headers) = headers {
+            queue.push_back((StatusCode::OK, headers));
+        }
+        queue.extend([
             (StatusCode::OK, json!({})),
             (StatusCode::OK, json!({})),
             (StatusCode::OK, json!({})),
         ]);
+        drop(queue);
         let result = service
             .process(
                 "DEAL-TEST",
@@ -266,6 +282,90 @@ fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     }
 }
 
+#[tokio::test]
+async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batches() {
+    use crate::adapters::{helix::client::HelixClient, sqlite::client::SqliteClient};
+    use axum::{routing::post, Json, Router};
+    use serde_json::{json, Value};
+    use std::num::NonZeroUsize;
+
+    for malformed in [false, true] {
+        let app = Router::new().route(
+            "/embeddings",
+            post(move |Json(body): Json<Value>| async move {
+                let inputs = body["input"].as_array().unwrap();
+                let mut data = inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, text)| {
+                        let value: f64 = text.as_str().unwrap().parse().unwrap();
+                        json!({"index": index, "embedding": [value, -value]})
+                    })
+                    .rev()
+                    .collect::<Vec<_>>();
+                if malformed && inputs[0] == "3" {
+                    // One valid batch must not cause partial assignment if another
+                    // reply contains duplicate indices and omits an input.
+                    data[0]["index"] = data[1]["index"].clone();
+                }
+                Json(json!({"data": data, "usage": {"prompt_tokens": 4, "total_tokens": 4}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .unwrap();
+        });
+        let dimensions = NonZeroUsize::new(2).unwrap();
+        let client = OpenAiClient::with_embeddings_url(
+            format!("http://{address}/embeddings"),
+            crate::integration_support::prompt_catalog(),
+            dimensions,
+        );
+        let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
+        let service = DocumentIngestionService::new(
+            DocumentStore::new(SqliteClient::open_in_memory().unwrap()),
+            DocumentGraphReader::new(helix.clone()),
+            DocumentGraphWriter::new(helix, dimensions),
+            None,
+            "test".into(),
+            "unused".into(),
+            1,
+        );
+        let mut chunks = (1..=4)
+            .map(|index| {
+                let mut chunk = chunk_with_token_count(150_000);
+                chunk.chunk_id = format!("chunk-{index}");
+                chunk.text = index.to_string();
+                chunk
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(embedding_batches(&chunks).unwrap().len(), 2);
+        let result = service
+            .embed_chunks("synthetic.txt", 4, &mut chunks, &client)
+            .await;
+        shutdown.send(()).unwrap();
+        server.await.unwrap();
+        if malformed {
+            assert!(result.is_err());
+            assert!(chunks.iter().all(|chunk| chunk.embedding.is_none()));
+        } else {
+            result.unwrap();
+            for (index, chunk) in chunks.iter().enumerate() {
+                let value = (index + 1) as f32;
+                assert_eq!(chunk.chunk_id, format!("chunk-{}", index + 1));
+                assert_eq!(chunk.embedding.as_deref(), Some([value, -value].as_slice()));
+            }
+        }
+    }
+}
+
 #[test]
 fn embedding_batches_split_at_the_openai_aggregate_token_limit() {
     let mut chunks = vec![chunk_with_token_count(800); 375];
@@ -328,7 +428,7 @@ fn embedding_batches_reject_a_chunk_larger_than_one_request() {
 #[tokio::test]
 async fn image_description_requires_a_configured_model_before_calling_openai() {
     let prompts = crate::integration_support::prompt_catalog();
-    let client = OpenAiClient::new(reqwest::Client::new(), "test-key", prompts.clone());
+    let client = OpenAiClient::new("test-key", prompts.clone());
 
     let error = describe_image(b"image bytes", "image/png", &client, "   ")
         .await
@@ -340,7 +440,7 @@ async fn image_description_requires_a_configured_model_before_calling_openai() {
 #[tokio::test]
 async fn image_uploads_are_validated_before_the_service_requests_a_description() {
     let prompts = crate::integration_support::prompt_catalog();
-    let client = OpenAiClient::new(reqwest::Client::new(), "test-key", prompts.clone());
+    let client = OpenAiClient::new("test-key", prompts.clone());
     let result = parse_document(
         UploadedDocument {
             filename: "evidence.png".to_string(),
@@ -384,11 +484,16 @@ fn upload_content_hash_is_stable_until_document_bytes_change() {
 fn shared_upload_errors_disclose_only_recovery_state() {
     let failed = failed_document(
         "synthetic.pdf".into(),
-        "provider failure containing secret details".into(),
+        IngestionError::BeforeCommit(
+            "provider failure containing secret details and after SQLite committed".into(),
+        ),
     );
     assert!(!failed.sqlite_committed);
     assert!(!failed.error.unwrap().contains("secret"));
-    let committed=failed_document("synthetic.pdf".into(),"Helix indexing failed after SQLite committed file_id 'synthetic' and version_id 'synthetic': secret details".into());
+    let committed = failed_document(
+        "synthetic.pdf".into(),
+        IngestionError::AfterCommit("private integrity failure without a magic phrase".into()),
+    );
     assert!(committed.sqlite_committed);
     let error = committed.error.unwrap();
     assert!(error.contains("stored"));
@@ -478,7 +583,10 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     )
     .await
     .unwrap_err();
-    assert!(failure.contains("Helix indexing failed after SQLite committed"));
+    assert!(failure
+        .to_string()
+        .contains("Helix indexing failed after SQLite committed"));
+    assert!(failure.sqlite_committed());
     let manifest = files.manifest(version.clone()).await.unwrap().unwrap();
     drop(files);
     drop(sqlite);
@@ -518,9 +626,10 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     )
     .await
     .unwrap_err();
-    assert!(changed.contains("parser chunk differs from immutable identity manifest"));
+    assert!(changed
+        .to_string()
+        .contains("parser chunk differs from immutable identity manifest"));
     let client = OpenAiClient::new(
-        reqwest::Client::new(),
         "unused-test-key",
         crate::integration_support::prompt_catalog(),
     );

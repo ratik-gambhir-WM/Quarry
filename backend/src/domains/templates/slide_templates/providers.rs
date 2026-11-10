@@ -1,14 +1,15 @@
-//! Native OpenAI adapters and classification/embedding lifecycle orchestration.
+//! Slide provider ports, domain normalization, and classification/embedding orchestration.
 
 mod worker;
 pub use worker::*;
 
 use super::{retrieval::*, TemplateRepository};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
-use crate::adapters::slide_templates::providers::post_json;
+use crate::adapters::slide_templates::providers::{
+    parse_classification_response, parse_embedding_response, ClassificationRequest, SlideProvider,
+};
 pub use crate::adapters::slide_templates::providers::{translate_http_error, SlideProviderError};
 
 pub type ProviderFuture<'a, T> =
@@ -42,91 +43,19 @@ pub struct OpenAISlideClassifierOptions {
 }
 
 pub struct OpenAISlideClassifier {
-    client: reqwest::Client,
+    client: SlideProvider,
     options: OpenAISlideClassifierOptions,
 }
 impl OpenAISlideClassifier {
-    pub fn new(client: reqwest::Client, options: OpenAISlideClassifierOptions) -> Self {
+    pub fn new(options: OpenAISlideClassifierOptions) -> Self {
+        let client = SlideProvider::new(&options.api_key, options.base_url.as_deref());
         Self { client, options }
     }
-    pub fn request_body(&self, input: &SlideClassificationInput) -> Value {
-        let mut content = vec![json!({"type":"input_text","text":input.digest})];
-        if let Some(preview) = &input.preview {
-            content.push(json!({"type":"input_image","detail":"high","image_url":format!("data:image/png;base64,{}",STANDARD.encode(preview))}));
-        }
-        json!({"input":[{"role":"user","content":content}],"instructions":slide_classification_instructions(),"max_output_tokens":self.options.max_output_tokens,"model":self.options.model,"store":false,"text":{"format":{"type":"json_schema","name":"slide_retrieval_metadata","strict":true,"schema":slide_retrieval_metadata_schema()}},"tools":[]})
-    }
     pub fn parse_response(response: Value) -> Result<SlideRetrievalMetadata, SlideProviderError> {
-        let unavailable = || SlideProviderError::new("classification_unavailable", false);
-        let output = response["output"].as_array().ok_or_else(unavailable)?;
-        // The SDK parses every text part before the adapter checks refusals and status.
-        // Incomplete responses skip parsing because their JSON may be truncated.
-        let status = &response["status"];
-        let should_parse = match status {
-            Value::Null => true,
-            Value::Bool(value) => !value,
-            Value::Number(value) => value.as_f64() == Some(0.0),
-            Value::String(value) => value.is_empty() || value == "completed",
-            _ => false,
-        };
-        let mut parsed = None;
-        let mut refused = false;
-        for item in output {
-            if item.is_null() {
-                return Err(unavailable());
-            }
-            if item["type"] != "message" {
-                continue;
-            }
-            let content = item["content"].as_array().ok_or_else(unavailable)?;
-            for part in content {
-                if part.is_null() {
-                    return Err(unavailable());
-                }
-                refused |= part["type"] == "refusal";
-                if should_parse && part["type"] == "output_text" {
-                    let text = provider_json_text(part.get("text"));
-                    let value = serde_json::from_str(&text).map_err(|_| unavailable())?;
-                    let metadata =
-                        normalize_slide_retrieval_metadata(provider_metadata_fields(value)?)
-                            .map_err(|_| {
-                                SlideProviderError::new("classification_invalid_output", false)
-                            })?;
-                    if parsed.is_none() {
-                        parsed = Some(metadata);
-                    }
-                }
-            }
-        }
-        if refused {
-            return Err(SlideProviderError::new("classification_refused", false));
-        }
-        if response["status"] != "completed" {
-            return Err(SlideProviderError::new("classification_incomplete", false));
-        }
-        parsed.ok_or_else(|| SlideProviderError::new("classification_missing_output", false))
-    }
-}
-
-// JSON.parse coerces a malformed non-string `text` field to a JavaScript string.
-fn provider_json_text(value: Option<&Value>) -> String {
-    match value {
-        None => "undefined".to_owned(),
-        Some(Value::Null) => "null".to_owned(),
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                if value.is_null() {
-                    String::new()
-                } else {
-                    provider_json_text(Some(value))
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-        Some(Value::Object(_)) => "[object Object]".to_owned(),
-        Some(value) => value.to_string(),
+        parse_classification_response(response, |value| {
+            normalize_slide_retrieval_metadata(provider_metadata_fields(value)?)
+                .map_err(|_| SlideProviderError::new("classification_invalid_output", false))
+        })
     }
 }
 
@@ -136,16 +65,19 @@ impl SlideClassifier for OpenAISlideClassifier {
         input: &'a SlideClassificationInput,
     ) -> ProviderFuture<'a, SlideRetrievalMetadata> {
         Box::pin(async move {
-            let response = post_json(
-                &self.client,
-                &self.options.api_key,
-                self.options.base_url.as_deref(),
-                "responses",
-                self.options.timeout,
-                "classification",
-                &self.request_body(input),
-            )
-            .await?;
+            let instructions = slide_classification_instructions();
+            let response = self
+                .client
+                .classify(ClassificationRequest {
+                    model: &self.options.model,
+                    instructions: &instructions,
+                    digest: &input.digest,
+                    preview: input.preview.as_deref(),
+                    schema: slide_retrieval_metadata_schema(),
+                    max_output_tokens: self.options.max_output_tokens,
+                    timeout: self.options.timeout,
+                })
+                .await?;
             Self::parse_response(response)
         })
     }
@@ -162,38 +94,20 @@ pub struct OpenAISlideEmbedderOptions {
 }
 
 pub struct OpenAISlideEmbedder {
-    client: reqwest::Client,
+    client: SlideProvider,
     options: OpenAISlideEmbedderOptions,
 }
 impl OpenAISlideEmbedder {
-    pub fn new(client: reqwest::Client, options: OpenAISlideEmbedderOptions) -> Self {
+    pub fn new(options: OpenAISlideEmbedderOptions) -> Self {
+        let client = SlideProvider::new(&options.api_key, options.base_url.as_deref());
         Self { client, options }
-    }
-    pub fn request_body(&self, text: &str) -> Value {
-        let mut body = json!({"input":text,"model":self.options.model,"encoding_format":"float"});
-        if let Some(dimensions) = self.options.dimensions {
-            body["dimensions"] = json!(dimensions);
-        }
-        body
     }
     pub fn parse_response(
         response: Value,
         dimensions: Option<usize>,
     ) -> Result<Vec<f64>, SlideProviderError> {
+        let vector = parse_embedding_response(response)?;
         let invalid = || SlideProviderError::new("embedding_invalid_vector", false);
-        if response["data"].is_null() {
-            return Err(SlideProviderError::new("embedding_unavailable", false));
-        }
-        let data = response["data"]
-            .as_array()
-            .filter(|data| data.len() == 1)
-            .ok_or_else(invalid)?;
-        let vector = data[0]["embedding"]
-            .as_array()
-            .ok_or_else(invalid)?
-            .iter()
-            .map(|v| v.as_f64().ok_or_else(invalid))
-            .collect::<Result<Vec<_>, _>>()?;
         validate_embedding(&vector, dimensions).map_err(|_| invalid())?;
         Ok(vector)
     }
@@ -207,17 +121,18 @@ impl SlideEmbedder for OpenAISlideEmbedder {
             {
                 return Err(SlideProviderError::new("embedding_invalid_vector", false));
             }
-            let response = post_json(
-                &self.client,
-                &self.options.api_key,
-                self.options.base_url.as_deref(),
-                "embeddings",
-                self.options.timeout,
-                "embedding",
-                &self.request_body(text),
-            )
-            .await?;
-            Self::parse_response(response, self.options.dimensions)
+            let vector = self
+                .client
+                .embed(
+                    &self.options.model,
+                    text,
+                    self.options.dimensions,
+                    self.options.timeout,
+                )
+                .await?;
+            validate_embedding(&vector, self.options.dimensions)
+                .map_err(|_| SlideProviderError::new("embedding_invalid_vector", false))?;
+            Ok(vector)
         })
     }
 }
@@ -233,6 +148,12 @@ pub struct SlideClassificationServiceOptions {
     pub repository: Arc<dyn TemplateRepository>,
 }
 
+struct EmbeddingPair {
+    subject_vector: Vec<f64>,
+    capability_vector: Vec<f64>,
+    dimensions: usize,
+}
+
 pub struct SlideClassificationService {
     pub options: SlideClassificationServiceOptions,
 }
@@ -246,20 +167,16 @@ impl SlideClassificationService {
         job: &SlideClassificationJob,
     ) -> anyhow::Result<CompleteSlideProcessing> {
         let classification = self.prepare_classification(job.clone()).await?;
-        let (subject_vector, capability_vector) = tokio::try_join!(
-            self.options
-                .embedder
-                .embed(&classification.subject_embedding_document),
-            self.options
-                .embedder
-                .embed(&classification.capability_embedding_document),
-        )?;
-        let dimensions = self
-            .options
-            .embedding_dimensions
-            .unwrap_or(subject_vector.len());
-        validate_embedding(&subject_vector, Some(dimensions))?;
-        validate_embedding(&capability_vector, Some(dimensions))?;
+        let EmbeddingPair {
+            subject_vector,
+            capability_vector,
+            dimensions,
+        } = self
+            .embed_pair(
+                &classification.subject_embedding_document,
+                &classification.capability_embedding_document,
+            )
+            .await?;
         Ok(CompleteSlideProcessing {
             classification,
             embedding_dimensions: dimensions,
@@ -283,16 +200,13 @@ impl SlideClassificationService {
             .map_err(Into::into)
     }
     pub async fn embed(&self, job: &SlideEmbeddingJob) -> anyhow::Result<()> {
-        let (subject_vector, capability_vector) = tokio::try_join!(
-            self.options.embedder.embed(&job.subject_document),
-            self.options.embedder.embed(&job.capability_document),
-        )?;
-        let dimensions = self
-            .options
-            .embedding_dimensions
-            .unwrap_or(subject_vector.len());
-        validate_embedding(&subject_vector, Some(dimensions))?;
-        validate_embedding(&capability_vector, Some(dimensions))?;
+        let EmbeddingPair {
+            subject_vector,
+            capability_vector,
+            dimensions,
+        } = self
+            .embed_pair(&job.subject_document, &job.capability_document)
+            .await?;
         let result = CompleteSlideEmbedding {
             capability_fingerprint: job.capability_fingerprint.clone(),
             capability_vector,
@@ -307,6 +221,24 @@ impl SlideClassificationService {
             .await?
             .map_err(Into::into)
     }
+    async fn embed_pair(&self, subject: &str, capability: &str) -> anyhow::Result<EmbeddingPair> {
+        let (subject_vector, capability_vector) = tokio::try_join!(
+            self.options.embedder.embed(subject),
+            self.options.embedder.embed(capability),
+        )?;
+        let dimensions = self
+            .options
+            .embedding_dimensions
+            .unwrap_or(subject_vector.len());
+        validate_embedding(&subject_vector, Some(dimensions))?;
+        validate_embedding(&capability_vector, Some(dimensions))?;
+        Ok(EmbeddingPair {
+            subject_vector,
+            capability_vector,
+            dimensions,
+        })
+    }
+
     async fn prepare_classification(
         &self,
         job: SlideClassificationJob,

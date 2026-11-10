@@ -11,7 +11,6 @@ import {
   type DealParty,
 } from "./dealModel";
 export type SaveDealInput = DealFields & {
-  dealId: string;
   localPath: string | null;
   sharepointLink: string | null;
 };

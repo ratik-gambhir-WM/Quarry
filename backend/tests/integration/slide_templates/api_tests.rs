@@ -534,7 +534,7 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
     let (status, _, listed) = send(&app, list_request).await;
     assert_eq!(status, StatusCode::OK);
     let listed: Value = serde_json::from_slice(&listed).expect("JSON template list");
-    assert_eq!(listed["templates"].as_array().map(Vec::len), Some(10));
+    assert_eq!(listed["templates"].as_array().map(Vec::len), Some(1));
     assert_eq!(listed["templates"][0]["templateId"], template_id);
     assert_eq!(listed["templates"][0]["slideCount"], 1);
     assert_eq!(listed["templates"][0]["elementCount"], 2);
@@ -691,8 +691,22 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
 }
 
 #[tokio::test]
-async fn built_in_catalog_filters_by_kind_and_serves_previews() {
-    let app = test_app(1024 * 1024, 1024 * 1024);
+async fn imported_templates_filter_by_kind_and_serve_previews() {
+    let repository = Arc::new(
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:")).unwrap(),
+    );
+    for kind in [TemplateKind::Diagram, TemplateKind::Commentary] {
+        crate::slide_template_test_support::import_fixture(repository.clone(), kind);
+    }
+    let app = compose(SlideTemplateEndpoint {
+        studio: Arc::new(SlideTemplates::new(
+            repository,
+            Arc::new(DisabledTemplatePreviewGenerator),
+            None,
+            None,
+            false,
+        )),
+    });
     let request = Request::get("/api/v1/templates/slide-templates/catalog?kind=commentary")
         .body(Body::empty())
         .expect("valid request");
@@ -700,7 +714,7 @@ async fn built_in_catalog_filters_by_kind_and_serves_previews() {
     assert_eq!(status, StatusCode::OK);
     let catalog: Value = serde_json::from_slice(&body).expect("catalog JSON");
     let templates = catalog["templates"].as_array().expect("templates");
-    assert_eq!(templates.len(), 3);
+    assert_eq!(templates.len(), 1);
     assert!(templates
         .iter()
         .all(|template| template["kind"] == "commentary"));
@@ -1011,7 +1025,6 @@ impl SlideTemplateEndpoint {
         let repository = Arc::new(crate::slide_template_test_support::repository(
             &config.database_path,
         )?);
-        crate::domains::templates::slide_templates::catalog::seed(repository.as_ref())?;
         Ok(Self::with_repository_and_preview(
             config,
             repository,

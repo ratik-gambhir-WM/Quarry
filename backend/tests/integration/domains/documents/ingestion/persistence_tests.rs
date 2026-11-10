@@ -429,6 +429,68 @@ async fn dimension_mismatch_is_rejected_before_any_canonical_document_is_saved()
     )
     .await
     .unwrap_err();
-    assert!(error.contains("embedding dimension"));
+    assert!(!error.sqlite_committed());
+    assert!(error.to_string().contains("embedding dimension"));
     assert_eq!(persisted_file_count(&sqlite), 0);
+}
+
+#[test]
+fn committed_identity_guards_preserve_commit_status_without_message_matching() {
+    let bytes = b"office bytes";
+    let document = document("logical-office", OWNER, "model.xlsx", bytes);
+    let prepared = prepare_document_persistence(
+        &test_graph_writer(2),
+        OWNER,
+        1,
+        &document,
+        &[document_chunk(&document)],
+        bytes.to_vec(),
+    )
+    .unwrap();
+    let mut different = prepared.expected_identity.clone();
+    different.file_id = "different-file".into();
+    let identity_error =
+        verify_committed_identity(&prepared.expected_identity, &prepared.graph, &different)
+            .unwrap_err();
+    assert!(identity_error.sqlite_committed());
+    assert!(identity_error
+        .to_string()
+        .contains("prepared ingestion plan"));
+    // A matching canonical result must still be checked against the prepared graph.
+    let graph_error =
+        verify_committed_identity(&different, &prepared.graph, &different).unwrap_err();
+    assert!(graph_error.sqlite_committed());
+    assert!(graph_error
+        .to_string()
+        .contains("prepared Helix graph identity"));
+    verify_committed_identity(
+        &prepared.expected_identity,
+        &prepared.graph,
+        &prepared.expected_identity,
+    )
+    .unwrap();
+}
+
+fn build_helix_graph_nodes(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+    chunks: &[DocumentChunk],
+) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
+    build_helix_graph_nodes_at(
+        insert_blob_result,
+        document,
+        chunks,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
+}
+
+fn build_file_version_node(
+    insert_blob_result: &PersistedFileIdentity,
+    document: &Document,
+) -> Result<FileVersionNode, String> {
+    build_file_version_node_at(
+        insert_blob_result,
+        document,
+        &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+    )
 }

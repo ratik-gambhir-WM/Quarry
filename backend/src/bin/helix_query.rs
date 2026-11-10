@@ -33,7 +33,7 @@ async fn main() {
             process::exit(1);
         }
     };
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts.clone());
+    let client = OpenAiClient::from_config(openai, prompts.clone());
 
     let result = match args.get(1).map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => {

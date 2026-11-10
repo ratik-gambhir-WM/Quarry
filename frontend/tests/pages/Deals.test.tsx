@@ -271,11 +271,11 @@ describe("Deals", () => {
     await user.click(addDealItem);
 
     const dialog = await screen.findByRole("dialog", { name: "Add deal" });
-    const dealIdInput = within(dialog).getByLabelText("Deal ID");
+    const dealNameInput = within(dialog).getByLabelText("Deal name");
     expect(dialog.getAttribute("data-slot")).toBe("dialog-content");
     expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeTruthy();
     expect(document.querySelector(".modal-backdrop")).toBeNull();
-    expect(dealIdInput.getAttribute("data-slot")).toBe("input");
+    expect(dealNameInput.getAttribute("data-slot")).toBe("input");
     expect(
       (within(dialog).getByLabelText("Status") as HTMLSelectElement).value,
     ).toBe("pipeline");
@@ -299,7 +299,7 @@ describe("Deals", () => {
       within(dialog).queryByRole("button", { name: "Create company" }),
     ).toBeNull();
     expect(within(dialog).queryByLabelText("SharePoint link")).toBeNull();
-    await waitFor(() => expect(dealIdInput).toBe(document.activeElement));
+    await waitFor(() => expect(dealNameInput).toBe(document.activeElement));
 
     await user.keyboard("{Escape}");
     await waitFor(() =>

@@ -539,8 +539,8 @@ global state or query-cache library.
   distinguish expected close, actual close, and engagement completion.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
   type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
-  The table sits within the responsive page gutters, with aligned header/body padding,
-  browser-sized columns based on their headings and text, and horizontal row dividers.
+  The table spans the full main inset width without outer horizontal gutters, with aligned
+  header/body padding, browser-sized columns based on their headings and text, and horizontal row dividers.
   The table begins 8px below the workspace header. Long names and metadata truncate at
   bounded widths with full-text tooltips. The table fills the page width, sharing spare
   space through automatic table layout rather than assigning it all to the project name.
@@ -1043,7 +1043,7 @@ method allowlist.
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
 | GET | `/deals` | List nonarchived aggregates | Metadata, parties/current companies, scopes; actual then expected close sort key; unknown dates last |
-| POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Typed codes; optional dates/parties; same-owner company references |
+| POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Backend-generated UUID; typed codes; optional dates/parties; same-owner company references |
 | POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Creator/ID immutable; owner/manager capability; metadata preserved; unchanged assignments retain row IDs |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
 | POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
@@ -1125,9 +1125,12 @@ validation failures are 400 and missing OpenAI capability is 503. Once HTTP 200 
 are sanitized terminal events. The OpenAI adapter replays the server-selected textual
 context followed by current-turn files and prompt, repeats instructions, and sends Responses API
 requests with `stream: true` and `store: false`; it carries no provider conversation/response ID.
-Streams have a 45-second provider/desktop idle bound, a 10-minute maximum, bounded event/response
-buffers, and bounded channels for backpressure. Cancellation drops the upstream response but is
-best effort and is not provider-side erasure.
+Streams have a 30-second provider connection bound, a 45-second provider/desktop idle bound,
+a 10-minute maximum, and bounded channels for backpressure. Rig observes provider byte activity,
+including SSE keepalives, for its idle timeout. Quarry limits decoded provider items to 1 MiB and
+accumulated/final text to 8 MiB. Rig owns raw SSE framing; its public API does not expose the old
+Quarry parser's pre-decoding raw-event buffer limit. Cancellation drops the upstream response but
+is best effort and is not provider-side erasure.
 
 The persisted contract is rooted at `/assistant/threads`. List/create/load/rename/archive/
 unarchive/delete operations resolve the server-verified profile email to `users.id` and enforce
@@ -1253,8 +1256,8 @@ while its live HTML editing surface uses the default tab interval; SVG previews 
 export apply explicit stops.
 
 The embedded domain owns OOXML, normalization, JSON contracts, catalog persistence,
-classification and retrieval rules. Adapters own Chromium/CDP, optional QuickLook, and bounded
-provider HTTP transport. SQLite work, conversion, browser work, and projection serialization are
+classification and retrieval rules. Adapters own Chromium/CDP, optional QuickLook, and
+Rig provider setup, sanitized errors, and operation timeouts. SQLite work, conversion, browser work, and projection serialization are
 offloaded. Four shared HTTP admissions remain held until response-body consumption/drop, with two
 blocking-operation permits and one admitted write. Classified decks use at most four additional
 scoped slide workers, as described below. Busy requests fail explicitly
@@ -1277,6 +1280,8 @@ unsupported or damaged layouts fail without deletion. There is no separate templ
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
 transactionally. New databases start with an empty catalog; startup no longer seeds built-in templates.
+The retired built-in catalog assets, seeder, and catalog-specific tests have been removed;
+current template behavior tests use imported PPTX fixtures under `backend/tests/fixtures/`.
 Each new import records `templates.owner_user_id` from the verified bearer-session identity.
 Both facade and native route middleware derive immutable request scopes from that identity;
 clients cannot select another owner. Catalogs and pagination, documents, previews, image assets,
@@ -1423,9 +1428,11 @@ flowchart TD
     Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12-16, or validate v17]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
+    Bootstrap --> Rig[Construct optional Rig OpenAI client]
     Sqlite --> Adapters[Construct concrete adapters]
     Helix --> Adapters
     Http --> Adapters
+    Rig --> Adapters
     Adapters --> Domains[Construct domain services]
     Domains --> FeatureRouters[Bind private feature router state]
     FeatureRouters --> Router[Merge API and apply global middleware]
@@ -1552,6 +1559,11 @@ domain repository error -> domain service error -> AppError -> HTTP status + { "
 and internal failures to 400/401/403/404/409/429/503/500. Internal context is logged and replaced with `internal server error` in the
 response. Built-in Axum extractor rejections do not all use this envelope, so clients must not yet
 assume one universal error schema.
+
+Document ingestion failures carry an explicit before/after SQLite commit variant through persistence
+and processing to the existing `sqliteCommitted` response field. Recovery status does not depend on
+diagnostic wording. Identity checks against the actual committed result remain after the canonical
+transaction, and graph publication failures retain the committed status.
 
 SQLite SELECT, INSERT, UPDATE, and DELETE builders return `Result<SqlQuery, SqliteClientError>`.
 Their `build()` methods only construct parameterized queries and convert validation failures into
@@ -1818,12 +1830,25 @@ None of these mechanisms supports multi-instance coordination or durable recover
 
 ```text
 Login/profile creates or resolves user
-  -> POST /deals validates deal and owner email
+  -> POST /deals validates deal fields and verified owner email
+  -> DealService generates a fresh UUID v4
   -> one SQLite transaction inserts deal + metadata + parties + scopes and returns a consistent aggregate
   -> optional POST /deals/{id}/metadata saves source links and uploads selected source files
   -> DealService sends files and extraction prompt to OpenAI
   -> parsed key questions update deal_metadata
 ```
+
+New deal creation omits `dealId`; the service generates a canonical UUID v4 and returns it in
+both the deal and metadata. A legacy `dealId` field is ignored and cannot select the new identity.
+The UI requires only the deal name (for example, Project Fleet); the existing engagement/status
+defaults and optional details remain.
+Consumers use the returned ID for teams, metadata, documents, chat, notebooks, and navigation.
+Existing `DEAL-...` identifiers remain valid and are not rewritten. Handler-owned validators use
+the shared HTTP-independent ID predicate to accept canonical UUIDs and legacy IDs; the desktop
+membership PATCH relay accepts both forms. No schema migration or existing-link change is needed.
+Both transports omit `dealId` on creation and use the response identity. Older clients may
+still submit the retired field, but must use the returned ID. The `/api` compatibility mount
+uses the same UUID-generating handler.
 
 Deal creation has no Helix or Diligence Studio write. Its entire durable aggregate lives in one
 SQLite transaction, so an invalid reference or failed child insert leaves no deal, metadata,
@@ -1831,9 +1856,9 @@ assignment, or scope behind. The same applies to scalar/collection replacement o
 is retained. Previously and explicitly saved directory companies are independent records. Document
 upload/indexing is a separate operation with the cross-store recovery contract in section 9.3.
 
-The shared add-deal modal has three steps: deal identity/details, company directory selection or
-creation and deal-specific roles, then optional SharePoint, SOW, fact-sheet, and request-list links
-alongside one or two SOW/timeline files. A stepper shows the current stage and offers top or side
+The shared add-deal modal has four steps: deal name/details, company directory selection or
+creation and deal-specific roles, an optional team name, then optional SharePoint, SOW, fact-sheet,
+and request-list links alongside one or two SOW/timeline files. A stepper shows the current stage and offers top or side
 placement through tabs; completed stages can be revisited when navigation is not locked. Next, Back,
 and the stepper preserve the draft, assigned companies, and selected sources; company forms must be
 saved or cancelled before continuing. Core deal creation
@@ -2005,7 +2030,7 @@ Custom AgentRuntime remote thread list + current prompt/uploads/file references,
   -> SQLite supplies bounded completed prior pairs
   -> current-turn references recheck membership and load canonical blobs, scoped to the room when supplied
   -> AssistantChatService resolves server defaults and opens bounded event channels
-  -> OpenAiClient replays text plus current files to Responses API with store=false
+  -> OpenAiClient uses Rig to replay text plus current files to Responses API with store=false
   -> started, ordered deltas, and one completed/failed terminal persisted to SQLite
 ```
 
@@ -2161,9 +2186,97 @@ from the startup-loaded server-side Markdown prompt catalog when the request omi
 Document ingestion injects `OPENAI_IMAGE_DESCRIPTION_MODEL` into the image parser; image uploads
 therefore require the optional OpenAI capability just as the existing embedding stage does.
 
-Per-user provider API-key collection/storage was removed with password authentication. All
-current AI use cases share the server-side `OpenAiClient` built from `OPENAI_API_KEY`;
-registering an account does not configure or select an AI credential.
+Per-user provider API-key collection/storage was removed with password authentication. Product
+chat, document, and notebook AI use cases share the server-side `OpenAiClient`; embedded slide
+classification and embeddings have dedicated Rig model handles built from the same server-side
+configuration. Registering an account does not configure or select an AI credential.
+
+`adapters/openai/client.rs` uses Rig 0.46 (`rig-core`, imported as `rig`, with default features
+disabled and `reqwest`/`rustls` enabled) for request builders and native Responses and embedding
+execution. Rig owns its shared bundled HTTP client, authentication, provider encoding/decoding,
+and SSE framing. All OpenAI calls, including embedded slide classification and embeddings, use
+unmodified Rig models and its bundled transport. Quarry constructs no OpenAI HTTP client and
+carries no SDK patch. The incoming SSE event byte limit is intentionally absent; the 8 MiB
+accumulated/final chat text bound and connection, idle, and total-duration deadlines remain.
+This dependency requires Rust 1.97.1 or newer. Credentials are supplied explicitly from
+`AppConfig`; Rig does not read ambient configuration. Agent and AgentRunner are not yet integrated.
+
+Request construction follows [Rig's completion builders](https://rig.rs/docs/concepts/completion):
+
+```rust
+use rig::completion::CompletionRequest;
+use rig::providers::openai::extension::OpenAiOptions;
+
+let request = CompletionRequest::new(prompt)
+    .preamble(system_instructions)
+    .messages(history)
+    .provider_option(OpenAiOptions::new().store(false));
+
+let response = provider.responses(model).call(request).await?;
+let text = response.text();
+let vectors = provider.embedding(embedding_model, Some(dimensions))
+    .call(texts).await?;
+```
+
+Here `provider` is Rig's `OpenAI` client and `history` contains typed Rig messages mapped from the
+server-selected completed turns. Buffered responses call the Responses model; streamed responses
+use its observed stream and final completion. Embeddings call Rig's embedding model with the
+configured dimensions and floating-point encoding.
+
+Quarry retains a small integration boundary for its prompt catalog, default models, attachment
+mapping, sanitized errors, stream duration/cancellation/backpressure, final text selection, and
+embedding integrity checks. Rig's response-header observation supports the connection deadline
+without a transport wrapper. Buffered and final streamed text use Rig's normalized
+`response.text()`: text blocks concatenate in provider order without inserted separators;
+buffered output trims outer whitespace and rejects empty text, while chat preserves whitespace.
+Rig's typed embedding vectors are used directly. Rig 0.46 discards upstream embedding indices
+without reordering, so only index metadata is read from the raw reply to reject invalid,
+duplicate, missing, or out-of-range indices and restore input order. Typed vectors still undergo
+dimension and finite f64/f32 checks before indexing. Incoming authorization and
+validation remain at the HTTP boundary. Prior text turns retain their order and text as
+`input_text`/`output_text` content blocks.
+
+Embedded slides use Rig's Responses model with the existing strict named JSON schema,
+nonstored requests, optional PNG preview, and configured output-token cap. Embeddings use Rig's
+embedding model with floating-point encoding and optional configured dimensions. Rig sends the
+single embedding input as a one-element array and omits an empty tool list; these are equivalent
+to the previous scalar input and `tools: []`. The integration retains metadata normalization,
+refusal/incomplete handling, vector integrity, stage-specific sanitized errors, and whole-operation
+timeouts. It adds no retry loop; the existing durable worker owns stage retries. The previous
+4 MiB slide response-body cap is also absent with unmodified Rig's buffered response API.
+No incoming HTTP validation, authorization, routes, SSE events, or persistence shapes change.
+
+File-bearing requests use Rig's typed `OpenAiResponsesOptions::input` extension to carry the
+complete ordered conversation and native `input_file`/`input_image` blocks. This preserves
+original filenames, MIME types, exact bytes in base64 data URLs, all currently accepted
+DOC/DOCX/PPTX/XLSX/text/PDF/image types, file IDs/URLs, and files-before-prompt ordering. Rig's
+generic inline-document encoder currently only handles PDF bytes with a fixed filename, so using
+only that type would narrow the existing upload contract. Mock-provider tests exercise buffered,
+streamed, and history-bearing chat execution for all four Office extensions; live provider file
+acceptance is not tested. No preprocessing, provider upload/reuse, route, SSE event, schema, or
+storage policy changes are introduced here.
+
+[OpenAI's file-input contract](https://developers.openai.com/api/docs/guides/file-inputs)
+supports these Office formats as base64 `input_file` items on the Responses API. The provider
+extracts text from non-PDF documents/presentations rather than embedded images or charts, and
+spreadsheet augmentation considers up to the first 1,000 rows per sheet. These upstream
+interpretation limits remain; byte-preserving transport does not change them.
+
+Responses models use an explicitly empty Rig model catalog to retain provider-side model
+selection and avoid Rig 0.46's built-in catalog panic with Quarry's required
+`serde_json/arbitrary_precision` feature. Rig calls and stream polling run with tracing disabled
+locally because its verbose trace target includes request/response bodies. Quarry emits its own
+sanitized diagnostics outside that scope. Enabling Rig's model catalog requires resolving this
+compatibility issue. Slide-provider wire requests, OpenAI envelope decoding, and Rig execution live in
+`adapters/slide_templates/providers.rs`. The domain provider module retains its ports, taxonomy and
+metadata normalization, input/vector integrity policy, and classification lifecycle. A shared embedding
+pair operation applies the same dimension and vector checks to combined processing and embedding
+retries. The durable worker uses an exhaustive stage enum for retry policy and failure recording;
+persisted stage codes, attempt budgets, timeout/cancellation behavior, and publication order are
+unchanged. Provider adapters do not import domain models.
+
+Product conversation persistence and run lifecycle remain in Quarry until
+the separately planned Agent/AgentRunner work.
 
 ### 11.5 Optional WM AI capability group
 
@@ -2335,9 +2448,12 @@ There is no browser end-to-end suite or visual regression suite.
 `backend/tests/unit/` in a tree that mirrors `backend/src/`. Persistence, local-server transport,
 and cross-module suites live under `backend/tests/integration/`. Owning source modules retain only
 `#[cfg(test)] #[path = ...] mod tests;` hooks where tests need private items; router and architecture
-suites are included from the crate root. The architecture suite verifies
-the source/test separation and mirrored unit-test layout; adding a file under `backend/tests/`
-without an inclusion hook will not make Cargo execute it.
+suites are included from the crate root. Test-only constructors, fixture types, helpers, and
+inherent implementations also live under `backend/tests/`; shared support modules are loaded
+through named test-only path hooks. The architecture suite rejects test-only implementations
+and inline test bodies under `backend/src/`, requires test-gated modules to point into
+`backend/tests/`, and verifies the mirrored unit-test layout. Adding a file under
+`backend/tests/` without an inclusion hook will not make Cargo execute it.
 
 Local-server transport tests bind ephemeral ports on `127.0.0.1` and connect to their own mock
 servers. The full backend suite therefore requires permission to listen and connect on loopback,

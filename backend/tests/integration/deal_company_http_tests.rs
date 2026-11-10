@@ -58,7 +58,6 @@ async fn request(app: &Router, method: &str, path: &str, value: Value) -> (Statu
 }
 fn deal() -> Value {
     json!({
-        "dealId": "DEAL-MODEL",
         "userEmail": "owner@example.com",
         "dealName": "Pipeline",
         "dealCode": null,
@@ -80,7 +79,11 @@ async fn app() -> Router {
     crate::integration_support::with_test_credentials(app.router)
 }
 
-async fn save_metadata_links(app: &Router, fields: &[(&str, &str)]) -> (StatusCode, Value) {
+async fn save_metadata_links(
+    app: &Router,
+    deal_id: &str,
+    fields: &[(&str, &str)],
+) -> (StatusCode, Value) {
     const BOUNDARY: &str = "quarry-optional-links";
     let mut body = String::new();
     for (name, value) in fields {
@@ -92,7 +95,7 @@ async fn save_metadata_links(app: &Router, fields: &[(&str, &str)]) -> (StatusCo
     let response = app
         .clone()
         .oneshot(
-            Request::post("/api/v1/deals/DEAL-MODEL/metadata")
+            Request::post(format!("/api/v1/deals/{deal_id}/metadata"))
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -110,10 +113,9 @@ async fn save_metadata_links(app: &Router, fields: &[(&str, &str)]) -> (StatusCo
 #[tokio::test]
 async fn optional_metadata_links_accept_blanks_preserve_omitted_and_validate_populated_fields() {
     let app = app().await;
-    assert_eq!(
-        request(&app, "POST", "/api/v1/deals", deal()).await.0,
-        StatusCode::CREATED
-    );
+    let (status, created) = request(&app, "POST", "/api/v1/deals", deal()).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let deal_id = created["deal"]["dealId"].as_str().unwrap();
     // Browser and desktop adapters send blanks for unfilled optional fields.
     let links = [
         (
@@ -127,7 +129,7 @@ async fn optional_metadata_links_accept_blanks_preserve_omitted_and_validate_pop
         ("factSheetLink", ""),
         ("rlLink", "   "),
     ];
-    let (status, saved) = save_metadata_links(&app, &links).await;
+    let (status, saved) = save_metadata_links(&app, deal_id, &links).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(saved["metadata"]["sharepointLink"], links[0].1);
     assert_eq!(saved["metadata"]["sowLink"], links[1].1);
@@ -141,12 +143,12 @@ async fn optional_metadata_links_accept_blanks_preserve_omitted_and_validate_pop
         ("rlLink", "https://user:password@example.com/list"),
         ("sowLink", "https://example.com/embedded\ncontrol"),
     ] {
-        let (status, error) = save_metadata_links(&app, &[(field, value)]).await;
+        let (status, error) = save_metadata_links(&app, deal_id, &[(field, value)]).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
         assert!(error["error"].as_str().unwrap().contains(field), "{error}");
     }
     // Omission preserves a saved link; an explicitly blank field clears it.
-    let (status, saved) = save_metadata_links(&app, &[("sowLink", "")]).await;
+    let (status, saved) = save_metadata_links(&app, deal_id, &[("sowLink", "")]).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(saved["metadata"]["sharepointLink"], links[0].1);
     assert!(saved["metadata"]["sowLink"].is_null());
@@ -156,9 +158,15 @@ async fn optional_metadata_links_accept_blanks_preserve_omitted_and_validate_pop
         ("factSheetLink", ""),
         ("rlLink", ""),
     ];
-    let (status, saved) = save_metadata_links(&app, &blanks).await;
+    let (status, saved) = save_metadata_links(&app, deal_id, &blanks).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
-    let (_, persisted) = request(&app, "GET", "/api/v1/deals/DEAL-MODEL", Value::Null).await;
+    let (_, persisted) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/deals/{deal_id}"),
+        Value::Null,
+    )
+    .await;
     for (field, _) in blanks {
         assert!(saved["metadata"][field].is_null());
         assert!(persisted["metadata"][field].is_null());
@@ -194,12 +202,10 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
     input["scopes"] = json!(["corporate_it"]);
     let (status, created) = request(&app, "POST", "/api/v1/deals", input.clone()).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    assert_eq!(
-        request(&app, "POST", "/api/v1/deals", input.clone())
-            .await
-            .0,
-        StatusCode::CONFLICT
-    );
+    let deal_id = created["deal"]["dealId"].as_str().unwrap();
+    let (status, second) = request(&app, "POST", "/api/v1/deals", input.clone()).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_ne!(second["deal"]["dealId"], deal_id);
     let party_id = created["deal"]["parties"][0]["dealPartyId"].clone();
     for key in ["dealId", "userEmail"] {
         input.as_object_mut().unwrap().remove(key);
@@ -210,7 +216,7 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
     let (status, updated) = request(
         &app,
         "POST",
-        "/api/v1/deals/DEAL-MODEL/update",
+        &format!("/api/v1/deals/{deal_id}/update"),
         input.clone(),
     )
     .await;
@@ -224,7 +230,7 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
         request(
             &app,
             "POST",
-            "/api/v1/deals/DEAL-MODEL/update",
+            &format!("/api/v1/deals/{deal_id}/update"),
             input.clone()
         )
         .await
@@ -232,12 +238,15 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
         StatusCode::OK
     );
     input.as_object_mut().unwrap().remove("scopes");
-    assert!(
-        request(&app, "POST", "/api/v1/deals/DEAL-MODEL/update", input)
-            .await
-            .0
-            .is_client_error()
-    );
+    assert!(request(
+        &app,
+        "POST",
+        &format!("/api/v1/deals/{deal_id}/update"),
+        input
+    )
+    .await
+    .0
+    .is_client_error());
 }
 #[tokio::test]
 async fn validates_enum_dates_cardinality_and_references_at_the_correct_boundary() {
@@ -282,11 +291,10 @@ async fn validates_enum_dates_cardinality_and_references_at_the_correct_boundary
 #[tokio::test]
 async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
     let app = app().await;
-    assert_eq!(
-        request(&app, "POST", "/api/v1/deals", deal()).await.0,
-        StatusCode::CREATED
-    );
-    for (id, linked) in [("free", Value::Null), ("linked", json!("DEAL-MODEL"))] {
+    let (status, created) = request(&app, "POST", "/api/v1/deals", deal()).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let deal_id = created["deal"]["dealId"].as_str().unwrap();
+    for (id, linked) in [("free", Value::Null), ("linked", json!(deal_id))] {
         let (status, thread) = request(
             &app,
             "POST",
@@ -298,9 +306,9 @@ async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
         assert_eq!(thread["dealId"], linked);
     }
     for (scope, expected) in [
-        ("scope=all", "linked"),
-        ("scope=freeform", "free"),
-        ("scope=deal&dealId=DEAL-MODEL", "linked"),
+        ("scope=all".to_owned(), "linked"),
+        ("scope=freeform".to_owned(), "free"),
+        (format!("scope=deal&dealId={deal_id}"), "linked"),
     ] {
         let (_, page) = request(
             &app,
@@ -318,25 +326,36 @@ async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
             assert_eq!(page["threads"].as_array().unwrap().len(), 1);
         }
     }
-    assert_eq!(request(&app,"GET","/api/v1/assistant/threads?userEmail=owner%40example.com&scope=freeform&dealId=DEAL-MODEL",Value::Null).await.0,StatusCode::BAD_REQUEST);
+    assert_eq!(request(&app,"GET",&format!("/api/v1/assistant/threads?userEmail=owner%40example.com&scope=freeform&dealId={deal_id}"),Value::Null).await.0,StatusCode::BAD_REQUEST);
     assert_eq!(
         request(
             &app,
             "POST",
             "/api/v1/assistant/threads",
-            json!({"userEmail":"other@example.com","threadId":"wrong-owner","dealId":"DEAL-MODEL"})
+            json!({"userEmail":"other@example.com","threadId":"wrong-owner","dealId":deal_id})
         )
         .await
         .0,
         StatusCode::NOT_FOUND
     );
-    let (_, archived) = request(&app, "POST", "/api/v1/deals/DEAL-MODEL/archive", json!({})).await;
+    let (_, archived) = request(
+        &app,
+        "POST",
+        &format!("/api/v1/deals/{deal_id}/archive"),
+        json!({}),
+    )
+    .await;
     assert_eq!(archived["status"], "pipeline");
     assert!(archived["archivedAt"].is_string());
     assert_eq!(
-        request(&app, "GET", "/api/v1/deals/DEAL-MODEL", Value::Null)
-            .await
-            .0,
+        request(
+            &app,
+            "GET",
+            &format!("/api/v1/deals/{deal_id}"),
+            Value::Null
+        )
+        .await
+        .0,
         StatusCode::OK
     );
     let (_, thread) = request(
@@ -346,19 +365,16 @@ async fn nullable_chat_association_owner_checks_scopes_and_archive_retention() {
         Value::Null,
     )
     .await;
-    assert_eq!(thread["dealId"], "DEAL-MODEL");
+    assert_eq!(thread["dealId"], deal_id);
 }
 
 #[tokio::test]
 async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_stage() {
     let app = app().await;
     let mut input = deal();
-    assert_eq!(
-        request(&app, "POST", "/api/v1/deals", input.clone())
-            .await
-            .0,
-        StatusCode::CREATED
-    );
+    let (status, initial) = request(&app, "POST", "/api/v1/deals", input.clone()).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let deal_id = initial["deal"]["dealId"].as_str().unwrap();
     input.as_object_mut().unwrap().remove("dealId");
     let frontend = include_str!("../../../frontend/src/data/dealModel.ts");
     for code in [
@@ -374,15 +390,14 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
     ] {
         assert!(frontend.contains(&format!("\"{code}\"")));
         input["status"] = json!(code);
-        let mut create = input.clone();
-        create["dealId"] = json!(format!("DEAL-{code}"));
+        let create = input.clone();
         let (created_status, created) = request(&app, "POST", "/api/v1/deals", create).await;
         assert_eq!(created_status, StatusCode::CREATED, "{created}");
         assert_eq!(created["deal"]["status"], code);
         let (status, saved) = request(
             &app,
             "POST",
-            "/api/v1/deals/DEAL-MODEL/update",
+            &format!("/api/v1/deals/{deal_id}/update"),
             input.clone(),
         )
         .await;
@@ -390,7 +405,13 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
         assert_eq!(saved["deal"]["status"], code);
         assert_eq!(saved["deal"]["actualCloseDate"], Value::Null);
         assert_eq!(saved["deal"]["engagementCompletedDate"], Value::Null);
-        let (_, read) = request(&app, "GET", "/api/v1/deals/DEAL-MODEL", Value::Null).await;
+        let (_, read) = request(
+            &app,
+            "GET",
+            &format!("/api/v1/deals/{deal_id}"),
+            Value::Null,
+        )
+        .await;
         assert_eq!(read["status"], code, "{read}");
     }
     for code in ["active", "on_hold", "completed", "cancelled", "unknown"] {
@@ -398,22 +419,26 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
         let (status, error) = request(
             &app,
             "POST",
-            "/api/v1/deals/DEAL-MODEL/update",
+            &format!("/api/v1/deals/{deal_id}/update"),
             input.clone(),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!error.to_string().contains(code));
-        let mut create = input.clone();
-        create["dealId"] = json!("DEAL-INVALID");
+        let create = input.clone();
         assert_eq!(
             request(&app, "POST", "/api/v1/deals", create).await.0,
             StatusCode::BAD_REQUEST
         );
     }
     for _ in 0..2 {
-        let (status, archived) =
-            request(&app, "POST", "/api/v1/deals/DEAL-MODEL/archive", json!({})).await;
+        let (status, archived) = request(
+            &app,
+            "POST",
+            &format!("/api/v1/deals/{deal_id}/archive"),
+            json!({}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(archived["status"], "pencils_down");
         assert!(archived["archivedAt"].is_string());

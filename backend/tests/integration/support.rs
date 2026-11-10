@@ -5,7 +5,7 @@ use axum::Router;
 use crate::{
     adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
     app::{
-        bootstrap::{assemble_api, BootstrapError},
+        bootstrap::{test_support::assemble_api, BootstrapError},
         config::AppConfig,
         http::create_router,
         migrations,

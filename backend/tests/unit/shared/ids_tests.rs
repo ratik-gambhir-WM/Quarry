@@ -31,3 +31,26 @@ fn required_values_reject_empty_and_whitespace_only_input() {
         "dealId is required"
     );
 }
+
+#[test]
+fn deal_ids_accept_canonical_uuids_and_preserve_legacy_ids() {
+    for id in [
+        "5346b615-818b-4b25-85da-045507df2db4",
+        "DEAL-000184",
+        "DEAL-",
+        "DEAL-legacy_name",
+    ] {
+        assert!(is_deal_id(id), "{id}");
+    }
+    for id in [
+        "",
+        "Project Fleet",
+        "5346B615-818B-4B25-85DA-045507DF2DB4",
+        "5346b615818b4b2585da045507df2db4",
+        "DEAL-../escape",
+        "DEAL-A?b=c",
+    ] {
+        assert!(!is_deal_id(id), "{id}");
+    }
+    assert!(!is_deal_id(&format!("DEAL-{}", "a".repeat(60))));
+}

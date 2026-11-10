@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         PromptCatalog::load(&config.prompts.directory)
             .map_err(|error| Error::msg(error.to_string()))?,
     );
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts);
+    let client = OpenAiClient::from_config(openai, prompts);
     let embeddings = client
         .gen_embeddings(&chunks, Some(&openai.embedding_model))
         .await

@@ -21,7 +21,6 @@ pub use super::model::DealFields;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDealInput {
-    pub deal_id: String,
     #[serde(skip_deserializing)]
     pub user_email: String,
     #[serde(flatten)]
@@ -151,7 +150,7 @@ impl DealService {
         let mut aggregate = self
             .deals
             .create(CreateDealRecord {
-                deal_id: input.deal_id,
+                deal_id: uuid::Uuid::new_v4().to_string(),
                 user_id: user.id,
                 fields: input.fields,
                 local_path: trim_optional_owned(input.local_path),

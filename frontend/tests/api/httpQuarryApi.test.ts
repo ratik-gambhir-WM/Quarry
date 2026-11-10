@@ -31,20 +31,22 @@ describe("httpQuarryApi", () => {
     "preserves %s through create, update and read",
     async (status) => {
       const input = { ...testDealInput(), status };
-      const response = { deal: testDeal({ status }), metadata: testMetadata() };
+      const deal = testDeal({ status, dealId: "5346b615-818b-4b25-85da-045507df2db4" });
+      const response = { deal, metadata: testMetadata(deal.dealId) };
       const fetchMock = vi
         .fn()
         .mockImplementation(() => Promise.resolve(Response.json(response)));
       vi.stubGlobal("fetch", fetchMock);
       const api = httpQuarryApi;
       expect((await api.createDeal(input)).deal.status).toBe(status);
-      expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(
+      expect(input).not.toHaveProperty("dealId");
+      expect((await api.updateDeal(response.deal.dealId, input)).deal.status).toBe(
         status,
       );
       fetchMock.mockResolvedValue(
         Response.json({ ...response.deal, metadata: response.metadata }),
       );
-      expect((await api.getDeal(input.dealId)).status).toBe(status);
+      expect((await api.getDeal(response.deal.dealId)).status).toBe(status);
       expect(JSON.parse(fetchMock.mock.calls[0][1].body).status).toBe(status);
       expect(JSON.parse(fetchMock.mock.calls[1][1].body).status).toBe(status);
     },
@@ -277,8 +279,8 @@ describe("httpQuarryApi", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await httpQuarryApi.createDeal(input);
-    await httpQuarryApi.saveDealMetadata(input.dealId, {
+    const created = await httpQuarryApi.createDeal(input);
+    await httpQuarryApi.saveDealMetadata(created.deal.dealId, {
       factSheetLink: "https://example.com/fact-sheet",
       files: [],
       rlLink: "https://example.com/request-list",

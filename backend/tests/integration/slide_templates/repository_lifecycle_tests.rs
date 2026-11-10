@@ -330,9 +330,11 @@ fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("quarry.sqlite3");
     let mut record = insert("durable-import");
-    let png = include_bytes!(
-        "../../../src/domains/templates/slide_templates/catalog/previews/layered-arch.png"
-    );
+    let preview = crate::slide_template_test_support::FixturePreview
+        .generate(b"pptx")
+        .unwrap()
+        .unwrap();
+    let png = preview.bytes.as_slice();
     record.assets.push(TemplateAsset {
         asset_id: "durable-image".into(),
         template_id: record.template.template_id.clone(),
@@ -388,7 +390,6 @@ fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors() {
         migrations::migrate(&client).unwrap();
         let repository = SqliteTemplateRepository::new(client.clone());
         repository.ensure_app("Quarry_WestMonroe", None).unwrap();
-        crate::domains::templates::slide_templates::catalog::seed(&repository).unwrap();
         assert_eq!(
             repository.find_by_id("durable-import").unwrap(),
             stored_template

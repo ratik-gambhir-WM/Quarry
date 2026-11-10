@@ -209,13 +209,6 @@ impl DealRepository {
             .await
             .map_err(storage)
     }
-    #[cfg(test)]
-    pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
-        self.sqlite
-            .read_transaction_async(|tx| load(tx, None, None))
-            .await
-            .map_err(storage)
-    }
     pub async fn with_metadata(
         &self,
         id: String,

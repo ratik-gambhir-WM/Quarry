@@ -82,7 +82,6 @@ export function testMetadata(dealId = "DEAL-000184"): SavedDealMetadata {
 export function testDealInput(): SaveDealInput {
   const deal = testDeal();
   return {
-    dealId: deal.dealId,
     dealName: deal.dealName,
     dealCode: deal.dealCode,
     engagementType: deal.engagementType,

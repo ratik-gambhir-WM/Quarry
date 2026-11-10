@@ -50,6 +50,48 @@ enum Work {
     Embedding(SlideEmbeddingJob),
 }
 
+#[derive(Clone, Copy)]
+enum Stage {
+    Classification,
+    Embedding,
+}
+
+struct StagePolicy {
+    name: &'static str,
+    maximum_attempts: usize,
+    timeout: Duration,
+}
+
+impl Stage {
+    fn policy(self, options: &SlideClassificationWorkerOptions) -> StagePolicy {
+        match self {
+            Self::Classification => StagePolicy {
+                name: "classification",
+                maximum_attempts: options.classification_max_attempts,
+                timeout: options.classification_timeout,
+            },
+            Self::Embedding => StagePolicy {
+                name: "embedding",
+                maximum_attempts: options.embedding_max_attempts,
+                timeout: options.embedding_timeout,
+            },
+        }
+    }
+
+    fn record_failure(
+        self,
+        repository: &dyn TemplateRepository,
+        id: &str,
+        code: &str,
+        retry: Option<&str>,
+    ) -> Result<(), crate::shared::error::RepositoryError> {
+        match self {
+            Self::Classification => repository.record_slide_classification_failure(id, code, retry),
+            Self::Embedding => repository.record_slide_embedding_failure(id, code, retry),
+        }
+    }
+}
+
 impl SlideClassificationWorker {
     pub fn new(options: SlideClassificationWorkerOptions) -> Self {
         let (cancel, _) = watch::channel(false);
@@ -190,32 +232,24 @@ impl SlideClassificationWorker {
     }
     async fn execute(&self, work: Work) {
         let mut cancelled = self.cancel.subscribe();
-        let (classification, id, attempt) = match &work {
-            Work::Classification(job) => {
-                (true, job.template.template_id.clone(), job.attempt_count)
-            }
-            Work::Embedding(job) => (false, job.template_id.clone(), job.attempt_count),
+        let (stage, id, attempt) = match &work {
+            Work::Classification(job) => (
+                Stage::Classification,
+                job.template.template_id.clone(),
+                job.attempt_count,
+            ),
+            Work::Embedding(job) => (Stage::Embedding, job.template_id.clone(), job.attempt_count),
         };
-        let stage = if classification {
-            "classification"
-        } else {
-            "embedding"
-        };
-        let maximum = if classification {
-            self.options.classification_max_attempts
-        } else {
-            self.options.embedding_max_attempts
-        };
-        let timeout = if classification {
-            self.options.classification_timeout
-        } else {
-            self.options.embedding_timeout
-        };
+        let StagePolicy {
+            name,
+            maximum_attempts: maximum,
+            timeout,
+        } = stage.policy(&self.options);
         let operation = async {
             // Expired leases also consume the bounded attempt budget.
             if attempt > maximum {
                 return Err(
-                    SlideProviderError::new(format!("{stage}_attempts_exhausted"), false).into(),
+                    SlideProviderError::new(format!("{name}_attempts_exhausted"), false).into(),
                 );
             }
             match work {
@@ -233,11 +267,11 @@ impl SlideClassificationWorker {
             }
         };
         let result = if *cancelled.borrow() {
-            Err(SlideProviderError::new(format!("{stage}_timeout"), true).into())
+            Err(SlideProviderError::new(format!("{name}_timeout"), true).into())
         } else {
             tokio::select! {
-                result=tokio::time::timeout(timeout, operation)=>result.unwrap_or_else(|_| Err(SlideProviderError::new(format!("{stage}_timeout"),true).into())),
-                _=cancelled.changed()=>Err(SlideProviderError::new(format!("{stage}_timeout"),true).into()),
+                result=tokio::time::timeout(timeout, operation)=>result.unwrap_or_else(|_| Err(SlideProviderError::new(format!("{name}_timeout"),true).into())),
+                _=cancelled.changed()=>Err(SlideProviderError::new(format!("{name}_timeout"),true).into()),
             }
         };
         if let Err(error) = result {
@@ -247,17 +281,13 @@ impl SlideClassificationWorker {
             } else {
                 None
             };
-            let fallback = format!("{stage}_internal");
+            let fallback = format!("{name}_internal");
             let code = provider.map_or(fallback.as_str(), |error| error.code.as_str());
             let repository = self.options.repository.clone();
             let code = code.to_owned();
             let id = id.clone();
             let recorded = tokio::task::spawn_blocking(move || {
-                if classification {
-                    repository.record_slide_classification_failure(&id, &code, retry.as_deref())
-                } else {
-                    repository.record_slide_embedding_failure(&id, &code, retry.as_deref())
-                }
+                stage.record_failure(repository.as_ref(), &id, &code, retry.as_deref())
             })
             .await
             .map_err(anyhow::Error::from)

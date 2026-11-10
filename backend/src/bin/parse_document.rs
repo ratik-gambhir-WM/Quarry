@@ -102,7 +102,7 @@ async fn summarize_dir(path: String) -> Result<(), String> {
     let prompts = std::sync::Arc::new(
         PromptCatalog::load(&config.prompts.directory).map_err(|error| error.to_string())?,
     );
-    let client = OpenAiClient::from_config(reqwest::Client::new(), openai, prompts.clone());
+    let client = OpenAiClient::from_config(openai, prompts.clone());
     let prompt = build_basic_document_summary_prompt(&prompts, &root, &files, &skipped_files);
     let file_inputs: Vec<ResponsesFileInput<'_>> = files
         .iter()

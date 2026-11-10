@@ -106,12 +106,7 @@ pub(super) fn validate_title(title: &str) -> AppResult<()> {
 }
 
 pub(super) fn validate_deal_id(id: &str) -> AppResult<()> {
-    if !id.starts_with("DEAL-")
-        || id.len() > 64
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-    {
+    if !crate::shared::ids::is_deal_id(id) {
         return Err(AppError::bad_request("invalid dealId"));
     }
     Ok(())

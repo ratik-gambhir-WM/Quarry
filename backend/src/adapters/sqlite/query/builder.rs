@@ -542,7 +542,7 @@ impl SelectBuilder {
 
     pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
-        ensure_unique_columns(&self.columns)?;
+        ensure_unique_columns(self.columns.iter().map(String::as_str))?;
         let columns = if self.count_rows {
             "COUNT(*)".to_owned()
         } else if self.columns.is_empty() {
@@ -642,15 +642,11 @@ impl InsertBuilder {
         }
 
         let table = quote_identifier(&self.table)?;
-        let column_names = self
+        ensure_unique_columns(self.values.iter().map(|(column, _)| column.as_str()))?;
+        let columns = self
             .values
             .iter()
-            .map(|(column, _)| column.clone())
-            .collect::<Vec<_>>();
-        ensure_unique_columns(&column_names)?;
-        let columns = column_names
-            .iter()
-            .map(|column| quote_identifier(column))
+            .map(|(column, _)| quote_identifier(column))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let placeholders = vec!["?"; self.values.len()].join(", ");
@@ -719,25 +715,21 @@ impl UpdateBuilder {
         require_conditions("UPDATE", &self.conditions, self.allow_all_rows)?;
 
         let table = quote_identifier(&self.table)?;
-        let mut column_names = self
-            .assignments
-            .iter()
-            .map(|(column, _)| column.clone())
-            .collect::<Vec<_>>();
-        column_names.extend(self.increments.iter().cloned());
-        ensure_unique_columns(&column_names)?;
-        let assignments = column_names
-            .iter()
-            .map(|column| {
-                let quoted = quote_identifier(column)?;
-                Ok(if self.increments.contains(column) {
-                    format!("{quoted} = {quoted} + 1")
-                } else {
-                    format!("{quoted} = ?")
-                })
-            })
-            .collect::<Result<Vec<_>, SqlBuilderError>>()?
-            .join(", ");
+        ensure_unique_columns(
+            self.assignments
+                .iter()
+                .map(|(column, _)| column.as_str())
+                .chain(self.increments.iter().map(String::as_str)),
+        )?;
+        let mut assignments = Vec::with_capacity(self.assignments.len() + self.increments.len());
+        for (column, _) in &self.assignments {
+            assignments.push(format!("{} = ?", quote_identifier(column)?));
+        }
+        for column in &self.increments {
+            let quoted = quote_identifier(column)?;
+            assignments.push(format!("{quoted} = {quoted} + 1"));
+        }
+        let assignments = assignments.join(", ");
         let mut parameters = self
             .assignments
             .into_iter()
@@ -827,13 +819,8 @@ fn append_insert_conflict(
                 return Err(SqlBuilderError::MissingConflictAssignments);
             }
 
-            ensure_unique_columns(&update.target_columns)?;
-            let assignment_columns = update
-                .assignments
-                .iter()
-                .map(|(column, _)| column.clone())
-                .collect::<Vec<_>>();
-            ensure_unique_columns(&assignment_columns)?;
+            ensure_unique_columns(update.target_columns.iter().map(String::as_str))?;
+            ensure_unique_columns(update.assignments.iter().map(|(column, _)| column.as_str()))?;
 
             sql.push_str(" ON CONFLICT");
             append_conflict_target(sql, &update.target_columns)?;
@@ -870,7 +857,7 @@ fn append_conflict_target(
     if target_columns.is_empty() {
         return Ok(());
     }
-    ensure_unique_columns(target_columns)?;
+    ensure_unique_columns(target_columns.iter().map(String::as_str))?;
     let target = target_columns
         .iter()
         .map(|column| quote_identifier(column))
@@ -947,19 +934,7 @@ fn append_joins(
                     operator,
                     value,
                 } => {
-                    sql.push_str(&quote_identifier(column)?);
-                    match (operator, value) {
-                        (ComparisonOperator::Equal, SqlValue::Null) => sql.push_str(" IS NULL"),
-                        (ComparisonOperator::NotEqual, SqlValue::Null) => {
-                            sql.push_str(" IS NOT NULL")
-                        }
-                        _ => {
-                            sql.push(' ');
-                            sql.push_str(operator.as_sql());
-                            sql.push_str(" ?");
-                            parameters.push(value.clone());
-                        }
-                    }
+                    append_comparison(sql, column, *operator, value, parameters)?;
                 }
             }
             sql.push(')');
@@ -1008,17 +983,7 @@ fn append_conditions(
                 operator,
                 value,
             } => {
-                sql.push_str(&quote_identifier(column)?);
-                match (operator, value) {
-                    (ComparisonOperator::Equal, SqlValue::Null) => sql.push_str(" IS NULL"),
-                    (ComparisonOperator::NotEqual, SqlValue::Null) => sql.push_str(" IS NOT NULL"),
-                    _ => {
-                        sql.push(' ');
-                        sql.push_str(operator.as_sql());
-                        sql.push_str(" ?");
-                        parameters.push(value.clone());
-                    }
-                }
+                append_comparison(sql, column, *operator, value, parameters)?;
             }
             Predicate::In {
                 column,
@@ -1056,11 +1021,36 @@ fn require_conditions(
     Ok(())
 }
 
-fn ensure_unique_columns(columns: &[String]) -> Result<(), SqlBuilderError> {
-    let mut seen = HashSet::with_capacity(columns.len());
+fn ensure_unique_columns<'a>(
+    columns: impl IntoIterator<Item = &'a str>,
+) -> Result<(), SqlBuilderError> {
+    let columns = columns.into_iter();
+    let mut seen = HashSet::with_capacity(columns.size_hint().0);
     for column in columns {
         if !seen.insert(column) {
-            return Err(SqlBuilderError::DuplicateColumn(column.clone()));
+            return Err(SqlBuilderError::DuplicateColumn(column.to_owned()));
+        }
+    }
+    Ok(())
+}
+
+/// JOIN and WHERE comparisons share SQLite NULL semantics and parameter ordering.
+fn append_comparison(
+    sql: &mut String,
+    column: &str,
+    operator: ComparisonOperator,
+    value: &SqlValue,
+    parameters: &mut Vec<SqlValue>,
+) -> Result<(), SqlBuilderError> {
+    sql.push_str(&quote_identifier(column)?);
+    match (operator, value) {
+        (ComparisonOperator::Equal, SqlValue::Null) => sql.push_str(" IS NULL"),
+        (ComparisonOperator::NotEqual, SqlValue::Null) => sql.push_str(" IS NOT NULL"),
+        _ => {
+            sql.push(' ');
+            sql.push_str(operator.as_sql());
+            sql.push_str(" ?");
+            parameters.push(value.clone());
         }
     }
     Ok(())
