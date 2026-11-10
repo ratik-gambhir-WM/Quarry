@@ -104,7 +104,7 @@ async fn chat_from_stream(
 async fn rig_stream_preserves_utf8_deltas_and_authoritative_completion() {
     let bytes = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hé\"}\r\n\r\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"authoritative\"}}\r\n\r\n"
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"authoritative\"}]}]}}\r\n\r\n"
     ).as_bytes();
     let chunks = bytes.chunks(1).map(bytes::Bytes::copy_from_slice).collect();
     let (result, deltas) = chat_from_stream(chunks).await;
@@ -136,8 +136,8 @@ async fn rig_sends_office_files_unchanged_in_buffered_streamed_and_chat_requests
             let streaming = body["stream"] == true;
             captured.lock().await.push(body);
             let response = if streaming {
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"answer\"}}\n\n".to_owned()
-            } else { json!({"object": "response", "output_text": "answer"}).to_string() };
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n".to_owned()
+            } else { response_body("answer").to_string() };
             axum::response::Response::builder().header("content-type", if streaming { "text/event-stream" } else { "application/json" })
                 .body(axum::body::Body::from(response)).unwrap()
         }
@@ -256,6 +256,11 @@ async fn rig_embedder_preserves_order_and_rejects_invalid_provider_vectors() {
     use axum::{routing::post, Json, Router};
     let valid = json!({"data": [{"index":1,"embedding":[0.6,0.8]},{"index":0,"embedding":[1.0,0.0]}], "usage": {"prompt_tokens":2,"total_tokens":2}});
     let invalid = [
+        json!({"data":[{"embedding":[1.0,0.0]},{"index":1,"embedding":[0.6,0.8]}]}),
+        json!({"data":[{"index":-1,"embedding":[1.0,0.0]}]}),
+        json!({"data":[{"index":0.5,"embedding":[1.0,0.0]}]}),
+        json!({"data":[{"index":0,"embedding":[null,0.0]}]}),
+        json!({"data":[]}),
         json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":0,"embedding":[0.6,0.8]}]}),
         json!({"data":[{"index":2,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.6,0.8]}]}),
         json!({"data":[{"index":0,"embedding":[1.0]}]}),
@@ -310,10 +315,10 @@ async fn response_modes_preserve_payloads_and_streamed_deltas() {
                     concat!(
                         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"First \"}\n\n",
                         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n",
-                        "data: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"Completion fallback\"}}\n\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completion fallback\"}]}]}}\n\n",
                     ).to_owned()
                 } else {
-                    json!({"object": "response", "output_text": "First answer"}).to_string()
+                    response_body("First answer").to_string()
                 };
                 axum::response::Response::builder()
                     .header("content-type", if streaming { "text/event-stream" } else { "application/json" })
@@ -600,59 +605,65 @@ fn infer_file_mime_type_falls_back_to_octet_stream_for_unknown_extension() {
     );
 }
 
-#[test]
-fn extract_response_text_prefers_output_text_field() {
-    let response_json = json!({
-        "output_text": "  First dragon: Aasterinian  "
-    });
-
-    assert_eq!(
-        extract_response_text(&response_json),
-        Some("First dragon: Aasterinian".to_string())
-    );
+fn response_body(text: &str) -> Value {
+    json!({"object": "response", "output": [{
+        "type": "message", "role": "assistant", "content": [{
+            "type": "output_text", "text": text
+        }]
+    }]})
 }
 
-#[test]
-fn extract_response_text_collects_text_parts_from_output_content() {
-    let response_json = json!({
-        "output": [
-            {
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": "First paragraph"
-                    },
-                    {
-                        "type": "text",
-                        "text": "Second paragraph"
-                    }
-                ]
-            }
-        ]
-    });
-
-    assert_eq!(
-        extract_response_text(&response_json),
-        Some("First paragraph\nSecond paragraph".to_string())
+#[tokio::test]
+async fn rig_buffered_text_uses_normalized_blocks_and_rejects_empty_output() {
+    use axum::{routing::post, Json, Router};
+    let mut multipart = response_body("  First paragraph\n\n");
+    multipart["output"][0]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "output_text", "text": "Second paragraph  "}));
+    multipart["output"].as_array_mut().unwrap().insert(0,
+        json!({"type": "reasoning", "summary": [{"type": "summary_text", "text": "private reasoning"}]}),
     );
+    multipart["output_text"] = json!("ignored raw text");
+    for (response, expected) in [
+        (multipart, Some("First paragraph\n\nSecond paragraph")),
+        (response_body("  \n"), None),
+        (json!({"object": "response", "output": []}), None),
+    ] {
+        let server = ResponsesServer::start(Router::new().route(
+            "/responses",
+            post(move || {
+                let response = response.clone();
+                async move { Json(response) }
+            }),
+        ))
+        .await;
+        let result = server
+            .client()
+            .gen_model_response(None, None, Some("custom-model"))
+            .await;
+        match expected {
+            Some(text) => assert_eq!(result.unwrap(), text),
+            None => assert!(result.is_err()),
+        }
+        server.stop().await;
+    }
 }
 
-#[test]
-fn extract_response_text_returns_none_when_no_text_is_present() {
-    let response_json = json!({
-        "output": [
-            {
-                "content": [
-                    {
-                        "type": "input_file",
-                        "filename": "draconomicon.pdf"
-                    }
-                ]
-            }
-        ]
-    });
-
-    assert_eq!(extract_response_text(&response_json), None);
+#[tokio::test]
+async fn rig_stream_preserves_completed_text_whitespace_and_block_boundaries() {
+    let mut response = response_body("  First\n\n");
+    response["output"][0]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "output_text", "text": "second  "}));
+    let event = format!(
+        "data: {}\n\n",
+        json!({"type": "response.completed", "response": response})
+    );
+    let (result, deltas) = chat_from_stream(vec![bytes::Bytes::from(event)]).await;
+    assert_eq!(result.unwrap(), "  First\n\nsecond  ");
+    assert_eq!(deltas.concat(), "  First\n\nsecond  ");
 }
 
 #[test]
@@ -873,25 +884,23 @@ fn test_responses_url_seam_is_constructor_injected() {
 }
 
 #[test]
-fn embedding_response_requires_the_requested_dimensions_before_storage_conversion() {
+fn embedding_response_requires_dimensions_and_finite_storage_values() {
     let dimensions = NonZeroUsize::new(2).unwrap();
-    let valid =
-        json!({"data":[{"index":1,"embedding":[0.6,0.8]},{"index":0,"embedding":[1.0,0.0]}]});
-    assert_eq!(
-        extract_embeddings(&valid, 2, dimensions).unwrap(),
-        vec![vec![1.0, 0.0], vec![0.6, 0.8]]
-    );
     for vector in [
-        json!([]),
-        json!([1.0]),
-        json!([1.0, 0.0, 0.0]),
-        json!([f64::MAX, 0.0]),
-        json!([null, 0.0]),
+        vec![],
+        vec![1.0],
+        vec![1.0, 0.0, 0.0],
+        vec![f64::MAX, 0.0],
+        vec![f64::NAN, 0.0],
+        vec![f64::INFINITY, 0.0],
     ] {
-        let response = json!({"data":[{"index":0,"embedding":vector}]});
-        assert!(extract_embeddings(&response, 1, dimensions).is_err());
+        let mut response = EmbeddingResponse::new(vec![rig::embeddings::Embedding {
+            document: String::new(),
+            vec: vector,
+        }]);
+        response.raw = json!({"data": [{"index": 0}]});
+        assert!(validate_embeddings(response, 1, dimensions).is_err());
     }
-    assert!(extract_embeddings(&valid, 2, NonZeroUsize::new(3).unwrap()).is_err());
 }
 
 #[tokio::test]
@@ -901,14 +910,14 @@ async fn rig_stream_accepts_large_provider_events_without_a_local_event_limit() 
         "x".repeat(2 * 1024 * 1024)
     );
     let done =
-        "data: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"answer\"}}\n\n";
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n";
     let (result, deltas) = chat_from_stream(vec![
         bytes::Bytes::from(created),
         bytes::Bytes::from_static(done.as_bytes()),
     ])
     .await;
     assert_eq!(result.unwrap(), "answer");
-    assert!(deltas.is_empty());
+    assert_eq!(deltas.concat(), "answer");
 }
 
 impl OpenAiClient {

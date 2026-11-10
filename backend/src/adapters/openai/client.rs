@@ -15,6 +15,7 @@ use futures_util::StreamExt;
 use rig::{
     catalog::{Catalog, ModelFacts},
     completion::CompletionRequest,
+    embeddings::EmbeddingResponse,
     message::Message,
     observe::{Action, AdapterContext, AdapterEvent, Observation, Subject, Witness},
     providers::openai::{
@@ -227,8 +228,7 @@ impl OpenAiClient {
                 "OpenAI chat stream reported a provider failure",
             ));
         }
-        let completed =
-            extract_response_text_preserved(&response.raw).unwrap_or_else(|| response.text());
+        let completed = response.text();
         if completed.len() > MAX_CHAT_RESPONSE_BYTES {
             return Err(ChatStreamError::new(
                 "provider_stream",
@@ -270,11 +270,13 @@ impl OpenAiClient {
             .await
             .map_err(|error| provider_error("responses", error, None, None, false, started))?;
         log_openai_success(OPENAI_RESPONSES_API, None, None, started);
-        extract_response_text(&response.raw)
-            .or_else(|| {
-                (!response.text().trim().is_empty()).then(|| response.text().trim().to_owned())
-            })
-            .ok_or_else(|| "OpenAI responses API did not include output text".into())
+        let text = response.text();
+        let text = text.trim();
+        if text.is_empty() {
+            Err("OpenAI responses API did not include output text".into())
+        } else {
+            Ok(text.to_owned())
+        }
     }
 
     pub async fn gen_model_response_with_files_streaming<F>(
@@ -444,10 +446,7 @@ impl OpenAiClient {
                 )
             })?;
         log_openai_success(OPENAI_EMBEDDINGS_API, filename, file_size_bytes, started);
-        // Rig currently drops upstream indices when normalizing vectors. Check
-        // the preserved reply to reject duplicates/missing indices and restore
-        // input order, in addition to the index's finite f32 storage invariant.
-        extract_embeddings(&response.raw, contents.len(), self.embedding_dimensions)
+        validate_embeddings(response, contents.len(), self.embedding_dimensions)
     }
 }
 
@@ -691,29 +690,6 @@ fn build_base64_data_url(mime_type: &str, data_base64: &str) -> String {
     format!("data:{mime_type};base64,{data_base64}")
 }
 
-fn extract_response_text_preserved(response: &Value) -> Option<String> {
-    if let Some(text) = response.get("output_text").and_then(Value::as_str) {
-        return (!text.trim().is_empty()).then(|| text.to_string());
-    }
-    let mut result = String::new();
-    for item in response.get("output")?.as_array()? {
-        let Some(content) = item.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in content {
-            if matches!(
-                part.get("type").and_then(Value::as_str),
-                Some("output_text") | Some("text")
-            ) {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    result.push_str(text);
-                }
-            }
-        }
-    }
-    (!result.trim().is_empty()).then_some(result)
-}
-
 fn infer_file_mime_type(path: &Path) -> &'static str {
     match path
         .extension()
@@ -739,53 +715,23 @@ fn infer_file_mime_type(path: &Path) -> &'static str {
     }
 }
 
-fn extract_response_text(response_json: &Value) -> Option<String> {
-    if let Some(output_text) = response_json.get("output_text").and_then(Value::as_str) {
-        return Some(output_text.trim().to_string());
-    }
-
-    let output = response_json.get("output")?.as_array()?;
-    let mut text_parts = Vec::new();
-
-    for item in output {
-        let Some(content) = item.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-
-        for part in content {
-            if matches!(
-                part.get("type").and_then(Value::as_str),
-                Some("output_text") | Some("text")
-            ) {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        text_parts.push(trimmed);
-                    }
-                }
-            }
-        }
-    }
-
-    if text_parts.is_empty() {
-        None
-    } else {
-        let text = text_parts.join("\n");
-        Some(text)
-    }
-}
-
-fn extract_embeddings(
-    response_json: &Value,
+// Rig 0.46 decodes vectors in wire order and discards their indices. Read only
+// that metadata from raw; numeric decoding belongs to Rig. These upstream-data
+// integrity checks must run here, after the provider reply, before storage.
+fn validate_embeddings(
+    response: EmbeddingResponse,
     expected_count: usize,
     expected_dimensions: NonZeroUsize,
 ) -> Result<Vec<Vec<f64>>, String> {
-    let items = response_json["data"]
+    let items = response.raw["data"]
         .as_array()
         .ok_or_else(|| "OpenAI embeddings response did not include embeddings".to_string())?;
     let mut embeddings = vec![None; expected_count];
 
-    for item in items {
+    if items.len() != response.embeddings.len() {
+        return Err("OpenAI embeddings response count does not match its decoded vectors".into());
+    }
+    for (item, embedding) in items.iter().zip(response.embeddings) {
         let index = item["index"]
             .as_u64()
             .and_then(|value| usize::try_from(value).ok())
@@ -800,29 +746,17 @@ fn extract_embeddings(
                 "OpenAI embeddings response included duplicate embedding index {index}"
             ));
         }
-        let values = item["embedding"].as_array().ok_or_else(|| {
-            format!("OpenAI embeddings response did not include embedding at index {index}")
-        })?;
-        if values.len() != expected_dimensions.get() {
+        if embedding.vec.len() != expected_dimensions.get() {
             return Err("OpenAI embedding dimension does not match the configured index".into());
         }
-        *destination = Some(
-            values
-                .iter()
-                .map(|value| {
-                    let number = value.as_f64().ok_or_else(|| {
-                        "OpenAI embedding contained a non-number value".to_string()
-                    })?;
-                    if !number.is_finite() || !(number as f32).is_finite() {
-                        return Err(
-                            "OpenAI embedding contained a non-finite or out-of-range value"
-                                .to_string(),
-                        );
-                    }
-                    Ok(number)
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        if embedding
+            .vec
+            .iter()
+            .any(|number| !number.is_finite() || !(*number as f32).is_finite())
+        {
+            return Err("OpenAI embedding contained a non-finite or out-of-range value".into());
+        }
+        *destination = Some(embedding.vec);
     }
 
     embeddings

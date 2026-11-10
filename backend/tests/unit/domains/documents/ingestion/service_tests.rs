@@ -282,6 +282,90 @@ fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     }
 }
 
+#[tokio::test]
+async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batches() {
+    use crate::adapters::{helix::client::HelixClient, sqlite::client::SqliteClient};
+    use axum::{routing::post, Json, Router};
+    use serde_json::{json, Value};
+    use std::num::NonZeroUsize;
+
+    for malformed in [false, true] {
+        let app = Router::new().route(
+            "/embeddings",
+            post(move |Json(body): Json<Value>| async move {
+                let inputs = body["input"].as_array().unwrap();
+                let mut data = inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, text)| {
+                        let value: f64 = text.as_str().unwrap().parse().unwrap();
+                        json!({"index": index, "embedding": [value, -value]})
+                    })
+                    .rev()
+                    .collect::<Vec<_>>();
+                if malformed && inputs[0] == "3" {
+                    // One valid batch must not cause partial assignment if another
+                    // reply contains duplicate indices and omits an input.
+                    data[0]["index"] = data[1]["index"].clone();
+                }
+                Json(json!({"data": data, "usage": {"prompt_tokens": 4, "total_tokens": 4}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .unwrap();
+        });
+        let dimensions = NonZeroUsize::new(2).unwrap();
+        let client = OpenAiClient::with_embeddings_url(
+            format!("http://{address}/embeddings"),
+            crate::integration_support::prompt_catalog(),
+            dimensions,
+        );
+        let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
+        let service = DocumentIngestionService::new(
+            DocumentStore::new(SqliteClient::open_in_memory().unwrap()),
+            DocumentGraphReader::new(helix.clone()),
+            DocumentGraphWriter::new(helix, dimensions),
+            None,
+            "test".into(),
+            "unused".into(),
+            1,
+        );
+        let mut chunks = (1..=4)
+            .map(|index| {
+                let mut chunk = chunk_with_token_count(150_000);
+                chunk.chunk_id = format!("chunk-{index}");
+                chunk.text = index.to_string();
+                chunk
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(embedding_batches(&chunks).unwrap().len(), 2);
+        let result = service
+            .embed_chunks("synthetic.txt", 4, &mut chunks, &client)
+            .await;
+        shutdown.send(()).unwrap();
+        server.await.unwrap();
+        if malformed {
+            assert!(result.is_err());
+            assert!(chunks.iter().all(|chunk| chunk.embedding.is_none()));
+        } else {
+            result.unwrap();
+            for (index, chunk) in chunks.iter().enumerate() {
+                let value = (index + 1) as f32;
+                assert_eq!(chunk.chunk_id, format!("chunk-{}", index + 1));
+                assert_eq!(chunk.embedding.as_deref(), Some([value, -value].as_slice()));
+            }
+        }
+    }
+}
+
 #[test]
 fn embedding_batches_split_at_the_openai_aggregate_token_limit() {
     let mut chunks = vec![chunk_with_token_count(800); 375];

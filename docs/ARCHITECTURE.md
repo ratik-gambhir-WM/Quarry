@@ -539,8 +539,8 @@ global state or query-cache library.
   distinguish expected close, actual close, and engagement completion.
   The portfolio table shows project name, status, target, portfolio company (PortCo), engagement
   type, PE sponsor, and SOW/fact-sheet/SharePoint quick links from the existing safe resource URLs.
-  The table sits within the responsive page gutters, with aligned header/body padding,
-  browser-sized columns based on their headings and text, and horizontal row dividers.
+  The table spans the full main inset width without outer horizontal gutters, with aligned
+  header/body padding, browser-sized columns based on their headings and text, and horizontal row dividers.
   The table begins 8px below the workspace header. Long names and metadata truncate at
   bounded widths with full-text tooltips. The table fills the page width, sharing spare
   space through automatic table layout rather than assigning it all to the project name.
@@ -2213,6 +2213,7 @@ let request = CompletionRequest::new(prompt)
     .provider_option(OpenAiOptions::new().store(false));
 
 let response = provider.responses(model).call(request).await?;
+let text = response.text();
 let vectors = provider.embedding(embedding_model, Some(dimensions))
     .call(texts).await?;
 ```
@@ -2225,8 +2226,13 @@ configured dimensions and floating-point encoding.
 Quarry retains a small integration boundary for its prompt catalog, default models, attachment
 mapping, sanitized errors, stream duration/cancellation/backpressure, final text selection, and
 embedding integrity checks. Rig's response-header observation supports the connection deadline
-without a transport wrapper. Rig's raw embedding reply is checked for duplicate/missing indices,
-input ordering, dimensions, and finite f64/f32 values before indexing. Incoming authorization and
+without a transport wrapper. Buffered and final streamed text use Rig's normalized
+`response.text()`: text blocks concatenate in provider order without inserted separators;
+buffered output trims outer whitespace and rejects empty text, while chat preserves whitespace.
+Rig's typed embedding vectors are used directly. Rig 0.46 discards upstream embedding indices
+without reordering, so only index metadata is read from the raw reply to reject invalid,
+duplicate, missing, or out-of-range indices and restore input order. Typed vectors still undergo
+dimension and finite f64/f32 checks before indexing. Incoming authorization and
 validation remain at the HTTP boundary. Prior text turns retain their order and text as
 `input_text`/`output_text` content blocks.
 
