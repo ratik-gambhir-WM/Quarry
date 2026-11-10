@@ -37,7 +37,8 @@ describe("createTauriQuarryApi", () => {
     "preserves %s through create, update and read",
     async (status) => {
       const input = { ...testDealInput(), status };
-      const response = { deal: testDeal({ status }), metadata: testMetadata() };
+      const deal = testDeal({ status, dealId: "5346b615-818b-4b25-85da-045507df2db4" });
+      const response = { deal, metadata: testMetadata(deal.dealId) };
       const post = vi.fn().mockResolvedValue(response);
       const get = vi.fn().mockResolvedValue(response);
       const api = createTauriQuarryApi({
@@ -50,15 +51,16 @@ describe("createTauriQuarryApi", () => {
         subscribeJob: vi.fn(),
       });
       expect((await api.createDeal(input)).deal.status).toBe(status);
-      expect((await api.updateDeal(input.dealId, input)).deal.status).toBe(
+      expect(input).not.toHaveProperty("dealId");
+      expect((await api.updateDeal(response.deal.dealId, input)).deal.status).toBe(
         status,
       );
       get.mockResolvedValue({ ...response.deal, metadata: response.metadata });
-      expect((await api.getDeal(input.dealId)).status).toBe(status);
+      expect((await api.getDeal(response.deal.dealId)).status).toBe(status);
       expect(post).toHaveBeenNthCalledWith(1, "/api/v1/deals", input);
       expect(post).toHaveBeenNthCalledWith(
         2,
-        `/api/v1/deals/${input.dealId}/update`,
+        `/api/v1/deals/${response.deal.dealId}/update`,
         input,
       );
     },

@@ -76,13 +76,7 @@ pub(super) async fn hybrid_search_handler(
     let Json(mut search) =
         input.map_err(|_| AppError::bad_request("invalid hybrid search input"))?;
     let deal = path.map(|p| p.0).unwrap_or_default();
-    if !deal.is_empty()
-        && (!deal.starts_with("DEAL-")
-            || deal.len() > 64
-            || !deal
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')))
-    {
+    if !deal.is_empty() && !crate::shared::ids::is_deal_id(&deal) {
         return Err(AppError::bad_request("invalid dealId"));
     }
     validate_common(search.limit)?;

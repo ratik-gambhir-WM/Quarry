@@ -1043,7 +1043,7 @@ method allowlist.
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
 | GET | `/deals` | List nonarchived aggregates | Metadata, parties/current companies, scopes; actual then expected close sort key; unknown dates last |
-| POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Typed codes; optional dates/parties; same-owner company references |
+| POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Backend-generated UUID; typed codes; optional dates/parties; same-owner company references |
 | POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Creator/ID immutable; owner/manager capability; metadata preserved; unchanged assignments retain row IDs |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
 | POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
@@ -1830,12 +1830,25 @@ None of these mechanisms supports multi-instance coordination or durable recover
 
 ```text
 Login/profile creates or resolves user
-  -> POST /deals validates deal and owner email
+  -> POST /deals validates deal fields and verified owner email
+  -> DealService generates a fresh UUID v4
   -> one SQLite transaction inserts deal + metadata + parties + scopes and returns a consistent aggregate
   -> optional POST /deals/{id}/metadata saves source links and uploads selected source files
   -> DealService sends files and extraction prompt to OpenAI
   -> parsed key questions update deal_metadata
 ```
+
+New deal creation omits `dealId`; the service generates a canonical UUID v4 and returns it in
+both the deal and metadata. A legacy `dealId` field is ignored and cannot select the new identity.
+The UI requires only the deal name (for example, Project Fleet); the existing engagement/status
+defaults and optional details remain.
+Consumers use the returned ID for teams, metadata, documents, chat, notebooks, and navigation.
+Existing `DEAL-...` identifiers remain valid and are not rewritten. Handler-owned validators use
+the shared HTTP-independent ID predicate to accept canonical UUIDs and legacy IDs; the desktop
+membership PATCH relay accepts both forms. No schema migration or existing-link change is needed.
+Both transports omit `dealId` on creation and use the response identity. Older clients may
+still submit the retired field, but must use the returned ID. The `/api` compatibility mount
+uses the same UUID-generating handler.
 
 Deal creation has no Helix or Diligence Studio write. Its entire durable aggregate lives in one
 SQLite transaction, so an invalid reference or failed child insert leaves no deal, metadata,
@@ -1843,9 +1856,9 @@ assignment, or scope behind. The same applies to scalar/collection replacement o
 is retained. Previously and explicitly saved directory companies are independent records. Document
 upload/indexing is a separate operation with the cross-store recovery contract in section 9.3.
 
-The shared add-deal modal has three steps: deal identity/details, company directory selection or
-creation and deal-specific roles, then optional SharePoint, SOW, fact-sheet, and request-list links
-alongside one or two SOW/timeline files. A stepper shows the current stage and offers top or side
+The shared add-deal modal has four steps: deal name/details, company directory selection or
+creation and deal-specific roles, an optional team name, then optional SharePoint, SOW, fact-sheet,
+and request-list links alongside one or two SOW/timeline files. A stepper shows the current stage and offers top or side
 placement through tabs; completed stages can be revisited when navigation is not locked. Next, Back,
 and the stepper preserve the draft, assigned companies, and selected sources; company forms must be
 saved or cancelled before continuing. Core deal creation

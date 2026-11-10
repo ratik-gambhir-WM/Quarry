@@ -4,7 +4,7 @@ pub(super) fn validate_patch(path: &str, body: &Value) -> Result<(), String> {
     let parts = path.split('/').collect::<Vec<_>>();
     if parts.len() != 7
         || parts[..4] != ["", "api", "v1", "deals"]
-        || !parts[4].starts_with("DEAL-")
+        || !(parts[4].starts_with("DEAL-") || super::notebooks::canonical_id(parts[4]).is_ok())
     {
         return Err("deal PATCH path is not allowed".into());
     }

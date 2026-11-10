@@ -19,6 +19,16 @@ pub fn file_version_id(file_id: &str, content_hash: &str) -> String {
     sha256_hex(format!("{file_id}\0{content_hash}").as_bytes())
 }
 
+/// New deals use canonical UUIDs; existing DEAL- identifiers remain addressable.
+pub fn is_deal_id(value: &str) -> bool {
+    (value.starts_with("DEAL-")
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')))
+        || uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value)
+}
+
 pub fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err(format!("{field} is required"));

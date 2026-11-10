@@ -25,19 +25,13 @@ pub(super) fn validate_target_rule(fields: &DealFields) -> AppResult<()> {
     Ok(())
 }
 pub(crate) fn validate_deal_id(id: &str) -> AppResult<()> {
-    if !id.starts_with("DEAL-")
-        || id.len() > 64
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-    {
+    if !crate::shared::ids::is_deal_id(id) {
         return Err(AppError::bad_request("invalid dealId"));
     }
     Ok(())
 }
 
 pub(crate) fn validate_deal_input(input: &SaveDealInput) -> AppResult<()> {
-    validate_deal_id(&input.deal_id)?;
     validate_text("userEmail", &input.user_email, 320)?;
     validate_fields(&input.fields)?;
     if let Some(path) = &input.local_path {

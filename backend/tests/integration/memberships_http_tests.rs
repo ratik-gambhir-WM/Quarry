@@ -58,7 +58,6 @@ async fn fixture() -> TestApplication {
             .unwrap();
     }
     let body = json!({
-        "dealId": "DEAL-SHARED",
         "dealName": "Shared project",
         "dealCode": null,
         "startDate": null,
@@ -72,10 +71,19 @@ async fn fixture() -> TestApplication {
         "scopes": [],
         "localPath": "/private/device/source"
     });
-    assert_eq!(
-        call(&app.router, 1, "POST", "/api/v1/deals", body).await.0,
-        StatusCode::CREATED
-    );
+    // Retain legacy-ID coverage independently of the UUID-only creation API.
+    let input: crate::domains::deals::service::SaveDealInput =
+        serde_json::from_value(body).unwrap();
+    crate::domains::deals::repository::DealRepository::new(app.sqlite.clone())
+        .create(crate::domains::deals::repository::CreateDealRecord {
+            deal_id: "DEAL-SHARED".into(),
+            user_id: 1,
+            fields: input.fields,
+            local_path: input.local_path,
+            sharepoint_link: input.sharepoint_link,
+        })
+        .await
+        .unwrap();
     for (name, role) in [
         ("manager", "manager"),
         ("contributor", "contributor"),
@@ -607,4 +615,131 @@ async fn membership_email_only_lookup_preserves_authorization_and_conflicts() {
             StatusCode::FORBIDDEN
         );
     }
+}
+
+#[tokio::test]
+async fn backend_generated_deal_uuids_work_across_product_boundaries() {
+    let app = fixture().await;
+    let fields = json!({
+        "dealName":"Project Fleet", "dealCode":null,
+        "engagementType":"buy_side", "transactionType":"unknown", "status":"pipeline",
+        "startDate":null, "expectedCloseDate":null, "actualCloseDate":null,
+        "engagementCompletedDate":null, "parties":[], "scopes":[]
+    });
+    let mut previous = None;
+    for prefix in ["/api/v1", "/api"] {
+        let mut request = fields.clone();
+        if prefix == "/api" {
+            request["dealId"] = json!("DEAL-CALLER");
+        }
+        let (status, created) =
+            call(&app.router, 1, "POST", &format!("{prefix}/deals"), request).await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let id = created["deal"]["dealId"].as_str().unwrap();
+        assert_eq!(uuid::Uuid::parse_str(id).unwrap().get_version_num(), 4);
+        assert_eq!(created["metadata"]["dealId"], id);
+        assert_ne!(id, "DEAL-CALLER");
+        assert_ne!(previous.as_deref(), Some(id));
+        previous = Some(id.to_owned());
+        let root = format!("{prefix}/deals/{id}");
+        for suffix in ["", "/members", "/teams", "/documents", "/data-room"] {
+            assert_eq!(
+                call(
+                    &app.router,
+                    1,
+                    "GET",
+                    &format!("{root}{suffix}"),
+                    Value::Null
+                )
+                .await
+                .0,
+                StatusCode::OK,
+                "{suffix}"
+            );
+        }
+        // UUIDs must not bypass existing ownership checks.
+        assert_eq!(
+            call(&app.router, 5, "GET", &root, Value::Null).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{root}/update"),
+                fields.clone()
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{root}/teams"),
+                json!({"name":"Fleet team"})
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{prefix}/assistant/threads"),
+                json!({"threadId":uuid::Uuid::new_v4().to_string(),"dealId":id})
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{prefix}/notebooks"),
+                json!({"title":"Fleet notebook","dealId":id})
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            call(
+                &app.router,
+                1,
+                "POST",
+                &format!("{root}/archive"),
+                json!({})
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    // Reject invalid caller fields before creating any additional records.
+    let mut invalid = fields.clone();
+    invalid["dealName"] = json!(" ");
+    assert_eq!(
+        call(&app.router, 1, "POST", "/api/v1/deals", invalid)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let rows = app
+        .sqlite
+        .read_async(
+            crate::adapters::sqlite::query::SqlBuilder::select("deals")
+                .columns(["deal_id"])
+                .build(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 3); // The legacy fixture plus two UUID deals, even with identical names.
 }

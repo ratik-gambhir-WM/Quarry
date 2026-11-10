@@ -1,6 +1,5 @@
 import { type FormEvent, useRef, useState } from "react";
 import {
-  DealTextField,
   SourceFilesStep,
   isLocalDealSourceFile,
   type SourceFileSelection,
@@ -49,7 +48,6 @@ type AddDealModalProps = {
 };
 
 type AddDealFormState = DealFields & {
-  dealId: string;
   factSheetLink: string;
   localPath: string;
   rlLink: string;
@@ -58,7 +56,6 @@ type AddDealFormState = DealFields & {
 };
 
 const emptyForm: AddDealFormState = {
-  dealId: "",
   dealName: "",
   dealCode: null,
   engagementType: "buy_side",
@@ -385,16 +382,6 @@ export function AddDealModal({
                 className="grid gap-4"
                 disabled={isSubmitting || step !== "details"}
               >
-                {!initialDeal ? (
-                  <DealTextField
-                    id="add-deal-id"
-                    label="Deal ID"
-                    maxLength={64}
-                    onValueChange={(value) => updateField("dealId", value)}
-                    placeholder="DEAL-000184"
-                    value={form.dealId}
-                  />
-                ) : null}
                 {initialDeal ? (
                   <DealFieldsEditor
                     onCompanyFormChange={setCompanyFormOpen}
@@ -629,7 +616,6 @@ function editableFields(form: DealFields): DealFields {
 function buildSaveDealInput(form: AddDealFormState): SaveDealInput {
   return {
     ...editableFields(form),
-    dealId: form.dealId.trim(),
     localPath:
       runtime.target === "desktop" ? form.localPath.trim() || null : null,
     sharepointLink: null,

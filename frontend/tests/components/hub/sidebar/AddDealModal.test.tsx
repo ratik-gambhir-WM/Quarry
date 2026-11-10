@@ -224,13 +224,13 @@ describe("AddDealModal", () => {
   it("switches stepper position and returns to completed steps without losing the draft", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
-    expect(document.activeElement).toBe(screen.getByLabelText("Deal ID"));
+    expect(screen.queryByLabelText("Deal ID")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByLabelText("Deal name"));
     expect(screen.getByRole("tab", { name: "Top" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("list", { name: "Add deal progress" }).className).toContain("horizontal");
     await user.click(screen.getByRole("tab", { name: "Side" }));
     expect(screen.getByRole("list", { name: "Add deal progress" }).className).toContain("vertical");
     expect(screen.getByRole("tab", { name: "Side" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
     fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("tab", { name: "Side" }).getAttribute("aria-selected")).toBe("true");
@@ -244,7 +244,6 @@ describe("AddDealModal", () => {
   it("locks completed steps while a company draft is open", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><AddDealModal email="analyst@example.com" onClose={vi.fn()} /></MemoryRouter>);
-    fireEvent.change(screen.getByLabelText("Deal ID"), { target: { value: savedDeal.dealId } });
     fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: savedDeal.dealName } });
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Create company" }));
@@ -291,9 +290,9 @@ describe("AddDealModal", () => {
         sowLink: "https://example.com/sow",
       });
     });
+    expect(createDeal.mock.calls[0]?.[0]).not.toHaveProperty("dealId");
     expect(createDeal).toHaveBeenCalledWith(
       expect.objectContaining({
-        dealId: savedDeal.dealId,
         sharepointLink: null,
       }),
     );
@@ -346,9 +345,6 @@ describe("AddDealModal", () => {
     );
     expect(screen.queryByRole("button", { name: "Create company" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "SOW link" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("Deal ID"), {
-      target: { value: savedDeal.dealId },
-    });
     fireEvent.change(screen.getByLabelText("Deal name"), {
       target: { value: savedDeal.dealName },
     });
@@ -555,9 +551,6 @@ describe("AddDealModal", () => {
 });
 
 async function completeDealDetails(user: ReturnType<typeof userEvent.setup>) {
-  fireEvent.change(screen.getByLabelText("Deal ID"), {
-    target: { value: savedDeal.dealId },
-  });
   fireEvent.change(screen.getByLabelText("Deal name"), {
     target: { value: savedDeal.dealName },
   });
@@ -573,5 +566,5 @@ function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
 }
 
-const savedDeal = testDeal();
-const emptyMetadata = testMetadata();
+const savedDeal = testDeal({ dealId: "5346b615-818b-4b25-85da-045507df2db4" });
+const emptyMetadata = testMetadata(savedDeal.dealId);
