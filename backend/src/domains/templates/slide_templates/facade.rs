@@ -83,9 +83,9 @@ impl SlideTemplates {
         }
     }
     /// Resume durable pending jobs, including expired leases from a prior process.
-    pub fn start_worker(&self) {
+    pub fn resume_pending_jobs(&self) {
         if let Some(worker) = &self.worker {
-            worker.start();
+            worker.notify();
         }
     }
     /// Drain classification work after stopping HTTP admission.
@@ -221,6 +221,24 @@ impl SlideTemplates {
         .await
         .map_err(SlideTemplateError::internal)?
     }
+    async fn run_queued<T: Send + 'static>(
+        &self,
+        worker: Arc<SlideClassificationWorker>,
+        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> SlideResult<T>
+            + Send
+            + 'static,
+    ) -> SlideResult<T> {
+        self.run(move |import, export, cancellation| {
+            let result = work(import, export, cancellation);
+            // Notify inside the blocking task after commit, even if the HTTP future
+            // was dropped while awaiting it. Publication still checks cancellation.
+            if result.is_ok() {
+                worker.notify();
+            }
+            result
+        })
+        .await
+    }
     pub async fn get(&self, id: String) -> SlideResult<Option<Value>> {
         self.run(move |i, _, _| {
             let value = i.find_json(&id)?;
@@ -271,12 +289,10 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        let result = self
-            .run(move |import, _, _| import.retry_failed_processing(&id))
-            .await?;
-        // Durable pending state is committed before waking the existing bounded worker.
-        worker.start();
-        Ok(result)
+        self.run_queued(worker.clone(), move |import, _, _| {
+            import.retry_failed_processing(&id)
+        })
+        .await
     }
     pub async fn export(&self, input: Value) -> SlideResult<ExportedPowerPoint> {
         self.run(move |_, e, _| e.export(input)).await
@@ -350,13 +366,10 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        let result = self
-            .run(move |i, _, c| i.queue_classified_import(&bytes, kind, &c))
-            .await?;
-        // The transaction is committed. The worker reads the saved preview/JSON independently
-        // of the HTTP request lifetime; no provider or graph call delays this acknowledgement.
-        worker.start();
-        Ok(result)
+        self.run_queued(worker.clone(), move |i, _, c| {
+            i.queue_classified_import(&bytes, kind, &c)
+        })
+        .await
     }
     pub async fn batch_classified(
         &self,
@@ -375,14 +388,10 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        let result = self
-            .run(move |import, _, cancellation| {
-                import.queue_classified_batch_import(&bytes, kind, &cancellation)
-            })
-            .await?;
-        // Durable jobs survive the request and are also resumed by the startup worker.
-        worker.start();
-        Ok(result)
+        self.run_queued(worker.clone(), move |import, _, cancellation| {
+            import.queue_classified_batch_import(&bytes, kind, &cancellation)
+        })
+        .await
     }
     pub async fn reconcile(&self) -> SlideResult<()> {
         if let Some(index) = &self.projection {
@@ -454,3 +463,7 @@ pub(super) fn json_size(value: &Value) -> SlideResult<usize> {
 pub(super) fn bound_json(value: &Value) -> SlideResult<()> {
     json_size(value).map(|_| ())
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/domains/templates/slide_templates/facade_tests.rs"]
+mod tests;

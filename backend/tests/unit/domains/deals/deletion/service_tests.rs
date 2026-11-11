@@ -11,7 +11,7 @@ use crate::{
     },
     integration_support::seed_identity,
 };
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, time::Duration};
 fn service(sqlite: SqliteClient, helix: Arc<HelixClient>) -> Arc<DealDeletionService> {
     let graph = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
     let files = DocumentStore::new(sqlite.clone());
@@ -61,7 +61,11 @@ async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
         sqlite.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
-    let op = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    let op = worker
+        .repository
+        .accept("DELETE-RESTART".into(), 1)
+        .await
+        .unwrap();
     worker.tick().await.unwrap();
     let status = worker.status(op.deletion_id, 1).await.unwrap();
     assert_eq!(status.status, super::super::model::DeletionStatus::Retrying);
@@ -99,7 +103,11 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
     let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
     let first = service(sqlite.clone(), helix.clone());
     first.graph.initialize().await.unwrap();
-    let op = first.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    let op = first
+        .repository
+        .accept("DELETE-RESTART".into(), 1)
+        .await
+        .unwrap();
     drop(first);
     drop(sqlite);
     let sqlite = SqliteClient::open(&path).unwrap();
@@ -122,7 +130,7 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
         super::super::model::DeletionStatus::Completed
     );
     assert_eq!(
-        third.accept(op.deal_id, 1).await.unwrap().status,
+        third.repository.accept(op.deal_id, 1).await.unwrap().status,
         super::super::model::DeletionStatus::Completed
     );
 }
@@ -169,7 +177,7 @@ async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
         let deal = format!("DELETE-BUSY-{index:02}");
         seed_deal(&sqlite, &deal);
         active.push(worker.lifecycle.admit(&deal).await);
-        let op = worker.accept(deal, 1).await.unwrap();
+        let op = worker.repository.accept(deal, 1).await.unwrap();
         sqlite
             .with_connection(|c| {
                 c.execute(
@@ -179,7 +187,11 @@ async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
             })
             .unwrap();
     }
-    let ready = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    let ready = worker
+        .repository
+        .accept("DELETE-RESTART".into(), 1)
+        .await
+        .unwrap();
     sqlite
         .with_connection(|c| {
             c.execute(
@@ -255,7 +267,7 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
     for index in 0..8 {
         let deal = format!("DELETE-CONCURRENT-{index}");
         seed_deal(&sqlite, &deal);
-        worker.accept(deal, 1).await.unwrap();
+        worker.repository.accept(deal, 1).await.unwrap();
     }
     let task = tokio::spawn(async move { worker.tick().await });
     tokio::time::timeout(Duration::from_secs(3), requests.recv())
@@ -311,4 +323,158 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
         })
         .unwrap();
     assert_eq!(attempts, 8);
+}
+
+async fn idle(worker: &Arc<DealDeletionService>) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while Arc::strong_count(worker) != 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the coordinator must release the service after draining its queue");
+}
+
+#[tokio::test]
+async fn acceptance_spawns_cleanup_without_startup_and_blocked_work_retires() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    seed(&sqlite);
+    let worker = service(
+        sqlite,
+        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
+    );
+    assert_eq!(Arc::strong_count(&worker), 1, "construction must not spawn");
+    let admission = worker.lifecycle.admit("DELETE-RESTART").await;
+    let receipt = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    assert_eq!(receipt.phase, DeletionPhase::Draining);
+    // Cleanup must survive the accepting request and wait for active work to drain.
+    drop(admission);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while worker
+            .status(receipt.deletion_id.clone(), 1)
+            .await
+            .unwrap()
+            .status
+            != super::super::model::DeletionStatus::Retrying
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    worker
+        .repository
+        .failure(receipt.deletion_id, true)
+        .await
+        .unwrap();
+    idle(&worker).await;
+    // An empty recovery scan must also retire without keeping a polling task alive.
+    worker.resume_pending();
+    idle(&worker).await;
+}
+
+#[tokio::test]
+async fn recovery_waits_for_a_future_retry_without_another_request() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    seed(&sqlite);
+    let worker = service(
+        sqlite.clone(),
+        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
+    );
+    let receipt = worker
+        .repository
+        .accept("DELETE-RESTART".into(), 1)
+        .await
+        .unwrap();
+    worker
+        .repository
+        .failure(receipt.deletion_id.clone(), false)
+        .await
+        .unwrap();
+    assert!(worker.repository.pending("").await.unwrap().is_empty());
+    worker.resume_pending();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let attempts: i64 = sqlite
+                .with_connection(|c| {
+                    c.query_row(
+                        "SELECT attempts FROM deal_deletions WHERE deletion_id=?1",
+                        [&receipt.deletion_id],
+                        |r| r.get(0),
+                    )
+                })
+                .unwrap();
+            if attempts >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("a future durable retry must run without a request");
+    worker
+        .repository
+        .failure(receipt.deletion_id, true)
+        .await
+        .unwrap();
+    idle(&worker).await;
+}
+
+#[tokio::test]
+async fn cancelled_accepting_request_still_notifies_after_the_receipt_commits() {
+    use rusqlite::OptionalExtension;
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    seed(&sqlite);
+    let worker = service(
+        sqlite.clone(),
+        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
+    );
+    let (locked, ready) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let blocked_sqlite = sqlite.clone();
+    let blocker = tokio::task::spawn_blocking(move || {
+        blocked_sqlite
+            .with_connection(|_| {
+                locked.send(()).unwrap();
+                released.recv().unwrap();
+                Ok(())
+            })
+            .unwrap();
+    });
+    ready.await.unwrap();
+    {
+        let request = worker.accept("DELETE-RESTART".into(), 1);
+        tokio::pin!(request);
+        assert!(futures_util::poll!(&mut request).is_pending());
+        // Drop the HTTP-owned future while acceptance is waiting for storage.
+    }
+    release.send(()).unwrap();
+    blocker.await.unwrap();
+    let id = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let id: Option<String> = sqlite
+                .with_connection(|c| {
+                    c.query_row("SELECT deletion_id FROM deal_deletions", [], |r| r.get(0))
+                        .optional()
+                })
+                .unwrap();
+            if let Some(id) = id {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while worker.status(id.clone(), 1).await.unwrap().status
+            != super::super::model::DeletionStatus::Retrying
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("committed acceptance must notify despite request cancellation");
+    worker.repository.failure(id, true).await.unwrap();
+    idle(&worker).await;
 }

@@ -1343,8 +1343,12 @@ for actual progress. The shared web and desktop template import actions use thes
 legacy Diligence Studio import contract remains separate. Ordinary imports and built-ins retain best-effort previews
 and do not fabricate vectors.
 
-One background worker starts after embedded reconciliation, leases saved JSON/preview from SQLite,
-and alternates classification and embedding stages with concurrency four. Classification commits
+Classified imports and manual retries notify an on-demand coordinator after committing SQLite.
+Each leased stage runs as a short-lived Tokio task; the coordinator alternates classification and
+embedding stages with concurrency four and retires once no unfinished work remains. Bootstrap
+requests one recovery scan after embedded reconciliation. While work remains, one-second wake
+checks retain future retries and unexpired leases;
+new requests wake the same coordinator immediately. Classification commits
 metadata/FTS and embedding documents before embeddings run; a failed embedding preserves those
 artifacts. Each stage has up to three attempts, a 150-second operation timeout, 30-second lease
 padding and exponential retries starting at five seconds with up to 25% jitter. Retryable provider
@@ -1354,7 +1358,16 @@ attempts, leases, sanitized error codes and terminal `failed`/`ready` states are
 restart resumes pending/due jobs and recovers expired leases. These are single-host workers, not a
 distributed queue; live pipeline changes require draining old writers. HTTP disconnects after commit
 do not cancel saved jobs. Shutdown stops claims, drains for five seconds, then cancels provider
-futures and records retryable work. Job claims enforce the fixed app membership.
+futures and records retryable work. Job claims and pending-work probes enforce the fixed app
+membership. Notifications run inside the blocking publication task after commit, so cancelling
+the HTTP future cannot strand a committed job before its wake-up. Publication still observes
+request/shutdown cancellation before committing.
+
+Both this coordinator and deal deletion use `shared/on_demand_task` for single-coordinator
+admission and retirement. A notification racing an empty-queue scan either forces a rescan or
+starts a successor task. The helper owns task lifetime and wake-ups only; each domain retains its
+durable queue, retry policy and concurrency limit. These tasks share the application's Tokio
+runtime and infrastructure; they do not provide separate-process CPU or database isolation.
 
 Manual retry is available only for a terminal failed stage on an existing app-visible template.
 The retry transaction resets that stage's attempts, retry schedule, error and lease, then wakes the
@@ -1440,9 +1453,15 @@ routes, DTO/null semantics, bounds, queue/lease policy, pipeline, cleanup, error
 The authenticated owner can accept asynchronous deletion with `DELETE /deals/{deal_id}` and poll
 `GET /deal-deletions/{deletion_id}`. SQLite receipts immediately hide the deal and fence writes;
 only verified cross-store cleanup becomes completed. Archive remains synchronous and retains data.
-`domains/deals/deletion` owns ledger transactions and one restart worker; document graph cleanup
-stays inside `documents/graph`. The worker scans due receipts in pages of 16, processes at most four
-deals concurrently, and skips busy deals until a later scan without blocking later pages. Helix
+`domains/deals/deletion` owns ledger transactions, cleanup phases in `service.rs`, and on-demand
+scheduling in `worker.rs`; document graph cleanup stays inside `documents/graph`. Acceptance
+commits and notifies in a short-lived task that survives cancellation of the accepting HTTP future.
+Bootstrap requests a recovery scan of durable receipts. The coordinator scans due receipts in
+pages of 16, spawns at most four deal cleanup tasks concurrently, and skips busy deals until a later
+scan without blocking later pages. Each task ends after its cleanup sweep; the coordinator retires
+when no pending/running/retrying receipts remain, including when only blocked/completed receipts
+are retained. One-second checks continue only while unfinished work or a ledger-read error remains,
+preserving delayed retries and drain checks without another request. Helix
 writes retain their shared serialization. A separate Helix `QuarryDealLifecycle` control record and
 unique index fence every prepared setup/chunk/publication inside its remote transaction. Ingestion
 preflight includes these additional clauses. Document identities and existing indexes remain stable.
@@ -1700,7 +1719,7 @@ schema currently contains:
 | `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Engagement/transaction/status codes, optional deal code/dates, immutable creator and audit/archive timestamps | Used |
-| `deal_deletions`, `deal_deletion_files`, `deal_deletion_threads` | Independent durable receipts/barriers and temporary cleanup targets | Owner-only permanent-deletion API and restart worker |
+| `deal_deletions`, `deal_deletion_files`, `deal_deletion_threads` | Independent durable receipts/barriers and temporary cleanup targets | Owner-only permanent-deletion API and on-demand recovery tasks |
 | `deal_memberships`, `deal_access_revisions` | One owner, actor roles and monotonic access revision | Canonical authorization |
 | `deal_teams`, `deal_team_memberships` | Same-deal team organization and cascading assignments | API and Settings |
 | `deal_activity_events` | Append-only typed project/member/team/metadata/upload history with minimal actor identity | Transactional mutations and cursor activity API |

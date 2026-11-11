@@ -321,7 +321,7 @@ pub(crate) fn assemble_api_with_templates(
         document_jobs.clone(),
         stored_documents.clone(),
     );
-    deletions.start();
+    deletions.resume_pending();
     let native_routes = embedded
         .map(templates::slide_templates::route::routes)
         .unwrap_or_default();
@@ -470,7 +470,7 @@ async fn build_templates(
             "Helix template reconciliation failed; canonical SQLite records were preserved".into(),
         )
     })?;
-    embedded.start_worker();
+    embedded.resume_pending_jobs();
     Ok((
         Arc::new(TemplateService::embedded(embedded.clone())),
         Some(embedded),

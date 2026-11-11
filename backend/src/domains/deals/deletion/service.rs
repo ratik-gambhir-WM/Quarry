@@ -3,6 +3,7 @@ use super::{
     model::{DealDeletion, DeletionPhase},
     repository::DeletionRepository,
 };
+use crate::shared::on_demand_task::OnDemandTask;
 use crate::{
     domains::documents::{
         graph::repository::DocumentGraphWriter, ingestion::job_service::DocumentJobService,
@@ -10,22 +11,15 @@ use crate::{
     },
     shared::error::{RepositoryError, ServiceResult},
 };
-use futures_util::{stream, StreamExt};
-use std::{
-    sync::{Arc, Weak},
-    time::Duration,
-};
-use tokio::sync::Notify;
-
-const MAX_CONCURRENT_DELETIONS: usize = 4;
+use std::sync::Arc;
 
 pub(crate) struct DealDeletionService {
-    repository: DeletionRepository,
+    pub(super) repository: DeletionRepository,
     graph: DocumentGraphWriter,
     lifecycle: DealLifecycle,
     jobs: Arc<DocumentJobService>,
     previews: Arc<StoredDocumentService>,
-    wake: Notify,
+    pub(super) task: OnDemandTask,
 }
 impl DealDeletionService {
     pub(crate) fn new(
@@ -41,13 +35,31 @@ impl DealDeletionService {
             lifecycle,
             jobs,
             previews,
-            wake: Notify::new(),
+            task: OnDemandTask::default(),
         })
     }
     pub(crate) async fn authorize(&self, deal: String, actor: i64) -> ServiceResult<()> {
         Ok(self.repository.preflight(deal, actor).await?)
     }
-    pub(crate) async fn accept(&self, deal: String, actor: i64) -> ServiceResult<DealDeletion> {
+    pub(crate) async fn accept(
+        self: &Arc<Self>,
+        deal: String,
+        actor: i64,
+    ) -> ServiceResult<DealDeletion> {
+        // Once admission starts, request cancellation must not separate a committed
+        // receipt from its notification. The task ends after acceptance, not cleanup.
+        let service = self.clone();
+        tokio::spawn(async move { service.accept_and_notify(deal, actor).await })
+            .await
+            .map_err(|_| {
+                crate::shared::error::ServiceError::unavailable("deletion acceptance interrupted")
+            })?
+    }
+    async fn accept_and_notify(
+        self: &Arc<Self>,
+        deal: String,
+        actor: i64,
+    ) -> ServiceResult<DealDeletion> {
         let receipt = self
             .repository
             .accept(deal, actor)
@@ -63,46 +75,19 @@ impl DealDeletionService {
                 }
                 other => other.into(),
             })?;
-        self.wake.notify_one();
+        if receipt.status != super::model::DeletionStatus::Completed {
+            super::worker::notify(self);
+        }
         Ok(receipt)
     }
     pub(crate) async fn status(&self, id: String, actor: i64) -> ServiceResult<DealDeletion> {
         Ok(self.repository.status(id, actor).await?)
     }
-    pub(crate) fn start(self: &Arc<Self>) {
-        let service = Arc::downgrade(self);
-        tokio::spawn(async move {
-            worker(service).await;
-        });
+    /// Discover interrupted receipts once; the coordinator retires when work is exhausted.
+    pub(crate) fn resume_pending(self: &Arc<Self>) {
+        super::worker::notify(self);
     }
-    async fn tick(&self) -> Result<(), RepositoryError> {
-        let mut after = String::new();
-        loop {
-            let operations = self.repository.pending(&after).await?;
-            let Some(last) = operations.last() else {
-                return Ok(());
-            };
-            after.clone_from(&last.deletion_id);
-            // Scan past busy deals, including a full page of them. Finish every admitted
-            // operation before surfacing ledger errors rather than cancelling sibling work.
-            let results = stream::iter(operations)
-                .map(|op| async move {
-                    if let Err(error) = self.advance(&op).await {
-                        let blocked = super::repository::integrity_failure(&error);
-                        tracing::error!(deletion_id=%op.deletion_id, blocked, "deal cleanup phase failed");
-                        self.repository.failure(op.deletion_id, blocked).await?;
-                    }
-                    Ok(())
-                })
-                .buffer_unordered(MAX_CONCURRENT_DELETIONS)
-                .collect::<Vec<Result<(), RepositoryError>>>()
-                .await;
-            for result in results {
-                result?;
-            }
-        }
-    }
-    async fn advance(&self, op: &DealDeletion) -> Result<(), RepositoryError> {
+    pub(super) async fn advance(&self, op: &DealDeletion) -> Result<(), RepositoryError> {
         // Workers and request bodies hold admission for their actual task lifetime. This guard
         // is acquired only after those tasks finish; busy deals wait for the next scan.
         let Some(_drained) = self.lifecycle.try_drain(&op.deal_id).await else {
@@ -141,19 +126,6 @@ impl DealDeletionService {
         self.repository.complete(op.deletion_id.clone()).await
     }
 }
-async fn worker(service: Weak<DealDeletionService>) {
-    loop {
-        let Some(service) = service.upgrade() else {
-            break;
-        };
-        if let Err(_error) = service.tick().await {
-            tracing::error!("deletion ledger scan failed");
-        }
-        tokio::select! { _=service.wake.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(1))=>{} }
-        drop(service);
-    }
-}
-
 #[cfg(test)]
 #[path = "../../../../tests/unit/domains/deals/deletion/service_tests.rs"]
 mod tests;

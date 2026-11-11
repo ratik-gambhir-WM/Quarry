@@ -161,6 +161,21 @@ impl DeletionRepository {
             )
             .await?)
     }
+    /// Include delayed retries; an empty due page alone does not mean the queue is drained.
+    pub(super) async fn has_pending(&self) -> Result<bool, RepositoryError> {
+        Ok(self
+            .sqlite
+            .read_one_with_async(
+                Q::select("deal_deletions")
+                    .columns(["deletion_id"])
+                    .and_where(C::in_values("status", ["pending", "running", "retrying"]))
+                    .limit(1)
+                    .build(),
+                |_| Ok(()),
+            )
+            .await?
+            .is_some())
+    }
     pub(super) async fn checkpoint(
         &self,
         id: String,

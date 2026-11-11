@@ -56,9 +56,16 @@ fresh/current layouts, foreign keys and owner invariants are validated. Damaged 
 
 `domains/deals/deletion` owns acceptance, orchestration and canonical transactions. Membership
 policy applies the barrier, document search extends existing canonical/final-result filtering,
-and the document graph owner supplies remote fencing/purge capabilities. Bootstrap starts one
-worker; it scans due operations in pages of 16 and wakes on acceptance or once per second.
-Each scan advances at most four deals concurrently. A busy deal is skipped without changing its
+and the document graph owner supplies remote fencing/purge capabilities. Scheduling lives in
+`deletion/worker.rs`, separate from acceptance and cleanup phases in `service.rs`. Acceptance
+commits and notifies in a short-lived Tokio task, preserving the wake-up even if its HTTP caller
+disconnects while storage is committing. A notification spawns or wakes one on-demand coordinator;
+bootstrap requests a recovery scan for receipts left by the previous process. The coordinator
+retires when no pending/running/retrying receipts remain. Blocked and completed receipts do not
+keep an idle task alive. While unfinished work remains, it scans due operations in pages of 16,
+wakes on acceptance or once per second, and spawns at most four short-lived cleanup tasks at once.
+The shared task-lifetime helper makes notification and empty-queue retirement race-safe.
+A busy deal is skipped without changing its
 receipt and retried on the next scan; keyset pagination continues past busy pages so later deals
 can progress. Every operation retains exclusive admission throughout its cleanup sweep.
 The shared Helix client still serializes remote writes.
