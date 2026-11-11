@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createNotebookPersistence,
-  noteContent,
 } from "@/data/notebook/notebookPersistence";
 import { createNotebookSession } from "@/data/notebook/notebookSession";
 import type {
@@ -167,8 +166,8 @@ describe("Notebook persistence", () => {
     );
     const current = session.getSnapshot()[0];
     expect(current.title).toBe("Newer edits");
-    expect(store.getSnapshot().records[draft.id].savedContent).not.toBe(
-      noteContent(current),
+    expect(store.getSnapshot().records[draft.id].savedEditVersion).not.toBe(
+      current.editVersion,
     );
   });
   it("reuses the immutable operation and snapshot after an uncertain admission response", async () => {
@@ -332,4 +331,15 @@ describe("Notebook save failure recovery", () => {
     await expect(store.remove(draft.id)).rejects.toThrow("finish");
     expect(session.getSnapshot()).toHaveLength(1);
   });
+});
+
+it("recognizes edits reverted to an in-flight save's content when completion arrives", async () => {
+  const { session, store, emit } = setup();
+  const draft = session.create();
+  session.update(draft.id, { title: "Submitted" });
+  await store.save(draft.id, { notebookId: "book" });
+  session.update(draft.id, { title: "Later edit" });
+  session.update(draft.id, { title: "Submitted" });
+  emit(job({ status: "completed", sqliteCommitted: true, committedRevision: 1, sequence: 8 }));
+  expect(store.getSnapshot().records[draft.id].savedEditVersion).toBe(session.getSnapshot()[0].editVersion);
 });

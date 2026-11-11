@@ -73,3 +73,12 @@ it("removes unselected deleted-deal chats without clearing or cancelling another
   expect(invalidate).not.toHaveBeenCalled();
   stop();
 });
+
+it("preserves the thread catalog reference during composer and streaming updates", () => {
+  const store = createThreadRuntimeStore(initial(""), vi.fn());
+  const threads = store.getSnapshot().threads;
+  store.update({ draft: "Edited" });
+  expect(store.getSnapshot().threads).toBe(threads);
+  store.update({ messages: [{ id: "reply", role: "assistant", content: [{ type: "text", text: "Streaming" }], status: { type: "running" } }] });
+  expect(store.getSnapshot().threads).toBe(threads);
+});

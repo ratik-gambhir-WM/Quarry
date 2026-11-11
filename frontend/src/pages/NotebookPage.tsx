@@ -18,14 +18,13 @@ import {
   NotebookSaveButton,
   NotebookSaveStatus,
 } from "@/components/notebook/NotebookSaveButton";
-import {
-  hasUnconfirmedSave,
-  noteContent,
-} from "@/data/notebook/notebookPersistence";
+import { hasUnconfirmedSave } from "@/data/notebook/notebookPersistence";
 import { NotebookExportMenu } from "@/components/notebook/NotebookExportMenu";
 import {
   NotebookProvider,
-  useNotebook,
+  useNotebookSelection,
+  useNotebookActions,
+  useNotebookCatalog,
 } from "@/components/notebook/NotebookProvider";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,26 +64,25 @@ export function NotebookPage() {
 function NotebookWorkspace() {
   const {
     selected,
+    session,
     noteId,
-    notes,
-    notebookNotes,
-    create,
     drawerOpen,
     setDrawerOpen,
     focusTitleAfterDrawer,
-    saved,
     selectedSaved,
     persistence,
-  } = useNotebook();
+  } = useNotebookSelection();
+  const { notebookNotes } = useNotebookCatalog();
+  const { create } = useNotebookActions();
   const { navigationState } = useWorkspace();
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (
-        !notes.some((note) => {
-          const remote = saved.records[note.id];
+        !session.getSnapshot().some((note) => {
+          const remote = persistence.getSnapshot().records[note.id];
           return (
             !remote ||
-            (remote.hydrated && remote.savedContent !== noteContent(note))
+            (remote.hydrated && remote.savedEditVersion !== note.editVersion)
           );
         })
       )
@@ -94,7 +92,7 @@ function NotebookWorkspace() {
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [notes, saved.records]);
+  }, [session, persistence]);
 
   return (
     <WorkspaceHomeShell
@@ -202,7 +200,8 @@ function NotebookWorkspace() {
 }
 
 function NotebookDocument({ note }: { note: NotebookDraft }) {
-  const { session, remove, selectedSaved } = useNotebook();
+  const { session, selectedSaved } = useNotebookSelection();
+  const { remove } = useNotebookActions();
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);

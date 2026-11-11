@@ -172,7 +172,16 @@ function SynthesisChatPicker() {
     selectedThreadId,
     threadListError,
     threads,
-  } = useThreadRuntimeState((state) => state);
+    nextCursor,
+  } = useThreadRuntimeState((state) => ({
+      isPreparingThread: state.isPreparingThread,
+      isRunning: state.isRunning,
+      isThreadListLoading: state.isThreadListLoading,
+      selectedThreadId: state.selectedThreadId,
+      threadListError: state.threadListError,
+      threads: state.threads,
+      nextCursor: state.nextCursor,
+    }));
   const selectedThread = threads.find(
     (thread) => thread.threadId === selectedThreadId,
   );
@@ -218,7 +227,7 @@ function SynthesisChatPicker() {
         {!isThreadListLoading && !threadListError && threads.length === 0 ? (
           <DropdownMenuLabel>No previous chats yet.</DropdownMenuLabel>
         ) : null}
-        {runtime.state.nextCursor ? (
+        {nextCursor ? (
           <DropdownMenuItem
             disabled={isThreadListLoading}
             onSelect={() => void runtime.loadMoreThreads()}

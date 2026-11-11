@@ -17,6 +17,7 @@ const note: NotebookDraft = {
   title: "Draft",
   blocks: [],
   contentSchemaVersion: 1,
+  editVersion: 0,
   createdAt: "now",
   updatedAt: "now",
 };

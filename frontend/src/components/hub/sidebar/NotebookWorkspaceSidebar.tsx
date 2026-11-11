@@ -1,8 +1,8 @@
 import { SearchField } from "../../ui/search-field";
-import { useId } from "react";
+import { memo, useId } from "react";
 import { NavLink } from "react-router-dom";
 import { BookOpen, ChevronDown, FileText, Plus } from "lucide-react";
-import { useNotebook } from "@/components/notebook/NotebookProvider";
+import { useNotebookActions, useNotebookCatalog } from "@/components/notebook/NotebookProvider";
 import { notebookTitle } from "@/data/notebook/notebookSession";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +16,9 @@ import {
 import { useWorkspace } from "@/app/WorkspaceProvider";
 import { SidebarFrame } from "./SidebarFrame";
 
-export function NotebookWorkspaceSidebar() {
+export const NotebookWorkspaceSidebar = memo(function NotebookWorkspaceSidebar() {
   const { email, navigationState } = useWorkspace();
-  const { create } = useNotebook();
+  const { create } = useNotebookActions();
   return (
     <SidebarFrame
       alignedHeader
@@ -47,23 +47,22 @@ export function NotebookWorkspaceSidebar() {
       }
     </SidebarFrame>
   );
-}
+});
 
-export function NotebookNotesList() {
+export const NotebookNotesList = memo(function NotebookNotesList() {
   const {
     notebookNotes,
     activeNotebook,
     activeNotebookId,
-    chooseNotebook,
     visibleNotes,
     query,
     setQuery,
-    create,
     session,
     setDrawerOpen,
     saved,
     persistence,
-  } = useNotebook();
+  } = useNotebookCatalog();
+  const { create, chooseNotebook } = useNotebookActions();
   const { navigationState } = useWorkspace();
   const searchId = useId();
   let notebookLabel = activeNotebook?.title.trim() ?? "Unsaved notes";
@@ -205,4 +204,4 @@ export function NotebookNotesList() {
       </div>
     </div>
   );
-}
+});

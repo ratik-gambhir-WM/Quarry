@@ -94,6 +94,18 @@ describe("bundle size inspection", () => {
     expect(result.failures[1]).toContain("application chunk");
   });
 
+  it("counts static dependencies once, follows cycles, and excludes deferred routes from startup", async () => {
+    const distDirectory = await makeBundle({
+      "assets/index.js": { contents: "12345", manifest: { isEntry: true, imports: ["assets/shared.js"], dynamicImports: ["assets/deferred.js"] } },
+      "assets/shared.js": { contents: "123456", manifest: { imports: ["assets/index.js"] } },
+      "assets/deferred.js": { contents: "deferred", manifest: { isDynamicEntry: true } },
+    });
+    const result = await inspectBundle({ distDirectory, entryBudget: 10, target: "web" });
+    expect(result.initialBytes).toBe(11);
+    expect(result.initialChunks).toHaveLength(2);
+    expect(result.failures).toEqual(["initial JavaScript is 11 bytes (budget 10)"]);
+  });
+
   it("rejects missing output and an output built for another target", async () => {
     const missingDirectory = await mkdtemp(
       path.join(tmpdir(), "quarry-bundle-test-"),

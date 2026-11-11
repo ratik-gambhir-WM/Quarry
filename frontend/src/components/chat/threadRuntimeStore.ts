@@ -43,7 +43,10 @@ const clearedConversation = {
 export function createThreadRuntimeStore(initial: ThreadRuntimeState, invalidatePendingWork: () => void) {
   const visibleState = (next: ThreadRuntimeState): ThreadRuntimeState => {
     const selected = next.threads.find((thread) => thread.threadId === next.selectedThreadId);
-    const threads = next.threads.filter((thread) => !thread.dealId || !isDealDeleted(thread.dealId));
+    const hasDeletedThreads = next.threads.some((thread) => thread.dealId && isDealDeleted(thread.dealId));
+    const threads = hasDeletedThreads
+      ? next.threads.filter((thread) => !thread.dealId || !isDealDeleted(thread.dealId))
+      : next.threads;
     const deletedSelection = (next.scopeDealId && isDealDeleted(next.scopeDealId))
       || (selected?.dealId && isDealDeleted(selected.dealId));
     return { ...next, ...(deletedSelection ? clearedConversation : {}), threads };

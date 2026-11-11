@@ -1,7 +1,7 @@
 import { CheckboxField } from "../ui/checkbox-field";
-import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useRef, useState, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
-import type { ProcessFileJobEvent } from "../../contracts/quarryApi";
+import { createUploadWorkflow, isActive, canUpload, type UploadEntry } from "./uploadWorkflow";
 import { formatFileSize } from "../../lib/formatters";
 import { Icon } from "../ui/Icon";
 import "./upload-files-modal.css";
@@ -18,20 +18,6 @@ type UploadFilesModalProps = {
   dealId: string;
   onClose: () => void;
   userId: string;
-};
-
-type UploadStatus =
-  "ready" | "uploading" | "processing" | "completed" | "skipped" | "failed";
-
-type UploadEntry = {
-  chunkCount?: number;
-  documentId?: string;
-  error?: string;
-  file: File;
-  id: string;
-  jobId?: string;
-  selected: boolean;
-  status: UploadStatus;
 };
 
 const maxFileBytes = 50 * 1024 * 1024;
@@ -57,54 +43,15 @@ export function UploadFilesModal({
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
-  const processingStartedAtRef = useRef<number | null>(null);
-  const subscriptionsRef = useRef(new Map<string, () => void>());
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [entries, setEntries] = useState<UploadEntry[]>([]);
-  const [processedSeconds, setProcessedSeconds] = useState<number | null>(null);
+  const [workflow] = useState(() => createUploadWorkflow(runtime.api, dealId));
+  const { entries, elapsedSeconds, processedSeconds } = useSyncExternalStore(
+    workflow.subscribe, workflow.getSnapshot, workflow.getSnapshot,
+  );
   const [selectionError, setSelectionError] = useState("");
   const activeCount = entries.filter((entry) => isActive(entry.status)).length;
   const isProcessing = activeCount > 0;
-  const uploadableEntries = entries.filter(
-    (entry) =>
-      entry.selected && (entry.status === "ready" || entry.status === "failed"),
-  );
+  const uploadableEntries = entries.filter(canUpload);
   const selectedCount = entries.filter((entry) => entry.selected).length;
-
-  useEffect(() => {
-    const subscriptions = subscriptionsRef.current;
-    return () => {
-      for (const unsubscribe of subscriptions.values()) {
-        unsubscribe();
-      }
-      subscriptions.clear();
-    };
-  }, []);
-
-  useEffect(() => {
-    const startedAt = processingStartedAtRef.current;
-    if (startedAt === null) {
-      return;
-    }
-
-    if (!isProcessing) {
-      const totalSeconds = Math.max(
-        1,
-        Math.ceil((Date.now() - startedAt) / 1000),
-      );
-      setElapsedSeconds(totalSeconds);
-      setProcessedSeconds(totalSeconds);
-      processingStartedAtRef.current = null;
-      return;
-    }
-
-    const updateElapsedSeconds = () => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
-    };
-    updateElapsedSeconds();
-    const intervalId = window.setInterval(updateElapsedSeconds, 1000);
-    return () => window.clearInterval(intervalId);
-  }, [isProcessing]);
 
   function addFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList);
@@ -126,18 +73,7 @@ export function UploadFilesModal({
     }
 
     setSelectionError(rejected.join(" "));
-    setEntries((current) => {
-      const existingIds = new Set(current.map((entry) => entry.id));
-      const additions = accepted.flatMap((file) => {
-        const id = fileIdentity(file);
-        if (existingIds.has(id)) {
-          return [];
-        }
-        existingIds.add(id);
-        return [{ file, id, selected: true, status: "ready" as const }];
-      });
-      return [...current, ...additions];
-    });
+    workflow.add(accepted);
   }
 
   function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
@@ -154,23 +90,8 @@ export function UploadFilesModal({
     addFiles(event.dataTransfer.files);
   }
 
-  function toggleEntry(entryId: string) {
-    setEntries((current) =>
-      current.map((entry) =>
-        entry.id === entryId &&
-        !isActive(entry.status) &&
-        entry.status !== "completed"
-          ? { ...entry, selected: !entry.selected }
-          : entry,
-      ),
-    );
-  }
-
-  function removeEntry(entryId: string) {
-    setEntries((current) =>
-      current.filter((entry) => entry.id !== entryId || isActive(entry.status)),
-    );
-  }
+  const toggleEntry = workflow.toggle;
+  const removeEntry = workflow.remove;
 
   function handleUpload() {
     if (!dealId.trim()) {
@@ -185,115 +106,8 @@ export function UploadFilesModal({
       return;
     }
 
-    const uploadIds = new Set(uploadableEntries.map((entry) => entry.id));
-    processingStartedAtRef.current = Date.now();
-    setElapsedSeconds(0);
-    setProcessedSeconds(null);
     setSelectionError("");
-    setEntries((current) =>
-      current.map((entry) =>
-        uploadIds.has(entry.id)
-          ? {
-              ...entry,
-              chunkCount: undefined,
-              documentId: undefined,
-              error: undefined,
-              status: "uploading",
-            }
-          : entry,
-      ),
-    );
-
-    for (const entry of uploadableEntries) {
-      void startEntryUpload(entry);
-    }
-  }
-
-  async function startEntryUpload(entry: UploadEntry) {
-    try {
-      const job = await runtime.api.startProcessFile(dealId, entry.file);
-      setEntries((current) =>
-        current.map((currentEntry) =>
-          currentEntry.id === entry.id
-            ? { ...currentEntry, jobId: job.jobId, status: "processing" }
-            : currentEntry,
-        ),
-      );
-
-      const unsubscribe = runtime.api.subscribeToProcessFileJob(job.jobId, {
-        onConnectionError: () => {
-          setEntries((current) =>
-            current.map((currentEntry) =>
-              currentEntry.id === entry.id &&
-              currentEntry.status === "processing"
-                ? {
-                    ...currentEntry,
-                    error: "Connection interrupted. Reconnecting…",
-                  }
-                : currentEntry,
-            ),
-          );
-        },
-        onEvent: (event) => handleJobEvent(entry.id, event),
-      });
-      subscriptionsRef.current.set(entry.id, unsubscribe);
-    } catch (error) {
-      setEntries((current) =>
-        current.map((currentEntry) =>
-          currentEntry.id === entry.id
-            ? {
-                ...currentEntry,
-                error: error instanceof Error ? error.message : String(error),
-                status: "failed",
-              }
-            : currentEntry,
-        ),
-      );
-    }
-  }
-
-  function handleJobEvent(entryId: string, event: ProcessFileJobEvent) {
-    setEntries((current) =>
-      current.map((entry) => {
-        if (entry.id !== entryId) {
-          return entry;
-        }
-        if (event.status === "completed") {
-          return {
-            ...entry,
-            chunkCount: event.chunkCount,
-            documentId: event.documentId,
-            error: undefined,
-            status: "completed",
-          };
-        }
-        if (event.status === "skipped") {
-          return {
-            ...entry,
-            documentId: event.documentId,
-            error: undefined,
-            status: "skipped",
-          };
-        }
-        if (event.status === "failed") {
-          return {
-            ...entry,
-            error: event.error || "Document processing failed.",
-            status: "failed",
-          };
-        }
-        return { ...entry, error: undefined, status: "processing" };
-      }),
-    );
-
-    if (
-      event.status === "completed" ||
-      event.status === "skipped" ||
-      event.status === "failed"
-    ) {
-      subscriptionsRef.current.get(entryId)?.();
-      subscriptionsRef.current.delete(entryId);
-    }
+    workflow.upload();
   }
 
   return (
@@ -577,6 +391,8 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
 
 function getStatusLabel(entry: UploadEntry) {
   switch (entry.status) {
+    case "queued":
+      return "Waiting to upload";
     case "uploading":
       return "Reading and uploading bytes";
     case "processing":
@@ -592,16 +408,8 @@ function getStatusLabel(entry: UploadEntry) {
   }
 }
 
-function isActive(status: UploadStatus) {
-  return status === "uploading" || status === "processing";
-}
-
 function getFileExtension(filename: string) {
   return filename.split(".").pop()?.toLowerCase() ?? "";
-}
-
-function fileIdentity(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 function formatElapsedSeconds(seconds: number) {

@@ -39,9 +39,15 @@ export default defineConfig(({ mode }) => {
       manifest: true,
       rollupOptions: {
         output: {
+          // Package chunks must not absorb shared React/UI dependencies and eagerly load PDF code.
+          onlyExplicitManualChunks: true,
           manualChunks(id) {
-            // Keep BlockNote's editing engine separate from its schema and React UI.
-            if (id.includes("/node_modules/prosemirror-")) {
+            // Keep the engine's leaf dependencies here to avoid an import cycle
+            // through BlockNote's schema chunk.
+            if (
+              id.includes("/node_modules/prosemirror-") ||
+              /\/node_modules\/(orderedmap|rope-sequence|w3c-keyname)\//.test(id)
+            ) {
               return "prosemirror";
             }
             const embedPdfMarker = "/node_modules/@embedpdf/";

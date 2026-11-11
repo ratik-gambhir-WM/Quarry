@@ -29,6 +29,7 @@ type Content = Pick<NotebookDraft, "title" | "blocks" | "contentSchemaVersion">;
 type Attempt = {
   operationId: string;
   content: Content;
+  editVersion: number;
   expectedRevision?: number;
   job?: NotebookSaveJob;
 };
@@ -38,7 +39,7 @@ export type NotePersistence = {
   revision?: number;
   hydrated: boolean;
   reloadKey?: number;
-  savedContent?: string;
+  savedEditVersion?: number;
   status: "idle" | "saving" | "saved" | "error" | "conflict";
   message?: string;
   attempt?: Attempt;
@@ -57,12 +58,6 @@ export const hasUnconfirmedSave = (saved?: NotePersistence) =>
       saved.attempt.job.status === "queued" ||
       saved.attempt.job.status === "processing"),
   );
-export const noteContent = (note: Content) =>
-  JSON.stringify({
-    title: note.title.trim(),
-    blocks: note.blocks,
-    contentSchemaVersion: note.contentSchemaVersion,
-  });
 const message = (error: unknown) =>
   error instanceof Error
     ? error.message
@@ -78,6 +73,10 @@ export function createNotebookPersistence(
   api: PersistenceApi,
 ) {
   let state: Snapshot = { notebooks: [], catalog: "idle", records: {} };
+  type Catalog = Omit<Snapshot, "records"> & {
+    records: Readonly<Record<string, Pick<NotePersistence, "notebookId" | "noteId">>>;
+  };
+  let catalog: Catalog = state;
   let active = true;
   let loading: Promise<void> | undefined;
   let destination: string | undefined;
@@ -88,6 +87,15 @@ export function createNotebookPersistence(
   const publish = (patch: Partial<Snapshot>) => {
     if (!active) return;
     state = { ...state, ...patch };
+    const records = state.records;
+    const sameRecords = Object.keys(records).length === Object.keys(catalog.records).length &&
+      Object.entries(records).every(([id, record]) =>
+        record.notebookId === catalog.records[id]?.notebookId && record.noteId === catalog.records[id]?.noteId);
+    if (state.notebooks !== catalog.notebooks || state.catalog !== catalog.catalog ||
+      state.catalogError !== catalog.catalogError || state.activeNotebookId !== catalog.activeNotebookId || !sameRecords)
+      catalog = { ...state, records: sameRecords ? catalog.records : Object.fromEntries(
+        Object.entries(records).map(([id, record]) => [id, { notebookId: record.notebookId, noteId: record.noteId }]),
+      ) };
     listeners.forEach((listener) => listener());
   };
   const record = (id: string, value: NotePersistence) =>
@@ -111,13 +119,15 @@ export function createNotebookPersistence(
       createdAt: remote.createdAt,
       updatedAt: remote.updatedAt,
     });
+    const editVersion = session.getSnapshot().find((note) => note.id === id)?.editVersion;
+    if (editVersion !== undefined) session.markSaved(id, remote, editVersion);
     record(id, {
       notebookId: remote.notebookId,
       noteId: remote.noteId,
       revision: remote.revision,
       hydrated: true,
       reloadKey: (previous?.reloadKey ?? 0) + (discard ? 1 : 0),
-      savedContent: noteContent(remote),
+      savedEditVersion: editVersion,
       status: "idle",
     });
   };
@@ -143,13 +153,14 @@ export function createNotebookPersistence(
     const revision = job.committedRevision ?? previous.revision;
     if (job.status === "completed") {
       stopMonitor(id);
+      session.markSaved(id, attempt.content, attempt.editVersion);
       record(id, {
         ...previous,
         noteId: job.noteId,
         revision,
         status: "saved",
         message: undefined,
-        savedContent: noteContent(attempt.content),
+        savedEditVersion: attempt.editVersion,
         attempt: undefined,
       });
     } else if (job.status === "failed") {
@@ -237,6 +248,7 @@ export function createNotebookPersistence(
 
   const store = {
     getSnapshot: () => state,
+    getCatalogSnapshot: () => catalog,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
@@ -298,6 +310,7 @@ export function createNotebookPersistence(
                   title: summary.title,
                   blocks: [],
                   contentSchemaVersion: 1,
+                  editVersion: 0,
                   createdAt: summary.createdAt,
                   updatedAt: summary.updatedAt,
                 });
@@ -389,6 +402,7 @@ export function createNotebookPersistence(
         (retryJob && prior ? prior : undefined) ?? {
           operationId: crypto.randomUUID(),
           content,
+          editVersion: note.editVersion,
           expectedRevision: previous?.revision,
         };
       const notebookId =
@@ -402,7 +416,7 @@ export function createNotebookPersistence(
         revision: previous?.revision,
         hydrated: true,
         reloadKey: previous?.reloadKey,
-        savedContent: previous?.savedContent,
+        savedEditVersion: previous?.savedEditVersion,
         status: "saving",
         attempt,
       });
@@ -471,6 +485,7 @@ export function createNotebookPersistence(
       hydrating.clear();
       destination = undefined;
       state = { notebooks: [], catalog: "idle", records: {} };
+      catalog = state;
       listeners.forEach((listener) => listener());
       listeners.clear();
       unwatch();

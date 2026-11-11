@@ -59,11 +59,28 @@ export async function inspectBundle({ distDirectory, entryBudget, target }) {
     );
   }
 
+  // The entry file alone can hide eager costs in manually named vendor chunks.
+  const initialFiles = new Set();
+  function visit(record) {
+    if (initialFiles.has(record.file)) return;
+    initialFiles.add(record.file);
+    for (const key of record.imports ?? []) {
+      if (!manifest[key]) throw new Error(`Missing static import ${key} in Vite manifest.`);
+      visit(manifest[key]);
+    }
+  }
+  visit(entryRecords[0]);
+  const initialChunks = chunks.filter((chunk) => initialFiles.has(chunk.file));
+  const initialBytes = initialChunks.reduce((total, chunk) => total + chunk.bytes, 0);
+
   const failures = [];
   if (entry.bytes > entryBudget) {
     failures.push(
       `entry ${entry.file} is ${entry.bytes} bytes (budget ${entryBudget})`,
     );
+  }
+  if (initialBytes > entryBudget && initialBytes !== entry.bytes) {
+    failures.push(`initial JavaScript is ${initialBytes} bytes (budget ${entryBudget})`);
   }
   for (const chunk of chunks) {
     if (chunk.bytes >= APPLICATION_CHUNK_LIMIT_BYTES) {
@@ -73,7 +90,7 @@ export async function inspectBundle({ distDirectory, entryBudget, target }) {
     }
   }
 
-  return { chunks, entry, entryBudget, failures, target };
+  return { chunks, entry, entryBudget, initialBytes, initialChunks, failures, target };
 }
 
 function isApplicationChunk(record) {
@@ -132,6 +149,7 @@ async function main() {
   console.log(
     `Entry: ${result.entry.file} — ${result.entry.bytes} bytes / ${result.entryBudget} byte budget`,
   );
+  console.log(`Initial JavaScript: ${result.initialBytes} bytes in ${result.initialChunks.length} chunks / ${result.entryBudget} byte budget`);
   console.log(`Largest application chunks:\n${largest}`);
 
   if (result.failures.length > 0) {

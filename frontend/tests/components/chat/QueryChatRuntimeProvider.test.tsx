@@ -4,7 +4,7 @@ import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-libr
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { useAgentRuntime } from "@/components/chat/AgentRuntime";
+import { useAgentRuntime, useAgentRuntimeContext, useThreadRuntimeState } from "@/components/chat/AgentRuntime";
 import { acceptDealDeletion } from "@/data/dealDeletion/lifecycle";
 import { QueryChatRuntimeProvider } from "@/components/chat/QueryChatRuntimeProvider";
 import { QueryChatThread } from "@/components/chat/QueryChat";
@@ -602,4 +602,38 @@ it("does not start a run when thread creation resolves after deal deletion", asy
   expect(api.runAssistantThread).not.toHaveBeenCalled();
   expect(result.current.state.messages).toEqual([]);
   expect(result.current.state.selectedThreadId).toBeNull();
+});
+
+
+it("isolates catalog and composer consumers from unrelated streaming state", async () => {
+  let actions: ReturnType<typeof useAgentRuntimeContext> | undefined;
+  const renders = { catalog: 0, composer: 0 };
+  function Catalog() {
+    const state = useThreadRuntimeState((state) => ({ threads: state.threads, selected: state.selectedThreadId }));
+    renders.catalog++;
+    return <span>{state.threads.length}</span>;
+  }
+  function Composer() {
+    actions = useAgentRuntimeContext();
+    useThreadRuntimeState((state) => state.draft);
+    renders.composer++;
+    return null;
+  }
+  api.listAssistantThreads.mockResolvedValue({ threads: [], nextCursor: null });
+  api.createAssistantThread.mockResolvedValue(threadMetadata);
+  api.runAssistantThread.mockReturnValue(() => {});
+  render(<QueryChatRuntimeProvider userEmail="synthetic@example.test" onContextTruncated={vi.fn()}>
+    <Catalog /><Composer />
+  </QueryChatRuntimeProvider>);
+  await waitFor(() => expect(api.listAssistantThreads).toHaveBeenCalledOnce());
+  const beforeDraft = renders.catalog;
+  act(() => actions?.setDraft("Question"));
+  expect(renders.catalog).toBe(beforeDraft);
+  act(() => actions?.send());
+  await waitFor(() => expect(api.runAssistantThread).toHaveBeenCalledOnce());
+  const beforeStream = { ...renders };
+  await act(async () => {
+    api.runAssistantThread.mock.calls[0][1].onEvent({ type: "delta", delta: "Partial response" });
+  });
+  expect(renders).toEqual(beforeStream);
 });

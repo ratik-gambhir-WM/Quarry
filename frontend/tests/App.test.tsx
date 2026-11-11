@@ -74,7 +74,7 @@ describe("App routes", () => {
     window.sessionStorage.clear();
   });
 
-  it("keeps Login eager without starting workspace data loading", () => {
+  it("loads sign in without starting workspace data loading", async () => {
     sessionStore.set(null);
     render(
       <MemoryRouter initialEntries={["/login"]}>
@@ -82,7 +82,7 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { name: "Quarry" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Quarry" })).toBeTruthy();
     expect(listDeals).not.toHaveBeenCalled();
   });
 
@@ -194,7 +194,7 @@ describe("App routes", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "How can I help you today?" }),
+      await screen.findByRole("heading", { name: "How can I help you today?" }, lazyRouteWait),
     ).toBeTruthy();
     expect(
       screen.getByRole("tab", { name: "Chat", selected: true }),

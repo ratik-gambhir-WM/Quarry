@@ -1,8 +1,8 @@
 import { Input } from "../ui/input";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { LoaderCircle, Save } from "lucide-react";
-import { useNotebook } from "./NotebookProvider";
-import { noteContent } from "@/data/notebook/notebookPersistence";
+import { useNotebookSaveState } from "./NotebookProvider";
+import { useStoreSelector } from "@/hooks/useStoreSelector";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,22 +13,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-export function NotebookSaveButton() {
-  const { selected, selectedSaved, saved, persistence } = useNotebook();
+export const NotebookSaveButton = memo(function NotebookSaveButton() {
+  const { selectedId, selectedSaved, persistence } = useNotebookSaveState();
+  const saved = useStoreSelector(persistence, (state) => ({
+    notebooks: state.notebooks, catalog: state.catalog, catalogError: state.catalogError,
+  }));
   const [choosing, setChoosing] = useState(false);
   const [notebook, setNotebook] = useState("new");
   const [title, setTitle] = useState("Personal notes");
   const saving = selectedSaved?.status === "saving";
   const disabled =
-    !selected ||
+    !selectedId ||
     saving ||
     saved.catalog !== "ready" ||
     selectedSaved?.status === "conflict" ||
     (selectedSaved && !selectedSaved.hydrated);
   function save() {
-    if (!selected || disabled) return;
+    if (!selectedId || disabled) return;
     if (selectedSaved?.notebookId) {
-      void persistence.save(selected.id);
+      void persistence.save(selectedId);
       return;
     }
     setNotebook(saved.notebooks[0]?.notebookId ?? "new");
@@ -58,10 +61,10 @@ export function NotebookSaveButton() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (!selected || (notebook === "new" && !title.trim())) return;
+              if (!selectedId || (notebook === "new" && !title.trim())) return;
               setChoosing(false);
               void persistence.save(
-                selected.id,
+                selectedId,
                 notebook === "new" ? { title } : { notebookId: notebook },
               );
             }}
@@ -121,20 +124,21 @@ export function NotebookSaveButton() {
       </Dialog>
     </>
   );
-}
+});
 
-export function NotebookSaveStatus() {
-  const { selected, selectedSaved, saved, persistence } = useNotebook();
+export const NotebookSaveStatus = memo(function NotebookSaveStatus() {
+  const { selectedId, selectedSaved, persistence, changed } = useNotebookSaveState();
+  const saved = useStoreSelector(persistence, (state) => ({
+    notebooks: state.notebooks, catalog: state.catalog, catalogError: state.catalogError,
+  }));
   const [reload, setReload] = useState(false);
-  const changed =
-    selected && selectedSaved?.savedContent !== noteContent(selected);
   let text = "";
   if (saved.catalog === "loading")
     text = "Loading saved notes… You can keep writing.";
   if (saved.catalogError) text = saved.catalogError;
   if (
     selectedSaved?.hydrated &&
-    selectedSaved.savedContent &&
+    selectedSaved.savedEditVersion !== undefined &&
     selectedSaved.status === "idle"
   )
     text = changed ? "Unsaved changes" : "Stored on server";
@@ -190,7 +194,7 @@ export function NotebookSaveStatus() {
             <Button
               onClick={() => {
                 setReload(false);
-                if (selected) void persistence.hydrate(selected.id, true);
+                if (selectedId) void persistence.hydrate(selectedId, true);
               }}
             >
               Reload saved note
@@ -200,4 +204,4 @@ export function NotebookSaveStatus() {
       </Dialog>
     </>
   );
-}
+});

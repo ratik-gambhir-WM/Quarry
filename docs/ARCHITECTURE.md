@@ -315,7 +315,7 @@ combination. Manifest and lockfile state must be inspected before dependency wor
 
 [`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) declares the isolated
 headless-render route and product fallback. [`frontend/src/App.tsx`](../frontend/src/App.tsx)
-declares the eager product routes and lazy workspace boundary;
+declares the authentication and workspace loading boundaries;
 [`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares the
 shared `/hub/*` route tree:
 
@@ -323,8 +323,8 @@ shared `/hub/*` route tree:
 | --- | --- | --- |
 | `/_internal/template-preview` | `TemplatePreviewRenderPage` outside the product shell | lazy; waits for server-injected JSON and renders only the SVG capture surface |
 | `/` | Redirect to `/login` | eager |
-| `/login` | Username-or-email/password `LoginPage` | eager |
-| `/register` | Account registration `LoginPage` | eager |
+| `/login` | Username-or-email/password `LoginPage` | lazy authentication boundary |
+| `/register` | Account registration `LoginPage` | lazy authentication boundary |
 | `/hub` | `HubPage` | lazy workspace route and page |
 | `/hub/account` | `AccountPage` | lazy workspace route and page |
 | `/hub/vault` | `GlobalVaultPage` | lazy |
@@ -343,13 +343,18 @@ shared `/hub/*` route tree:
 | unmatched `/hub/*` paths | Missing-page recovery inside the workspace shell; unauthenticated visitors still go to sign-in | workspace boundary |
 | other unmatched paths | Missing-page recovery with a sign-in link | eager |
 
-Both router targets opt into React transitions. `App.tsx` keeps Login eager and loads one
-`WorkspaceRoutes` boundary for `/hub/*`; the workspace provider remains mounted while nested routes
+Both router targets opt into React transitions. `App.tsx` loads Login through an accessible authentication boundary, avoiding its form and
+animation dependencies during authenticated startup, and loads one `WorkspaceRoutes` boundary for `/hub/*`; the workspace provider remains mounted while nested routes
 change. Deal Room is a parent route whose shared sidebar and deal-scoped state wrap lazy child
 routes, so a URL, refresh, Back, or Forward action selects the same view without a second local
 view router. For an already authorized deal, navigation revalidates access without replacing the
 workspace; a denied check removes the protected content. Lazy boundaries commit an accessible workspace or in-content skeleton while their
 module loads. Reduced-motion CSS disables transition animation.
+
+The authentication boundary also catches failed sign-in/registration module loads. Its recovery
+screen keeps the product shell mounted, announces the error, and focuses the recovery heading.
+Reload page reloads the current web URL or desktop hash route, preserving the navigation entry
+while clearing the rejected lazy-module state; it does not repeatedly render the cached failure.
 
 The product root supplies route-specific browser titles, including the deal activity query tab,
 without placing deal names or document contents in browser metadata. A keyboard-visible skip link
@@ -465,6 +470,12 @@ global state or query-cache library.
   in-memory edits across workspace routes and clears them on reload/authentication changes;
   `notebookPersistence.ts` owns the session-scoped external store for saved-note catalog loading,
   lazy native-document reads, server IDs/revisions, immutable save snapshots and durable job tracking.
+  The provider exposes stable store handles and drawer/search state. Catalog summaries, the selected
+  draft, and save records have separate subscriptions; body edits keep sidebar catalog references
+  stable while their displayed date is unchanged. Save controls observe dirty transitions rather
+  than every document edit. Draft edit versions and immutable submitted versions track savedness;
+  canonical-content checkpoints recognize undo back to saved content at edit/save boundaries,
+  without serializing documents during rendering or before-unload checks.
   Saved notes reload from the authenticated API after sign-in; drafts and newer unsaved edits are
   never promoted automatically. Collections load through bounded 100-row pages; the selector uses
   this catalog and scopes the visible list, count and title search to one notebook, including its
@@ -533,7 +544,11 @@ global state or query-cache library.
   and directory creation is explicit.
   Enter in a company text input saves that company; Save and Cancel buttons retain their native
   keyboard activation and do not submit the surrounding deal form.
-  Directory entries remain saved when a deal form is cancelled or its write fails. Closed and
+  `useDealSaveWorkflow` owns core writes, team reconciliation, metadata submission and final
+  navigation, with explicit core/team/metadata/completion/error stages. It retains the created deal
+  across retries, reconciles an uncertain team response before replaying creation, blocks duplicate
+  submissions, and ignores responses after its modal unmounts. The modal owns editable form and
+  step/focus interaction. Directory entries remain saved when a deal form is cancelled or its write fails. Closed and
   Pencils Down engagements are Historic; Pipeline and the six working stages are Current.
   Transaction closing never changes engagement status. Views show all companies for each role and
   distinguish expected close, actual close, and engagement completion.
@@ -548,6 +563,17 @@ global state or query-cache library.
   manual column resizing and pinning on this table.
   Missing values and unavailable links display `N/A`; external links open in a separate tab.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
+- `UploadFilesModal` delegates its queue, retry/completion transitions, timing and SSE cleanup to
+  `uploadWorkflow`. At most three jobs upload or process concurrently; additional selected files
+  wait in a queued state. Active and queued work protects dismissal. Unmount invalidates pending
+  admission callbacks, clears queued starts and closes subscriptions; it does not cancel jobs
+  already admitted by Axum. Attempt identity rejects stale events after retry, including synchronous
+  terminal replay while a subscription is being created. Interrupted processing streams reconnect
+  to the same admitted job with exponential delays from one to ten seconds, retaining their queue
+  slots until a terminal event replays. They never re-upload a file to recover a connection.
+  Connection identity rejects callbacks from replaced streams; terminal events and unmount clear
+  reconnect timers as well as subscriptions. A continuing outage leaves jobs visibly reconnecting;
+  local cleanup does not cancel server processing.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes through a mode dropdown. A single toolbar row starts with the pages sidebar
@@ -699,7 +725,10 @@ global state or query-cache library.
   `threadRuntimeStore` observed through `useSyncExternalStore`. Its first/last subscriber controls
   the deletion-event subscription; snapshot reads and store construction are side-effect-free.
   Deletion callbacks clear affected conversations, cancel streams and invalidate pending history;
-  unrelated events leave the snapshot unchanged. The provider wraps both the
+  unrelated events leave the snapshot unchanged. The provider publishes stable actions/store handles;
+  selector subscriptions isolate thread-list/history, composer and streamed-message consumers.
+  Composer and message boundaries retain unchanged props, and updates preserve the thread-array
+  reference unless its contents change. The provider wraps both the
   route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
   one runtime owner. It retains locally created threads when the initial remote list resolves late
   and returns a failed history load to an explicit retryable selection state. The provider is keyed by the workspace email to prevent one development
@@ -2596,16 +2625,24 @@ npm test
 npm run build:web
 npm run check:web-bundle
 npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
 npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 Each Vite build emits a manifest and target stamp. The matching bundle-size check rejects missing
-or wrong-target output, enforces a 350,000-byte entry budget for both UI targets, and requires every
-application `.js` chunk to remain below 500,000 bytes. The separately emitted PDF worker `.mjs`
-asset is reported by Vite but is not classified as an application chunk. The budget was set from
-the completed route/interaction split: the September 2026 web and desktop entry measurements were
-323,746 and 322,559 minified bytes respectively, leaving roughly 26–27 kB of entry headroom.
+or wrong-target output, enforces a 350,000-byte budget for both the entry file and its complete
+static JavaScript import graph in both UI targets, and requires every application `.js` chunk
+below 500,000 bytes. Dynamic route dependencies are excluded from startup totals. PDF worker
+assets retain their existing exclusions. Manual PDF/ProseMirror chunks contain only explicitly
+selected modules so shared React/UI dependencies cannot pull PDF code into eager startup.
+ProseMirror's `orderedmap`, `rope-sequence` and `w3c-keyname` dependencies share its chunk to avoid
+cycles through the notebook schema. After each target build, its notebook-bundle check executes
+the emitted app and lazy editor modules in Happy DOM to catch initialization-order failures;
+this is a module-loading smoke check, not a native or full-browser editing test.
+Authentication has its own loading boundary. Bundle checks report entry and startup totals;
+measure the matching build rather than assuming a named entry file captures all loading costs.
 
 From `backend/`:
 
