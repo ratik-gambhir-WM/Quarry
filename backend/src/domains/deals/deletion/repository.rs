@@ -139,7 +139,7 @@ impl DeletionRepository {
             .read_transaction_result_async(move |tx| owned(find(tx, "deletion_id", &id)?, actor))
             .await
     }
-    pub(super) async fn pending(&self) -> Result<Vec<DealDeletion>, RepositoryError> {
+    pub(super) async fn pending(&self, after: &str) -> Result<Vec<DealDeletion>, RepositoryError> {
         Ok(self
             .sqlite
             .read_with_async(
@@ -153,7 +153,8 @@ impl DeletionRepository {
                         Op::LessThanOrEqual,
                         chrono::Utc::now().timestamp(),
                     ))
-                    .order_by("created_at", SortDirection::Ascending)
+                    .and_where(C::compare("deletion_id", Op::GreaterThan, after))
+                    .order_by("deletion_id", SortDirection::Ascending)
                     .limit(16)
                     .build(),
                 decode,

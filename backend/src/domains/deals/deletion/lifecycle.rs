@@ -23,7 +23,7 @@ impl DealLifecycle {
     pub(crate) async fn admit(&self, deal: &str) -> DealAdmission {
         Arc::new(self.lock(deal).await.read_owned().await)
     }
-    pub(super) async fn drain(&self, deal: &str) -> OwnedRwLockWriteGuard<()> {
-        self.lock(deal).await.write_owned().await
+    pub(super) async fn try_drain(&self, deal: &str) -> Option<OwnedRwLockWriteGuard<()>> {
+        self.lock(deal).await.try_write_owned().ok()
     }
 }

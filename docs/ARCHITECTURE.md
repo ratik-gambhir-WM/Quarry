@@ -1441,8 +1441,10 @@ The authenticated owner can accept asynchronous deletion with `DELETE /deals/{de
 `GET /deal-deletions/{deletion_id}`. SQLite receipts immediately hide the deal and fence writes;
 only verified cross-store cleanup becomes completed. Archive remains synchronous and retains data.
 `domains/deals/deletion` owns ledger transactions and one restart worker; document graph cleanup
-stays inside `documents/graph`. A separate Helix `QuarryDealLifecycle` control record and unique
-index fence every prepared setup/chunk/publication inside its remote transaction. Ingestion
+stays inside `documents/graph`. The worker scans due receipts in pages of 16, processes at most four
+deals concurrently, and skips busy deals until a later scan without blocking later pages. Helix
+writes retain their shared serialization. A separate Helix `QuarryDealLifecycle` control record and
+unique index fence every prepared setup/chunk/publication inside its remote transaction. Ingestion
 preflight includes these additional clauses. Document identities and existing indexes remain stable.
 
 Cleanup drains active tasks, removes all linked chats across users, detaches private notebook deal
@@ -1450,6 +1452,9 @@ links, and cascades the canonical deal aggregate. Personal notes/jobs/projection
 templates, other deals and external originals survive. Minimal receipts/fences reserve deleted IDs;
 content-free temporary target manifests survive until cleanup is verified. Current membership,
 canonical candidate filtering, final-result checks and stream revocation also consult deletion state.
+Chat revocation cancels the provider future independently of stream backpressure. When membership
+loss leaves a private thread intact, the worker saves a terminal cancelled response with its partial
+text before releasing admission. Final persistence still rejects an accepted deletion barrier.
 
 Normal bootstrap holds a database-side writer file lock through the router and detached
 SQLite-owning worker lifetimes. Multiple writers with different databases/hosts are unsupported. The rollout must drain older binaries/outstanding

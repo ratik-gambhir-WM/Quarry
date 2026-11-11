@@ -43,7 +43,15 @@ fn service(sqlite: SqliteClient, helix: Arc<HelixClient>) -> Arc<DealDeletionSer
 fn seed(sqlite: &SqliteClient) {
     migrations::migrate(sqlite).unwrap();
     seed_identity(sqlite, "deletion-test@example.com", 'a');
-    sqlite.with_connection(|c|c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DELETE-RESTART',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DELETE-RESTART',1,'owner','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('DELETE-RESTART');")).unwrap();
+    seed_deal(sqlite, "DELETE-RESTART");
+}
+fn seed_deal(sqlite: &SqliteClient, deal: &str) {
+    sqlite.with_connection(|c| {
+        c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES(?1,1,'Synthetic','buy_side','unknown','pipeline','now','now')", [deal])?;
+        c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,1,'owner','now','now')", [deal])?;
+        c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)", [deal])?;
+        Ok(())
+    }).unwrap();
 }
 #[tokio::test]
 async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
@@ -68,14 +76,12 @@ async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
     );
 }
 #[tokio::test]
-async fn lifecycle_waits_for_real_task_guards() {
+async fn lifecycle_requires_drained_tasks_and_excludes_late_admission() {
     let gate = DealLifecycle::default();
     let task = gate.admit("synthetic").await;
-    let drain = gate.drain("synthetic");
-    tokio::pin!(drain);
-    assert!(futures_util::poll!(&mut drain).is_pending());
+    assert!(gate.try_drain("synthetic").await.is_none());
     drop(task);
-    let exclusive = drain.await;
+    let exclusive = gate.try_drain("synthetic").await.unwrap();
     let late = gate.admit("synthetic");
     tokio::pin!(late);
     assert!(futures_util::poll!(&mut late).is_pending());
@@ -131,9 +137,10 @@ async fn cloned_admission_survives_a_cancelled_parent_until_blocking_work_finish
     let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
     let parent = tokio::spawn(async move {
         tokio::task::spawn_blocking(move || {
-            let _admission = blocking_admission;
+            let admission = blocking_admission;
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
+            drop(admission);
             finished_tx.send(()).unwrap();
         })
         .await
@@ -142,10 +149,166 @@ async fn cloned_admission_survives_a_cancelled_parent_until_blocking_work_finish
     started_rx.await.unwrap();
     parent.abort();
     drop(admission);
-    let drain = gate.drain("blocking-preview");
-    tokio::pin!(drain);
-    assert!(futures_util::poll!(&mut drain).is_pending());
+    assert!(gate.try_drain("blocking-preview").await.is_none());
     release_tx.send(()).unwrap();
     finished_rx.await.unwrap();
-    drop(drain.await);
+    parent.await.unwrap_err();
+    assert!(gate.try_drain("blocking-preview").await.is_some());
+}
+
+#[tokio::test]
+async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    seed(&sqlite);
+    let worker = service(
+        sqlite.clone(),
+        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
+    );
+    let mut active = Vec::new();
+    for index in 0..17 {
+        let deal = format!("DELETE-BUSY-{index:02}");
+        seed_deal(&sqlite, &deal);
+        active.push(worker.lifecycle.admit(&deal).await);
+        let op = worker.accept(deal, 1).await.unwrap();
+        sqlite
+            .with_connection(|c| {
+                c.execute(
+                    "UPDATE deal_deletions SET deletion_id=?1 WHERE deletion_id=?2",
+                    [format!("busy-{index:02}"), op.deletion_id],
+                )
+            })
+            .unwrap();
+    }
+    let ready = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    sqlite
+        .with_connection(|c| {
+            c.execute(
+                "UPDATE deal_deletions SET deletion_id='ready' WHERE deletion_id=?1",
+                [&ready.deletion_id],
+            )
+        })
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(2), worker.tick())
+        .await
+        .expect("busy deals must not stall the ledger scan")
+        .unwrap();
+    // The unavailable remote is attempted only for the deal whose tasks have drained.
+    assert_eq!(
+        worker.status("ready".into(), 1).await.unwrap().status,
+        super::super::model::DeletionStatus::Retrying
+    );
+    for index in 0..17 {
+        let status = worker.status(format!("busy-{index:02}"), 1).await.unwrap();
+        assert_eq!(status.status, super::super::model::DeletionStatus::Pending);
+        assert_eq!(status.phase, DeletionPhase::Draining);
+    }
+
+    drop(active);
+    worker.tick().await.unwrap();
+    for index in 0..17 {
+        assert_eq!(
+            worker
+                .status(format!("busy-{index:02}"), 1)
+                .await
+                .unwrap()
+                .status,
+            super::super::model::DeletionStatus::Retrying
+        );
+    }
+}
+
+#[tokio::test]
+async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() {
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    seed(&sqlite);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (started, mut requests) = tokio::sync::mpsc::channel(8);
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let permits = release.clone();
+    let router = axum::Router::new().route(
+        "/v2/query",
+        axum::routing::post(move || {
+            let started = started.clone();
+            let release = permits.clone();
+            async move {
+                started.send(()).await.unwrap();
+                release.acquire().await.unwrap().forget();
+                axum::http::StatusCode::SERVICE_UNAVAILABLE
+            }
+        }),
+    );
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let worker = service(
+        sqlite.clone(),
+        Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap()),
+    );
+    for index in 0..8 {
+        let deal = format!("DELETE-CONCURRENT-{index}");
+        seed_deal(&sqlite, &deal);
+        worker.accept(deal, 1).await.unwrap();
+    }
+    let task = tokio::spawn(async move { worker.tick().await });
+    tokio::time::timeout(Duration::from_secs(3), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    // Helix intentionally serializes writes. The other admitted operations should reach
+    // their durable fencing checkpoint while that first remote request is held open.
+    let fencing_count = || {
+        sqlite.read_one_with_async(
+            crate::adapters::sqlite::query::SqlBuilder::select("deal_deletions")
+                .count_rows()
+                .and_where(crate::adapters::sqlite::query::Condition::equal(
+                    "phase", "fencing",
+                ))
+                .build(),
+            |r| r.get::<_, i64>(0),
+        )
+    };
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while fencing_count().await.unwrap() != Some(4) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let exceeded_limit = tokio::time::timeout(Duration::from_millis(100), requests.recv())
+        .await
+        .is_ok();
+    let admitted = fencing_count().await.unwrap();
+    release.add_permits(8);
+    let result = tokio::time::timeout(Duration::from_secs(3), task).await;
+    stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    result.unwrap().unwrap().unwrap();
+    assert!(!exceeded_limit, "Helix writes must remain serialized");
+    assert_eq!(
+        admitted,
+        Some(4),
+        "cleanup must not admit more than four deals"
+    );
+    let attempts: i64 = sqlite
+        .with_connection(|c| {
+            c.query_row(
+                "SELECT count(*) FROM deal_deletions WHERE status='retrying'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(attempts, 8);
 }

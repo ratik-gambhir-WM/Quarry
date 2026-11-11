@@ -2,6 +2,146 @@ use super::*;
 
 use crate::domains::assistant::chat::repository::AssistantMessage;
 
+struct RevocationServer {
+    address: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl RevocationServer {
+    async fn start() -> Self {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n").await.unwrap();
+            std::future::pending::<()>().await;
+            drop((listener, socket));
+        });
+        Self { address, task }
+    }
+
+    async fn stop(&mut self) {
+        self.task.abort();
+        let _ = (&mut self.task).await;
+        assert!(tokio::net::TcpStream::connect(self.address).await.is_err());
+    }
+}
+
+impl Drop for RevocationServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn assert_chat_revocation(deleting: bool) {
+    use crate::{
+        adapters::sqlite::client::SqliteClient,
+        app::migrations,
+        domains::{
+            deals::{repository::DealRepository, DealContextReader},
+            users::repository::UserRepository,
+        },
+        integration_support::{prompt_catalog, seed_identity},
+    };
+    let mut upstream = RevocationServer::start().await;
+    let sqlite = SqliteClient::open_in_memory().unwrap();
+    migrations::migrate(&sqlite).unwrap();
+    seed_identity(&sqlite, "owner@example.com", 'a');
+    seed_identity(&sqlite, "member@example.com", 'b');
+    sqlite.with_connection(|c| c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('REVOKE-CHAT',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('REVOKE-CHAT',1,'owner','now','now'),('REVOKE-CHAT',2,'viewer','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('REVOKE-CHAT');")).unwrap();
+    let repository = AssistantChatRepository::new(sqlite.clone());
+    repository
+        .create_thread(2, "revoked-thread".into(), Some("REVOKE-CHAT".into()))
+        .await
+        .unwrap();
+    let client = OpenAiClient::with_responses_url(
+        "synthetic",
+        format!("http://{}/v1/responses", upstream.address),
+        prompt_catalog(),
+    );
+    let service = AssistantChatService::with_persistence(
+        Some(Arc::new(client)),
+        "test".into(),
+        repository.clone(),
+        UserDirectory::new(UserRepository::new(sqlite.clone())),
+        prompt_catalog(),
+    )
+    .with_deal_context(DealContextReader::new(DealRepository::new(sqlite.clone())));
+    let mut events = service
+        .ask_with_history(PersistentQueryInput {
+            assistant_message_id: "revoked-a".into(),
+            user_message_id: "revoked-u".into(),
+            user_email: "member@example.com".into(),
+            thread_id: "revoked-thread".into(),
+            request_id: "revoked-r".into(),
+            parent_message_id: None,
+            prompt: "synthetic".into(),
+            model: None,
+            system_instructions: None,
+            files: vec![],
+            file_references: vec![],
+            file_scope_deal_id: None,
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        assert!(matches!(events.recv().await, Some(SendQueryEvent::Started { .. })));
+        assert!(matches!(events.recv().await, Some(SendQueryEvent::Delta { delta }) if delta == "partial"));
+    }).await.unwrap();
+    if deleting {
+        sqlite.with_connection(|c| c.execute_batch("INSERT INTO deal_deletions(deletion_id,deal_id,owner_user_id,status,phase,created_at,updated_at) VALUES('revoked-deletion','REVOKE-CHAT',1,'pending','draining','now','now');")).unwrap();
+    } else {
+        sqlite
+            .with_connection(|c| {
+                c.execute(
+                    "DELETE FROM deal_memberships WHERE deal_id='REVOKE-CHAT' AND user_id=2",
+                    [],
+                )
+            })
+            .unwrap();
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        assert!(
+            events.recv().await.is_none(),
+            "revocation must close the stream"
+        );
+    })
+    .await
+    .unwrap();
+    upstream.stop().await;
+    let (status, content, completed_at): (String, String, Option<String>) = sqlite.with_connection(|c| {
+        c.query_row("SELECT status,content,completed_at FROM assistant_messages WHERE message_id='revoked-a'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    }).unwrap();
+    if deleting {
+        assert_eq!(
+            status, "streaming",
+            "the deletion barrier must reject late writes"
+        );
+        assert!(content.is_empty());
+        assert!(completed_at.is_none());
+    } else {
+        assert_eq!(status, "cancelled");
+        assert_eq!(content, "partial");
+        assert!(completed_at.is_some());
+        let thread = service
+            .get_thread("member@example.com", "revoked-thread".into())
+            .await
+            .unwrap();
+        assert_eq!(thread.messages.last().unwrap().status, "cancelled");
+    }
+}
+
+#[tokio::test]
+async fn membership_revocation_cancels_the_saved_run_and_preserves_partial_text() {
+    assert_chat_revocation(false).await;
+}
+
+#[tokio::test]
+async fn deletion_revocation_stops_the_run_without_writing_past_the_barrier() {
+    assert_chat_revocation(true).await;
+}
+
 #[test]
 fn uses_the_catalog_default_when_the_client_omits_system_instructions() {
     let prompts = crate::integration_support::prompt_catalog();

@@ -423,6 +423,8 @@ impl AssistantChatService {
                 .collect::<Vec<_>>();
             // Keep revocation independent of provider/SSE backpressure: a blocked send must
             // not keep a deletion waiting indefinitely for this task's admission guard.
+            let cancelled_message_id = assistant_message_id.clone();
+            let mut buffer = String::new();
             let run = async {
                 let (delta_tx, mut delta_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
                 let response = client.gen_chat_response_streaming(
@@ -434,20 +436,19 @@ impl AssistantChatService {
                     delta_tx,
                 );
                 tokio::pin!(response);
-                let mut buffer = String::new();
                 loop {
                     tokio::select! {
                         biased;
                         _ = event_tx.closed() => {
                             tracing::info!(client_request_id = %client_request_id, elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted client disconnected");
-                            let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
+                            let _ = repository.finish_run(assistant_message_id, "cancelled", std::mem::take(&mut buffer), None).await;
                             break;
                         }
                         result = &mut response => {
                             while let Ok(delta) = delta_rx.try_recv() {
                                 buffer.push_str(&delta);
                                 if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
-                                    let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
+                                    let _ = repository.finish_run(assistant_message_id, "cancelled", std::mem::take(&mut buffer), None).await;
                                     return;
                                 }
                             }
@@ -463,7 +464,7 @@ impl AssistantChatService {
                                 }
                                 Err(error) => {
                                     tracing::error!(client_request_id = %client_request_id, category = %error.category(), elapsed_ms = run_started_at.elapsed().as_millis(), "assistant persisted provider failed");
-                                    let _ = repository.finish_run(assistant_message_id, "failed", buffer, Some("provider_failed")).await;
+                                    let _ = repository.finish_run(assistant_message_id, "failed", std::mem::take(&mut buffer), Some("provider_failed")).await;
                                     let _ = event_tx.send(SendQueryEvent::Failed { error: "query generation failed" }).await;
                                 }
                             }
@@ -473,7 +474,7 @@ impl AssistantChatService {
                             let Some(delta) = delta else { continue };
                             buffer.push_str(&delta);
                             if event_tx.send(SendQueryEvent::Delta { delta }).await.is_err() {
-                                let _ = repository.finish_run(assistant_message_id, "cancelled", buffer, None).await;
+                                let _ = repository.finish_run(assistant_message_id, "cancelled", std::mem::take(&mut buffer), None).await;
                                 break;
                             }
                         }
@@ -492,7 +493,22 @@ impl AssistantChatService {
                     }
                 }
             };
-            tokio::select! { biased; _ = revoked => {}, _ = run => {} }
+            let was_revoked = tokio::select! { biased; _ = revoked => true, _ = run => false };
+            if was_revoked {
+                // Membership loss leaves the private thread intact. Finalize it while the
+                // task still holds admission; finish_run retains the atomic deletion barrier.
+                if let Err(error) = repository
+                    .finish_run(cancelled_message_id, "cancelled", buffer, None)
+                    .await
+                {
+                    if !matches!(
+                        error,
+                        RepositoryError::Conflict(_) | RepositoryError::NotFound(_)
+                    ) {
+                        tracing::error!(client_request_id = %client_request_id, "assistant revoked run cancellation failed to save");
+                    }
+                }
+            }
         });
         Ok(event_rx)
     }

@@ -57,7 +57,11 @@ fresh/current layouts, foreign keys and owner invariants are validated. Damaged 
 `domains/deals/deletion` owns acceptance, orchestration and canonical transactions. Membership
 policy applies the barrier, document search extends existing canonical/final-result filtering,
 and the document graph owner supplies remote fencing/purge capabilities. Bootstrap starts one
-worker; it scans at most 16 due operations per pass and wakes on acceptance or once per second.
+worker; it scans due operations in pages of 16 and wakes on acceptance or once per second.
+Each scan advances at most four deals concurrently. A busy deal is skipped without changing its
+receipt and retried on the next scan; keyset pagination continues past busy pages so later deals
+can progress. Every operation retains exclusive admission throughout its cleanup sweep.
+The shared Helix client still serializes remote writes.
 Barriers already apply to recovered operations before any route can serve them. Other deals remain
 usable while cleanup resumes. Canonical SQLite work uses the existing blocking-pool client.
 
@@ -66,8 +70,11 @@ workers recheck upload authorization after admission; job registration is also g
 streams stop on deletion, check liveness before emitting events and reject late persistence.
 Metadata/preview work drains before purge; dropped requests cannot publish a final result.
 Cloneable admission tokens remain inside blocking preview/text tasks after HTTP cancellation.
-Chat revocation runs independently of stream backpressure after encoding settles. No
-SQLite transaction is held while waiting for tasks. A stalled producer delays completion; it does
+Chat revocation runs independently of stream backpressure after encoding settles. If membership
+loss leaves a private thread intact, cancellation persists the partial response and a terminal
+`cancelled` status before releasing admission. The same transaction barrier rejects this final
+write when deletion has been accepted; cancellation never recreates a removed thread. No
+SQLite transaction is held while waiting for tasks. A stalled producer delays that deal's completion; it does
 not justify purging underneath an active task. Preserved personal notebook workers may continue.
 
 The worker establishes the remote fence before deleting canonical data. With producers drained,

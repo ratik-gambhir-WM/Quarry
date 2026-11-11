@@ -10,11 +10,14 @@ use crate::{
     },
     shared::error::{RepositoryError, ServiceResult},
 };
+use futures_util::{stream, StreamExt};
 use std::{
     sync::{Arc, Weak},
     time::Duration,
 };
 use tokio::sync::Notify;
+
+const MAX_CONCURRENT_DELETIONS: usize = 4;
 
 pub(crate) struct DealDeletionService {
     repository: DeletionRepository,
@@ -73,19 +76,38 @@ impl DealDeletionService {
         });
     }
     async fn tick(&self) -> Result<(), RepositoryError> {
-        for op in self.repository.pending().await? {
-            if let Err(error) = self.advance(&op).await {
-                let blocked = super::repository::integrity_failure(&error);
-                tracing::error!(deletion_id=%op.deletion_id, blocked, "deal cleanup phase failed");
-                self.repository.failure(op.deletion_id, blocked).await?;
+        let mut after = String::new();
+        loop {
+            let operations = self.repository.pending(&after).await?;
+            let Some(last) = operations.last() else {
+                return Ok(());
+            };
+            after.clone_from(&last.deletion_id);
+            // Scan past busy deals, including a full page of them. Finish every admitted
+            // operation before surfacing ledger errors rather than cancelling sibling work.
+            let results = stream::iter(operations)
+                .map(|op| async move {
+                    if let Err(error) = self.advance(&op).await {
+                        let blocked = super::repository::integrity_failure(&error);
+                        tracing::error!(deletion_id=%op.deletion_id, blocked, "deal cleanup phase failed");
+                        self.repository.failure(op.deletion_id, blocked).await?;
+                    }
+                    Ok(())
+                })
+                .buffer_unordered(MAX_CONCURRENT_DELETIONS)
+                .collect::<Vec<Result<(), RepositoryError>>>()
+                .await;
+            for result in results {
+                result?;
             }
         }
-        Ok(())
     }
     async fn advance(&self, op: &DealDeletion) -> Result<(), RepositoryError> {
         // Workers and request bodies hold admission for their actual task lifetime. This guard
-        // is never held with a SQLite transaction while waiting for other tasks to finish.
-        let _drained = self.lifecycle.drain(&op.deal_id).await;
+        // is acquired only after those tasks finish; busy deals wait for the next scan.
+        let Some(_drained) = self.lifecycle.try_drain(&op.deal_id).await else {
+            return Ok(());
+        };
         if matches!(
             op.phase,
             DeletionPhase::Draining | DeletionPhase::Fencing | DeletionPhase::Sqlite
