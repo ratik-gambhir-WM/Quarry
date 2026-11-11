@@ -91,6 +91,35 @@ Keep parameterized query construction in an owned adapter/query module. Do not s
 through handlers or services, preserve synchronous SQLite APIs by blocking on async work,
 or introduce a permanent multi-database abstraction/fallback.
 
+### Explicit adapter replacement
+
+Replace the product SQLite adapter at `backend/src/adapters/sqlite/` with a PostgreSQL
+adapter under `backend/src/adapters/postgres/`. Register the new module in
+`backend/src/adapters/mod.rs`, construct its pool in bootstrap, and change every active
+product repository and other consumer to use it. This is an adapter replacement, not just
+a schema change or a PostgreSQL connection added alongside the existing SQLite client.
+
+Account for every part of the current adapter:
+
+| Existing SQLite component | PostgreSQL replacement responsibility |
+| --- | --- |
+| `mod.rs` | Register the PostgreSQL adapter and expose only the interfaces its consumers need. |
+| `client.rs` | Replace `SqliteClient`, transactions, row/value decoding, write results and errors with async PostgreSQL pool/connection, transaction, decoding and error handling. Preserve transaction ownership and affected-row semantics. |
+| `read_pool.rs` | Replace SQLite reader leases and writer coordination with bounded PostgreSQL pool acquisition and appropriate transaction/concurrency controls; retain the lifecycle guarantees consumers need. |
+| `query/builder.rs` | Provide parameterized PostgreSQL query construction with validated identifiers and equivalent supported operations; translate SQLite-only conflict, substring and FTS behavior deliberately. |
+| `query/statement.rs` and `query/value.rs` | Replace SQLite query and bound-value representations with PostgreSQL-compatible statements, placeholders and typed values. |
+| `query/mod.rs` | Expose the PostgreSQL query interfaces and wire their tests into the existing backend test tree. |
+
+The PostgreSQL adapter need not reproduce the same file layout or public types internally,
+but it must cover these responsibilities and preserve the repository contracts described
+below. Inventory imports and direct SQLite use outside this directory, including migrations,
+domain repositories, bootstrap, maintenance utilities and tests; port or retire each one.
+Do not retain the SQLite adapter as a runtime fallback. Remove `backend/src/adapters/sqlite/`
+and its module registration only after all active product consumers have moved, equivalent
+adapter/repository tests and the full backend gates pass against the intended test setup,
+and the final runtime has been verified with PostgreSQL and Helix. Remove obsolete SQLite
+dependencies and tests only after confirming no supported consumer still needs them.
+
 All database credentials remain server-side and redacted. Web and Tauri still call only
 Axum. Preserve `/api/v1`, camelCase JSON, status/error mappings, bearer sessions, ownership,
 PDF/MIME/multipart checks, SSE names, operation IDs and preview references.
@@ -270,11 +299,11 @@ that PostgreSQL and Helix committed atomically or rename wire values accidentall
 | Step | Work | Exit evidence |
 | --- | --- | --- |
 | 1. Capture baseline | Inventory final marker-18 schema, SQLite consumers, Helix boundaries and current query/route tests; identify local PostgreSQL and isolated test targets | Complete table/query matrix; no unrelated data/configuration changes |
-| 2. Add PostgreSQL foundation | Driver/pool, redacted config, parameterized query module, initial schema/version validation, disposable test support | Fresh init/restart, incompatible-schema rejection and actual constraint tests pass |
+| 2. Add PostgreSQL foundation | Replace the SQLite adapter responsibilities with a PostgreSQL adapter, driver/pool, redacted config, parameterized query module, initial schema/version validation and disposable test support | Adapter tests, fresh init/restart, incompatible-schema rejection and actual constraint tests pass |
 | 3. Port relational repositories | Identity/auth, deals/companies, access/memberships/activity, assistant and deletion state | Equivalent domain/route results, concurrency, transactions and errors |
 | 4. Port documents | Canonical blobs, versions, content claims, identity/image checkpoints and graph-facing canonical lookups | Upload/preview/deduplication parity; unchanged Helix writes/search; commit-then-index failure recovery |
 | 5. Port notebooks/templates | Notes/jobs/cleanup, catalog/assets/previews/classification/artifacts and FTS equivalent | Same saves/retries/recovery, lexical results and retained Helix projections/retrieval |
-| 6. Wire final runtime | PostgreSQL repositories plus retained Helix in bootstrap/config/launchers; remove dead product SQLite code | Both clients run against PostgreSQL + Helix; no active product SQLite fallback |
+| 6. Wire final runtime | PostgreSQL repositories plus retained Helix in bootstrap/config/launchers; remove the SQLite adapter and dead product SQLite code after the adapter replacement gates pass | Both clients run against PostgreSQL + Helix; all active consumers ported; no product SQLite adapter or fallback |
 | 7. Verify/document | Full gates, fresh-data product flows, query plans, updated operational guidance | Acceptance below passes; limitations reported; no migration/backfill system built |
 
 The final runtime is PostgreSQL **and Helix**, with no product SQLite dependency. Intermediate

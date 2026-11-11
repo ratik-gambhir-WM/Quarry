@@ -1,9 +1,10 @@
 import { UserProvider, useUser } from "./auth/UserProvider";
-import { lazy, Suspense } from "react";
+import { Component, createRef, lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { LazyPage } from "./app/LazyPage";
 import { ViewTransition } from "./components/ui/ViewTransition";
 import { AppShell } from "./components/layout/AppShell";
+import { QuarryButton } from "./components/ui/QuarryButton";
 import { ThemeModeProvider } from "./hooks/useThemeMode";
 import { PageMetadata } from "./app/PageMetadata";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -18,20 +19,53 @@ const WorkspaceRoutes = lazy(() =>
   })),
 );
 
-function AuthPage({ register = false }: { register?: boolean }) {
-  return (
-    <Suspense
-      fallback={
+class AuthPage extends Component<{ register?: boolean }, { failed: boolean }> {
+  state = { failed: false };
+  private errorHeading = createRef<HTMLHeadingElement>();
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.errorHeading.current?.focus();
+  }
+
+  render() {
+    const { register = false } = this.props;
+    if (this.state.failed) {
+      return (
         <AppShell centered showFooter={false}>
-          <p role="status">
-            {register ? "Loading registration…" : "Loading sign in…"}
-          </p>
+          <section className="glass-panel mx-auto w-full max-w-[400px] space-y-md rounded-xl p-lg sm:p-xl">
+            <div className="space-y-sm" role="alert">
+              <h1 className="type-h1 text-on-surface" ref={this.errorHeading} tabIndex={-1}>
+                {register ? "Registration couldn’t load" : "Sign in couldn’t load"}
+              </h1>
+              <p className="type-body-sm text-on-surface-variant">
+                Check your connection, then reload this page to try again.
+              </p>
+            </div>
+            <QuarryButton onClick={() => window.location.reload()}>
+              Reload page
+            </QuarryButton>
+          </section>
         </AppShell>
-      }
-    >
-      <LoginPage register={register} />
-    </Suspense>
-  );
+      );
+    }
+    return (
+      <Suspense
+        fallback={
+          <AppShell centered showFooter={false}>
+            <p role="status">
+              {register ? "Loading registration…" : "Loading sign in…"}
+            </p>
+          </AppShell>
+        }
+      >
+        <LoginPage register={register} />
+      </Suspense>
+    );
+  }
 }
 
 function ProductApp() {

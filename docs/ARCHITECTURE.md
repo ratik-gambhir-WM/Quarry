@@ -351,6 +351,11 @@ view router. For an already authorized deal, navigation revalidates access witho
 workspace; a denied check removes the protected content. Lazy boundaries commit an accessible workspace or in-content skeleton while their
 module loads. Reduced-motion CSS disables transition animation.
 
+The authentication boundary also catches failed sign-in/registration module loads. Its recovery
+screen keeps the product shell mounted, announces the error, and focuses the recovery heading.
+Reload page reloads the current web URL or desktop hash route, preserving the navigation entry
+while clearing the rejected lazy-module state; it does not repeatedly render the cached failure.
+
 The product root supplies route-specific browser titles, including the deal activity query tab,
 without placing deal names or document contents in browser metadata. A keyboard-visible skip link
 focuses the shared main landmark. Workspace scroll bodies expose themed scrollbars, use smaller
