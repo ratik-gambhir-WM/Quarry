@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createUploadWorkflow } from "@/components/data-room/uploadWorkflow";
 import type { ProcessFileJobEventHandlers } from "@/contracts/quarryApi";
 
-function setup() {
+afterEach(() => vi.useRealTimers());
+
+function setup(fileCount = 5) {
   const handlers: ProcessFileJobEventHandlers[] = [];
   const stops: ReturnType<typeof vi.fn>[] = [];
   const api = {
@@ -17,11 +19,90 @@ function setup() {
   };
   const store = createUploadWorkflow(api, "deal");
   const stop = store.subscribe(() => {});
-  store.add(Array.from({ length: 5 }, (_, index) => new File(["bytes"], `${index}.pdf`)));
+  store.add(Array.from({ length: fileCount }, (_, index) => new File(["bytes"], `${index}.pdf`)));
   return { api, store, stop, handlers, stops };
 }
 
 describe("upload lifecycle", () => {
+  it("reconnects admitted jobs without uploading again and releases queued work on terminal replay", async () => {
+    vi.useFakeTimers();
+    const { api, store, stop, handlers, stops } = setup();
+    store.upload();
+    await Promise.resolve();
+    handlers.slice().forEach((handler) => handler.onConnectionError?.());
+    expect(stops.every((stop) => stop.mock.calls.length === 1)).toBe(true);
+    expect(api.startProcessFile).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.subscribeToProcessFileJob.mock.calls.map(([id]) => id)).toEqual([
+      "0.pdf", "1.pdf", "2.pdf", "0.pdf", "1.pdf", "2.pdf",
+    ]);
+    // A callback from a disconnected stream cannot complete a current attempt.
+    handlers[0].onEvent({ filename: "0.pdf", jobId: "0.pdf", status: "completed" });
+    expect(store.getSnapshot().entries[0].status).toBe("processing");
+    handlers.slice(3).forEach((handler, index) => handler.onEvent({
+      filename: `${index}.pdf`, jobId: `${index}.pdf`, status: "completed",
+    }));
+    await Promise.resolve();
+    expect(api.startProcessFile).toHaveBeenCalledTimes(5);
+    handlers.slice(6).forEach((handler, index) => handler.onEvent({
+      filename: `${index + 3}.pdf`, jobId: `${index + 3}.pdf`, status: "skipped",
+    }));
+    expect(store.getSnapshot().entries.every((entry) => ["completed", "skipped"].includes(entry.status))).toBe(true);
+    expect(store.getSnapshot().processedSeconds).not.toBeNull();
+    stop();
+    expect(stops.every((stop) => stop.mock.calls.length === 1)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("backs off repeated disconnects and cancels reconnects on unmount", async () => {
+    vi.useFakeTimers();
+    const { api, store, stop, handlers } = setup(1);
+    store.upload();
+    await Promise.resolve();
+    handlers[0].onConnectionError?.();
+    handlers[0].onConnectionError?.();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(handlers).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    handlers[1].onConnectionError?.();
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(handlers).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    handlers[2].onConnectionError?.();
+    stop();
+    const stopAgain = store.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(handlers).toHaveLength(3);
+    expect(api.startProcessFile).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    stopAgain();
+  });
+
+  it("recovers from synchronous subscription failures and cleans up terminal replay on reconnect", async () => {
+    vi.useFakeTimers();
+    const { api, store, stop } = setup(1);
+    const cleanup = vi.fn();
+    api.subscribeToProcessFileJob
+      .mockImplementationOnce((_id, handlers) => {
+        handlers.onConnectionError();
+        return cleanup;
+      })
+      .mockImplementationOnce(() => { throw new Error("Disconnected"); })
+      .mockImplementationOnce((id, handlers) => {
+        handlers.onEvent({ filename: id, jobId: id, status: "completed" });
+        return cleanup;
+      });
+    store.upload();
+    await Promise.resolve();
+    expect(cleanup).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(api.startProcessFile).toHaveBeenCalledOnce();
+    expect(store.getSnapshot().entries[0].status).toBe("completed");
+    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
+
   it("bounds active jobs, releases slots after terminal events, and retries failures once", async () => {
     const { api, store, stop, handlers, stops } = setup();
     store.upload();

@@ -306,8 +306,10 @@ npm test
 npm run build:web
 npm run check:web-bundle
 npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
 npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 Use `npm run typecheck` instead of the two individual typechecks when shared code is affected.
@@ -315,6 +317,8 @@ Use `npm run typecheck` instead of the two individual typechecks when shared cod
 Run each bundle-size check immediately after its matching build, before another target overwrites
 `dist`. The checks enforce the entry and complete static startup JavaScript budgets as well as
 individual application chunk limits.
+Run the matching notebook-bundle check after each build to execute the production editor modules;
+source tests and compilation alone do not detect chunk initialization cycles.
 
 For meaningful UI work, run `npm run dev:web` or `npm run dev:desktop` and inspect the changed
 route, browser console/network, keyboard/focus behavior, async states, light/dark themes, and

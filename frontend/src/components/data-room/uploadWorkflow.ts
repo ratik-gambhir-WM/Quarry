@@ -66,22 +66,50 @@ export function createUploadWorkflow(
       if (!current()) return;
       change(entry.id, { jobId: job.jobId, status: "processing" });
       if (!current()) return;
-      const unsubscribe = api.subscribeToProcessFileJob(job.jobId, {
-        onConnectionError: () => {
-          if (current()) change(entry.id, { error: "Connection interrupted. Reconnecting…" });
-        },
-        onEvent: (event: ProcessFileJobEvent) => {
+      let connection = 0;
+      let retryDelay = 1000;
+      let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe = () => {};
+      run.stop = () => {
+        connection++;
+        clearTimeout(reconnectTimer);
+        const stop = unsubscribe;
+        unsubscribe = () => {};
+        stop();
+      };
+      function connect() {
+        if (!current()) return;
+        const attempt = ++connection;
+        const connected = () => current() && connection === attempt;
+        const reconnect = () => {
+          if (!connected()) return;
+          run.stop();
+          change(entry.id, { error: "Connection interrupted. Reconnecting…" });
           if (!current()) return;
-          if (event.status === "completed" || event.status === "skipped") {
-            finish(entry.id, { status: event.status, documentId: event.documentId, chunkCount: event.chunkCount, error: undefined });
-          } else if (event.status === "failed") {
-            finish(entry.id, { status: "failed", error: event.error || "Document processing failed." });
-          } else change(entry.id, { status: "processing", error: undefined });
-        },
-      });
-      // A transport may replay a terminal event before returning its cleanup function.
-      if (current()) run.stop = unsubscribe;
-      else unsubscribe();
+          reconnectTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 10000);
+        };
+        try {
+          const stop = api.subscribeToProcessFileJob(job.jobId, {
+            onConnectionError: reconnect,
+            onEvent: (event: ProcessFileJobEvent) => {
+              if (!connected()) return;
+              retryDelay = 1000;
+              if (event.status === "completed" || event.status === "skipped") {
+                finish(entry.id, { status: event.status, documentId: event.documentId, chunkCount: event.chunkCount, error: undefined });
+              } else if (event.status === "failed") {
+                finish(entry.id, { status: "failed", error: event.error || "Document processing failed." });
+              } else change(entry.id, { status: "processing", error: undefined });
+            },
+          });
+          // Replay may terminate or disconnect before the cleanup function returns.
+          if (connected()) unsubscribe = stop;
+          else stop();
+        } catch {
+          reconnect();
+        }
+      }
+      connect();
     } catch (error) {
       if (current()) finish(entry.id, { status: "failed", error: error instanceof Error ? error.message : String(error) });
     }

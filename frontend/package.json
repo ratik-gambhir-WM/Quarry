@@ -19,6 +19,8 @@
     "check:web-bundle": "node scripts/check-runtime-boundaries.mjs --web-bundle",
     "check:bundle-size:web": "node scripts/check-bundle-size.mjs --target web",
     "check:bundle-size:desktop": "node scripts/check-bundle-size.mjs --target desktop",
+    "check:notebook-bundle:web": "node scripts/check-notebook-bundle.mjs --target web",
+    "check:notebook-bundle:desktop": "node scripts/check-notebook-bundle.mjs --target desktop",
     "preview": "vite preview",
     "test": "vitest run"
   },

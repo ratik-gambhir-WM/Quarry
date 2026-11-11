@@ -563,7 +563,12 @@ global state or query-cache library.
   wait in a queued state. Active and queued work protects dismissal. Unmount invalidates pending
   admission callbacks, clears queued starts and closes subscriptions; it does not cancel jobs
   already admitted by Axum. Attempt identity rejects stale events after retry, including synchronous
-  terminal replay while a subscription is being created.
+  terminal replay while a subscription is being created. Interrupted processing streams reconnect
+  to the same admitted job with exponential delays from one to ten seconds, retaining their queue
+  slots until a terminal event replays. They never re-upload a file to recover a connection.
+  Connection identity rejects callbacks from replaced streams; terminal events and unmount clear
+  reconnect timers as well as subscriptions. A continuing outage leaves jobs visibly reconnecting;
+  local cleanup does not cancel server processing.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
   Annotate modes through a mode dropdown. A single toolbar row starts with the pages sidebar
@@ -2615,8 +2620,10 @@ npm test
 npm run build:web
 npm run check:web-bundle
 npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
 npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 Each Vite build emits a manifest and target stamp. The matching bundle-size check rejects missing
@@ -2625,6 +2632,10 @@ static JavaScript import graph in both UI targets, and requires every applicatio
 below 500,000 bytes. Dynamic route dependencies are excluded from startup totals. PDF worker
 assets retain their existing exclusions. Manual PDF/ProseMirror chunks contain only explicitly
 selected modules so shared React/UI dependencies cannot pull PDF code into eager startup.
+ProseMirror's `orderedmap`, `rope-sequence` and `w3c-keyname` dependencies share its chunk to avoid
+cycles through the notebook schema. After each target build, its notebook-bundle check executes
+the emitted app and lazy editor modules in Happy DOM to catch initialization-order failures;
+this is a module-loading smoke check, not a native or full-browser editing test.
 Authentication has its own loading boundary. Bundle checks report entry and startup totals;
 measure the matching build rather than assuming a named entry file captures all loading costs.
 
