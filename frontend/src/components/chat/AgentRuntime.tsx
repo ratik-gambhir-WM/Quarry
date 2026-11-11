@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import {
   createContext,
   useCallback,
+  useMemo,
   useContext,
   useEffect,
   useState,
   useSyncExternalStore,
   useRef,
 } from "react";
+import { useStoreSelector } from "../../hooks/useStoreSelector";
 import { runtime } from "@quarry/runtime";
 import type {
   AssistantMessage as PersistedAssistantMessage,
@@ -83,7 +85,7 @@ const emptyState: ThreadRuntimeState = {
   threads: [],
 };
 
-export function useAgentRuntime({
+function useAgentRuntimeController({
   api,
   onContextTruncated,
   userEmail,
@@ -91,7 +93,7 @@ export function useAgentRuntime({
   dealId,
   initialDraft = "",
   initialFileReference,
-}: AgentRuntimeOptions): AgentRuntimeValue {
+}: AgentRuntimeOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadTokenRef = useRef(0);
   const mountedRef = useRef(true);
@@ -106,7 +108,9 @@ export function useAgentRuntime({
     loadTokenRef.current++;
     abortControllerRef.current?.abort();
   }));
-  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+
+  // Keep deletion cancellation active even when children consume actions only.
+  useEffect(() => store.subscribe(() => {}), [store]);
 
   const update = useCallback((change: Partial<ThreadRuntimeState>) => {
     if (mountedRef.current) store.update(change);
@@ -550,26 +554,21 @@ export function useAgentRuntime({
       update({ isThreadListLoading: false, threadListError: true });
     }
   }, [api, userEmail, scope, dealId, store, update]);
-  return {
-    loadMoreThreads,
-    copy,
-    deleteThread,
-    newChat,
-    retry,
-    selectThread,
-    send,
-    setDraft,
-    setReferences,
-    addReference,
-    addFiles,
-    removeFile,
-    setModel,
-    state,
-    stop,
-  };
+  return useMemo(() => ({
+    loadMoreThreads, copy, deleteThread, newChat, retry, selectThread, send,
+    setDraft, setReferences, addReference, addFiles, removeFile, setModel, stop, store,
+  }), [loadMoreThreads, copy, deleteThread, newChat, retry, selectThread, send,
+    setDraft, setReferences, addReference, addFiles, removeFile, setModel, stop, store]);
 }
 
-const AgentRuntimeContext = createContext<AgentRuntimeValue | null>(null);
+// Retain the standalone hook's full-state contract; providers expose stable actions and a store.
+export function useAgentRuntime(options: AgentRuntimeOptions): AgentRuntimeValue {
+  const controller = useAgentRuntimeController(options);
+  const state = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot, controller.store.getSnapshot);
+  return { ...controller, state };
+}
+
+const AgentRuntimeContext = createContext<ReturnType<typeof useAgentRuntimeController> | null>(null);
 
 type ProviderProps = Omit<AgentRuntimeOptions, "api"> & { children: ReactNode };
 export function QueryChatRuntimeProvider(props: ProviderProps) {
@@ -581,7 +580,7 @@ export function QueryChatRuntimeProvider(props: ProviderProps) {
   );
 }
 function ScopedChatRuntimeProvider({ children, ...options }: ProviderProps) {
-  const agentRuntime = useAgentRuntime({ api: runtime.api, ...options });
+  const agentRuntime = useAgentRuntimeController({ api: runtime.api, ...options });
   return (
     <AgentRuntimeContext.Provider value={agentRuntime}>
       {children}
@@ -601,7 +600,7 @@ export function useAgentRuntimeContext() {
 export function useThreadRuntimeState<T>(
   select: (state: ThreadRuntimeState) => T,
 ) {
-  return select(useAgentRuntimeContext().state);
+  return useStoreSelector(useAgentRuntimeContext().store, select);
 }
 
 function activeMessageBranch(

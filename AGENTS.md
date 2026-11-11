@@ -200,6 +200,49 @@ request -> router -> handler -> service -> repository/client
   be removable during API integration so TypeScript/import failures identify every remaining
   product-fixture consumer.
 
+### Frontend workflow and subscription pattern
+
+Follow this pattern for ongoing frontend development and refactoring. Apply it to the feature
+being changed, keep abstractions proportional to its complexity, and preserve unrelated work.
+
+- Keep components focused on rendering, editable form state, and interaction/focus behavior.
+  Move multi-step request orchestration into a feature-owned hook or lifecycle store. Give each
+  workflow one owner for explicit progress stages, errors, retries, and completion. Use
+  [`useDealSaveWorkflow.ts`](frontend/src/components/hub/sidebar/useDealSaveWorkflow.ts) and
+  [`uploadWorkflow.ts`](frontend/src/components/data-room/uploadWorkflow.ts) as existing examples.
+- Keep provider values stable for actions and store handles. Subscribe consumers to the specific
+  state they render, using the existing
+  [`useStoreSelector`](frontend/src/hooks/useStoreSelector.ts) where appropriate. Separate catalog,
+  selected-document/composer, and save/stream state so typing and streamed tokens do not refresh
+  unrelated navigation/history consumers. Preserve unchanged object and array references; add
+  memoization at demonstrated parent-render boundaries rather than wrapping everything.
+- Bound concurrent uploads and other fan-out work. Guard every asynchronous continuation against
+  unmount, identity changes, and superseded attempts before starting follow-up work or publishing
+  results. Invalidate stale callbacks and release owned subscriptions/timers on cleanup. Handle
+  synchronous terminal replay before a subscription returns its cleanup function. Local cleanup
+  must not be presented as cancellation of already-admitted server work.
+- Prevent duplicate submissions synchronously. Retain committed resource IDs across partial
+  failures, reconcile uncertain create responses before replaying them, and reuse immutable
+  operation IDs and submitted content where the API supports idempotent retries. Keep newer edits
+  distinct from the version being saved.
+- For rich-document edit buffers, track edit versions and submitted/saved versions instead of
+  serializing documents during rendering or unload checks. Preserve undo-to-saved detection,
+  edits made during pending saves, retry snapshots, revision conflicts, and explicit reload
+  confirmation. Follow the ownership split in
+  [`NotebookProvider.tsx`](frontend/src/components/notebook/NotebookProvider.tsx),
+  [`notebookSession.ts`](frontend/src/data/notebook/notebookSession.ts), and
+  [`notebookPersistence.ts`](frontend/src/data/notebook/notebookPersistence.ts).
+- Choose lazy boundaries from measured application imports and loading costs. Measure the entry
+  and its complete static import graph for both targets; keep deferred editors/viewers out of
+  eager startup. Preserve explicit manual-chunk ownership so shared dependencies do not pull
+  deferred features into startup. Do not relax budgets or merely redistribute eager code to make
+  the entry file appear smaller.
+- Add focused regression coverage for the lifecycle and state contracts being changed, including
+  relevant late responses, stale attempts, cleanup, concurrency, duplicate prevention, and
+  partial-failure recovery. Verify subscription isolation and loading costs with reproducible
+  evidence. Preserve accessible feedback, focus, motion, routes, API contracts, and both runtime
+  targets, then follow the verification and architecture-impact gates below.
+
 ## Backend development rules
 
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
@@ -262,11 +305,16 @@ npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
 ```
 
 Use `npm run typecheck` instead of the two individual typechecks when shared code is affected.
 `check:web-bundle` must follow `build:web` because it inspects `dist`. There is no `npm run lint`.
+Run each bundle-size check immediately after its matching build, before another target overwrites
+`dist`. The checks enforce the entry and complete static startup JavaScript budgets as well as
+individual application chunk limits.
 
 For meaningful UI work, run `npm run dev:web` or `npm run dev:desktop` and inspect the changed
 route, browser console/network, keyboard/focus behavior, async states, light/dark themes, and

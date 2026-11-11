@@ -1,6 +1,6 @@
 import { ArrowDown } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
@@ -19,7 +19,14 @@ export function QueryChatThread({
   contextTruncated: boolean;
   floatingPanel?: boolean;
 }) {
-  const state = useThreadRuntimeState((snapshot) => snapshot);
+  const state = useThreadRuntimeState((snapshot) => ({
+    isThreadLoading: snapshot.isThreadLoading,
+    messages: snapshot.messages,
+    scopeDealId: snapshot.scopeDealId,
+    selectedThreadId: snapshot.selectedThreadId,
+    threadLoadError: snapshot.threadLoadError,
+    threads: snapshot.threads,
+  }));
   const shouldReduceMotion = useReducedMotion() ?? false;
   const viewportRef = useRef<HTMLDivElement>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -163,7 +170,7 @@ function ThreadLoadError() {
   );
 }
 
-function ComposerBar({
+const ComposerBar = memo(function ComposerBar({
   compact,
   condensed,
 }: {
@@ -172,7 +179,18 @@ function ComposerBar({
 }) {
   const runtime = useAgentRuntimeContext();
   const { draft, draftFiles, draftReferences, scopeDealId, attachmentError, selectedModel, sendError, isPreparingThread, isRunning, isThreadLoading } = useThreadRuntimeState(
-    (state) => state,
+    (state) => ({
+      draft: state.draft,
+      draftFiles: state.draftFiles,
+      draftReferences: state.draftReferences,
+      scopeDealId: state.scopeDealId,
+      attachmentError: state.attachmentError,
+      selectedModel: state.selectedModel,
+      sendError: state.sendError,
+      isPreparingThread: state.isPreparingThread,
+      isRunning: state.isRunning,
+      isThreadLoading: state.isThreadLoading,
+    }),
   );
   return (
     <PromptInput
@@ -195,15 +213,15 @@ function ComposerBar({
       condensed={condensed}
     />
   );
-}
+});
 
-function ThreadMessage({ message }: { message: Message }) {
+const ThreadMessage = memo(function ThreadMessage({ message }: { message: Message }) {
   return message.role === "user" ? (
     <UserMessageView message={message} />
   ) : (
     <AssistantMessageView message={message} />
   );
-}
+});
 
 function UserMessageView({ message }: { message: Message & { role: "user" } }) {
   return (
@@ -224,7 +242,10 @@ function UserMessageView({ message }: { message: Message & { role: "user" } }) {
 function AssistantMessageView({ message }: { message: AssistantMessage }) {
   const runtime = useAgentRuntimeContext();
   const { copiedMessageId, isRunning: threadRunning } = useThreadRuntimeState(
-    (state) => state,
+    (state) => ({
+      copiedMessageId: state.copiedMessageId,
+      isRunning: state.isRunning,
+    }),
   );
   const content = textOf(message);
   const isRunning = message.status.type === "running";

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -248,6 +249,27 @@ describe("AddDealModal", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Create company" }));
     expect(screen.getByRole("button", { name: /Deal details.*completed/ })).toHaveProperty("disabled", true);
+  });
+
+  it("prevents duplicate core writes and stops follow-up work after unmount", async () => {
+    const user = userEvent.setup();
+    const response = { deal: savedDeal, metadata: emptyMetadata };
+    let finishCreate = (_value: typeof response) => {};
+    createDeal.mockImplementationOnce(() => new Promise((resolve) => { finishCreate = resolve; }));
+    const view = render(<MemoryRouter>
+      <AddDealModal email="synthetic@example.test" onClose={vi.fn()} />
+    </MemoryRouter>);
+    await completeDealDetails(user);
+    const form = screen.getByRole("button", { name: "Finish deal" }).closest("form");
+    if (!form) throw new Error("Expected deal form");
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(createDeal).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).toBe("Saving deal…");
+    view.unmount();
+    await act(async () => { finishCreate(response); });
+    expect(createDealTeam).not.toHaveBeenCalled();
+    expect(saveDealMetadata).not.toHaveBeenCalled();
   });
 
   it("collects four steps before creating the deal and saving metadata on Finish deal", async () => {

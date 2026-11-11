@@ -21,6 +21,7 @@ function note(title = "Research"): NotebookDraft {
     title,
     blocks: editor.document,
     contentSchemaVersion: 1,
+    editVersion: 0,
     createdAt: "now",
     updatedAt: "now",
   };

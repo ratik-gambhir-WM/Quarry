@@ -1,19 +1,13 @@
 import { type FormEvent, useRef, useState } from "react";
 import {
   SourceFilesStep,
-  isLocalDealSourceFile,
-  type SourceFileSelection,
   type SelectedSourceFiles,
 } from "../../deal-room/DealSourceFields";
 import { X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useDealSaveWorkflow, type AddDealFormState } from "./useDealSaveWorkflow";
 import { runtime } from "@quarry/runtime";
 import type {
-  DealExtractionLocationState,
   LocalDealDataRoom,
-  LocalDealFileContents,
-  SaveDealInput,
-  SaveDealResponse,
 } from "../../../data/dealExtraction";
 import { Button } from "../../ui/button";
 import {
@@ -47,14 +41,6 @@ type AddDealModalProps = {
   onClose: () => void;
 };
 
-type AddDealFormState = DealFields & {
-  factSheetLink: string;
-  localPath: string;
-  rlLink: string;
-  sharepointLink: string;
-  sowLink: string;
-};
-
 const emptyForm: AddDealFormState = {
   dealName: "",
   dealCode: null,
@@ -84,14 +70,13 @@ export function AddDealModal({
   onClose,
   initialDeal,
 }: AddDealModalProps) {
-  const navigate = useNavigate();
   const returnFocusRef = useRef(
     document.activeElement instanceof HTMLElement &&
       document.activeElement !== document.body
       ? document.activeElement
       : null,
   );
-  const { saveDealResult, saveCompanyResult } = useWorkspace();
+  const { saveCompanyResult } = useWorkspace();
   const [form, setForm] = useState<AddDealFormState>(() =>
     initialDeal ? { ...emptyForm, ...initialDeal } : emptyForm,
   );
@@ -99,10 +84,6 @@ export function AddDealModal({
     null,
   );
   const [teamName, setTeamName] = useState("");
-  const teamSaved = useRef(false);
-  const teamCreationAttempted = useRef(false);
-  const submissionInFlight = useRef(false);
-  const [createdDeal, setCreatedDeal] = useState<SaveDealResponse | null>(null);
   const [selectedSourceFiles, setSelectedSourceFiles] =
     useState(emptySourceFiles);
   const [step, setStep] = useState<DealStep>(
@@ -114,13 +95,16 @@ export function AddDealModal({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [fieldError, setFieldError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const workflow = useDealSaveWorkflow({
+    email, initialDeal, form, teamName, selectedSourceFiles, localDataRoom, onClose,
+    onCoreFailure: () => changeStep("companies"),
+  });
+  const { createdDeal, isSubmitting, error: submitError } = workflow;
 
   function updateField(field: keyof AddDealFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
     setFieldError("");
-    setSubmitError("");
+    workflow.clearError();
   }
 
   async function chooseLocalFolder() {
@@ -155,7 +139,7 @@ export function AddDealModal({
 
   function changeStep(next: typeof step) {
     setStep(next);
-    setSubmitError("");
+    workflow.clearError();
     window.requestAnimationFrame(() => {
       titleRef.current?.focus();
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -164,132 +148,19 @@ export function AddDealModal({
 
   function updateDealFields(fields: DealFields) {
     setForm((current) => ({ ...current, ...fields }));
-    setSubmitError("");
+    workflow.clearError();
   }
 
   async function saveDeal(includeMetadata: boolean) {
-    if (submissionInFlight.current) return;
     if (!email) {
-      setSubmitError("Sign in again before adding a deal.");
+      setFieldError("Sign in again before adding a deal.");
       return;
     }
     if (!form.transactionType) {
       setFieldError("Select a transaction type.");
       return;
     }
-    submissionInFlight.current = true;
-    setIsSubmitting(true);
-    setSubmitError("");
-    let savedCore = createdDeal;
-    let savingTeam = false;
-    try {
-      if (!savedCore) {
-        const input = buildSaveDealInput(form);
-        savedCore = initialDeal
-          ? await runtime.api.updateDeal(
-              initialDeal.dealId,
-              editableFields(input),
-            )
-          : await runtime.api.createDeal(input);
-        saveDealResult(savedCore);
-        if (!initialDeal) setCreatedDeal(savedCore);
-      }
-      if (initialDeal) {
-        onClose();
-        return;
-      }
-      if (teamName.trim() && !teamSaved.current) {
-        savingTeam = true;
-        // A failed response can follow a committed create. Reconcile before replaying it.
-        if (teamCreationAttempted.current) {
-          const teams = await runtime.api.listDealTeams(savedCore.deal.dealId, {
-            limit: 100,
-          });
-          const normalizedName = teamName
-            .trim()
-            .replace(/\p{White_Space}+/gu, " ")
-            .trim();
-          teamSaved.current = teams.items.some(
-            (team) => team.name === normalizedName,
-          );
-          if (!teamSaved.current && teams.items.length > 0) {
-            throw new Error(
-              "This deal already has a different team. Close this dialog and review it in Settings.",
-            );
-          }
-        }
-        if (!teamSaved.current) {
-          teamCreationAttempted.current = true;
-          await runtime.api.createDealTeam(savedCore.deal.dealId, {
-            name: teamName.trim(),
-          });
-          teamSaved.current = true;
-        }
-        savingTeam = false;
-      }
-      if (includeMetadata) await saveSources(savedCore);
-      else finishWithoutMetadata(savedCore);
-    } catch (error) {
-      if (savedCore && !initialDeal) {
-        setSubmitError(
-          savingTeam
-          ? `Deal created, but the team could not be saved. Retry Finish deal. ${errorMessage(error)}`
-          : `Deal created, but metadata could not be saved. Retry Finish deal or skip metadata. ${errorMessage(error)}`,
-        );
-      } else {
-        if (!initialDeal) changeStep("companies");
-        setSubmitError(errorMessage(error));
-      }
-    } finally {
-      submissionInFlight.current = false;
-      setIsSubmitting(false);
-    }
-  }
-
-  async function saveSources(core: SaveDealResponse) {
-    const selections = [
-      selectedSourceFiles.sowFile,
-      selectedSourceFiles.projectTimelineFile,
-    ].filter((file): file is SourceFileSelection => file !== null);
-    const uploads =
-      localDataRoom && selections.length > 0
-        ? (
-            await runtime.platform.readDealSourceFiles({
-              paths: selections
-                .filter(isLocalDealSourceFile)
-                .map((file) => file.path),
-              rootPath: localDataRoom.rootPath,
-            })
-          ).map(localFileContentsToFile)
-        : selections.filter((file): file is File => file instanceof File);
-    const response = await runtime.api.saveDealMetadata(core.deal.dealId, {
-      factSheetLink: optionalLink(form.factSheetLink),
-      files: uploads,
-      rlLink: optionalLink(form.rlLink),
-      sharepointLink: optionalLink(form.sharepointLink),
-      sowLink: optionalLink(form.sowLink),
-    });
-    saveDealResult(response, sourceFileName(selectedSourceFiles.sowFile));
-    navigate(`/hub/deals/${encodeURIComponent(response.deal.dealId)}`, {
-      state: {
-        email,
-        result: response,
-        sowSourceName: sourceFileName(selectedSourceFiles.sowFile),
-      } satisfies DealExtractionLocationState,
-    });
-  }
-
-  function finishWithoutMetadata(core: SaveDealResponse) {
-    navigate(`/hub/deals/${encodeURIComponent(core.deal.dealId)}`, {
-      state: {
-        email,
-        result: {
-          ...core,
-          extraction: { keyQuestions: [] },
-          files: [],
-        },
-      } satisfies DealExtractionLocationState,
-    });
+    await workflow.save(includeMetadata);
   }
 
   return (
@@ -461,7 +332,7 @@ export function AddDealModal({
                       ...current,
                       [field]: file,
                     }));
-                    setSubmitError("");
+                    workflow.clearError();
                   }}
                   onUpdateField={updateField}
                   selected={selectedSourceFiles}
@@ -469,6 +340,10 @@ export function AddDealModal({
               </fieldset>
             ) : null}
 
+            {isSubmitting ? <p className="sr-only" role="status">
+              {workflow.stage === "core" ? "Saving deal…" : workflow.stage === "team" ? "Saving team…" : "Saving metadata…"}
+            </p> : null}
+            {fieldError ? <p role="alert" className="mt-3 text-sm text-error">{fieldError}</p> : null}
             {submitError ? (
               <p
                 className="mt-4 rounded-lg border border-error/25 bg-error/8 px-3 py-2 text-sm font-medium text-error"
@@ -592,50 +467,6 @@ function LocalFolderField({
       <FieldError>{error}</FieldError>
     </Field>
   );
-}
-
-function editableFields(form: DealFields): DealFields {
-  return {
-    dealName: form.dealName.trim(),
-    dealCode: form.dealCode?.trim() || null,
-    engagementType: form.engagementType,
-    transactionType: form.transactionType,
-    status: form.status,
-    startDate: form.startDate,
-    expectedCloseDate: form.expectedCloseDate,
-    actualCloseDate: form.actualCloseDate,
-    engagementCompletedDate: form.engagementCompletedDate,
-    parties: form.parties.map(({ companyId, role, notes }) => ({
-      companyId,
-      role,
-      notes,
-    })),
-    scopes: form.scopes,
-  };
-}
-function buildSaveDealInput(form: AddDealFormState): SaveDealInput {
-  return {
-    ...editableFields(form),
-    localPath:
-      runtime.target === "desktop" ? form.localPath.trim() || null : null,
-    sharepointLink: null,
-  };
-}
-
-function optionalLink(value: string) {
-  return value.trim() || null;
-}
-
-function sourceFileName(file: SourceFileSelection | null) {
-  if (!file) return undefined;
-  return isLocalDealSourceFile(file) ? file.filename : file.name;
-}
-
-function localFileContentsToFile(file: LocalDealFileContents) {
-  const bytes = Uint8Array.from(atob(file.dataBase64), (character) =>
-    character.charCodeAt(0),
-  );
-  return new File([bytes], file.filename, { type: file.mimeType });
 }
 
 function errorMessage(error: unknown) {

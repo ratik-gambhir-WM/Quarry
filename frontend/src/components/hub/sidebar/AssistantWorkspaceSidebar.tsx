@@ -170,7 +170,18 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
     threadDeleteError,
     threadListError,
     threads,
-  } = useThreadRuntimeState((state) => state);
+    nextCursor,
+  } = useThreadRuntimeState((state) => ({
+      isPreparingThread: state.isPreparingThread,
+      isRunning: state.isRunning,
+      isThreadListLoading: state.isThreadListLoading,
+      selectedThreadId: state.selectedThreadId,
+      deletingThreadId: state.deletingThreadId,
+      threadDeleteError: state.threadDeleteError,
+      threadListError: state.threadListError,
+      threads: state.threads,
+      nextCursor: state.nextCursor,
+    }));
   return (
     <div className="space-y-3">
       <button
@@ -212,7 +223,7 @@ function ChatSidebarContent({ collapsed }: { collapsed: boolean }) {
               association={thread.dealId ? "Deal" : "Freeform"}
             />
           ))}
-          {runtime.state.nextCursor ? (
+          {nextCursor ? (
             <li>
               <button
                 className="px-3 py-2 text-xs text-sidebar-muted"

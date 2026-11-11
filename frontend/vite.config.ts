@@ -39,6 +39,8 @@ export default defineConfig(({ mode }) => {
       manifest: true,
       rollupOptions: {
         output: {
+          // Package chunks must not absorb shared React/UI dependencies and eagerly load PDF code.
+          onlyExplicitManualChunks: true,
           manualChunks(id) {
             // Keep BlockNote's editing engine separate from its schema and React UI.
             if (id.includes("/node_modules/prosemirror-")) {
