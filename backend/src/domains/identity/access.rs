@@ -84,6 +84,12 @@ impl ResourceAccess {
                         "quarry_files.deal_id",
                         "deal_memberships.deal_id",
                     )
+                    .left_join(
+                        "deal_deletions",
+                        "quarry_files.deal_id",
+                        "deal_deletions.deal_id",
+                    )
+                    .and_where(Condition::is_null("deal_deletions.deal_id"))
                     .and_where(Condition::equal("deal_memberships.user_id", actor))
                     .and_where(Condition::equal("quarry_file_versions.is_current", true))
                     .and_where(Condition::is_null("quarry_files.deleted_at"))

@@ -72,7 +72,7 @@ not exist.
   Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
   projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
   in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
-- `app/migrations.rs` owns all SQLite schema (marker 17), including templates, assets, previews,
+- `app/migrations.rs` owns all SQLite schema (marker 18), including templates, assets, previews,
   metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
   `SqliteClient` to product and template repositories. Old schemas require an explicit offline development reset;
   no standalone template database setting, initializer, or memory-store default exists. Previously
@@ -152,8 +152,8 @@ request -> router -> handler -> service -> repository/client
 - Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
   version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
   do not “fix” the gap by deleting canonical SQLite data.
-- The current shared schema marker is 17. Startup creates an empty database, additively upgrades
-  validated marker-12/13/14/15/16 layouts, or validates/reuses schema 17. Accepted image document/chunk
+- The current shared schema marker is 18. Startup creates an empty database, additively upgrades
+  validated marker-12/13/14/15/16/17 layouts, or validates/reuses schema 18. Accepted image document/chunk
   text is checkpointed per immutable version for retry recovery; old images without a checkpoint
   require reviewed maintenance if their projection is lost. Existing documents require verified
   identity/graph checkpoints before serving. The one-time Helix migration tool was removed after local cutover; see `docs/shared-deal-projects.md` for offline recovery. Older profile schemas require the
@@ -184,6 +184,11 @@ request -> router -> handler -> service -> repository/client
   Do not edit generated `dist` output or bypass semantic theme tokens with a parallel style system.
 - Preserve semantic HTML, accessible names, keyboard/focus behavior, reduced-motion behavior,
   and visible async feedback.
+- Include purposeful motion when building or changing UI. Read
+  [`docs/interface-motion.md`](docs/interface-motion.md), reuse the existing timing/easing tokens
+  and shared controls, keep keyboard-triggered changes instant, and implement reduced-motion and
+  interruption behavior in the same change. Preserve state, focus, and scroll rather than remounting
+  content to replay an animation. Verify the animated and immediate paths before handoff.
 - Put all runtime mock, demo, placeholder, and development-fixture product data under
   `frontend/src/fixtures/`, grouped by feature and split into clearly named fixture files. Pages,
   components, hooks, and `data/` modules must import fixtures explicitly rather than defining mock

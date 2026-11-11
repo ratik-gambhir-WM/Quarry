@@ -1,3 +1,4 @@
+use crate::domains::deals::deletion::lifecycle::DealAdmission;
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
@@ -92,6 +93,9 @@ pub struct StoredDocumentService {
 }
 
 impl StoredDocumentService {
+    pub(crate) async fn evict_previews(&self) {
+        *self.preview_cache.lock().await = OfficePreviewCache::default();
+    }
     pub fn new(files: DocumentStore, office: OfficeConverter) -> Self {
         Self {
             files,
@@ -117,12 +121,23 @@ impl StoredDocumentService {
     }
 
     pub async fn render_pdf(&self, document: StoredDocumentBlob) -> ServiceResult<Vec<u8>> {
-        self.render_pdf_inner(document)
+        self.render_pdf_tracked(document, None).await
+    }
+    pub(crate) async fn render_pdf_tracked(
+        &self,
+        document: StoredDocumentBlob,
+        admission: Option<DealAdmission>,
+    ) -> ServiceResult<Vec<u8>> {
+        self.render_pdf_inner(document, admission)
             .await
             .map_err(ServiceError::validation)
     }
 
-    async fn render_pdf_inner(&self, document: StoredDocumentBlob) -> Result<Vec<u8>, String> {
+    async fn render_pdf_inner(
+        &self,
+        document: StoredDocumentBlob,
+        admission: Option<DealAdmission>,
+    ) -> Result<Vec<u8>, String> {
         if document.file_bytes.len() as u64 > MAX_PDF_BYTES {
             return Err(format!(
                 "The stored document is too large to preview ({} MB; limit is {} MB).",
@@ -160,6 +175,7 @@ impl StoredDocumentService {
             let mime_type = document.mime_type;
             let bytes = document.file_bytes;
             let converted = tokio::task::spawn_blocking(move || {
+                let _admission = admission;
                 render_image_bytes_as_pdf(&display_name, &mime_type, &bytes)
             })
             .await
@@ -201,6 +217,7 @@ impl StoredDocumentService {
             let bytes = document.file_bytes;
             let office = self.office.clone();
             let converted = tokio::task::spawn_blocking(move || {
+                let _admission = admission;
                 render_office_bytes_as_pdf(extension, &display_name, &bytes, |extension, bytes| {
                     office.convert_bytes(extension, bytes)
                 })
@@ -235,7 +252,14 @@ impl StoredDocumentService {
         &self,
         document: StoredDocumentBlob,
     ) -> ServiceResult<StoredDocumentText> {
-        render_stored_document_as_text(document)
+        self.render_text_tracked(document, None).await
+    }
+    pub(crate) async fn render_text_tracked(
+        &self,
+        document: StoredDocumentBlob,
+        admission: Option<DealAdmission>,
+    ) -> ServiceResult<StoredDocumentText> {
+        render_stored_document_as_text(document, admission)
             .await
             .map_err(ServiceError::validation)
     }
@@ -243,6 +267,7 @@ impl StoredDocumentService {
 
 async fn render_stored_document_as_text(
     document: StoredDocumentBlob,
+    admission: Option<DealAdmission>,
 ) -> Result<StoredDocumentText, String> {
     if document.file_bytes.len() as u64 > MAX_PDF_BYTES {
         return Err(format!(
@@ -256,16 +281,19 @@ async fn render_stored_document_as_text(
     let error_file_name = file_name.clone();
     let mime_type = document.mime_type;
     let bytes = document.file_bytes;
-    let (source_kind, text) = tokio::task::spawn_blocking(move || match mime_type.as_str() {
-        "application/pdf" => parse_pdf_from_bytes(&bytes)
-            .map(|text| ("pdf".to_string(), text))
-            .map_err(|error| format!("failed to parse the stored PDF: {error}")),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
-            parse_docx_from_bytes(bytes).map(|text| ("docx".to_string(), text))
+    let (source_kind, text) = tokio::task::spawn_blocking(move || {
+        let _admission = admission;
+        match mime_type.as_str() {
+            "application/pdf" => parse_pdf_from_bytes(&bytes)
+                .map(|text| ("pdf".to_string(), text))
+                .map_err(|error| format!("failed to parse the stored PDF: {error}")),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+                parse_docx_from_bytes(bytes).map(|text| ("docx".to_string(), text))
+            }
+            _ => Err(format!(
+                "Raw text is unavailable for `{error_file_name}` ({mime_type})."
+            )),
         }
-        _ => Err(format!(
-            "Raw text is unavailable for `{error_file_name}` ({mime_type})."
-        )),
     })
     .await
     .map_err(|error| format!("document text worker failed: {error}"))??;

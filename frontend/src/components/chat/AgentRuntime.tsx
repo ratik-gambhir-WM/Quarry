@@ -1,10 +1,12 @@
+import { createThreadRuntimeStore, type ThreadRuntimeState } from "./threadRuntimeStore";
 import type { ReactNode } from "react";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
-  useReducer,
+  useState,
+  useSyncExternalStore,
   useRef,
 } from "react";
 import { runtime } from "@quarry/runtime";
@@ -19,28 +21,7 @@ import { isChatModelValid, type AssistantMessage, type ChatModelSelection, type 
 import { addChatFiles } from "./chatAttachments";
 import { createModelAdapter } from "./threadModelAdapter";
 
-export type ThreadRuntimeState = {
-  nextCursor: string | null;
-  scopeDealId: string | null;
-  copiedMessageId: string | null;
-  deletingThreadId: string | null;
-  draft: string;
-  draftFiles: readonly File[];
-  draftReferences: readonly ChatFileReference[];
-  attachmentError: string | null;
-  selectedModel: ChatModelSelection;
-  sendError: string | null;
-  isPreparingThread: boolean;
-  isRunning: boolean;
-  isThreadListLoading: boolean;
-  isThreadLoading: boolean;
-  messages: readonly Message[];
-  selectedThreadId: string | null;
-  threadDeleteError: boolean;
-  threadLoadError: boolean;
-  threadListError: boolean;
-  threads: readonly AssistantThread[];
-};
+export type { ThreadRuntimeState } from "./threadRuntimeStore";
 
 type AgentRuntimeOptions = {
   api: Pick<QuarryApi, "createAssistantThread" | "runAssistantThread"> &
@@ -111,30 +92,25 @@ export function useAgentRuntime({
   initialDraft = "",
   initialFileReference,
 }: AgentRuntimeOptions): AgentRuntimeValue {
-  const [state, dispatch] = useReducer(
-    (_current: ThreadRuntimeState, next: ThreadRuntimeState) => next,
-    userEmail,
-    (email) => ({
-      ...emptyState,
-      draft: initialDraft,
-      draftReferences: initialFileReference && scope === "deal" && initialFileReference.dealId === dealId
-        ? [initialFileReference] : [],
-      isThreadListLoading: Boolean(email),
-      scopeDealId: scope === "deal" ? (dealId ?? null) : null,
-    }),
-  );
-  const stateRef = useRef(state);
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadTokenRef = useRef(0);
   const mountedRef = useRef(true);
-  stateRef.current = state;
+  const [store] = useState(() => createThreadRuntimeStore({
+    ...emptyState,
+    draft: initialDraft,
+    draftReferences: initialFileReference && scope === "deal" && initialFileReference.dealId === dealId
+      ? [initialFileReference] : [],
+    isThreadListLoading: Boolean(userEmail),
+    scopeDealId: scope === "deal" ? (dealId ?? null) : null,
+  }, () => {
+    loadTokenRef.current++;
+    abortControllerRef.current?.abort();
+  }));
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 
   const update = useCallback((change: Partial<ThreadRuntimeState>) => {
-    if (!mountedRef.current) return;
-    const next = { ...stateRef.current, ...change };
-    stateRef.current = next;
-    dispatch(next);
-  }, []);
+    if (mountedRef.current) store.update(change);
+  }, [store]);
 
   const replaceAssistantMessage = useCallback(
     (
@@ -144,7 +120,7 @@ export function useAgentRuntime({
       error?: string,
     ) => {
       update({
-        messages: stateRef.current.messages.map((message) =>
+        messages: store.current.messages.map((message) =>
           message.role === "assistant" && message.id === id
             ? {
                 ...message,
@@ -158,7 +134,7 @@ export function useAgentRuntime({
         ),
       });
     },
-    [update],
+    [store, update],
   );
 
   const startRun = useCallback(
@@ -171,8 +147,8 @@ export function useAgentRuntime({
       if (!mountedRef.current) return;
       const assistantMessage = assistantMessageFor();
       const messages = reusesUserMessage
-        ? [...stateRef.current.messages, assistantMessage]
-        : [...stateRef.current.messages, userMessage, assistantMessage];
+        ? [...store.current.messages, assistantMessage]
+        : [...store.current.messages, userMessage, assistantMessage];
       const text = textContent(userMessage);
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -236,13 +212,13 @@ export function useAgentRuntime({
         update({ isRunning: false });
       }
     },
-    [api, onContextTruncated, replaceAssistantMessage, update],
+    [api, onContextTruncated, replaceAssistantMessage, store, update],
   );
 
   const send = useCallback(
-    (prompt = stateRef.current.draft) => {
+    (prompt = store.current.draft) => {
       const text = prompt.trim();
-      const current = stateRef.current;
+      const current = store.current;
       if (
         !text ||
         !isChatModelValid(current.selectedModel) ||
@@ -270,7 +246,7 @@ export function useAgentRuntime({
       }
 
       update({ isPreparingThread: true, sendError: null });
-      const selectedThreadId = stateRef.current.selectedThreadId;
+      const selectedThreadId = store.current.selectedThreadId;
       const createAssistantThread = api.createAssistantThread;
       const threadId = selectedThreadId
         ? Promise.resolve(selectedThreadId)
@@ -278,9 +254,9 @@ export function useAgentRuntime({
             if (!mountedRef.current) return null;
             update({
               selectedThreadId: thread.threadId,
-              threads: [thread, ...stateRef.current.threads],
+              threads: [thread, ...store.current.threads],
             });
-            return thread.threadId;
+            return store.current.selectedThreadId === thread.threadId ? thread.threadId : null;
           });
       void threadId
         .then((id) => {
@@ -293,21 +269,21 @@ export function useAgentRuntime({
         })
         .finally(() => update({ isPreparingThread: false }));
     },
-    [api.createAssistantThread, startRun, update, userEmail, scope, dealId],
+    [api.createAssistantThread, startRun, store, update, userEmail, scope, dealId],
   );
 
   const setReferences = useCallback((draftReferences: readonly ChatFileReference[]) => {
-    const current = stateRef.current;
+    const current = store.current;
     if (current.isPreparingThread || current.isThreadLoading) return;
     if (draftReferences.length + current.draftFiles.length > 20) {
       update({ attachmentError: "Choose up to 20 uploads and file references in total." });
       return;
     }
     update({ draftReferences, attachmentError: null });
-  }, [update]);
+  }, [store, update]);
 
   const addReference = useCallback((reference: ChatFileReference) => {
-    const current = stateRef.current;
+    const current = store.current;
     if (current.scopeDealId !== reference.dealId || current.draftReferences.some(
       (file) => file.dealId === reference.dealId && file.fileId === reference.fileId,
     )) return;
@@ -317,31 +293,31 @@ export function useAgentRuntime({
   const setDraft = useCallback((draft: string) => update({ draft }), [update]);
 
   const addFiles = useCallback((incoming: readonly File[]) => {
-    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
-    if (stateRef.current.draftFiles.length + stateRef.current.draftReferences.length + incoming.length > 20) {
+    if (store.current.isPreparingThread || store.current.isThreadLoading) return;
+    if (store.current.draftFiles.length + store.current.draftReferences.length + incoming.length > 20) {
       update({ attachmentError: "Choose up to 20 uploads and file references in total." });
       return;
     }
-    const result = addChatFiles(stateRef.current.draftFiles, incoming);
+    const result = addChatFiles(store.current.draftFiles, incoming);
     update({ draftFiles: result.files, attachmentError: result.error });
-  }, [update]);
+  }, [store, update]);
 
   const removeFile = useCallback((index: number) => {
-    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    if (store.current.isPreparingThread || store.current.isThreadLoading) return;
     update({
-      draftFiles: stateRef.current.draftFiles.filter((_, fileIndex) => fileIndex !== index),
+      draftFiles: store.current.draftFiles.filter((_, fileIndex) => fileIndex !== index),
       attachmentError: null,
     });
-  }, [update]);
+  }, [store, update]);
 
   const setModel = useCallback((selectedModel: ChatModelSelection) => {
-    if (stateRef.current.isPreparingThread || stateRef.current.isThreadLoading) return;
+    if (store.current.isPreparingThread || store.current.isThreadLoading) return;
     update({ selectedModel });
-  }, [update]);
+  }, [store, update]);
 
   const deleteThread = useCallback(
     async (threadId: string) => {
-      const current = stateRef.current;
+      const current = store.current;
       const deleteAssistantThread = api.deleteAssistantThread;
       if (
         !userEmail ||
@@ -355,26 +331,26 @@ export function useAgentRuntime({
       update({ deletingThreadId: threadId, threadDeleteError: false });
       try {
         await deleteAssistantThread(threadId);
-        const wasSelected = stateRef.current.selectedThreadId === threadId;
+        const wasSelected = store.current.selectedThreadId === threadId;
         if (wasSelected) loadTokenRef.current += 1;
         update({
           copiedMessageId: wasSelected
             ? null
-            : stateRef.current.copiedMessageId,
+            : store.current.copiedMessageId,
           deletingThreadId: null,
-          draft: wasSelected ? "" : stateRef.current.draft,
-          draftFiles: wasSelected ? [] : stateRef.current.draftFiles,
-          draftReferences: wasSelected ? [] : stateRef.current.draftReferences,
-          attachmentError: wasSelected ? null : stateRef.current.attachmentError,
-          sendError: wasSelected ? null : stateRef.current.sendError,
+          draft: wasSelected ? "" : store.current.draft,
+          draftFiles: wasSelected ? [] : store.current.draftFiles,
+          draftReferences: wasSelected ? [] : store.current.draftReferences,
+          attachmentError: wasSelected ? null : store.current.attachmentError,
+          sendError: wasSelected ? null : store.current.sendError,
           isThreadLoading: wasSelected
             ? false
-            : stateRef.current.isThreadLoading,
-          messages: wasSelected ? [] : stateRef.current.messages,
+            : store.current.isThreadLoading,
+          messages: wasSelected ? [] : store.current.messages,
           selectedThreadId: wasSelected
             ? null
-            : stateRef.current.selectedThreadId,
-          threads: stateRef.current.threads.filter(
+            : store.current.selectedThreadId,
+          threads: store.current.threads.filter(
             (thread) => thread.threadId !== threadId,
           ),
         });
@@ -387,11 +363,11 @@ export function useAgentRuntime({
         update({ deletingThreadId: null, threadDeleteError: true });
       }
     },
-    [api.deleteAssistantThread, update, userEmail],
+    [api.deleteAssistantThread, store, update, userEmail],
   );
 
   const newChat = useCallback(() => {
-    const current = stateRef.current;
+    const current = store.current;
     if (current.isPreparingThread || current.isRunning) return;
     loadTokenRef.current += 1;
     onContextTruncated(false);
@@ -408,11 +384,11 @@ export function useAgentRuntime({
       threadDeleteError: false,
       threadLoadError: false,
     });
-  }, [onContextTruncated, update]);
+  }, [onContextTruncated, store, update]);
 
   const selectThread = useCallback(
     async (threadId: string) => {
-      const current = stateRef.current;
+      const current = store.current;
       const getAssistantThread = api.getAssistantThread;
       if (
         !userEmail ||
@@ -456,14 +432,14 @@ export function useAgentRuntime({
         }
       }
     },
-    [api.getAssistantThread, onContextTruncated, update, userEmail],
+    [api.getAssistantThread, onContextTruncated, store, update, userEmail],
   );
 
   const stop = useCallback(() => {
     const controller = abortControllerRef.current;
     if (!controller) return;
     controller.abort();
-    const runningMessage = [...stateRef.current.messages]
+    const runningMessage = [...store.current.messages]
       .reverse()
       .find(
         (message): message is AssistantMessage =>
@@ -476,11 +452,11 @@ export function useAgentRuntime({
         type: "incomplete",
       });
     }
-  }, [replaceAssistantMessage]);
+  }, [replaceAssistantMessage, store]);
 
   const retry = useCallback(
     (messageId: string) => {
-      const current = stateRef.current;
+      const current = store.current;
       if (current.isRunning || current.isPreparingThread || !isChatModelValid(current.selectedModel)) return;
       const failedIndex = current.messages.findIndex(
         (message) => message.id === messageId,
@@ -491,12 +467,12 @@ export function useAgentRuntime({
       void startRun(previous, current.selectedThreadId ?? "", true,
         current.selectedModel.type === "model" ? current.selectedModel.id.trim() : undefined);
     },
-    [startRun, update],
+    [startRun, store, update],
   );
 
   const copy = useCallback(
     async (messageId: string) => {
-      const message = stateRef.current.messages.find(
+      const message = store.current.messages.find(
         (candidate) => candidate.id === messageId,
       );
       if (message?.role !== "assistant" || !navigator.clipboard) return;
@@ -507,7 +483,7 @@ export function useAgentRuntime({
         // Clipboard access is browser-policy controlled. The response remains selectable if denied.
       }
     },
-    [update],
+    [store, update],
   );
 
   useEffect(() => {
@@ -524,7 +500,7 @@ export function useAgentRuntime({
           update({
             isThreadListLoading: false,
             threadListError: false,
-            threads: mergeThreadPage(page.threads, stateRef.current.threads),
+            threads: mergeThreadPage(page.threads, store.current.threads),
             nextCursor: page.nextCursor,
           });
         }
@@ -537,7 +513,8 @@ export function useAgentRuntime({
     return () => {
       active = false;
     };
-  }, [api, update, userEmail, scope, dealId]);
+  }, [api, store, update, userEmail, scope, dealId]);
+
 
   useEffect(() => {
     mountedRef.current = true;
@@ -548,11 +525,11 @@ export function useAgentRuntime({
   }, []);
 
   const loadMoreThreads = useCallback(async () => {
-    const cursor = stateRef.current.nextCursor;
+    const cursor = store.current.nextCursor;
     if (
       !api.listAssistantThreads ||
       !cursor ||
-      stateRef.current.isThreadListLoading
+      store.current.isThreadListLoading
     )
       return;
     update({ isThreadListLoading: true });
@@ -567,12 +544,12 @@ export function useAgentRuntime({
         isThreadListLoading: false,
         threadListError: false,
         nextCursor: page.nextCursor,
-        threads: mergeThreadPage(page.threads, stateRef.current.threads),
+        threads: mergeThreadPage(page.threads, store.current.threads),
       });
     } catch {
       update({ isThreadListLoading: false, threadListError: true });
     }
-  }, [api, userEmail, scope, dealId, update]);
+  }, [api, userEmail, scope, dealId, store, update]);
   return {
     loadMoreThreads,
     copy,

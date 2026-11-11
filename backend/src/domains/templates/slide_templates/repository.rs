@@ -17,6 +17,8 @@ const MAX_STORED_PREVIEW_DIMENSION: u32 = 10_000;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 /// Persistence boundary used by both import and export services.
 pub trait TemplateRepository: Send + Sync {
+    /// Whether this scope has unfinished stages, including delayed retries and leases.
+    fn has_pending_slide_processing(&self) -> RepositoryResult<bool>;
     /// Atomically reset only a terminal failed stage in this app's saved template.
     fn retry_failed_slide_processing(
         &self,
@@ -210,6 +212,9 @@ impl SqliteTemplateRepository {
     }
 }
 impl TemplateRepository for SqliteTemplateRepository {
+    fn has_pending_slide_processing(&self) -> RepositoryResult<bool> {
+        repository_boundary(|| Self::has_pending_slide_processing(self))
+    }
     fn retry_failed_slide_processing(
         &self,
         id: &str,

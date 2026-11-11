@@ -27,6 +27,7 @@ import {
   quarryDataGridTableClassNames,
 } from "../reui/data-grid/quarry-data-grid";
 import { ViewTransition } from "../ui/ViewTransition";
+import { DealActionsMenu, type DeleteDealTarget } from "./DealActionsMenu";
 
 const dealsDataGridTableClassNames = {
   ...quarryDataGridTableClassNames,
@@ -41,6 +42,7 @@ type DealsTableProps = {
   deals: DealPortfolioView[];
   navigationState?: WorkspaceLocationState;
   onReset: () => void;
+  onDelete?: (target: DeleteDealTarget) => void;
 };
 
 export function DealsTable(props: DealsTableProps) {
@@ -51,7 +53,12 @@ export function DealsTable(props: DealsTableProps) {
     />
   );
 }
-function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
+function DealsTableState({
+  deals,
+  navigationState,
+  onReset,
+  onDelete,
+}: DealsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -78,22 +85,27 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
               name={deal.transitionName}
               share="morph"
             >
-              <div className="min-w-0 max-w-[24rem]">
-                <ViewTransition
-                  default="none"
-                  name={`${deal.transitionName}-title`}
-                  share="text-morph"
-                >
-                  <Link
-                    aria-label={`Open ${deal.name}`}
-                    title={deal.name.trim() || "N/A"}
-                    className="block truncate font-medium text-foreground outline-none hover:text-primary focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
-                    state={navigationState}
-                    to={getDealRoomPath(deal.id)}
+              <div className="flex min-w-0 max-w-[24rem] items-center gap-1">
+                <div className="min-w-0">
+                  <ViewTransition
+                    default="none"
+                    name={`${deal.transitionName}-title`}
+                    share="text-morph"
                   >
-                    {deal.name.trim() || "N/A"}
-                  </Link>
-                </ViewTransition>
+                    <Link
+                      aria-label={`Open ${deal.name}`}
+                      title={deal.name.trim() || "N/A"}
+                      className="block truncate font-medium text-foreground outline-none hover:text-primary focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                      state={navigationState}
+                      to={getDealRoomPath(deal.id)}
+                    >
+                      {deal.name.trim() || "N/A"}
+                    </Link>
+                  </ViewTransition>
+                </div>
+                {deal.canDelete && onDelete ? (
+                  <DealActionsMenu deal={deal} onDelete={onDelete} />
+                ) : null}
               </div>
             </ViewTransition>
           );
@@ -109,7 +121,7 @@ function DealsTableState({ deals, navigationState, onReset }: DealsTableProps) {
       linkColumn("factSheetHref", "Fact sheet"),
       linkColumn("sharepointHref", "SharePoint"),
     ],
-    [navigationState],
+    [navigationState, onDelete],
   );
 
   const table = useTable({

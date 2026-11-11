@@ -1,14 +1,18 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useDeferredValue,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
 import { useWorkspace } from "../app/WorkspaceProvider";
 import { useNavigate } from "react-router-dom";
 import { AddDealMenu } from "../components/deals/AddDealMenu";
+import type { DeleteDealTarget } from "../components/deals/DealActionsMenu";
+import { DeleteDealDialog } from "../components/deals/DeleteDealDialog";
 import {
   DealsSearch,
   DealsViewMenu,
@@ -133,6 +137,9 @@ function DealsContent({
   const navigate = useNavigate();
   const { dealsResource } = useWorkspace();
   const deferredQuery = useDeferredValue(query);
+  const [deletingDeal, setDeletingDeal] = useState<DeleteDealTarget | null>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const closeDeletion = useCallback(() => setDeletingDeal(null), []);
 
   const visibleDeals = useMemo(
     () => filterDealPortfolioViews(deals, deferredQuery, "all"),
@@ -144,7 +151,7 @@ function DealsContent({
   }
 
   return (
-    <div className="flex w-full flex-col gap-5 pb-10">
+    <div ref={content} tabIndex={-1} className="flex w-full flex-col gap-5 pb-10 outline-none">
       {dealsResource.status === "loading" ? (
         <div role="status" aria-label="Loading deals" className="space-y-3">
           <span className="sr-only">Loading deals…</span>
@@ -157,6 +164,7 @@ function DealsContent({
           deals={visibleDeals}
           navigationState={navigationState}
           onReset={resetFilters}
+          onDelete={dealsResource.status === "success" && dealsResource.source === "server" ? setDeletingDeal : undefined}
         />
       ) : (
         // Keep the lazy boundary unanimated so it does not suppress the per-deal shared morphs.
@@ -169,6 +177,9 @@ function DealsContent({
           />
         </Suspense>
       )}
+      {deletingDeal ? (
+        <DeleteDealDialog key={deletingDeal.id} deal={deletingDeal} fallbackFocus={content} onClose={closeDeletion} />
+      ) : null}
     </div>
   );
 }

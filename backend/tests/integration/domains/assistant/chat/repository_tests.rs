@@ -296,6 +296,24 @@ async fn thread_pagination_keeps_same_timestamp_ties() {
 async fn scoped_cursor_filters_before_limiting_even_when_recency_is_tied() {
     let (repository, owner, sqlite) = repository_fixture().await;
     sqlite.with_connection(|c| c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now'),('DEAL-B',?1,'B','sell_side','unknown','pipeline','now','now')", [owner])).unwrap();
+    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [owner])).unwrap();
+    sqlite
+        .with_connection(|c| {
+            c.execute(
+                "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",
+                [],
+            )
+        })
+        .unwrap();
+    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-B',?1,'owner','now','now')", [owner])).unwrap();
+    sqlite
+        .with_connection(|c| {
+            c.execute(
+                "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-B')",
+                [],
+            )
+        })
+        .unwrap();
     for (thread, deal) in [
         ("z-free", None),
         ("y-a", Some("DEAL-A")),

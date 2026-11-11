@@ -6,6 +6,7 @@ import {
   getWorkspaceDataSource,
   useWorkspaceDeals,
 } from "@/hooks/useWorkspaceDeals";
+import { acceptDealDeletion } from "@/data/dealDeletion/lifecycle";
 import type { PersistedDeal } from "@/contracts/quarryApi";
 import { testDeal, testMetadata, testParty } from "@/test/fixtures/deals";
 
@@ -325,4 +326,16 @@ it("keeps a saved aggregate when an older list finishes, while retaining other d
       resource.status === "success" && resource.deals.map((d) => d.room.name),
     ).toEqual(["Edited", "Project Alpha"]);
   });
+});
+
+it("never restores an accepted deletion from stale or refreshed portfolio responses", async () => {
+  const aggregate = { ...testDeal({ dealId: "deleting-portfolio" }), metadata: null };
+  const stale = deferred<PersistedDeal[]>(); listDeals.mockReturnValueOnce(stale.promise).mockResolvedValue([aggregate]);
+  const { result } = renderHook(() => useWorkspaceDeals("api"));
+  await act(async () => { await acceptDealDeletion(aggregate.dealId, async () => null); });
+  await act(async () => { stale.resolve([aggregate]); await stale.promise; });
+  expect(result.current.resource).toMatchObject({ status: "success", source: "server", deals: [] });
+  await act(async () => result.current.retry());
+  await waitFor(() => expect(result.current.resource).toMatchObject({ status: "success", deals: [] }));
+  await expect(result.current.loadDeal(aggregate.dealId)).rejects.toThrow("unavailable");
 });

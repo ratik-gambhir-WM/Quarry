@@ -5,18 +5,16 @@ use super::super::{
     TemplateRepository,
 };
 use super::{SlideClassificationService, SlideProviderError};
+use crate::shared::on_demand_task::OnDemandTask;
 use chrono::{DateTime, Utc};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
-use tokio::{
-    sync::{watch, Notify},
-    task::{JoinHandle, JoinSet},
-};
+use tokio::{sync::watch, task::JoinSet};
 
 pub struct SlideClassificationWorkerOptions {
     pub classification_max_attempts: usize,
@@ -38,11 +36,9 @@ pub struct SlideClassificationWorkerOptions {
 pub struct SlideClassificationWorker {
     options: SlideClassificationWorkerOptions,
     stopping: AtomicBool,
-    polling: AtomicBool,
     prefer_classification: AtomicBool,
-    wake: Notify,
     cancel: watch::Sender<bool>,
-    task: Mutex<Option<JoinHandle<()>>>,
+    task: OnDemandTask,
 }
 
 enum Work {
@@ -98,45 +94,30 @@ impl SlideClassificationWorker {
         Self {
             options,
             stopping: AtomicBool::new(false),
-            polling: AtomicBool::new(false),
             prefer_classification: AtomicBool::new(true),
-            wake: Notify::new(),
             cancel,
-            task: Mutex::new(None),
+            task: OnDemandTask::default(),
         }
     }
-    /// Start polling and immediately try to lease durable work.
-    pub fn start(self: &Arc<Self>) {
-        self.polling.store(true, Ordering::Release);
-        self.notify();
-    }
-    /// Drain immediately even when periodic polling has not been started.
+    /// Spawn a bounded drain, or wake the current one. Retire when durable work is exhausted.
     pub fn notify(self: &Arc<Self>) {
         if self.stopping.load(Ordering::Acquire) {
             return;
         }
-        let Ok(mut task) = self.task.lock() else {
-            return;
-        };
-        if task.as_ref().is_some_and(|task| !task.is_finished()) {
-            self.wake.notify_one();
-            return;
-        }
         let worker = Arc::clone(self);
-        *task = Some(tokio::spawn(async move {
+        self.task.notify(async move {
             worker.run().await;
-        }));
+        });
     }
     /// Stop new claims immediately; in-flight jobs can still drain.
     pub fn request_stop(&self) {
         self.stopping.store(true, Ordering::Release);
-        self.polling.store(false, Ordering::Release);
-        self.wake.notify_one();
+        self.task.request_stop();
     }
     /// Stop claiming jobs, then cancel provider futures after the bounded drain.
     pub async fn stop(&self, drain_timeout: Duration) {
         self.request_stop();
-        let task = self.task.lock().ok().and_then(|mut task| task.take());
+        let task = self.task.take_task();
         if let Some(mut task) = task {
             if tokio::time::timeout(drain_timeout, &mut task)
                 .await
@@ -150,8 +131,8 @@ impl SlideClassificationWorker {
     }
     async fn run(self: Arc<Self>) {
         let mut active = JoinSet::new();
-        let mut poll = tokio::time::interval(Duration::from_secs(1));
         loop {
+            self.task.begin_scan();
             while !self.stopping.load(Ordering::Acquire) && active.len() < self.options.concurrency
             {
                 let now = (self.options.now)();
@@ -177,14 +158,26 @@ impl SlideClassificationWorker {
                     worker.execute(work).await;
                 });
             }
-            if (self.stopping.load(Ordering::Acquire) || !self.polling.load(Ordering::Acquire))
-                && active.is_empty()
-            {
-                return;
+            if active.is_empty() {
+                if self.stopping.load(Ordering::Acquire) {
+                    return;
+                }
+                let repository = self.options.repository.clone();
+                match tokio::task::spawn_blocking(move || repository.has_pending_slide_processing())
+                    .await
+                {
+                    Ok(Ok(false)) => {
+                        if self.task.retire_if_idle() {
+                            return;
+                        }
+                        continue;
+                    }
+                    Ok(Ok(true)) => {} // Includes future retries and unexpired leases.
+                    _ => tracing::warn!("classification worker could not read pending work"),
+                }
             }
             tokio::select! {
-                _=poll.tick(),if self.polling.load(Ordering::Acquire)=>{},
-                _=self.wake.notified()=>{},
+                _=self.task.wait(Duration::from_secs(1))=>{},
                 result=active.join_next(),if !active.is_empty()=>{if let Some(Err(error))=result{tracing::warn!(error=%error,"classification worker task failed");}},
             }
         }

@@ -3,10 +3,17 @@ use crate::shared::error::ServiceResult;
 #[derive(Clone)]
 pub struct DealAccessService {
     repository: MembershipRepository,
+    lifecycle: crate::domains::deals::deletion::lifecycle::DealLifecycle,
 }
 impl DealAccessService {
     pub fn new(repository: MembershipRepository) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            lifecycle: Default::default(),
+        }
+    }
+    pub(crate) fn lifecycle(&self) -> &crate::domains::deals::deletion::lifecycle::DealLifecycle {
+        &self.lifecycle
     }
     pub async fn require(
         &self,

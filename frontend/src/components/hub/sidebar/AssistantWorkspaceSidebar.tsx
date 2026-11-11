@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useContentTransition } from "../../../hooks/useContentTransition";
 import type { KeyboardEvent } from "react";
 import { Archive, MoreHorizontal, Trash2 } from "lucide-react";
 import type { HomeSidebarProps } from "./sidebarTypes";
@@ -33,6 +34,7 @@ export function AssistantWorkspaceSidebar({
   tools,
 }: AssistantWorkspaceSidebarProps) {
   const [activeView, setActiveView] = useState<AssistantSidebarView>("chat");
+  const contentRef = useContentTransition(activeView);
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -100,6 +102,7 @@ export function AssistantWorkspaceSidebar({
     >
       {({ collapsed }) => (
         <div
+          ref={contentRef}
           aria-labelledby={`assistant-${activeView}-tab`}
           id="assistant-sidebar-panel"
           role="tabpanel"

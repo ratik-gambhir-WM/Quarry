@@ -550,8 +550,9 @@ global state or query-cache library.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - The Data Room PDF surface uses the vendored Extend UI editor on EmbedPDF/PDFium for rendering,
   page navigation, annotations, comments, and export. The Data Room instance exposes only View and
-  Annotate modes through a mode dropdown. The top toolbar contains the pages sidebar and page
-  navigation; document controls and preview actions appear in the horizontally scrollable ribbon.
+  Annotate modes through a mode dropdown. A single toolbar row starts with the pages sidebar
+  toggle, page navigation, and mode dropdown. Document controls and preview actions appear in
+  the horizontally scrollable remainder of the ribbon.
   The zoom selector sizes to its current percentage and dropdown arrow instead of a fixed width.
   The loaded PDF toolbar omits the raw-text toggle and duplicate Close action; document tabs own
   closing. Loading/error shells retain their accessible Close action.
@@ -657,9 +658,11 @@ global state or query-cache library.
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
   section enables Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents.
   Deal Activity shows persisted activity for saved deals through a Quarry-themed Stealth activity
-  feed with day groups, event icons, exact timestamp labels, and a responsive timeline. It retains
-  the API’s oldest-first cursor order; loading, empty, retry, and paginated states remain owned by
-  the existing request resource. Site Visits follows it and restores the
+  feed with day groups, event icons, exact timestamp labels, and a responsive timeline. Icons use
+  semantic colors: green for uploads/additions/creation, red for removal/deletion, amber for edits,
+  purple for ownership transfers, and blue for other history; action labels retain the meaning
+  independently of color. It retains the API’s oldest-first cursor order; loading, empty, retry,
+  and paginated states remain owned by the existing request resource. Site Visits follows it and restores the
   existing editable calendar, timeline, and tasks beneath the persistent tab header; demo Deal
   Activity retains its fixture timeline. Site Visits calendar edits remain session-only and do not
   create persisted activity events or durable visit records. Enabled tabs use the `section` query parameter, with Overview
@@ -692,7 +695,11 @@ global state or query-cache library.
   container; an empty Data Room continues to use the upload-first state.
 - The Assistant page uses the custom `AgentRuntime` for its selected conversation and remote
   thread list. Axum/SQLite own thread metadata and normalized messages; the runtime owns the
-  composer, active streaming state, retry actions, and pinned scroll. The provider wraps both the
+  composer, active streaming state, retry actions, and pinned scroll. Each keyed provider owns a
+  `threadRuntimeStore` observed through `useSyncExternalStore`. Its first/last subscriber controls
+  the deletion-event subscription; snapshot reads and store construction are side-effect-free.
+  Deletion callbacks clear affected conversations, cancel streams and invalidate pending history;
+  unrelated events leave the snapshot unchanged. The provider wraps both the
   route-specific sidebar and conversation, so New chat and persisted previous-chat selection share
   one runtime owner. It retains locally created threads when the initial remote list resolves late
   and returns a failed history load to an explicit retryable selection state. The provider is keyed by the workspace email to prevent one development
@@ -846,9 +853,18 @@ limit inside the mutation transaction and returns HTTP 409 for a second team, in
 name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
 but cannot add more. The paginated team API and schema are unchanged.
 
-The live working tree includes React canary View Transition wrappers and CSS transition recipes.
-Any canary API use must retain feature/fallback behavior, keyboard/focus semantics, and
-`prefers-reduced-motion` behavior.
+Interface motion follows [the maintained motion guide](interface-motion.md). Shared Radix menus,
+popovers, select popups, and tooltips use 180 ms entrances and 120 ms exits; shared dialog surfaces
+use 260/160 ms. Existing primitives retain presence/unmounting and focus ownership. Pointer-driven
+Deal Room section and Assistant sidebar-view changes use a cancellable 180 ms native content
+transition on the existing container, without introducing keyed remounts or additional request/state
+resets. Shared tab panels use the matching short CSS entrance, and sidebar width changes take 220 ms. React canary
+View Transition recipes retain their fallback wrapper, use shorter opacity/transform transitions,
+and avoid delayed entrances and large-area blur. The product root tracks pointer/keyboard input
+through document capture listeners; keyboard-triggered motion is suppressed for these shared
+surfaces and view-transition snapshots. Reduced-motion styles clear delays as well as durations;
+the content hook also cancels when the preference changes. Native animation support is optional.
+These controls are shared by the web and desktop UI; they do not alter the transport boundary.
 
 The Assistant keeps the 40-pixel `WorkspaceHeader` rail and its `Assistant` title, and
 uses Assistant-only Deal Hub and Chat sidebar-view tabs. Chat is initially active and contains the
@@ -986,6 +1002,7 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `quarry_api_get` | Relay versioned JSON GET | main window/origin; path policy; safe base URL |
 | `quarry_api_get_pdf` | Relay stored document PDF bytes | exact route shape; PDF MIME/signature; 64 MB cap |
 | `quarry_api_delete` | Relay versioned DELETE with a required 204 response | Main window/origin; path policy; safe base URL |
+| `quarry_api_delete_json` | Relay permanent-deal DELETE (202 receipt or completed 204) | Main window/origin; exact deal-ID path; bearer credentials; safe base URL |
 | `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy |
 | `quarry_api_patch` | Relay notebook resource PATCH | main window/origin; canonical resource paths; 2 MiB JSON; authenticated status errors |
 | `subscribe_notebook_job` | Relay authenticated notebook save-job SSE | canonical notebook/job/subscription IDs; 64 KiB events; cancellation; ten-minute maximum |
@@ -1049,6 +1066,8 @@ method allowlist.
 | POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
 | POST | `/deals/{deal_id}/archive` | Set `archivedAt` idempotently | Preserves status, metadata, parties, scopes, files, and linked chats |
+| DELETE | `/deals/{deal_id}` | Accept durable permanent deletion or return completed receipt | Current membership owner; archived deals allowed; 202 JSON/Location or completed 204; no-store |
+| GET | `/deal-deletions/{deletion_id}` | Poll durable cleanup state after the deal is gone | Current valid session for the accepting actor only; no-store |
 | GET/POST | `/companies` | Search/create the resolved owner's company directory | `{companies, hasMore}`; default 30/max 100; no implicit name/website merge |
 | POST | `/companies/{company_id}/update` | Edit shared company details | Same-owner lookup; reflected in every linked deal; no delete/merge |
 | GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
@@ -1274,8 +1293,8 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 SQLite remains canonical, per the implementation decision in
 [Slide Templates Studio storage and migration](slide-templates-migration.md). Templates share
 Quarry's shared `SqliteClient` pool and database location; `app/migrations.rs` owns all
-schema DDL and marker 17. Startup creates a fresh schema, upgrades validated markers 12/13/14/15/16,
-or validates/reuses marker 17; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
+schema DDL and marker 18. Startup creates a fresh schema, upgrades validated markers 12/13/14/15/16/17,
+or validates/reuses marker 18; older profiles require an explicit offline development reset. Fresh databases receive the complete schema;
 unsupported or damaged layouts fail without deletion. There is no separate template initializer,
 connection, memory default, or database-path setting. Templates, image BLOBs, previews, metadata,
 memberships, classification, FTS, and both finite dimensioned embedding artifacts are stored
@@ -1324,8 +1343,12 @@ for actual progress. The shared web and desktop template import actions use thes
 legacy Diligence Studio import contract remains separate. Ordinary imports and built-ins retain best-effort previews
 and do not fabricate vectors.
 
-One background worker starts after embedded reconciliation, leases saved JSON/preview from SQLite,
-and alternates classification and embedding stages with concurrency four. Classification commits
+Classified imports and manual retries notify an on-demand coordinator after committing SQLite.
+Each leased stage runs as a short-lived Tokio task; the coordinator alternates classification and
+embedding stages with concurrency four and retires once no unfinished work remains. Bootstrap
+requests one recovery scan after embedded reconciliation. While work remains, one-second wake
+checks retain future retries and unexpired leases;
+new requests wake the same coordinator immediately. Classification commits
 metadata/FTS and embedding documents before embeddings run; a failed embedding preserves those
 artifacts. Each stage has up to three attempts, a 150-second operation timeout, 30-second lease
 padding and exponential retries starting at five seconds with up to 25% jitter. Retryable provider
@@ -1335,7 +1358,16 @@ attempts, leases, sanitized error codes and terminal `failed`/`ready` states are
 restart resumes pending/due jobs and recovers expired leases. These are single-host workers, not a
 distributed queue; live pipeline changes require draining old writers. HTTP disconnects after commit
 do not cancel saved jobs. Shutdown stops claims, drains for five seconds, then cancels provider
-futures and records retryable work. Job claims enforce the fixed app membership.
+futures and records retryable work. Job claims and pending-work probes enforce the fixed app
+membership. Notifications run inside the blocking publication task after commit, so cancelling
+the HTTP future cannot strand a committed job before its wake-up. Publication still observes
+request/shutdown cancellation before committing.
+
+Both this coordinator and deal deletion use `shared/on_demand_task` for single-coordinator
+admission and retirement. A notification racing an empty-queue scan either forces a rescan or
+starts a successor task. The helper owns task lifetime and wake-ups only; each domain retains its
+durable queue, retry policy and concurrency limit. These tasks share the application's Tokio
+runtime and infrastructure; they do not provide separate-process CPU or database isolation.
 
 Manual retry is available only for a terminal failed stage on an existing app-visible template.
 The retry transaction resets that stage's attempts, retry schedule, error and lease, then wakes the
@@ -1416,6 +1448,47 @@ Notebook editor supports explicit Save, lazy saved-note loading and job/conflict
 organization controls remain deferred. See [notebook API and recovery](notebook-api.md) for exact
 routes, DTO/null semantics, bounds, queue/lease policy, pipeline, cleanup, errors and schema rollout.
 
+### 7.8 Permanent deal deletion
+
+The authenticated owner can accept asynchronous deletion with `DELETE /deals/{deal_id}` and poll
+`GET /deal-deletions/{deletion_id}`. SQLite receipts immediately hide the deal and fence writes;
+only verified cross-store cleanup becomes completed. Archive remains synchronous and retains data.
+`domains/deals/deletion` owns ledger transactions, cleanup phases in `service.rs`, and on-demand
+scheduling in `worker.rs`; document graph cleanup stays inside `documents/graph`. Acceptance
+commits and notifies in a short-lived task that survives cancellation of the accepting HTTP future.
+Bootstrap requests a recovery scan of durable receipts. The coordinator scans due receipts in
+pages of 16, spawns at most four deal cleanup tasks concurrently, and skips busy deals until a later
+scan without blocking later pages. Each task ends after its cleanup sweep; the coordinator retires
+when no pending/running/retrying receipts remain, including when only blocked/completed receipts
+are retained. One-second checks continue only while unfinished work or a ledger-read error remains,
+preserving delayed retries and drain checks without another request. Helix
+writes retain their shared serialization. A separate Helix `QuarryDealLifecycle` control record and
+unique index fence every prepared setup/chunk/publication inside its remote transaction. Ingestion
+preflight includes these additional clauses. Document identities and existing indexes remain stable.
+
+Cleanup drains active tasks, removes all linked chats across users, detaches private notebook deal
+links, and cascades the canonical deal aggregate. Personal notes/jobs/projections, companies,
+templates, other deals and external originals survive. Minimal receipts/fences reserve deleted IDs;
+content-free temporary target manifests survive until cleanup is verified. Current membership,
+canonical candidate filtering, final-result checks and stream revocation also consult deletion state.
+Chat revocation cancels the provider future independently of stream backpressure. When membership
+loss leaves a private thread intact, the worker saves a terminal cancelled response with its partial
+text before releasing admission. Final persistence still rejects an accepted deletion barrier.
+
+Normal bootstrap holds a database-side writer file lock through the router and detached
+SQLite-owning worker lifetimes. Multiple writers with different databases/hosts are unsupported. The rollout must drain older binaries/outstanding
+remote writes; the lock does not retrofit older releases. Client adapters expose acceptance/polling
+and session-scoped invalidation for workspace/document/chat caches and notebook links. The shared
+Deals table shows owners a three-dot menu beside the project name. Its Delete deal confirmation
+requires the exact, case-sensitive phrase `delete {dealName}` before calling the existing adapter.
+Demo and non-owner rows have no delete action; the server remains the authorization authority.
+The page owns the dialog so acceptance can remove the row without losing cleanup progress.
+The dialog distinguishes acceptance from completion, supports status-check retries without another
+DELETE, and reports blocked cleanup with an operation reference. Closing after acceptance stops
+local polling while durable work continues; cancelling before submission sends no request.
+See [deletion contracts, rollout and recovery](deal-permanent-deletion.md)
+for ownership, batching, retention limits and backup/rollback constraints.
+
 ## 8. Backend architecture
 
 ### 8.1 Startup and composition root
@@ -1425,7 +1498,7 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12-16, or validate v17]
+    Prompts --> Sqlite[Open shared SQLite and initialize, upgrade 12-17, or validate v18]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Bootstrap --> Rig[Construct optional Rig OpenAI client]
@@ -1500,7 +1573,7 @@ service, model, table, or product capability.
 | Domain ownership | Current maturity |
 | --- | --- |
 | `users` | Public user directory and private password hash persistence |
-| `deals` | Implemented typed engagement aggregates, transactional writes, metadata, source selection, extraction, and public context/source readers |
+| `deals` | Implemented typed engagement aggregates, transactional writes, metadata, source selection/extraction, public context/source readers, and durable owner-only permanent deletion |
 | `companies` | Implemented authenticated-owner company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
 | `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and Helix search capabilities |
@@ -1586,7 +1659,7 @@ repositories map the resulting client error to their storage error at the reposi
   snapshots on one reader; mutations retain `BEGIN IMMEDIATE` and their existing atomic rollback
   on the writer. The transaction wrapper rejects writes in a read snapshot, including tests using
   private in-memory databases. Raw connection/schema access always uses the writer. Migrations
-  still complete before request/job assembly and the schema marker remains 17.
+  still complete before request/job assembly and the document pipeline does not change the schema marker; shared storage is now 18.
 - `open_in_memory` and temporary connections without a file path keep their original single
   private connection; opening independent `:memory:` readers would create different databases.
   They do not enable SQLite shared-cache mode. Pool concurrency/isolation tests use disposable
@@ -1627,7 +1700,7 @@ fresh isolated Helix store, rebuild/reload matching clients, sign up again, and 
 manually. No status conversion or automatic downgrade is provided. See
 [development reset and recovery](authentication.md#schema-15-and-development-reset).
 
-### 9.1 Shared SQLite schema marker 17
+### 9.1 Shared SQLite schema marker 18
 
 SQLite is configured with foreign keys, WAL mode, a busy timeout, and parameterized queries. The
 schema currently contains:
@@ -1646,6 +1719,7 @@ schema currently contains:
 | `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Engagement/transaction/status codes, optional deal code/dates, immutable creator and audit/archive timestamps | Used |
+| `deal_deletions`, `deal_deletion_files`, `deal_deletion_threads` | Independent durable receipts/barriers and temporary cleanup targets | Owner-only permanent-deletion API and on-demand recovery tasks |
 | `deal_memberships`, `deal_access_revisions` | One owner, actor roles and monotonic access revision | Canonical authorization |
 | `deal_teams`, `deal_team_memberships` | Same-deal team organization and cascading assignments | API and Settings |
 | `deal_activity_events` | Append-only typed project/member/team/metadata/upload history with minimal actor identity | Transactional mutations and cursor activity API |
@@ -1690,7 +1764,7 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-`PRAGMA user_version = 17` is the shared marker. Empty databases receive the complete schema.
+`PRAGMA user_version = 18` is the shared marker. Empty databases receive the complete schema.
 Validated marker 12 receives notebooks first; validated 12/13 then receives the data-preserving
 membership/file-scope upgrade. Memberships backfill the creator as owner, including archived deals;
 legacy uploader attribution remains null. Validated 12/13/14 layouts also receive the additive
@@ -1702,6 +1776,9 @@ attempts reset and `classification_interrupted`; ready/failed and leased rows re
 Schema 17 validates the preceding layout and adds nullable `templates.owner_user_id`, a foreign
 key to `users(id)` with deletion restricted, and an owner/template index. Existing records remain
 unassigned; all authenticated imports persist a verified owner in the publication transaction.
+Schema 18 additively introduces the independent deletion ledger and target tables after validating
+the complete preceding layout. Existing data and template ownership remain unchanged. See
+[permanent deal deletion and recovery](deal-permanent-deletion.md).
 See [private template rollout and recovery](template-ownership.md) and
 [classified import rollout and recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
 Schema/layout, foreign keys and exactly-one-owner
@@ -2571,7 +2648,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Shared schema 17 SQLite, preserving 12/13/14/15/16 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
+| Persistence | Shared schema 18 SQLite, preserving 12/13/14/15/16/17 upgrades and explicit offline reset for older layouts | No conversion of legacy profiles/passwords or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with SQLite | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical SQLite data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

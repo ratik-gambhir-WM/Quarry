@@ -123,7 +123,7 @@ async fn retries_stages_independently_and_preserves_classification_on_embedding_
             hang: false,
         }),
     );
-    worker.start();
+    worker.notify();
     let state = terminal(&repo, &id).await;
     worker.stop(Duration::from_secs(1)).await;
     assert_eq!(state.status, "ready");
@@ -151,7 +151,7 @@ async fn exhausted_classification_retries_and_nonretryable_errors_are_durable() 
             }),
             Arc::new(support::FixtureEmbedder(false)),
         );
-        worker.start();
+        worker.notify();
         let state = terminal(&repo, &id).await;
         worker.stop(Duration::from_secs(1)).await;
         assert_eq!(state.status, "failed");
@@ -184,7 +184,7 @@ async fn embedding_timeout_retries_are_bounded_without_reclassifying() {
             hang: true,
         }),
     );
-    worker.start();
+    worker.notify();
     let state = terminal(&repo, &id).await;
     worker.stop(Duration::from_secs(1)).await;
     assert_eq!(state.status, "ready");
@@ -222,7 +222,7 @@ async fn worker_recovers_durable_pending_jobs_and_expired_leases_after_reopen() 
         Arc::new(support::FixtureClassifier),
         Arc::new(support::FixtureEmbedder(false)),
     );
-    worker.start();
+    worker.notify();
     assert_eq!(terminal(&repo, &pending).await.embedding_status, "ready");
     let state = terminal(&repo, &expired).await;
     assert_eq!(state.embedding_status, "ready");
@@ -243,7 +243,7 @@ async fn stopping_cancels_provider_and_leaves_retryable_work_for_restart() {
             hang: true,
         }),
     );
-    first.start();
+    first.notify();
     tokio::time::timeout(Duration::from_secs(1), async {
         while calls.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -260,7 +260,7 @@ async fn stopping_cancels_provider_and_leaves_retryable_work_for_restart() {
         Arc::new(support::FixtureClassifier),
         Arc::new(support::FixtureEmbedder(false)),
     );
-    next.start();
+    next.notify();
     assert_eq!(terminal(&repo, &id).await.embedding_status, "ready");
     next.stop(Duration::from_secs(1)).await;
 }
@@ -284,7 +284,7 @@ async fn saved_preview_outside_provider_bounds_fails_explicitly_without_text_onl
         .options
         .input_limits
         .max_preview_bytes = 0;
-    worker.start();
+    worker.notify();
     let state = terminal(&repo, &id).await;
     worker.stop(Duration::from_secs(1)).await;
     assert_eq!(state.status, "failed");
@@ -294,4 +294,145 @@ async fn saved_preview_outside_provider_bounds_fails_explicitly_without_text_onl
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(repo.find_preview(&id).unwrap().is_some());
+}
+
+async fn idle(worker: &Arc<SlideClassificationWorker>) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while Arc::strong_count(worker) != 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("empty queues must not retain a polling coordinator");
+}
+
+#[tokio::test]
+async fn notification_drains_then_retires_and_a_later_import_starts_a_new_task() {
+    let repo = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let worker = worker(
+        repo.clone(),
+        Arc::new(support::FixtureClassifier),
+        Arc::new(support::FixtureEmbedder(false)),
+    );
+    assert_eq!(Arc::strong_count(&worker), 1, "construction must not spawn");
+    worker.notify(); // Empty startup recovery.
+    idle(&worker).await;
+    for _ in 0..2 {
+        let id = queue(repo.clone());
+        for _ in 0..20 {
+            worker.notify();
+        }
+        let state = terminal(&repo, &id).await;
+        assert_eq!(state.embedding_status, "ready");
+        assert_eq!(
+            state.attempt_count, 1,
+            "duplicate wakes must not duplicate a claim"
+        );
+        assert_eq!(state.embedding_attempt_count, 1);
+        idle(&worker).await;
+    }
+    worker.stop(Duration::from_secs(1)).await;
+}
+
+#[tokio::test]
+async fn future_leases_are_recovered_without_another_notification() {
+    let repo = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let id = queue(repo.clone());
+    repo.claim_next_slide_classification(
+        &iso(Utc::now()),
+        &iso(Utc::now() + chrono::Duration::milliseconds(100)),
+    )
+    .unwrap()
+    .unwrap();
+    let worker = worker(
+        repo.clone(),
+        Arc::new(support::FixtureClassifier),
+        Arc::new(support::FixtureEmbedder(false)),
+    );
+    worker.notify();
+    let state = terminal(&repo, &id).await;
+    assert_eq!(state.embedding_status, "ready");
+    assert_eq!(state.attempt_count, 2);
+    idle(&worker).await;
+    worker.stop(Duration::from_secs(1)).await;
+}
+
+#[tokio::test]
+async fn delayed_provider_retries_continue_after_the_first_task_finishes() {
+    let repo = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let id = queue(repo.clone());
+    let mut worker = worker(
+        repo.clone(),
+        Arc::new(RetryingClassifier {
+            calls: Arc::new(AtomicUsize::new(0)),
+            failures: 1,
+            retryable: true,
+        }),
+        Arc::new(support::FixtureEmbedder(false)),
+    );
+    Arc::get_mut(&mut worker).unwrap().options.retry_base = Duration::from_millis(100);
+    worker.notify();
+    let state = terminal(&repo, &id).await;
+    assert_eq!(state.embedding_status, "ready");
+    assert_eq!(state.attempt_count, 2);
+    idle(&worker).await;
+    worker.stop(Duration::from_secs(1)).await;
+}
+
+struct HeldClassifier {
+    started: tokio::sync::mpsc::Sender<()>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+impl SlideClassifier for HeldClassifier {
+    fn classify<'a>(
+        &'a self,
+        input: &'a SlideClassificationInput,
+    ) -> ProviderFuture<'a, SlideRetrievalMetadata> {
+        Box::pin(async move {
+            self.started.send(()).await.unwrap();
+            self.release.acquire().await.unwrap().forget();
+            support::FixtureClassifier.classify(input).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn duplicate_notifications_cannot_exceed_four_active_classification_tasks() {
+    let repo = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let ids: Vec<_> = (0..8).map(|_| queue(repo.clone())).collect();
+    let (started, mut active) = tokio::sync::mpsc::channel(8);
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut worker = worker(
+        repo.clone(),
+        Arc::new(HeldClassifier {
+            started,
+            release: release.clone(),
+        }),
+        Arc::new(support::FixtureEmbedder(false)),
+    );
+    let options = &mut Arc::get_mut(&mut worker).unwrap().options;
+    options.concurrency = 4;
+    options.classification_timeout = Duration::from_secs(5);
+    for _ in 0..20 {
+        worker.notify();
+    }
+    for _ in 0..4 {
+        tokio::time::timeout(Duration::from_secs(3), active.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), active.recv())
+            .await
+            .is_err()
+    );
+    release.add_permits(8);
+    for id in ids {
+        let state = terminal(&repo, &id).await;
+        assert_eq!(state.embedding_status, "ready");
+        assert_eq!(state.attempt_count, 1);
+    }
+    idle(&worker).await;
+    worker.stop(Duration::from_secs(1)).await;
 }

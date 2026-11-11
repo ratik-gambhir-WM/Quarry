@@ -1,3 +1,4 @@
+import { isDealDeleted, subscribeDealDeletion } from "../data/dealDeletion/lifecycle";
 import { useMemo, useSyncExternalStore } from "react";
 import { runtime } from "@quarry/runtime";
 import type { DealDocumentSummary } from "../contracts/quarryApi";
@@ -48,7 +49,15 @@ function createContentsStore(dealId: string, localAllowed: boolean) {
     snapshot = { local, stored };
     for (const listener of listeners) listener();
   };
+  const invalidate = () => {
+    localRequest++; storedRequest++;
+    local = { status: "error", message: "This deal is unavailable while permanent deletion is processed." };
+    stored = { status: "error", message: "This deal is unavailable while permanent deletion is processed." };
+    publish();
+  };
+  let stopDeletion: (() => void) | undefined;
   const loadLocal = () => {
+    if (isDealDeleted(dealId)) { invalidate(); return; }
     if (!localAllowed) return;
     const request = ++localRequest;
     local = { status: "loading", previous: value(local) };
@@ -75,6 +84,7 @@ function createContentsStore(dealId: string, localAllowed: boolean) {
       });
   };
   const loadStored = () => {
+    if (isDealDeleted(dealId)) { invalidate(); return; }
     const request = ++storedRequest;
     stored = { status: "loading", previous: value(stored) };
     publish();
@@ -99,12 +109,14 @@ function createContentsStore(dealId: string, localAllowed: boolean) {
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       if (listeners.size === 1) {
+        stopDeletion = subscribeDealDeletion((id) => { if (id === dealId) invalidate(); });
         loadLocal();
         loadStored();
       }
       return () => {
         listeners.delete(listener);
         if (listeners.size === 0) {
+          stopDeletion?.();
           localRequest++;
           storedRequest++;
         }

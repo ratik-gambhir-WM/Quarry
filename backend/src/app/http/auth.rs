@@ -23,6 +23,7 @@ pub(crate) async fn authenticate(
 ) -> AppResult<Response> {
     let (mut parts, body) = request.into_parts();
     let mut stream_deal = None;
+    let mut admission = None;
     if parts.headers.get_all(header::AUTHORIZATION).iter().count() != 1
         || parts.headers.get_all("x-user-id").iter().count() != 1
     {
@@ -67,53 +68,82 @@ pub(crate) async fn authenticate(
             use crate::domains::memberships::model::Capability;
             let path = parts.uri.path();
             let method = &parts.method;
-            let capability = if path.contains("/data-room") {
-                Capability::LocalSource
-            } else if method == axum::http::Method::GET || path.contains("/documents/search/") {
-                Capability::Read
-            } else if path.ends_with("/documents/process")
-                || path.ends_with("/documents/process_file")
-            {
-                Capability::Upload
-            } else if path.ends_with("/archive") {
-                Capability::Transfer
-            } else if path.ends_with("/metadata")
-                || path.ends_with("/extraction/upload")
-                || path.ends_with("/update")
-            {
-                Capability::Edit
-            } else if path.contains("/teams") {
-                Capability::ManageTeams
-            } else if path.ends_with("/ownership-transfer") {
-                Capability::Transfer
-            } else if path.contains("/members") {
-                if method == axum::http::Method::DELETE {
-                    if params.get("user_id").and_then(|id| id.parse::<i64>().ok())
-                        == Some(actor.user.id)
-                    {
-                        Capability::Leave
+            let deleting =
+                method == axum::http::Method::DELETE && path.ends_with(&format!("/deals/{deal}"));
+            // Deletion handler authorizes the receipt before requiring a live membership.
+            if !deleting {
+                let capability = if path.contains("/data-room") {
+                    Capability::LocalSource
+                } else if method == axum::http::Method::GET || path.contains("/documents/search/") {
+                    Capability::Read
+                } else if path.ends_with("/documents/process")
+                    || path.ends_with("/documents/process_file")
+                {
+                    Capability::Upload
+                } else if path.ends_with("/archive") {
+                    Capability::Transfer
+                } else if path.ends_with("/metadata")
+                    || path.ends_with("/extraction/upload")
+                    || path.ends_with("/update")
+                {
+                    Capability::Edit
+                } else if path.contains("/teams") {
+                    Capability::ManageTeams
+                } else if path.ends_with("/ownership-transfer") {
+                    Capability::Transfer
+                } else if path.contains("/members") {
+                    if method == axum::http::Method::DELETE {
+                        if params.get("user_id").and_then(|id| id.parse::<i64>().ok())
+                            == Some(actor.user.id)
+                        {
+                            Capability::Leave
+                        } else {
+                            Capability::RemoveMember
+                        }
                     } else {
-                        Capability::RemoveMember
+                        Capability::ManageMembers
                     }
                 } else {
-                    Capability::ManageMembers
+                    return Err(AppError::Forbidden);
+                }; // Canonical mutations repeat this policy in their write transaction.
+                boundary
+                    .access
+                    .policy()
+                    .require(deal, actor.user.id, capability)
+                    .await?;
+                if !path.ends_with("/documents/process")
+                    && !path.ends_with("/documents/process_file")
+                {
+                    admission = Some(boundary.access.policy().lifecycle().admit(deal).await);
                 }
-            } else {
-                return Err(AppError::Forbidden);
-            }; // Canonical mutations repeat this policy in their write transaction.
-            boundary
-                .access
-                .policy()
-                .require(deal, actor.user.id, capability)
-                .await?;
-            stream_deal = Some(deal.clone());
+                // Close the acceptance race after waiting for admission.
+                boundary
+                    .access
+                    .policy()
+                    .require(deal, actor.user.id, capability)
+                    .await?;
+                stream_deal = Some(deal.clone());
+            }
         }
     }
-    let is_read =
-        parts.method == axum::http::Method::GET || parts.uri.path().contains("/documents/search/");
+    let is_read = parts.method == axum::http::Method::GET
+        || parts.uri.path().contains("/documents/search/")
+        || parts.uri.path().ends_with("/data-room/preview");
     let mut revoked = boundary.identity.revocations();
     parts.extensions.insert(actor.clone());
+    if let Some(admission) = &admission {
+        parts.extensions.insert(admission.clone());
+    }
     let response = next.run(Request::from_parts(parts, body)).await;
+    let (response_parts, response_body) = response.into_parts();
+    let response = Response::from_parts(
+        response_parts,
+        Body::from_stream(response_body.into_data_stream().map(move |chunk| {
+            let _keep_admission = &admission;
+            chunk
+        })),
+    );
+
     if is_read {
         if let Some(deal) = &stream_deal {
             boundary.access.deal(deal.clone(), actor.user.id).await?;

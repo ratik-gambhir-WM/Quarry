@@ -107,6 +107,31 @@ impl QuarryHttpClient {
         .await
     }
 
+    pub async fn delete_json(&self, path: &str) -> Result<Option<Value>, String> {
+        let response = self
+            .client
+            .delete(self.url(path)?)
+            .headers(self.headers.clone())
+            .send()
+            .await
+            .map_err(|error| format!("Quarry API request failed: {error}"))?;
+        match response.status() {
+            reqwest::StatusCode::NO_CONTENT => Ok(None),
+            reqwest::StatusCode::ACCEPTED => {
+                let value: Value = response
+                    .json()
+                    .await
+                    .map_err(|_| "Quarry API returned invalid deletion JSON")?;
+                if !value.is_object() {
+                    return Err("Quarry API returned invalid deletion JSON".into());
+                }
+                Ok(Some(value))
+            }
+            status if !status.is_success() => Err(self.response_error(response).await),
+            _ => Err("Quarry API returned an invalid delete response".into()),
+        }
+    }
+
     pub async fn delete(&self, path: &str) -> Result<(), String> {
         let response = self
             .client

@@ -122,3 +122,44 @@ async fn classified_import_relay_posts_raw_bytes_and_preserves_request_credentia
         server.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn deletion_json_relay_preserves_202_and_204_and_rejects_other_success_statuses() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for (status, body) in [
+        (
+            202,
+            r#"{"deletionId":"test","dealId":"DEAL-1","status":"pending"}"#,
+        ),
+        (204, ""),
+        (200, "{}"),
+        (202, "null"),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            let n = stream.read(&mut bytes).await.unwrap();
+            let request = String::from_utf8_lossy(&bytes[..n]);
+            assert!(request.starts_with("DELETE /api/v1/deals/DEAL-1 HTTP/1.1"));
+            stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        });
+        let client = QuarryHttpClient {
+            base_url: reqwest::Url::parse(&format!("http://{address}")).unwrap(),
+            client: reqwest::Client::new(),
+            stream_client: reqwest::Client::new(),
+            headers: reqwest::header::HeaderMap::new(),
+            status: Arc::new(AtomicU16::new(0)),
+        };
+        let result = client.delete_json("/api/v1/deals/DEAL-1").await;
+        match (status, body) {
+            (204, _) => assert_eq!(result.unwrap(), None),
+            (202, body) if body != "null" => {
+                assert_eq!(result.unwrap().unwrap()["status"], "pending")
+            }
+            _ => assert!(result.is_err()),
+        }
+        server.await.unwrap();
+    }
+}

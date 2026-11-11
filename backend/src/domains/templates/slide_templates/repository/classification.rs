@@ -239,6 +239,37 @@ fn load(tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<Option<Row>> {
         )?
         .pop())
 }
+// Claims and idle detection must apply identical ownership and stage prerequisites.
+fn stage_jobs(
+    scope: &SqliteTemplateRepository,
+    embedding: bool,
+) -> crate::adapters::sqlite::query::SelectBuilder {
+    let mut query = SqlBuilder::select("template_classification_status")
+        .inner_join(
+            "app_templates",
+            "template_classification_status.template_id",
+            "app_templates.template_id",
+        )
+        .inner_join(
+            "templates",
+            "templates.template_id",
+            "app_templates.template_id",
+        )
+        .and_where(scope.owner_condition())
+        .and_where(Condition::equal("app_templates.app_id", &scope.app_id));
+    if embedding {
+        for column in [
+            "subject_embedding_document",
+            "subject_embedding_fingerprint",
+            "capability_embedding_document",
+            "capability_embedding_fingerprint",
+        ] {
+            query = query.and_where(Condition::is_not_null(column));
+        }
+    }
+    query
+}
+
 // Select one due row instead of decoding every completed template/vector on each poll.
 fn next_job_row(
     tx: &SqliteTransaction<'_>,
@@ -270,32 +301,10 @@ fn next_job_row(
             retry,
         ),
     ] {
-        let mut query = SqlBuilder::select("template_classification_status")
+        let query = stage_jobs(scope, embedding)
             .columns(["template_classification_status.*"])
-            .inner_join(
-                "app_templates",
-                "template_classification_status.template_id",
-                "app_templates.template_id",
-            )
-            .inner_join(
-                "templates",
-                "templates.template_id",
-                "app_templates.template_id",
-            )
-            .and_where(scope.owner_condition())
-            .and_where(Condition::equal("app_templates.app_id", &scope.app_id))
             .and_where(Condition::equal(status, state))
             .and_where(due);
-        if embedding {
-            for column in [
-                "subject_embedding_document",
-                "subject_embedding_fingerprint",
-                "capability_embedding_document",
-                "capability_embedding_fingerprint",
-            ] {
-                query = query.and_where(Condition::is_not_null(column));
-            }
-        }
         if let Some(row) = tx
             .read_result_with(
                 query
@@ -316,6 +325,23 @@ fn next_job_row(
     Ok(None)
 }
 impl SqliteTemplateRepository {
+    pub(super) fn has_pending_slide_processing(&self) -> anyhow::Result<bool> {
+        for status in ["status", "embedding_status"] {
+            let query = stage_jobs(self, status == "embedding_status")
+                .columns(["template_classification_status.template_id"])
+                .and_where(Condition::in_values(status, ["pending", "processing"]));
+            if self
+                .client
+                .read_one_with(query.limit(1).build(), |_| Ok(()))
+                .context("read pending slide work")?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn complete_slide_classification(
         &self,
         result: &CompleteSlideClassification,

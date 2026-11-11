@@ -13,6 +13,21 @@ use super::{
 };
 
 #[tauri::command]
+pub async fn quarry_api_delete_json(
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
+    path: String,
+) -> AppResult<Option<Value>> {
+    verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
+    service
+        .delete_json(&path)
+        .await
+        .map_err(|error| service.api_error(error))
+}
+
+#[tauri::command]
 pub async fn quarry_api_delete(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,

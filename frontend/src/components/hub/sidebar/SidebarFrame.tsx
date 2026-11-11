@@ -52,7 +52,7 @@ export function SidebarFrame({
 
   return (
     <aside
-      className={`workspace-sidebar hidden h-full shrink-0 overflow-hidden text-sidebar-text transition-[width] duration-300 ease-out lg:flex [font-family:var(--font-sidebar)] ${
+      className={`workspace-sidebar quarry-sidebar-motion hidden h-full shrink-0 overflow-hidden text-sidebar-text transition-[width] duration-[var(--motion-sidebar)] ease-[var(--ease-out-expo)] lg:flex [font-family:var(--font-sidebar)] ${
         collapsed ? "w-12" : "w-72"
       }`}
     >

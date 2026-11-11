@@ -97,6 +97,9 @@ impl DealRepository {
     ) -> Result<DealWithMetadata, RepositoryError> {
         self.sqlite
             .transaction_async(move |tx| {
+                if super::deletion::barrier(tx, &record.deal_id)? {
+                    return Ok(Err(RepositoryError::Conflict("dealId is reserved".into())));
+                }
                 if !tx
                     .read(
                         SqlBuilder::select("deals")
@@ -223,6 +226,37 @@ impl DealRepository {
             .with_metadata(id)
             .await?
             .map(|aggregate| aggregate.deal))
+    }
+    pub(super) async fn local_source_root(
+        &self,
+        id: String,
+    ) -> Result<Option<String>, RepositoryError> {
+        self.sqlite
+            .read_transaction_result_async(move |tx| {
+                if super::deletion::barrier(tx, &id)?
+                    || tx
+                        .read_one_with(
+                            SqlBuilder::select("deals")
+                                .columns(["deal_id"])
+                                .and_where(Condition::equal("deal_id", &id))
+                                .build(),
+                            |_| Ok(()),
+                        )?
+                        .is_none()
+                {
+                    return Err(RepositoryError::NotFound("deal not found".into()));
+                }
+                Ok(tx
+                    .read_one_with(
+                        SqlBuilder::select("deal_metadata")
+                            .columns(["local_path"])
+                            .and_where(Condition::equal("deal_id", id))
+                            .build(),
+                        |r| r.get::<_, Option<String>>(0),
+                    )?
+                    .flatten())
+            })
+            .await
     }
     pub async fn metadata(&self, id: String) -> Result<Option<DealMetadata>, RepositoryError> {
         self.sqlite
@@ -448,7 +482,9 @@ fn load(
                 .iter()
                 .map(|column| format!("deal_metadata.{column}")),
         )
-        .left_join("deal_metadata", "deals.deal_id", "deal_metadata.deal_id");
+        .left_join("deal_metadata", "deals.deal_id", "deal_metadata.deal_id")
+        .left_join("deal_deletions", "deals.deal_id", "deal_deletions.deal_id")
+        .and_where(Condition::is_null("deal_deletions.deal_id"));
     builder = if let Some(id) = id {
         builder.and_where(Condition::equal("deals.deal_id", id))
     } else {

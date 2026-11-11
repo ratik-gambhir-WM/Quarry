@@ -237,7 +237,7 @@ export function SelectPopup({
         <SelectPrimitive.Popup
           className={cn(
             "group/popup relative min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest text-on-surface shadow-xl outline-none",
-            "transition-[opacity,scale] duration-160 ease-out data-ending-style:duration-100 data-ending-style:ease-out",
+            "quarry-popup-motion transition-[opacity,scale] duration-160 ease-out data-ending-style:duration-100 data-ending-style:ease-out",
             "data-starting-style:scale-[0.96] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0",
             // Aligned over the trigger, Base UI measures the popup to line the item up; a scale would throw that off, so it only fades.
             "data-[side=none]:data-starting-style:scale-100 data-[side=none]:data-ending-style:scale-100 data-[side=none]:min-w-[calc(var(--anchor-width)+0.5rem)]",

@@ -1,3 +1,4 @@
+import { acceptDealDeletion } from "../data/dealDeletion/lifecycle";
 import {
   classifiedTemplateImportPath,
   validateTemplateImportFile,
@@ -7,6 +8,7 @@ import { createNotebookApi, notebookEventReceiver } from "./notebookApi";
 import { sessionStore } from "../auth/sessionStore";
 import type { Company, CompanyPage } from "../data/dealModel";
 import type {
+  DealDeletion,
   LoginInput,
   RegisterInput,
   SessionResponse,
@@ -88,6 +90,7 @@ export type TauriQueryPayload =
 
 type TauriTransport = {
   delete(path: string): Promise<void>;
+  deleteJson?<T>(path: string): Promise<T | null>;
   get<T>(path: string): Promise<T>;
   getPdf(path: string): Promise<ArrayBuffer>;
   post<T>(path: string, body: unknown): Promise<T>;
@@ -238,6 +241,12 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/archive`,
         {},
       ),
+    deleteDeal: (id) => {
+      if (!transport.deleteJson) return Promise.reject(new Error("Permanent deletion is unavailable in this desktop runtime."));
+      const deleteJson = transport.deleteJson;
+      return acceptDealDeletion(id, () => deleteJson<DealDeletion>(`/api/v1/deals/${encodeURIComponent(id)}`));
+    },
+    getDealDeletion: (id) => transport.get<DealDeletion>(`/api/v1/deal-deletions/${encodeURIComponent(id)}`),
     archiveDeal: (dealId) =>
       transport.post<SavedDeal>(
         `/api/v1/deals/${encodeURIComponent(dealId)}/archive`,

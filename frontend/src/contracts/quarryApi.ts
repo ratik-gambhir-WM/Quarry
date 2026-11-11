@@ -312,6 +312,19 @@ export type AssistantThreadListOptions = {
   scope?: "all" | "freeform" | "deal";
   dealId?: string;
 };
+export type DealDeletion = {
+  deletionId: string;
+  dealId: string;
+  status: "pending" | "running" | "retrying" | "blocked" | "completed";
+  phase: "draining" | "fencing" | "sqlite" | "graph" | "verifying" | "completed";
+  retryable: boolean;
+  statusUrl: string;
+  errorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
 export interface QuarryApi extends NotebookApi, DealMembershipApi {
   createCompany(input: CompanyInput): Promise<Company>;
   updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
@@ -319,6 +332,9 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
   updateDeal(dealId: string, input: DealFields): Promise<SaveDealResponse>;
   archiveAssistantThread(threadId: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
+  /** Null means the retained receipt already proves completed deletion (HTTP 204). */
+  deleteDeal(dealId: string): Promise<DealDeletion | null>;
+  getDealDeletion(deletionId: string): Promise<DealDeletion>;
   createAssistantThread(
     threadId?: string,
     dealId?: string | null,

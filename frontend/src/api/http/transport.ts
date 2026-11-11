@@ -63,6 +63,7 @@ export async function requestJson<TResponse>(
   init?: RequestInit,
   requestDetails?: unknown,
   logResponseBody = true,
+  expectedStatuses?: readonly number[],
 ) {
   const url = apiUrl(path);
   const method = init?.method ?? "GET";
@@ -107,6 +108,11 @@ export async function requestJson<TResponse>(
       throw new BackendApiError(message, response.status);
     }
 
+    if (expectedStatuses && (!expectedStatuses.includes(response.status) || (response.status === 202 && (!body || typeof body !== "object")))) {
+      const message = "The server returned an invalid deletion response.";
+      finishApiRequest(requestId, { durationMs: performance.now() - startedAt, httpStatus: response.status, message, status: "error" });
+      throw new BackendApiError(message, response.status);
+    }
     finishApiRequest(requestId, {
       details: logResponseBody ? body : undefined,
       durationMs: performance.now() - startedAt,

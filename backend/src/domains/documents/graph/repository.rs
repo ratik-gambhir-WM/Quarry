@@ -61,7 +61,7 @@ struct IndexOperationStatusResponse {
 
 #[derive(Clone)]
 pub struct DocumentGraphWriter {
-    helix: Arc<HelixClient>,
+    pub(super) helix: Arc<HelixClient>,
     vector_dimension: NonZeroUsize,
 }
 
@@ -151,16 +151,19 @@ impl DocumentGraphWriter {
         &self,
         prepared: PreparedDocumentGraph,
     ) -> Result<Value, RepositoryError> {
-        self.helix
+        let setup = self
+            .helix
             .execute_write_query::<Value>(
                 "helix.file_version.insert_setup",
                 prepared.graph_write.setup_query,
             )
             .await
             .map_err(RepositoryError::storage)?;
+        check_deletion_fence(&setup)?;
         let batch_count = prepared.graph_write.chunk_queries.len();
         for (batch_index, query) in prepared.graph_write.chunk_queries.into_iter().enumerate() {
-            self.helix
+            let result = self
+                .helix
                 .execute_write_query::<Value>("helix.file_version.insert_chunk_batch", query)
                 .await
                 .map_err(|error| {
@@ -169,8 +172,9 @@ impl DocumentGraphWriter {
                         batch_index + 1,
                     ))
                 })?;
+            check_deletion_fence(&result)?;
         }
-        self.helix
+        let result = self.helix
             .execute_write_query(
                 "helix.file_version.publish",
                 prepared.graph_write.publish_query,
@@ -180,7 +184,23 @@ impl DocumentGraphWriter {
                 RepositoryError::storage(format!(
                     "failed to publish Helix file version after indexing {batch_count} chunk batch(es): {error}"
                 ))
-            })
+            })?;
+        check_deletion_fence(&result)?;
+        Ok(result)
+    }
+}
+
+fn check_deletion_fence(value: &Value) -> Result<(), RepositoryError> {
+    let fenced = value
+        .get("deletion_fence")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RepositoryError::storage("missing document admission acknowledgement"))?;
+    if fenced.is_empty() {
+        Ok(())
+    } else {
+        Err(RepositoryError::Conflict(
+            "deal_deletion_in_progress".into(),
+        ))
     }
 }
 

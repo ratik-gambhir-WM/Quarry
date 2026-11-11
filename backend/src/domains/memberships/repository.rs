@@ -31,9 +31,15 @@ impl MembershipRepository {
             .sqlite
             .read_with_async(
                 SqlBuilder::select("deal_memberships")
-                    .columns(["deal_id"])
+                    .columns(["deal_memberships.deal_id"])
+                    .left_join(
+                        "deal_deletions",
+                        "deal_memberships.deal_id",
+                        "deal_deletions.deal_id",
+                    )
+                    .and_where(Condition::is_null("deal_deletions.deal_id"))
                     .and_where(Condition::equal("user_id", actor))
-                    .order_by("deal_id", SortDirection::Ascending)
+                    .order_by("deal_memberships.deal_id", SortDirection::Ascending)
                     // Global search rejects the sentinel row rather than returning a partial set.
                     .limit(201)
                     .build(),
@@ -614,6 +620,14 @@ pub(crate) fn require(
             },
         )?
         .ok_or_else(|| RepositoryError::NotFound("resource not found".into()))?;
+    if crate::domains::deals::deletion::barrier(tx, deal)? {
+        return Err(match capability {
+            Capability::Read | Capability::LocalSource => {
+                RepositoryError::NotFound("resource not found".into())
+            }
+            _ => RepositoryError::Conflict("deal_deletion_in_progress".into()),
+        });
+    }
     let (role, creator, archived, revision) = row;
     let access = DealAccess::for_actor(role, creator, archived, revision, actor);
     if !access.permits(capability) {

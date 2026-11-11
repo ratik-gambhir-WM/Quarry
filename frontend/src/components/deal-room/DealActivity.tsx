@@ -75,14 +75,31 @@ export function DealActivity({ dealId }: { dealId: string }) {
 }
 
 function activityIcon(kind: string) {
-  if (kind === "document_uploaded") return <FileUp />;
-  if (kind === "member_removed" || kind === "team_deleted") return <UserMinus />;
+  const className = activityIconColor(kind);
+  if (kind === "document_uploaded") return <FileUp className={className} />;
+  if (kind === "member_removed" || kind === "team_deleted") return <UserMinus className={className} />;
   if (
     kind.startsWith("member_") ||
     kind.startsWith("team_") ||
     kind === "ownership_transferred"
-  ) return <Users />;
-  if (kind.endsWith("created")) return <Plus />;
-  if (kind.endsWith("updated") || kind.endsWith("renamed")) return <Pencil />;
-  return <History />;
+  ) return <Users className={className} />;
+  if (kind.endsWith("created")) return <Plus className={className} />;
+  if (kind.endsWith("updated") || kind.endsWith("renamed")) return <Pencil className={className} />;
+  return <History className={className} />;
+}
+
+function activityIconColor(kind: string) {
+  if (kind.endsWith("_removed") || kind.endsWith("_deleted")) return "text-error";
+  if (
+    kind === "document_uploaded" ||
+    kind.endsWith("_added") ||
+    kind.endsWith("_created")
+  ) return "text-success";
+  if (
+    kind.endsWith("_updated") ||
+    kind.endsWith("_renamed") ||
+    kind.endsWith("_changed")
+  ) return "text-icon-files";
+  if (kind === "ownership_transferred") return "text-icon-assistant";
+  return "text-icon-navigation";
 }

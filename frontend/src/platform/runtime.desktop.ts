@@ -182,6 +182,7 @@ async function invokePowerPointExport(path: string, body: unknown) {
 }
 
 const tauriQuarryApi = createTauriQuarryApi({
+  deleteJson: <TResult>(path: string) => invokeWithActivity<TResult | null>("quarry_api_delete_json", { path }),
   delete: (path: string) =>
     invokeWithActivity<void>("quarry_api_delete", { path }),
   get: <TResult>(path: string) =>

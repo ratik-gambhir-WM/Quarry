@@ -12,6 +12,7 @@ import { WorkspaceMain } from "../../components/hub/WorkspaceLayout";
 import { DealRoomHeader } from "../../components/deal-room/DealRoomHeader";
 import { workspaceInsights } from "../../fixtures/workspace/portfolio";
 import { useDealRoom } from "../DealRoomPage";
+import { useContentTransition } from "../../hooks/useContentTransition";
 
 export function DealRoomOverviewPage() {
   const [addingResources, setAddingResources] = useState(false);
@@ -24,6 +25,7 @@ export function DealRoomOverviewPage() {
     timelineItems,
     setTimelineItems,
   } = useDealRoom();
+  const contentRef = useContentTransition(activeOverviewSection);
   const dealInsights = workspaceInsights.filter(
     (insight) => insight.deal === deal.room.name,
   );
@@ -50,7 +52,7 @@ export function DealRoomOverviewPage() {
           onClose={() => setAddingResources(false)}
         />
       ) : null}
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
+      <div ref={contentRef} className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
         {activeOverviewSection === "activity" ? (
           deal.persisted ? (
             <DealActivity key={deal.room.id} dealId={deal.room.id} />

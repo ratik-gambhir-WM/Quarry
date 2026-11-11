@@ -1,10 +1,11 @@
+use crate::domains::deals::deletion::lifecycle::DealAdmission;
 use validate::validate_identifier;
 mod validate;
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 
 use crate::{
@@ -36,6 +37,7 @@ pub(super) async fn list_deal_documents_handler(
 pub(super) async fn get_deal_document_text_handler(
     State(state): State<DocumentViewingHttpState>,
     Path((deal_id, file_id)): Path<(String, String)>,
+    admission: Option<Extension<DealAdmission>>,
 ) -> AppResult<Json<StoredDocumentText>> {
     validate_identifier("dealId", &deal_id)?;
     validate_identifier("fileId", &file_id)?;
@@ -46,7 +48,7 @@ pub(super) async fn get_deal_document_text_handler(
         .map_err(AppError::from)?;
     state
         .stored_documents
-        .render_text(document)
+        .render_text_tracked(document, admission.map(|Extension(guard)| guard))
         .await
         .map(Json)
         .map_err(AppError::from)
@@ -55,6 +57,7 @@ pub(super) async fn get_deal_document_text_handler(
 pub(super) async fn get_deal_document_pdf_handler(
     State(state): State<DocumentViewingHttpState>,
     Path((deal_id, file_id)): Path<(String, String)>,
+    admission: Option<Extension<DealAdmission>>,
 ) -> AppResult<Response> {
     validate_identifier("dealId", &deal_id)?;
     validate_identifier("fileId", &file_id)?;
@@ -65,7 +68,7 @@ pub(super) async fn get_deal_document_pdf_handler(
         .map_err(AppError::from)?;
     let pdf_bytes = state
         .stored_documents
-        .render_pdf(document)
+        .render_pdf_tracked(document, admission.map(|Extension(guard)| guard))
         .await
         .map_err(AppError::from)?;
 

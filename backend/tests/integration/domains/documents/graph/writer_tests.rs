@@ -197,7 +197,7 @@ async fn read_http_request(socket: &mut TcpStream) -> String {
 }
 
 fn helix_success_response() -> &'static [u8] {
-    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 4\r\nconnection: close\r\n\r\nnull"
+    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 21\r\nconnection: close\r\n\r\n{\"deletion_fence\":[]}"
 }
 
 fn helix_failure_response() -> &'static [u8] {
@@ -295,7 +295,7 @@ fn indexes_versioned_file_graph_properties() {
     assert!(json.contains(FILE_CHUNK_LABEL));
     assert!(json.contains("cosine"));
     assert!(!json.contains("document_id"));
-    assert_eq!(DOCUMENT_INDEX_NAMES.len(), 13);
+    assert_eq!(DOCUMENT_INDEX_NAMES.len(), 14);
     assert_eq!(query.request_type(), QueryRequestType::Write);
 }
 

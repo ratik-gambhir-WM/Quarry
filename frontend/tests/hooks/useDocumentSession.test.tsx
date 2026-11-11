@@ -4,6 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DataRoomTreeNode } from "@/data/dataRoom";
 import type { DocumentPreviewResponse } from "@/data/dataRoomPreview";
+import { acceptDealDeletion } from "@/data/dealDeletion/lifecycle";
 import { useDocumentSession } from "@/hooks/useDocumentSession";
 
 const { getDealDocumentPdf, getDealDocumentText, previewDealDocument } =
@@ -286,3 +287,18 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+it("releases deleted previews and ignores their in-flight completion", async () => {
+  const pending = deferred<DocumentPreviewResponse>();
+  previewDealDocument.mockReturnValue(pending.promise);
+  const { result } = renderHook(() => useDocumentSession("deleting-preview"));
+  act(() => void result.current.selectDocument(localDocument));
+  await act(async () => { await acceptDealDeletion("deleting-preview", async () => null); });
+  expect(result.current.state).toEqual({ status: "closed" });
+  expect(result.current.documents).toEqual([]);
+  pending.resolve({ fileName: "file.pdf", mimeType: "application/pdf", pdfBase64: "JVBERi0xLjQ=", sourceKind: "native" });
+  await act(async () => pending.promise);
+  expect(result.current.state).toEqual({ status: "closed" });
+  await act(async () => result.current.selectDocument(localDocument));
+  expect(result.current.state).toEqual({ status: "closed" });
+});

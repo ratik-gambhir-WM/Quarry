@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { ThemeModeProvider } from "./hooks/useThemeMode";
 import { PageMetadata } from "./app/PageMetadata";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { useMotionInput } from "./hooks/useMotionInput";
 
 const WorkspaceRoutes = lazy(() =>
   import("./app/WorkspaceRoutes").then((module) => ({
@@ -15,6 +16,7 @@ const WorkspaceRoutes = lazy(() =>
 );
 
 function ProductApp() {
+  useMotionInput();
   const user = useUser();
   const location = useLocation();
 
