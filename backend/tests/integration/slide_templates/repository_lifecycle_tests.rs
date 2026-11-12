@@ -631,7 +631,7 @@ async fn classified_batch_jobs_and_previews_survive_reopen_and_cancelled_publica
         let source = pptx::write(&document).unwrap();
         let result = service
             .queue_classified_batch_import(
-                &source,
+                source.clone(),
                 TemplateKind::Diagram,
                 &RequestCancellation::default(),
             )
@@ -640,7 +640,7 @@ async fn classified_batch_jobs_and_previews_survive_reopen_and_cancelled_publica
         let cancellation = RequestCancellation::default();
         cancellation.cancel();
         assert!(service
-            .queue_classified_batch_import(&source, TemplateKind::Diagram, &cancellation)
+            .queue_classified_batch_import(source, TemplateKind::Diagram, &cancellation)
             .await
             .is_err());
         assert_eq!(repository.list(None).await.unwrap().len(), 12);

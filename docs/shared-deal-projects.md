@@ -4,7 +4,7 @@ Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces ca
 Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
 reset and verification records below describe the earlier implementation, not current commands.
 
-The existing deal is the shared project. SQLite owns access, files, attribution and activity;
+The existing deal is the shared project. PostgreSQL owns access, files, attribution and activity;
 Helix owns a recoverable document projection. Teams organize active deal members and never grant
 access on their own. Organization tenancy, email invitations/guests, shared notebooks/chats,
 persistent PDF comments/findings and live co-editing remain deferred.
@@ -99,7 +99,7 @@ and before event delivery. Revocation before canonical commit rejects the upload
 of an already accepted version may finish. Restart loses document jobs; refresh the stored list
 and explicitly retry the same bytes when needed. Shared failures contain sanitized recovery text.
 
-Search first selects current, live, authorized chunk identities from SQLite, verifies complete graph
+Search first selects current, live, authorized chunk identities from PostgreSQL, verifies complete graph
 projection headers, ranks only those candidates, then checks canonical identities again before
 exposing text. Vector search uses the pinned SDK's within-stream cosine ranking; distances from
 the same configured embedding model are comparable across deals. The pinned SDK lacks a
@@ -117,7 +117,26 @@ explicit error; a missing/partial graph projection never masquerades as complete
 PDF-page fixture search remains a separate selected-document tool; API search links to the target
 data room. Exact cross-document page activation and persistent PDF annotations remain deferred.
 
-## Schema 14 rollout and recovery
+## Current PostgreSQL deployment and recovery
+
+Fresh PostgreSQL schema 1 includes memberships, teams, activity, uploader attribution, immutable
+identity manifests and image recovery checkpoints. Startup initializes an empty selected schema
+or validates its recorded checksum, live catalog, ownership and document-readiness invariants.
+It does not upgrade or import former SQLite profiles. All aggregate writes retain the shared
+transaction lock and point-of-use permission/revision guards; reads use repeatable-read snapshots.
+
+Back up PostgreSQL and its matching Helix projection/configuration, drain writers before restore,
+and keep canonical rows after graph failures. Exact-byte upload can repair an accepted version's
+projection without creating a second identity. There is no automatic reset, old-data migration or
+general reindex tool. See [storage and recovery](postgresql-storage.md) and the
+[PostgreSQL verification record](postgresql-storage-verification.md).
+
+## Historical SQLite schema 14 rollout and recovery
+
+The following sections record the earlier SQLite rollout only. They are not deployment or
+rollback procedures for PostgreSQL schema 1; no retained maintenance artifact is invoked by the
+current runtime.
+
 
 Schema 14 preserves validated schemas 12 and 13, including accounts, sessions, notebooks, chats,
 company references, templates, blobs and file/version IDs. Schema 12 receives notebook schema 13
@@ -163,7 +182,7 @@ A SQLite-only rollback cannot restore removed graph properties or index definiti
 `clear_helix`, automatic reset or automatic downgrade for this rollout. A general graph rebuild
 and collaboration outbox remain unimplemented.
 
-## Schema 15 image recovery
+## Historical SQLite schema 15 image recovery
 
 Schema 15 additively upgrades validated schemas 12, 13, and 14. The existing membership/scope
 upgrade still applies to 12/13. One transaction creates `document_image_recovery`, validates the

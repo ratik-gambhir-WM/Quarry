@@ -9,8 +9,8 @@ SQLite marker upgrades are historical and are not executed by this runtime.
 | Field | Value |
 | --- | --- |
 | Status | Current-state companion to `ARCHITECTURE.md` |
-| Last verified | 2026-11-01 |
-| Repository snapshot | Live working tree; optional legacy Diligence Studio is in a separate checkout |
+| Last verified | 2026-11-11 (storage, templates and launcher documentation) |
+| Repository snapshot | Live working tree; templates run inside Axum |
 | Audience | Quarry product engineers, reviewers, and coding agents |
 | Scope | Product-domain ownership, durable entities, projections, ephemeral models, and known gaps |
 
@@ -63,7 +63,7 @@ and tests first.
 | `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
 | `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | PostgreSQL-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog and Helix projection in default embedded mode | Explicit legacy mode uses the independent Diligence Studio service; no deal ownership implied |
+| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog and Helix projection inside Axum | Authenticated owner/app scope; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -111,8 +111,9 @@ flowchart LR
 
     Summaries --> OpenAI[OpenAI adapter]
     Research --> WMAI[WM AI adapters]
-    Templates --> DSAdapter[Diligence Studio adapter]
-    DSAdapter --> DS[Diligence Studio service\nin-memory catalog]
+    Templates --> Embedded[Embedded slide templates]
+    Embedded --> PostgreSQL
+    Embedded --> Helix
     DataRooms --> FS[Configured server filesystem]
     Documents --> PostgreSQL[(PostgreSQL)]
     Documents --> Helix[(Helix)]
@@ -307,15 +308,22 @@ Research aggregate today.
 
 ### 7.4 Slide templates and previews
 
-`TemplatePreviewPage`, pagination, and preview records are validated service-owned read models
-supplied by the optional external Diligence Studio process. Single-slide and deck PPTX imports are
-service writes whose compact Quarry results contain only the selected mode and imported/warning
-counts. Diligence Studio converts and stores one template per selected source slide in its own
-in-memory SQLite catalog; Quarry's canonical PostgreSQL and Helix stores receive no template copy. A
-template preview is not a deliverable and has no current deal ownership, selection, or generation
-lifecycle. Built-ins reseed from tracked catalog files when Diligence Studio starts. Imported
-templates, assets, previews, classifications, and app registrations disappear on process restart,
-and imports without a generated preview remain absent from Quarry's preview-only gallery.
+The maintained web/desktop launcher selects embedded templates in Axum. PostgreSQL stores
+owner-scoped template documents, binary assets, generated previews, classification/embedding
+artifacts and durable processing jobs. Helix holds their app-scoped metadata and dual-vector
+projection. Catalog and binary reads resolve ownership from PostgreSQL before exposing content;
+startup reconciles the template projection from canonical records. New databases have no seeded
+built-in catalog. Imported templates survive application restart.
+
+The stable Quarry facade returns compact import counts; native embedded endpoints also expose
+full template documents, editing/import/export operations, retrieval state and explicit retries.
+Classified imports commit slides/previews/pending jobs before asynchronous enrichment. Imports
+without a generated preview remain absent from the preview-only gallery. A template is not a saved
+deliverable and has no current deal ownership or deliverable-generation lifecycle. Presentation
+editor changes remain local to the open editor.
+
+See [template ownership](template-ownership.md) and
+[current architecture](ARCHITECTURE.md#1121-embedded-slide-templates-studio).
 
 ### 7.5 Frontend view models and fixtures
 
@@ -364,7 +372,6 @@ is no notebook search integration yet. See [notebook API and recovery](notebook-
 | Canonical durable state | Users, deals, metadata, files, versions, blobs, notebooks/folders/notes/save jobs | PostgreSQL through owning domain repositories | Survives restart; subject to current schema migration policy |
 | Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from PostgreSQL, but general tooling is missing |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
-| Legacy service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
 | Server ephemeral state | Document jobs, ingestion locks, Office preview cache | Owning service/process | Lost on restart; not multi-instance |
 | Desktop ephemeral authority | Authorized local roots | Tauri process | Lost on desktop restart |
 | Client session state | Activity log, route state, modal/view state | React/module/session storage | Tab/webview or route lifetime |

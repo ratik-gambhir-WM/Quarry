@@ -5,7 +5,6 @@ use thiserror::Error;
 
 use crate::{
     adapters::{
-        diligence_studio::client::DiligenceStudioClient,
         helix::client::HelixClient,
         office::converter::OfficeConverter,
         openai::client::OpenAiClient,
@@ -58,7 +57,7 @@ const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 pub struct Application {
     pub router: Router,
     pub bind_address: std::net::SocketAddr,
-    pub templates: Option<Arc<templates::slide_templates::SlideTemplates>>,
+    pub templates: Arc<templates::slide_templates::SlideTemplates>,
 }
 
 #[derive(Debug, Error)]
@@ -85,13 +84,14 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     );
     let postgres = PostgresClient::connect(&config.postgres)
         .await
-        .map_err(BootstrapError::Postgres)?
-        .with_writer_lease()
-        .await
         .map_err(BootstrapError::Postgres)?;
     migrations::migrate(&postgres)
         .await
         .map_err(BootstrapError::Migration)?;
+    let postgres = postgres
+        .with_writer_lease()
+        .await
+        .map_err(BootstrapError::Postgres)?;
 
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
@@ -124,36 +124,110 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let http = reqwest::Client::builder()
         .build()
         .map_err(BootstrapError::HttpClient)?;
-    let (templates, embedded) =
-        build_templates(&config, postgres.clone(), helix.clone(), http.clone()).await?;
-    let api = assemble_api_with_templates(
-        &config,
-        postgres,
-        helix,
-        http,
-        prompts,
-        templates,
-        embedded.clone(),
-    );
+    let (api, templates) = assemble_api(&config, postgres, helix, http, prompts).await?;
     let bind_address = config.http.bind_address;
     let router = create_router(api, &config.http);
     Ok(Application {
         router,
         bind_address,
-        templates: embedded,
+        templates,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn assemble_api_with_templates(
+async fn assemble_api(
+    config: &AppConfig,
+    postgres: PostgresClient,
+    helix: Arc<HelixClient>,
+    http: reqwest::Client,
+    prompts: Arc<PromptCatalog>,
+) -> Result<(Router, Arc<templates::slide_templates::SlideTemplates>), BootstrapError> {
+    use crate::adapters::slide_templates::preview as native;
+    use templates::slide_templates::*;
+    let settings = &config.slide_templates;
+    let repository = Arc::new(PostgresTemplateRepository::new(postgres.clone()));
+    repository.ensure_app(APP_ID, None).await.map_err(|_| {
+        BootstrapError::SlideTemplates(
+            "shared PostgreSQL template catalog initialization failed".into(),
+        )
+    })?;
+    let native_preview: Arc<dyn native::TemplatePreviewGenerator> = match &settings.chromium_path {
+        Some(path) => Arc::new(native::HeadlessTemplatePreviewGenerator::new(
+            path.clone(),
+            settings.render_url.clone(),
+            settings.preview_max_bytes,
+            10_000,
+            settings.preview_render_size,
+            settings.preview_timeout,
+        )),
+        None => Arc::new(native::DisabledTemplatePreviewGenerator),
+    };
+    let preview = Arc::new(NativePreview(native_preview));
+    let classification = settings.classification.as_ref().map(|c| {
+        Arc::new(SlideClassificationService::new(
+            SlideClassificationServiceOptions {
+                classifier: Arc::new(OpenAISlideClassifier::new(OpenAISlideClassifierOptions {
+                    api_key: c.key.expose().into(),
+                    base_url: None,
+                    model: c.model.clone(),
+                    timeout: c.timeout,
+                    max_output_tokens: c.max_output_tokens,
+                })),
+                classification_model: c.model.clone(),
+                embedder: Arc::new(OpenAISlideEmbedder::new(OpenAISlideEmbedderOptions {
+                    api_key: c.key.expose().into(),
+                    base_url: None,
+                    model: c.embedding_model.clone(),
+                    timeout: c.timeout,
+                    dimensions: Some(c.dimensions.get()),
+                    max_input_bytes: c.max_embedding_text_bytes,
+                })),
+                embedding_dimensions: Some(c.dimensions.get()),
+                embedding_max_text_bytes: c.max_embedding_text_bytes,
+                embedding_model: c.embedding_model.clone(),
+                input_limits: SlideClassificationInputLimits::default(),
+                repository: repository.clone(),
+            },
+        ))
+    });
+    let dimensions = settings.embedding_dimensions;
+    let graph = Arc::new(graph::TemplateGraph::new(helix.clone(), dimensions));
+    graph.initialize().await.map_err(|_| {
+        BootstrapError::SlideTemplates("Helix template indexes failed to initialize".into())
+    })?;
+    let embedded = Arc::new(SlideTemplates::new(
+        repository,
+        preview,
+        classification,
+        Some(graph),
+        settings.allow_embedding_inspection,
+    ));
+    embedded.reconcile().await.map_err(|_| {
+        BootstrapError::SlideTemplates(
+            "Helix template reconciliation failed; canonical PostgreSQL records were preserved"
+                .into(),
+        )
+    })?;
+    embedded.resume_pending_jobs();
+    let api = assemble_api_routes(
+        config,
+        postgres,
+        helix,
+        http,
+        prompts,
+        Some(embedded.clone()),
+    );
+    Ok((api, embedded))
+}
+
+pub(crate) fn assemble_api_routes(
     config: &AppConfig,
     postgres: PostgresClient,
     document_graph: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
-    templates: Arc<TemplateService>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
 ) -> Router {
+    let templates = Arc::new(TemplateService::new(embedded.clone()));
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
         postgres.clone(),
         UserRepository::new(postgres.clone()),
@@ -350,109 +424,6 @@ pub(crate) fn assemble_api_with_templates(
 #[cfg(test)]
 #[path = "../../tests/unit/app/bootstrap_tests.rs"]
 mod tests;
-
-async fn build_templates(
-    config: &AppConfig,
-    postgres: PostgresClient,
-    helix: Arc<HelixClient>,
-    http: reqwest::Client,
-) -> Result<
-    (
-        Arc<TemplateService>,
-        Option<Arc<templates::slide_templates::SlideTemplates>>,
-    ),
-    BootstrapError,
-> {
-    use crate::adapters::slide_templates::preview as native;
-    use crate::app::config::TemplateBackend;
-    use templates::slide_templates::*;
-    let settings = &config.slide_templates;
-    if settings.backend == TemplateBackend::DiligenceStudio {
-        let legacy = config
-            .diligence_studio
-            .as_ref()
-            .map(|c| Arc::new(DiligenceStudioClient::new(http, c.base_url.clone())));
-        return Ok((Arc::new(TemplateService::new(legacy)), None));
-    }
-    let repository = initialize_template_repository(postgres)
-        .await
-        .map_err(|_| {
-            BootstrapError::SlideTemplates(
-                "shared PostgreSQL template catalog initialization failed".into(),
-            )
-        })?;
-    let native_preview: Arc<dyn native::TemplatePreviewGenerator> = match &settings.chromium_path {
-        Some(path) => Arc::new(native::HeadlessTemplatePreviewGenerator::new(
-            path.clone(),
-            settings.render_url.clone(),
-            settings.preview_max_bytes,
-            10_000,
-            settings.preview_render_size,
-            settings.preview_timeout,
-        )),
-        None => Arc::new(native::DisabledTemplatePreviewGenerator),
-    };
-    let preview = Arc::new(NativePreview(native_preview));
-    let classification = settings.classification.as_ref().map(|c| {
-        Arc::new(SlideClassificationService::new(
-            SlideClassificationServiceOptions {
-                classifier: Arc::new(OpenAISlideClassifier::new(OpenAISlideClassifierOptions {
-                    api_key: c.key.expose().into(),
-                    base_url: None,
-                    model: c.model.clone(),
-                    timeout: c.timeout,
-                    max_output_tokens: c.max_output_tokens,
-                })),
-                classification_model: c.model.clone(),
-                embedder: Arc::new(OpenAISlideEmbedder::new(OpenAISlideEmbedderOptions {
-                    api_key: c.key.expose().into(),
-                    base_url: None,
-                    model: c.embedding_model.clone(),
-                    timeout: c.timeout,
-                    dimensions: Some(c.dimensions.get()),
-                    max_input_bytes: c.max_embedding_text_bytes,
-                })),
-                embedding_dimensions: Some(c.dimensions.get()),
-                embedding_max_text_bytes: c.max_embedding_text_bytes,
-                embedding_model: c.embedding_model.clone(),
-                input_limits: SlideClassificationInputLimits::default(),
-                repository: repository.clone(),
-            },
-        ))
-    });
-    let dimensions = settings.embedding_dimensions;
-    let graph = Arc::new(graph::TemplateGraph::new(helix, dimensions));
-    graph.initialize().await.map_err(|_| {
-        BootstrapError::SlideTemplates("Helix template indexes failed to initialize".into())
-    })?;
-    let embedded = Arc::new(SlideTemplates::new(
-        repository,
-        preview,
-        classification,
-        Some(graph),
-        settings.allow_embedding_inspection,
-    ));
-    embedded.reconcile().await.map_err(|_| {
-        BootstrapError::SlideTemplates(
-            "Helix template reconciliation failed; canonical PostgreSQL records were preserved"
-                .into(),
-        )
-    })?;
-    embedded.resume_pending_jobs();
-    Ok((
-        Arc::new(TemplateService::embedded(embedded.clone())),
-        Some(embedded),
-    ))
-}
-/// The repository shares the migrated product connection; it never opens or initializes a store.
-async fn initialize_template_repository(
-    postgres: PostgresClient,
-) -> anyhow::Result<Arc<dyn templates::slide_templates::TemplateRepository>> {
-    use templates::slide_templates::{PostgresTemplateRepository, APP_ID};
-    let repository = Arc::new(PostgresTemplateRepository::new(postgres));
-    repository.ensure_app(APP_ID, None).await?;
-    Ok(repository)
-}
 
 #[cfg(test)]
 #[path = "../../tests/integration/app/bootstrap_support.rs"]

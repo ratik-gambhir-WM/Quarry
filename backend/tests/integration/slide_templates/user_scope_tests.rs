@@ -1,7 +1,7 @@
 use crate::{
     adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
-    app::{bootstrap::assemble_api_with_templates, migrations},
-    domains::templates::{self, slide_templates::*},
+    app::{bootstrap::assemble_api_routes, migrations},
+    domains::templates::slide_templates::*,
     integration_support, slide_template_test_support as support, AppConfig,
 };
 use axum::{
@@ -45,15 +45,12 @@ async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
         false,
     ));
     let config = AppConfig::default();
-    let api = assemble_api_with_templates(
+    let api = assemble_api_routes(
         &config,
         postgres.clone(),
         Arc::new(HelixClient::from_config(&config.helix).unwrap()),
         reqwest::Client::new(),
         integration_support::prompt_catalog(),
-        Arc::new(templates::service::TemplateService::embedded(
-            studio.clone(),
-        )),
         Some(studio.clone()),
     );
     (crate::create_router(api, &config.http), postgres, studio)
@@ -390,34 +387,6 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
     }
     studio.shutdown();
     studio.stop_worker().await;
-}
-
-#[tokio::test]
-async fn legacy_template_routes_fail_closed_without_relaying_a_shared_catalog() {
-    let client = crate::adapters::diligence_studio::client::DiligenceStudioClient::new(
-        reqwest::Client::new(),
-        reqwest::Url::parse("http://127.0.0.1:1/api/v1/").unwrap(),
-    );
-    let api = templates::route::routes(Arc::new(templates::service::TemplateService::new(Some(
-        Arc::new(client),
-    ))))
-    .layer(axum::Extension(integration_support::test_actor()));
-    let app = crate::create_router(api, &AppConfig::default().http);
-    for prefix in ["/api/v1", "/api"] {
-        for (method, path) in [
-            ("GET", "/templates/previews?page=1"),
-            ("GET", "/templates/shared"),
-            ("DELETE", "/templates/shared"),
-            ("POST", "/templates/import?mode=single"),
-            ("POST", "/templates/export"),
-        ] {
-            let (status, body) = json_call(&app, method, &format!("{prefix}{path}"), 1).await;
-            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-            assert!(body
-                .to_string()
-                .contains("user-private templates require the embedded template backend"));
-        }
-    }
 }
 
 #[tokio::test]

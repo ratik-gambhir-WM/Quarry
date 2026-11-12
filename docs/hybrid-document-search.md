@@ -5,7 +5,7 @@ Current storage is fresh PostgreSQL schema 1 with retained Helix. See
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 Updated 2026-11-06. The initial bounded-scan implementation is available behind
-`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It does not change PostgreSQL schema 17,
+`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It requires no additional change to PostgreSQL schema 1,
 Helix publication, stored embeddings, or the model used for ingestion.
 
 ## Request and result contract
@@ -40,8 +40,8 @@ futures own all orchestration; error, disconnect/drop or timeout stops further s
 Already accepted remote reads and blocking lexical ranking can finish after cancellation.
 
 Vector retrieval preserves Helix-normalized cosine distance until the service applies a relevance floor:
-`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` defaults to 0.4 (finite 0–1); the selected large/3072
-local profile uses the measured 0.26 override described below. The floor admits distances
+`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` defaults to 0.4 (finite 0–1); the historical large/3072
+local trial used the measured 0.26 override described below. The floor admits distances
 in `0..=(1 - minimumSimilarity) / 2`. The pinned server normalizes cosine distance:
 `distance = (1 - cosineSimilarity) / 2`, so similarity is `1 - 2 × distance`. Identical vectors
 return 0, orthogonal vectors 0.5, and opposite vectors 1. The old `1 - distance` interpretation
@@ -127,7 +127,8 @@ This source inspection is not a client/server capability spike or performance pr
 indexed milestone still requires an explicitly selected disposable Helix instance, eligible
 matches below historical/deleted/unpublished distractors, analyzer parity (including C++/C#),
 query-plan/index-readiness evidence and bounded text transfer. If unavailable, separately
-review a narrow upstream extension or a PostgreSQL FTS5 durability/backfill/recovery decision.
+review a narrow upstream extension or a separately designed PostgreSQL document lexical index with durability/backfill/recovery guarantees.
+Template lexical parity already uses PostgreSQL; it does not provide a document lexical index.
 The 5,000-current-document, 10,000-canonical-chunk and 200-deal ceilings remain explicit.
 Large-deal indexed preparation/publication verification is a separate design milestone.
 
@@ -158,6 +159,12 @@ Frontend tests cover HTTP/Tauri mapping, explicit submission, stale responses, a
 reset, source labels, literal highlights, unavailable fallback and page activation. Native
 relay code/capabilities are unchanged: its existing validated `/api/v1/` JSON transport carries
 the additive routes. Use the existing frontend and backend gates from the architecture.
+
+## Historical verification records
+
+The dated November 6 records below describe the former SQLite deployment and its local model
+trial. They do not describe the current PostgreSQL database or authorize repeating any cleanup.
+Use [PostgreSQL storage and Helix](postgresql-storage.md) for the current deployment and recovery.
 
 ## Implementation verification — 2026-11-06
 
@@ -221,7 +228,7 @@ changes. Query-structure, metric-conversion and 30-candidate no-match regression
 The dimension check also found a missing provider-response validation in document ingestion.
 OpenAI responses now have to match the requested dimension and finite f32 storage range;
 `DocumentGraphWriter` requires the expected dimension at construction and uses it for both index
-initialization and preflight. A mismatch is rejected before any PostgreSQL document row is committed.
+initialization and preflight. A mismatch is rejected before any SQLite document row is committed.
 The test-only mock provider now explicitly requests and returns the same two dimensions.
 Cosine remains the metric, following [official OpenAI embedding guidance](https://developers.openai.com/api/docs/guides/embeddings#which-distance-function-should-i-use);
 OpenAI embeddings are unit-normalized, while the Helix regression additionally verifies that scaling
@@ -251,14 +258,14 @@ is the normalized distance interpretation, and the similarity floor remains 0.4.
 
 ## Selected local 3072-dimensional trial (2026-11-06)
 
-At the user's explicit request, the selected local profile was drained and its PostgreSQL database,
+At the user's explicit request, the selected local profile was drained and its SQLite database,
 Helix store, and configuration were backed up together under ignored local maintenance storage.
-The user then authorized removal of all uploaded Data Room documents from PostgreSQL and Helix.
-The cleanup removed the PostgreSQL file/version/blob/current-content/identity/recovery records and
+The user then authorized removal of all uploaded Data Room documents from SQLite and Helix.
+The cleanup removed the SQLite file/version/blob/current-content/identity/recovery records and
 all Helix document nodes, including an orphan projection. All seven document tables and all
 three document graph labels were verified empty. Account, deal, membership, template, notebook,
 and note counts were unchanged; the 14 unrelated Helix nodes were retained. A disposable copy
-first verified the PostgreSQL cascade and preservation behavior, followed by a foreign-key check.
+first verified the SQLite cascade and preservation behavior, followed by a foreign-key check.
 
 The empty document and notebook vector indexes were explicitly rebuilt at 3072 dimensions.
 Notebook projections were already empty; canonical notebook content was preserved. The ignored
@@ -271,7 +278,7 @@ A small live provider check returned finite 3072-dimensional vectors. A syntheti
 written to Helix, read back with all 3072 values unchanged, and queried through the actual
 within-candidate vector path; the returned normalized distance agreed with local cosine
 calculation. The synthetic document was removed and both document stores were checked empty
-again. The temporary cleanup source, executable, and scratch PostgreSQL copy were removed afterward;
+again. The temporary cleanup source, executable, and scratch SQLite copy were removed afterward;
 no reset endpoint or startup deletion path was added. Matching backups remain private and ignored.
 
 This is a model trial, not a relevance guarantee. A synthetic Java/Angular passage scored about
@@ -281,7 +288,7 @@ documents need to be uploaded again and judged after this reset. The proposed br
 UI/request/configuration option was removed at the user's request; search remains embedding-only
 with the original keyword branch and no relevance-model call.
 
-Rollback requires another drained window and restoration of the matching PostgreSQL, Helix, and
+Rollback requires another drained window and restoration of the matching SQLite, Helix, and
 configuration backups together. Preserve any newly uploaded content before restoring the old
 snapshot; do not mix the old 1536-dimensional graph with 3072-dimensional query configuration.
 
@@ -295,7 +302,7 @@ Post-cutover verification:
 - After removing the proposed broader-match option, `npm test --
   tests/components/data-room/document-search/DataRoomDocumentSearch.test.tsx
   tests/api/dealMembershipApi.test.ts`: 25 passed; `npm run typecheck` passed for both targets.
-- Live maintenance checks: matching backups, disposable PostgreSQL cascade/preservation check,
+- Live maintenance checks: matching backups, disposable SQLite cascade/preservation check,
   foreign-key check, zero document rows/projections, unchanged unrelated counts, and a real
   3072-dimensional provider/Helix save/read/search round trip passed. Probe records were removed.
 - The standalone embedding demonstration now uses the configured model, avoiding a hardcoded
@@ -336,7 +343,7 @@ planning; no parser change or live re-ingestion was performed in this UI work.
 The user subsequently identified additional indexed Rome and COBOL history documents, beyond
 the three initially supplied test documents. A temporary read-only diagnosis confirmed six
 current files and 22 canonical chunks in the selected local deal, including three current
-chunks each for Rome and COBOL. It used a read-only PostgreSQL connection, bound query builders,
+chunks each for Rome and COBOL. It used a read-only SQLite connection, bound query builders,
 the existing Helix candidate-filtered retrieval path, and a small batch of query embeddings.
 No bootstrap, migration, ingestion, document deletion, or graph write was performed.
 

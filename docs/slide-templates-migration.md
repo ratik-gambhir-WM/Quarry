@@ -4,14 +4,31 @@ Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces ca
 Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
 reset and verification records below describe the earlier implementation, not current commands.
 
-Current rollout (2026-11-05): schema **17** preserves validated **12/13/14/15/16** product and
+## Current implementation
+
+The maintained launcher uses embedded Axum templates and does not start the Node service.
+Fresh PostgreSQL schema 1 owns private templates, assets, previews, classification/embedding
+artifacts and durable jobs through the same asynchronous pool as other product records. Helix
+remains the metadata/dual-vector projection; imports commit canonical content before indexing.
+Startup reconciles templates from PostgreSQL. There is no SQLite driver, profile import, marker
+upgrade chain, separate template database or destructive reset command in this deployment.
+
+Use [current storage and recovery](postgresql-storage.md), [private template policy](template-ownership.md),
+and [current template architecture](ARCHITECTURE.md#1121-embedded-slide-templates-studio) for
+contracts and operations, including manual retry. The [PostgreSQL verification record](postgresql-storage-verification.md)
+contains branch validation evidence. The historical dependency choices, schema/reset procedures,
+retired launcher commands and test results below are retained evidence, not current instructions.
+
+## Historical SQLite migration evidence
+
+Historical rollout (2026-11-05): schema **17** preserves validated **12/13/14/15/16** product and
 template records and adds authenticated user ownership. Existing shared records remain unassigned
 and hidden from user catalogs. See [private template rollout and recovery](template-ownership.md).
 The asynchronous classified-import rollout below describes schema 16 and still applies before
 schema 17 is added.
-Schema 11 and older still require the deliberately selected, drained development reset described in
-[authentication](authentication.md#schema-15-and-development-reset), paired with a fresh isolated
-Helix store. Historical schema-9/10 upgrade instructions below do not authorize an older migration.
+At that time, schema 11 and older required a deliberately selected, drained development reset
+paired with an isolated Helix store. That utility and upgrade path have since been removed; do
+not use the historical schema-9/10 or reset procedures with the PostgreSQL runtime.
 
 ## Asynchronous classified imports (schema 16)
 
@@ -28,8 +45,8 @@ a generated preview. JSON, assets, metadata, PNG preview and pending work commit
 `201 Created` with `retrieval.status: pending`. Classification and both embeddings run separately
 from the request. Do not interpret 201 as completed retrieval. Poll the returned template's
 `/retrieval` resource for `classification` and `embedding` stage status, attempt count, next attempt
-and sanitized error code; metadata and vector inspection remain opt-in. Other template imports,
-the web/desktop adapters and explicit Diligence Studio mode retain their contracts.
+and sanitized error code; metadata and vector inspection remain opt-in. Other template imports
+and the web/desktop adapters retain their contracts.
 
 `POST /api/v1/templates/slide-templates/batch-import/classified` adds the same contract for raw
 PPTX decks (maximum 100 slides). Four workers prepare slides and previews concurrently, then one
@@ -59,8 +76,7 @@ The supplied directory has no Git metadata. The checked-in
 and destination ownership before adaptation. Those historical destination paths include the
 retired built-in catalog; its copied assets and seeding tests have since been removed. No
 environment files or databases were copied.
-The source manifest declares MIT; no root license/notice file was supplied. Existing
-catalog art remains in the separate Diligence Studio checkout.
+The source manifest declares MIT; no root license/notice file was supplied. The retired source catalog art is not part of the maintained runtime.
 
 Dependency decisions: preserve edition 2021 and rusqlite 0.39 / bundled SQLite.
 Use a named ZIP 8 dependency for the port, retaining ZIP 4 for existing parsers.
@@ -126,9 +142,9 @@ continue to use canonical SQLite classification/FTS/vector artifacts.
 
 ## Selection, classification, and cutover
 
-The repository and launcher default to `embedded`: use ordinary `./quarry web` or
-`./quarry desktop`. Explicit `QUARRY_TEMPLATE_BACKEND=diligence-studio` selects Node rollback. Embedded mode does not
-start or wait for the Node template service, and does not require its port to be free. Both modes retain normal Helix startup requirements.
+The repository and launcher run templates inside Axum: use ordinary `./quarry web` or
+`./quarry desktop`. No separate template process or backend selector is supported. Helix
+remains required for startup.
 The renderer becomes available after Vite starts; API startup does not wait for screenshots.
 
 Ordinary single/deck imports retain their existing behavior. Optional native
@@ -152,13 +168,6 @@ Helix reconciliation fails after the SQLite upgrade committed, the schema-10 dat
 remain canonical; repair Helix availability and restart to retry reconciliation. Do not clear the
 document graph. The explicit offline development reset is still destructive and now also deletes
 templates, assets, previews, memberships, FTS, and embeddings; it is never a migration fallback.
-
-To switch the selected backend, drain in-flight requests, stop the launcher, set
-`QUARRY_TEMPLATE_BACKEND=diligence-studio`, and restart this version. The Node in-memory catalog
-is separate; mode changes neither transfer nor dual-write imports. Embedded SQLite data remains
-intact while legacy mode is selected. Legacy mode still uses Quarry migrations/schema 10 for
-product data and does not publish or reconcile the embedded template projection. Switching back
-to embedded reconciles its persisted catalog.
 
 To roll back the executable to a version that only understands schema 9, drain and stop it first,
 then restore the consistent pre-upgrade SQLite backup and matching Helix backup. Do not decrement
@@ -212,8 +221,6 @@ Prior port verification (before shared-database correction), completed 2026-10-2
 | `frontend/` | `npm run build:web` | Passed; existing large-chunk warnings |
 | `frontend/` | `npm run check:web-bundle` | Passed after the web build |
 | `frontend/` | `npm run build:desktop-ui` | Passed |
-| `$HOME/diligence-studio-server/` | `npm run typecheck` | Passed |
-| `$HOME/diligence-studio-server/` | `npm test` | 134 tests across 16 files passed; experimental Node SQLite warning |
 | Repository root | `bash -n quarry` | Passed |
 | Repository root | `./quarry --help` | Passed |
 | Repository root | `git diff --check` | Passed |
@@ -275,7 +282,7 @@ Correction checks completed 2026-10-20:
 | `backend/` | `cargo clippy --locked --offline --all-targets -- -D warnings` | Only the pre-existing PDF parser lint at `formats/pdf.rs:451` |
 | `backend/` | `cargo clippy --locked --offline --all-targets -- -D warnings -A clippy::chunks_exact_to_as_chunks` | Passed |
 | Repository root | `bash -n quarry` | Passed |
-| Repository root | `./quarry --help` | Passed; default Rust / explicit Node rollback documented |
+| Repository root | `./quarry --help` | Passed; historical launcher help checked |
 | Repository root | `git diff --check` | Passed |
 
 Initial focused runs exposed and corrected test fixture expectations and the built-in last-membership

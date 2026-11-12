@@ -15,6 +15,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 pub const WRITE_LOCK: i64 = 0x517561727279;
+const WRITER_GENERATION_KEY: &str = "postgres_writer_generation";
 #[derive(Debug, Error)]
 pub enum PostgresError {
     #[error("PostgreSQL query construction failed: {0}")]
@@ -84,6 +85,7 @@ pub struct PostgresClient {
 struct WriterLease {
     connection: Mutex<Option<sqlx::pool::PoolConnection<Postgres>>>,
     healthy: std::sync::atomic::AtomicBool,
+    generation: String,
 }
 pub struct PostgresTransaction {
     connection: Arc<Mutex<Option<Transaction<'static, Postgres>>>>,
@@ -92,7 +94,7 @@ pub struct PostgresTransaction {
 fn bind(query: &SqlQuery) -> sqlx::query::Query<'_, Postgres, sqlx::postgres::PgArguments> {
     let mut q = sqlx::query(query.sql());
     for value in query.parameters() {
-        q = q.bind(value.clone());
+        q = q.bind(value);
     }
     q
 }
@@ -135,6 +137,7 @@ impl PostgresClient {
     }
     /// Retain the single active application writer through routers and detached workers.
     /// The dedicated pooled connection closes on drop so session locks never return to the pool.
+    /// The schema must be initialized before registering the commit fence.
     pub(crate) async fn with_writer_lease(mut self) -> Result<Self, PostgresError> {
         let mut connection = self.pool.acquire().await?;
         connection.close_on_drop();
@@ -147,9 +150,23 @@ impl PostgresClient {
         if !owned {
             return Err(PostgresError::WriterBusy);
         }
+        let generation = uuid::Uuid::new_v4().to_string();
+        // This ownership update deliberately bypasses the aggregate write lock: a new
+        // owner must fence an old transaction that is still holding that lock. A
+        // transaction already at its commit fence holds this row until it finishes,
+        // so takeover cannot return before that commit/rollback is resolved.
+        sqlx::query(
+            "INSERT INTO app_metadata(key,value) VALUES ($1,$2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        .bind(WRITER_GENERATION_KEY)
+        .bind(&generation)
+        .execute(&mut *connection)
+        .await?;
         self.writer_lease = Some(Arc::new(WriterLease {
             connection: Mutex::new(Some(connection)),
             healthy: std::sync::atomic::AtomicBool::new(true),
+            generation,
         }));
         Ok(self)
     }
@@ -169,6 +186,30 @@ impl PostgresClient {
                 .is_err()
             {
                 lease.healthy.store(false, Ordering::Release);
+                return Err(PostgresError::WriterLeaseLost);
+            }
+        }
+        Ok(())
+    }
+    async fn fence_commit(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        read_only: bool,
+    ) -> Result<(), PostgresError> {
+        self.ensure_writer_lease().await?;
+        if let Some(lease) = self.writer_lease.as_ref().filter(|_| !read_only) {
+            // READ COMMITTED sees a replacement owner's generation, even if this
+            // transaction started earlier. Keep the row locked through commit to
+            // close the gap between checking ownership and publishing the write.
+            let generation: Option<String> =
+                sqlx::query_scalar("SELECT value FROM app_metadata WHERE key=$1 FOR SHARE")
+                    .bind(WRITER_GENERATION_KEY)
+                    .fetch_optional(&mut **transaction)
+                    .await?;
+            if generation.as_deref() != Some(lease.generation.as_str()) {
+                lease
+                    .healthy
+                    .store(false, std::sync::atomic::Ordering::Release);
                 return Err(PostgresError::WriterLeaseLost);
             }
         }
@@ -203,16 +244,26 @@ impl PostgresClient {
                 .await
                 .map_err(PostgresError::from)?;
         }
+        // Pool acquisition and the aggregate lock may have waited through takeover.
+        self.ensure_writer_lease().await?;
         let connection = Arc::new(Mutex::new(Some(transaction)));
         let result = operation(PostgresTransaction {
             connection: connection.clone(),
             read_only,
         })
         .await;
-        let transaction =
+        let mut transaction =
             connection.lock().await.take().ok_or_else(|| {
                 PostgresError::transaction_aborted("transaction already finished")
             })?;
+        let result = match result {
+            Ok(result) => self
+                .fence_commit(&mut transaction, read_only)
+                .await
+                .map(|()| result)
+                .map_err(E::from),
+            Err(error) => Err(error),
+        };
         match result {
             Ok(result) => {
                 transaction.commit().await.map_err(PostgresError::from)?;
@@ -265,6 +316,7 @@ impl PostgresClient {
         ensure(&query, true)?;
         self.ensure_writer_lease().await?;
         let rows = bind(&query).fetch_all(&self.pool).await?;
+        self.ensure_writer_lease().await?;
         rows.iter().map(|r| mapper(&Row(r))).collect()
     }
     pub async fn read_one_with_async<T>(
@@ -275,12 +327,9 @@ impl PostgresClient {
         let query = query?;
         ensure(&query, true)?;
         self.ensure_writer_lease().await?;
-        bind(&query)
-            .fetch_optional(&self.pool)
-            .await?
-            .as_ref()
-            .map(|r| mapper(&Row(r)))
-            .transpose()
+        let row = bind(&query).fetch_optional(&self.pool).await?;
+        self.ensure_writer_lease().await?;
+        row.as_ref().map(|r| mapper(&Row(r))).transpose()
     }
     pub async fn read_async(
         &self,

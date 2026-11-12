@@ -20,6 +20,7 @@ Run commands from the repository root unless a section names a different directo
 | Node.js and npm | Use Node.js 22.12 or newer in the Node 22 line, or a newer supported LTS; the current Vite dependency requires `^20.19.0` or `>=22.12.0` |
 | Rust and Cargo | Rust 1.97.1 or newer, with `rustfmt` and Clippy; the backend declares this minimum for Rig 0.46 |
 | Docker | Docker Desktop on macOS, or a running Docker Engine on Linux |
+| PostgreSQL | Existing local service with a fresh `Quarry` database; PostgreSQL 18 was validated |
 | Bash and curl | Required by the root launcher |
 | Tauri system dependencies | Required for the native desktop app; follow the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform |
 | Chromium | Required for embedded template previews; configure an installed executable as described below |
@@ -64,16 +65,14 @@ cd ..
 ```
 
 Use npm and the checked-in lockfile. There is no root npm workspace or root task runner.
-Cargo downloads Rust dependencies during the first build or launcher run. The independent
-legacy Diligence Studio service is optional; it is not needed for the default stack.
+Cargo downloads Rust dependencies during the first build or launcher run.
 
 ## Configure local capabilities
 
-The default stack can start without an environment file. Add overrides only as needed:
+The default stack requires the exported `QUARRY_DATABASE_URL` shown above. An environment file is optional; add other overrides only as needed:
 
 - `frontend/.env`: public Vite settings.
 - `backend/.env`: backend configuration and server-side secrets.
-- The external Diligence Studio checkout's `.env`: settings for that optional legacy service.
 
 These are ignored local files. Never place provider secrets in `VITE_*` variables or the
 browser bundle. The backend does not read the external service's environment file.
@@ -120,12 +119,14 @@ From the repository root, choose one target:
 ./quarry desktop
 ```
 
-The launcher starts Docker Desktop if needed on macOS, prepares Helix, starts the backend,
+The launcher starts an existing Postgres.app 18 cluster and Docker Desktop if needed on macOS,
+checks the configured PostgreSQL connection, prepares Helix, starts the backend,
 and then starts the selected UI. Open [localhost:1420](http://localhost:1420) for the web target;
 the desktop target opens a Tauri window. Register an account or sign in to use protected workflows.
 
-Templates run inside the backend by default and persist in Quarry's shared PostgreSQL database.
-The browser and desktop app call the backend; neither calls the legacy template service directly.
+Templates run inside the backend and persist in Quarry's shared PostgreSQL database.
+The browser and desktop app call the backend. The launcher always selects embedded templates
+and runs template processing inside Axum.
 
 ### Helix and local storage
 
@@ -144,8 +145,8 @@ QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
 
 That container must use host port `6970` and its matching `<container-name>-data` volume.
 Preserve existing data before deliberately replacing any container. PostgreSQL is the canonical
-product store; Helix is the required graph/search projection. Startup opens and may upgrade
-PostgreSQL and initializes graph indexes. Consult the architecture's recovery procedures if an
+product store; Helix is the required graph/search projection. Startup initializes an empty
+PostgreSQL schema or validates version 1 and its catalog; it also initializes graph indexes. Consult the architecture's recovery procedures if an
 existing database or projection is incompatible; do not delete stores as a setup shortcut.
 
 ### Local addresses
@@ -155,13 +156,12 @@ existing database or projection is incompatible; do not delete stores as a setup
 | Web UI / desktop development UI | `http://localhost:1420` | Both launcher targets |
 | Backend API | `http://127.0.0.1:3001` | Health: `/api/v1/health` |
 | Helix | `http://127.0.0.1:6970` | Required by normal backend startup |
-| Legacy Diligence Studio | `http://127.0.0.1:43127` | Explicit legacy mode only |
 
 ### Stop the application
 
-Keep the launcher terminal open. Press `Ctrl-C` to stop the backend, selected UI, and any
-launcher-owned legacy service. If an application process exits, the launcher stops its other
-application processes too. Docker and Helix remain running.
+Keep the launcher terminal open. Press `Ctrl-C` to stop the backend and selected UI. If an
+application process exits, the launcher stops its other application processes too. PostgreSQL,
+Docker, and Helix remain running.
 
 Stop Helix separately when appropriate:
 
@@ -222,8 +222,10 @@ npm test
 npm run build:web
 npm run check:web-bundle
 npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
 npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 Replace the focused test path with the affected test. `typecheck` checks both web and desktop;
@@ -249,7 +251,8 @@ cargo test --locked domains::documents::search
 ```
 
 Backend tests are manually included from `tests/unit/` and `tests/integration/`; they are not
-independent `cargo test --test <file>` targets. Normal tests use temporary stores and test clients.
+independent `cargo test --test <file>` targets. Database-backed tests require a separate `_test`
+PostgreSQL database and create isolated schemas; other capabilities use test clients.
 Some opt-in tests require explicitly selected disposable services and remain ignored in the normal
 suite. Do not enable them against a live store. Do not use startup, `clear_helix`, or destructive graph maintenance as verification commands.
 
@@ -268,52 +271,21 @@ Run from `frontend/src-tauri/` when native code, capabilities, or transport chan
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
+cargo test --locked --all-targets
 ```
 
 Also check the frontend desktop target, shared boundary checks, and adapter tests for native
 contract changes. Reserve `npm run build:desktop` for packaging/release validation.
 
-## Optional legacy Diligence Studio service
-
-The independent Node/Express service defaults to `$HOME/diligence-studio-server/`. Set
-`QUARRY_DILIGENCE_STUDIO_ROOT` in the launcher environment to use another checkout. It has its
-own package and lockfile; do not add it to the frontend workspace.
-
-Install from that checkout:
-
-```sh
-cd "$HOME/diligence-studio-server"
-npm ci
-npx playwright install chromium
-```
-
-Run its checks from the same directory:
-
-```sh
-npm run typecheck
-npm test
-```
-
-`npm start` runs the service independently. To select it through Quarry, return to the Quarry
-repository root and run:
-
-```sh
-QUARRY_TEMPLATE_BACKEND=diligence-studio ./quarry web
-```
-
-The launcher additionally checks port `43127`, starts the service after the UI preview renderer
-is available, and supervises it with the other application processes. Its catalog is in memory
-and does not survive process exit. Authenticated template operations currently fail closed with
-503 in this mode because the legacy service cannot enforce per-user isolation. Use default
-embedded mode for the maintained authenticated template workflow.
-
 ## Troubleshooting
 
 - **Missing command:** install the prerequisite, reopen the terminal, and verify it is on `PATH`.
 - **Node version error:** check `node --version`; use a version compatible with the installed Vite dependency.
-- **Port already in use:** check `3001` and `1420`, plus `43127` only in legacy mode. Stop the owning
+- **Port already in use:** check `3001` and `1420`. Stop the owning
   process intentionally; the launcher will not stop an unknown listener.
+- **Helix vector-dimension conflict:** the configured `HELIX_VECTOR_DIMENSION` must match the
+  existing document index. Align the setting only after confirming the intended embedding size;
+  changing the index requires a planned rebuild. Do not delete the graph to bypass the conflict.
 - **Docker or Helix timeout:** check `docker info`, `docker ps -a`, and
   `docker logs helix-quarry-postgres-dev`. Confirm registry access and the pinned image configuration.
 - **Helix image/storage mismatch:** preserve the live graph and follow the architecture's cutover

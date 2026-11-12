@@ -33,7 +33,7 @@ request -> router -> handler -> service -> repository/client
 - `handlers/`: extract/validate transport input, invoke service, adapt response.
 - `services/`: orchestration and preconditions derived from loaded or upstream state.
 - `repository/`: PostgreSQL/Helix persistence and projection operations.
-- `core/clients`, parsers, SQL/query/node modules: concrete infrastructure and pure mechanisms.
+- `adapters/`, domain parsers, and query/model modules: concrete infrastructure and pure mechanisms.
 
 Services and repositories must not depend on `AppState`, read ambient configuration, or construct
 infrastructure clients. Handlers must not import repositories or construct clients. Current
@@ -116,7 +116,9 @@ work and preserve necessary guards at the actual operation.
   document/template graph projection and search boundary.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
-- Jobs and caches are currently process-local. Do not describe them as durable or distributed.
+- Document jobs and caches are process-local. Notebook saves/cleanup, template classification
+  jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
+  Durable receipts do not make these workers a distributed queue.
 
 ## Configuration and optional capabilities
 

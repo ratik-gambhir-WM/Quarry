@@ -14,7 +14,6 @@ fn default_config_is_local_and_has_a_timeout() {
     assert_eq!(config.helix.vector_dimension.get(), 1536);
     assert!(config.openai.is_none());
     assert!(config.wm_ai.is_none());
-    assert!(config.diligence_studio.is_none());
     assert_eq!(config.prompts.directory, PathBuf::from("prompts"));
 }
 
@@ -32,47 +31,6 @@ fn prompt_catalog_directory_defaults_and_rejects_a_blank_override() {
             .unwrap_err()
             .contains("QUARRY_PROMPTS_DIR")
     );
-}
-
-#[test]
-fn parses_and_normalizes_optional_diligence_studio_configuration() {
-    let config = crate::integration_support::config([(
-        "DILIGENCE_STUDIO_API_BASE_URL",
-        "http://127.0.0.1:43127/api/v1",
-    )])
-    .unwrap();
-
-    assert_eq!(
-        config.diligence_studio.unwrap().base_url.as_str(),
-        "http://127.0.0.1:43127/api/v1/"
-    );
-    assert!(
-        crate::integration_support::config([("DILIGENCE_STUDIO_API_BASE_URL", "  ")])
-            .unwrap()
-            .diligence_studio
-            .is_none()
-    );
-    assert!(crate::integration_support::config([(
-        "DILIGENCE_STUDIO_API_BASE_URL",
-        "http://[::1]:43127/api/v1",
-    )])
-    .is_ok());
-}
-
-#[test]
-fn rejects_unsafe_or_unversioned_diligence_studio_urls() {
-    for value in [
-        "http://example.com/api/v1",
-        "https://user:secret@example.com/api/v1",
-        "https://example.com/api",
-        "https://example.com/api/v2",
-        "https://example.com/api/v1?debug=true",
-        "not-a-url",
-    ] {
-        let error = crate::integration_support::config([("DILIGENCE_STUDIO_API_BASE_URL", value)])
-            .unwrap_err();
-        assert!(error.contains("DILIGENCE_STUDIO_API_BASE_URL"), "{error}");
-    }
 }
 
 #[test]
@@ -194,27 +152,14 @@ fn secrets_are_redacted_from_debug_output() {
 }
 
 #[test]
-fn slide_templates_default_to_embedded_and_provider_configuration_is_atomic() {
+fn slide_template_provider_configuration_is_atomic() {
     let defaults = crate::integration_support::config(Vec::<(String, String)>::new()).unwrap();
-    assert_eq!(defaults.slide_templates.backend, TemplateBackend::Embedded);
     assert!(defaults.slide_templates.classification.is_none());
-    let embedded = crate::integration_support::config([
-        ("QUARRY_TEMPLATE_BACKEND", "embedded"),
-        ("QUARRY_SLIDE_TEMPLATES_PREVIEW", "disabled"),
-    ])
-    .unwrap();
-    assert_eq!(embedded.slide_templates.backend, TemplateBackend::Embedded);
-    assert!(embedded.slide_templates.chromium_path.is_none());
-    let legacy =
-        crate::integration_support::config([("QUARRY_TEMPLATE_BACKEND", "diligence-studio")])
+    let embedded =
+        crate::integration_support::config([("QUARRY_SLIDE_TEMPLATES_PREVIEW", "disabled")])
             .unwrap();
-    assert_eq!(
-        legacy.slide_templates.backend,
-        TemplateBackend::DiligenceStudio
-    );
-    assert_eq!(TemplateBackend::default(), TemplateBackend::Embedded);
+    assert!(embedded.slide_templates.chromium_path.is_none());
     for values in [
-        vec![("QUARRY_TEMPLATE_BACKEND", "other")],
         vec![("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "openai")],
         vec![("QUARRY_SLIDE_TEMPLATES_PREVIEW", "other")],
         vec![("TEMPLATE_PREVIEW_RENDER_SIZE", "1")],
@@ -223,7 +168,6 @@ fn slide_templates_default_to_embedded_and_provider_configuration_is_atomic() {
         assert!(crate::integration_support::config(values).is_err());
     }
     let configured = crate::integration_support::config([
-        ("QUARRY_TEMPLATE_BACKEND", "embedded"),
         ("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "openai"),
         ("OPENAI_API_KEY", "synthetic-test-key"),
         ("OPENAI_SLIDE_CLASSIFICATION_MODEL", "fixture-classifier"),

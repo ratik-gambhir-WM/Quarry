@@ -59,7 +59,7 @@ pub(super) async fn find_for_finding(
             .await??;
     let analysis = analyze_finding(&input.markdown, &records);
     let compatible: Vec<_> = records
-        .into_iter()
+        .iter()
         .filter(|record| {
             compatible_vectors(
                 record,
@@ -98,12 +98,12 @@ pub(super) async fn find_for_finding(
     };
     let subject = rank_by_vector(&subject_vector, &compatible, VectorRole::Subject)?;
     let capability = rank_by_vector(&capability_vector, &compatible, VectorRole::Capability)?;
-    let mut ranked = reciprocal_rank_scores(&[lexical, subject, capability], 60.0)
+    let mut ranked = reciprocal_rank_scores(&[&lexical, &subject, &capability], 60.0)
         .into_iter()
         .map(|(record, score)| {
             (
-                record.clone(),
-                score + f64::from(exact_finding_boost(&record, &analysis)) * 0.005,
+                record,
+                score + f64::from(exact_finding_boost(record, &analysis)) * 0.005,
             )
         })
         .collect::<Vec<_>>();
@@ -118,7 +118,7 @@ pub(super) async fn find_for_finding(
     let results = ranked
         .into_iter()
         .take(input.limit)
-        .map(|(record, _)| explain_finding_match(&record, &analysis, app_id))
+        .map(|(record, _)| explain_finding_match(record, &analysis, app_id))
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(json!({"results":results,"warnings":[]}))
 }

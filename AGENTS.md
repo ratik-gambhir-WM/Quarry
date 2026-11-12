@@ -53,7 +53,6 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
-| `$HOME/diligence-studio-server/` | External Node/Express template catalog and PowerPoint service | npm + `package-lock.json` |
 | `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
@@ -62,22 +61,20 @@ build root. There is currently no CI, deployment manifest, repository-owned cont
 configuration, or repository-pinned Node/Rust version. Do not invent scripts that do
 not exist.
 
-### Diligence Studio remains a separate server boundary
+### Embedded templates
 
-- `$HOME/diligence-studio-server/` is an independent Node 22.5+ build root outside this repository. Do not add it to the
-  frontend package or create a root npm workspace.
-- The browser and Tauri webview call only Axum. Axum reaches Diligence Studio through its typed
-  adapter and fixed `X-App-Id: Quarry_WestMonroe`; client code must never call port `43127`.
-- Default `embedded` mode runs `domains/templates/slide_templates` in Axum with native conversion,
-  Chromium/CDP previews, shared durable product PostgreSQL, and Helix template/metadata/dual-vector
-  projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
-  in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
+- Templates run only inside Axum through `domains/templates/slide_templates`, with native
+  conversion, Chromium/CDP previews, shared durable PostgreSQL and Helix metadata/dual-vector
+  projection. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
+  the shared read-only SVG render surface.
+- Bootstrap's main API assembly initializes one template engine for the facade, native routes
+  and shutdown lifecycle; there is no alternate template backend or service selector.
 - `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
   `app/migrations.rs` initializes/validates version 1, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
   schemas. Old SQLite files and Helix stores remain untouched; no import, fallback or reset exists.
-- Keep server keys in the ignored `$HOME/diligence-studio-server/.env`; never place them in `VITE_*`,
+- Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
 ## Non-negotiable architecture boundaries
@@ -165,6 +162,11 @@ request -> router -> handler -> service -> repository/client
   document and template Helix projection/search contracts remain unchanged.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
+- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook indexes. Template vector
+  dimensions are configured independently. A configuration change does not resize existing indexes;
+  do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
+  a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
+  `docs/postgresql-storage.md` for the verified-empty-index case.
 - `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
   drained operational procedure; never use it as verification. Document jobs/caches remain in memory.
 - See `docs/postgresql-storage.md` for server-only URL/pool configuration, fresh local graph port
@@ -288,7 +290,7 @@ being changed, keep abstractions proportional to its complexity, and preserve un
 - Optional OpenAI and WM AI capabilities must fail explicitly when invoked but unconfigured;
   partial WM AI configuration must fail startup validation. Never move provider keys into
   frontend code or logs.
-- The Rust SharePoint client under `backend/src/core/clients/sharepoint_client/` is isolated and
+- The Rust SharePoint client under `backend/src/adapters/sharepoint/` is isolated and
   is not currently wired into product bootstrap. Do not imply the frontend SharePoint modal is a
   completed integration.
 
@@ -353,21 +355,12 @@ Also run frontend desktop typechecking and boundary checks for native contract c
 `npm run build:desktop` for packaging or release validation; it is substantially broader than a
 normal code check.
 
-### Diligence Studio server (`$HOME/diligence-studio-server/`)
-
-```sh
-npm ci
-npm run typecheck
-npm test
-```
-
-Install the matching local preview browser with `npx playwright install chromium` when imports
-will be exercised. The root `./quarry web` and `./quarry desktop` launchers supervise Axum, the
-selected UI, and, only in explicit legacy mode, this server after ensuring Docker Desktop and the
-configured local Helix container are ready; Docker and Helix remain running after the launcher exits. A direct `npm start` is a
-standalone runtime operation.
-
 ## Change checklists
+
+The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
+embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped, check
+the configured database connection, and ensure Docker Desktop and the configured local Helix
+container are ready. PostgreSQL, Docker, and Helix remain running after the launcher exits.
 
 ### When changing a frontend route or feature
 
@@ -386,8 +379,8 @@ standalone runtime operation.
 - For backend validation/authorization changes, review check placement and test early rejection
   before protected work, plus the retained state-dependent guards. Run the architecture suite
   (directly or through the full backend gate); static dependency checks alone do not prove order.
-- When a template operation changes, also update and test the matching Diligence Studio route,
-  headers, request bounds, app scoping, and error contract.
+- When a template operation changes, update and test the facade and native template routes,
+  headers, request bounds, owner/app scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 

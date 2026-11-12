@@ -74,7 +74,8 @@ receipt and retried on the next scan; keyset pagination continues past busy page
 can progress. Every operation retains exclusive admission throughout its cleanup sweep.
 The shared Helix client still serializes remote writes.
 Barriers already apply to recovered operations before any route can serve them. Other deals remain
-usable while cleanup resumes. Canonical PostgreSQL work uses the existing blocking-pool client.
+usable while cleanup resumes. Canonical PostgreSQL work uses the shared asynchronous pool; Office, filesystem and CPU-heavy
+conversion keep their separate blocking-task boundaries.
 
 Admission guards cover HTTP response bodies and actual spawned ingestion/chat tasks. Ingestion
 workers recheck upload authorization after admission; job registration is also guarded. Chat

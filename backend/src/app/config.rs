@@ -105,11 +105,6 @@ pub struct DocumentConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct DiligenceStudioConfig {
-    pub base_url: reqwest::Url,
-}
-
-#[derive(Clone, Debug)]
 pub struct PromptConfig {
     pub directory: PathBuf,
 }
@@ -124,7 +119,6 @@ pub struct AppConfig {
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
     pub search: SearchConfig,
-    pub diligence_studio: Option<DiligenceStudioConfig>,
     pub slide_templates: SlideTemplatesConfig,
     pub prompts: PromptConfig,
 }
@@ -160,7 +154,6 @@ impl AppConfig {
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
             search: parse_search_config(&values)?,
-            diligence_studio: parse_diligence_studio_config(&values)?,
             slide_templates: parse_slide_templates_config(&values)?,
             prompts: parse_prompt_config(&values)?,
         })
@@ -202,7 +195,6 @@ impl Default for AppConfig {
                     DEFAULT_COMPLETED_JOB_RETENTION_SECONDS,
                 ),
             },
-            diligence_studio: None,
             slide_templates: parse_slide_templates_config(&HashMap::new())
                 .expect("default slide configuration is valid"),
             prompts: PromptConfig {
@@ -221,40 +213,6 @@ fn parse_prompt_config(values: &HashMap<String, String>) -> Result<PromptConfig,
         None => PathBuf::from("prompts"),
     };
     Ok(PromptConfig { directory })
-}
-
-fn parse_diligence_studio_config(
-    values: &HashMap<String, String>,
-) -> Result<Option<DiligenceStudioConfig>, String> {
-    let Some(value) = value(values, "DILIGENCE_STUDIO_API_BASE_URL") else {
-        return Ok(None);
-    };
-    let mut base_url = reqwest::Url::parse(value)
-        .map_err(|error| format!("invalid DILIGENCE_STUDIO_API_BASE_URL: {error}"))?;
-    let is_loopback_http = base_url.scheme() == "http"
-        && (base_url.host_str() == Some("localhost")
-            || base_url
-                .host_str()
-                .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
-                .is_some_and(|address| address.is_loopback()));
-    if base_url.scheme() != "https" && !is_loopback_http {
-        return Err("DILIGENCE_STUDIO_API_BASE_URL must use HTTPS or loopback HTTP".to_string());
-    }
-    if !base_url.username().is_empty()
-        || base_url.password().is_some()
-        || base_url.query().is_some()
-        || base_url.fragment().is_some()
-    {
-        return Err(
-            "DILIGENCE_STUDIO_API_BASE_URL must not contain credentials, a query, or a fragment"
-                .to_string(),
-        );
-    }
-    if base_url.path().trim_end_matches('/') != "/api/v1" {
-        return Err("DILIGENCE_STUDIO_API_BASE_URL must end with /api/v1".to_string());
-    }
-    base_url.set_path("/api/v1/");
-    Ok(Some(DiligenceStudioConfig { base_url }))
 }
 
 fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, String> {
@@ -573,15 +531,8 @@ fn normalize_deal_config_key(deal_id: &str) -> String {
 #[path = "../../tests/unit/app/config_tests.rs"]
 mod tests;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TemplateBackend {
-    DiligenceStudio,
-    #[default]
-    Embedded,
-}
 #[derive(Clone, Debug)]
 pub struct SlideTemplatesConfig {
-    pub backend: TemplateBackend,
     pub embedding_dimensions: NonZeroUsize,
     pub chromium_path: Option<PathBuf>,
     pub render_url: String,
@@ -604,11 +555,6 @@ pub struct SlideClassificationConfig {
 fn parse_slide_templates_config(
     values: &HashMap<String, String>,
 ) -> Result<SlideTemplatesConfig, String> {
-    let backend = match value(values, "QUARRY_TEMPLATE_BACKEND").unwrap_or("embedded") {
-        "diligence-studio" => TemplateBackend::DiligenceStudio,
-        "embedded" => TemplateBackend::Embedded,
-        _ => return Err("QUARRY_TEMPLATE_BACKEND must be diligence-studio or embedded".into()),
-    };
     let render_url = value(values, "QUARRY_TEMPLATE_PREVIEW_RENDER_URL")
         .unwrap_or("http://localhost:1420/_internal/template-preview")
         .to_owned();
@@ -691,7 +637,6 @@ fn parse_slide_templates_config(
             }
         };
     Ok(SlideTemplatesConfig {
-        backend,
         embedding_dimensions,
         chromium_path,
         render_url,

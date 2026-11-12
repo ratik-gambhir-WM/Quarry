@@ -2,7 +2,10 @@
 
 Updated: November 11, 2026
 
-Status: proposed implementation plan; no runtime or database changes made
+Status: implemented November 11, 2026. The canonical database is **`Quarry`**; Helix is retained.
+See [current storage and recovery](../docs/postgresql-storage.md) and
+[implementation verification](../docs/postgresql-storage-verification.md). The sections below
+retain the original design input and planning-time observations.
 
 ## 1. Objective and scope
 
@@ -45,7 +48,6 @@ The maintained architecture and current code override older planning notes and s
 | Embedded templates | SQLite catalog/assets/previews/classification, canonical embedding artifacts and FTS5; Helix metadata/dual-vector projection | PostgreSQL canonical tables and lexical replacement; retain Helix projection and retrieval |
 | Permanent deal deletion | SQLite durable receipts/barriers/cleanup targets; Helix graph purge | PostgreSQL receipts/barriers/targets; retain Helix purge and verification |
 | Document jobs/caches | Process-local memory | Remain process-local |
-| Optional Diligence Studio service | Independent Node boundary | Remains separate; no service or storage consolidation |
 
 PostgreSQL replaces canonical relational persistence. It does not replace Helix, make
 cross-store writes atomic, make in-memory jobs durable, or add new search capabilities.
@@ -264,9 +266,7 @@ that PostgreSQL and Helix committed atomically or rename wire values accidentall
 - Keep permanent deal deletion's durable receipt, admission barrier, drains, canonical
   cleanup, Helix purge, verification and restart recovery. A database swap must not leave
   orphaned graph results visible or mark deletion complete before graph verification.
-- The optional external Diligence Studio service stays independent with its existing
-  protocol; embedded mode is the primary acceptance target. Do not modify that separate
-  server's local data/configuration or turn it into a hidden product SQLite fallback.
+- Templates run inside Axum; there is no separate template service or product SQLite fallback.
 
 ## 7. Configuration, bootstrap and launcher
 
@@ -407,9 +407,9 @@ Use these current repository sources during implementation:
 - [Final schema/upgrades](../backend/src/app/migrations.rs),
   [bootstrap](../backend/src/app/bootstrap.rs), [configuration](../backend/src/app/config.rs),
   [backend manifest](../backend/Cargo.toml), [lockfile](../backend/Cargo.lock), [launcher](../quarry).
-- [SQLite client](../backend/src/adapters/sqlite/client.rs),
-  [query builder](../backend/src/adapters/sqlite/query/builder.rs),
-  [document store](../backend/src/domains/documents/store/sqlite.rs),
+- [PostgreSQL client](../backend/src/adapters/postgres/client.rs),
+  [query builder](../backend/src/adapters/postgres/query/builder.rs),
+  [document store](../backend/src/domains/documents/store/postgres.rs),
   [identity checkpoints](../backend/src/domains/documents/store/identity.rs).
 - [Document graph queries](../backend/src/domains/documents/graph/query.rs),
   [writer](../backend/src/domains/documents/graph/writer.rs),

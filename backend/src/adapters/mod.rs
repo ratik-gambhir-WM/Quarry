@@ -1,4 +1,3 @@
-pub mod diligence_studio;
 pub mod helix;
 pub mod office;
 pub mod openai;

@@ -2,6 +2,106 @@ use super::*;
 use crate::slide_template_test_support as support;
 use std::time::Duration;
 
+async fn json_studio() -> SlideTemplates {
+    SlideTemplates::new(
+        Arc::new(
+            support::repository(std::path::Path::new(":memory:"))
+                .await
+                .unwrap(),
+        ),
+        Arc::new(support::FixturePreview),
+        None,
+        None,
+        false,
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn json_encoding_is_concurrent_off_runtime_and_retains_capacity_after_request_drop() {
+    let studio = Arc::new(json_studio().await);
+    let runtime_thread = std::thread::current().id();
+    let mut requests = Vec::new();
+    let mut releases = Vec::new();
+    let mut starts = Vec::new();
+    for index in 0..2 {
+        let studio = studio.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        releases.push(release);
+        starts.push(ready);
+        requests.push(tokio::spawn(async move {
+            studio
+                .encode_json(move || {
+                    assert_ne!(std::thread::current().id(), runtime_thread);
+                    started.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(serde_json::json!({"slide": index}))
+                })
+                .await
+        }));
+    }
+    tokio::time::timeout(Duration::from_secs(3), async {
+        for ready in starts {
+            ready.await.unwrap();
+        }
+    })
+    .await
+    .expect("both blocking jobs must start while the runtime stays responsive");
+    assert_eq!(
+        studio.parse_json(b"{}".to_vec()).await.unwrap_err().code,
+        "template_busy"
+    );
+    let cancelled = requests.pop().unwrap();
+    cancelled.abort();
+    assert!(cancelled.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        studio.parse_json(b"{}".to_vec()).await.unwrap_err().code,
+        "template_busy"
+    );
+    for release in releases {
+        release.send(()).unwrap();
+    }
+    let bytes = requests.pop().unwrap().await.unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes).unwrap(),
+        serde_json::json!({"slide": 0})
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while studio.capacity.available_permits() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        studio.parse_json(bytes).await.unwrap(),
+        serde_json::json!({"slide": 0})
+    );
+}
+
+#[tokio::test]
+async fn offloaded_json_preserves_invalid_input_output_bounds_and_shutdown_errors() {
+    let studio = json_studio().await;
+    assert_eq!(
+        studio
+            .parse_json(b"invalid".to_vec())
+            .await
+            .unwrap_err()
+            .code,
+        "invalid_json"
+    );
+    let error = studio
+        .encode_json(|| Ok("x".repeat(super::super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES)))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "response_too_large");
+    studio.shutdown();
+    assert_eq!(
+        studio.parse_json(b"{}".to_vec()).await.unwrap_err().code,
+        "template_stopping"
+    );
+}
+
 #[tokio::test]
 async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_return() {
     let repository = Arc::new(

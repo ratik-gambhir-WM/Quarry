@@ -127,7 +127,7 @@ From `frontend/src-tauri/`:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
+cargo test --locked --all-targets
 ```
 
 For any native command, IPC payload, desktop API relay, capability, CSP, or routing change, also

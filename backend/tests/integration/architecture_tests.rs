@@ -186,7 +186,6 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "FileUploadServiceClient::new(",
         "IndexServiceClient::new(",
         "GraphRagClient::new(",
-        "DiligenceStudioClient::new(",
         "PostgresTemplateRepository::new(",
         "HeadlessTemplatePreviewGenerator::new(",
         "OpenAISlideClassifier::new(",

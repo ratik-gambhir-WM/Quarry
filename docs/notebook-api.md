@@ -140,8 +140,6 @@ trash or automatic distributed transaction across PostgreSQL/Helix.
 <a id="additive-schema-12--13-and-recovery"></a>
 ## PostgreSQL schema and recovery
 
-The live pre-notebook schema is 12, not the plan's assumed 11. Marker 13 adds notebooks,
-notebook_folders, notebook_notes, notebook_save_jobs and notebook_cleanup to the shared database.
 Notebook tables, durable save snapshots/jobs and cleanup tombstones are part of fresh PostgreSQL
 schema 1. There is no old-data upgrade/reset path. Startup validates the complete schema and rejects
 drift without deleting notes. Back up PostgreSQL and the matching Helix store/binary before any

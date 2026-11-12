@@ -38,14 +38,6 @@ the matching configuration/binary before future changes. Drain writers for recov
 remove ownership checks, modify schema markers or delete canonical rows to conceal a graph failure.
 See [current storage setup and recovery](postgresql-storage.md).
 
-## Legacy service
-
-The separately configured Diligence Studio service has an app-wide catalog without authenticated
-user ownership. Quarry therefore returns 503 for its template facade operations instead of
-forwarding requests into that shared catalog. Use embedded mode for private templates. This does
-not change the independent service's files, data, routes or fixed `X-App-Id` adapter contract, and
-switching modes never copies or assigns legacy records.
-
 ## Verification
 
 Checks run on 2026-11-05:

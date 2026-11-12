@@ -91,9 +91,9 @@ async fn cross_origin_export_exposes_headers_required_by_the_browser_adapter() {
 
 fn routes(studio: Arc<SlideTemplates>) -> Router {
     crate::create_router(
-        templates::route::routes(Arc::new(templates::service::TemplateService::embedded(
+        templates::route::routes(Arc::new(templates::service::TemplateService::new(Some(
             studio.clone(),
-        )))
+        ))))
         .merge(templates::slide_templates::route::routes(studio))
         .layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,

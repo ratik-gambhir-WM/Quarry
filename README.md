@@ -88,4 +88,5 @@ For dependencies, local setup, configuration, development commands, builds, test
 troubleshooting, read [Getting Started](Getting%20Started.md).
 
 For deeper technical context, see the [architecture](docs/ARCHITECTURE.md),
-[domain model](docs/DOMAIN_MODEL.md), and [contributor guidance](AGENTS.md).
+[domain model](docs/DOMAIN_MODEL.md), [PostgreSQL storage and recovery](docs/postgresql-storage.md),
+and [contributor guidance](AGENTS.md).

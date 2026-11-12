@@ -1065,8 +1065,9 @@ impl SlideTemplateEndpoint {
 }
 fn compose(endpoint: SlideTemplateEndpoint) -> Router {
     let studio = endpoint.studio;
-    let facade =
-        Arc::new(crate::domains::templates::service::TemplateService::embedded(studio.clone()));
+    let facade = Arc::new(crate::domains::templates::service::TemplateService::new(
+        Some(studio.clone()),
+    ));
     let api = crate::domains::templates::route::routes(facade).merge(
         crate::domains::templates::slide_templates::route::routes(studio),
     );

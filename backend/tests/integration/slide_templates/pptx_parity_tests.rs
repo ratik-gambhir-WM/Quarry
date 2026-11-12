@@ -1,4 +1,4 @@
-//! Differential fixtures generated with diligence-studio's unmodified TypeScript converter.
+//! Differential fixtures generated with the original TypeScript reference converter.
 use crate::domains::templates::slide_templates::{
     compact_document, pptx, ArrowType, CanvasDocument, ElbowDirection, Element, LineType,
 };

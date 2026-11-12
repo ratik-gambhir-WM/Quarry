@@ -21,13 +21,37 @@ indexes. Credentials may instead be supplied through the ignored backend configu
 through `VITE_*`, browser storage, Tauri arguments, screenshots, or logs. The application requires
 an explicit URL; it does not use an old database path or fall back to SQLite.
 
-The launcher checks PostgreSQL connectivity without changing its schema, then supervises Axum
-and the selected UI as before. It reuses PostgreSQL without starting/stopping the shared service.
+On macOS, the launcher starts an existing Postgres.app 18 cluster if stopped, then checks
+PostgreSQL connectivity without changing its schema. `QUARRY_POSTGRES_BIN` selects the tools
+(default `/Applications/Postgres.app/Contents/Versions/18/bin`) and `QUARRY_POSTGRES_DATA_DIR`
+selects the existing cluster (default `$HOME/Library/Application Support/Postgres/var-18`). It
+never initializes storage or creates databases. Other installations must be started separately
+when these tools/storage are unavailable. Startup failures leave existing data intact; `pg_ctl`
+writes startup diagnostics to `postgres-server.log` in the selected cluster. The launcher
+supervises Axum and the selected UI; PostgreSQL remains running after it exits.
 The new local graph uses `helix-quarry-postgres-dev`, a separate disk-backed Docker volume, and
 loopback port **6970**, leaving the previous port-6969 graph untouched. `QUARRY_HELIX_CONTAINER_NAME`
 and `QUARRY_HELIX_PORT` select another isolated local store/port. The launcher passes its selected
 `HELIX_URL` to Axum. For direct backend startup, explicitly match `HELIX_URL` to the selected graph.
 Existing graph credentials, vector dimensions and template embedding settings retain their meaning.
+
+## Vector dimensions and existing indexes
+
+`HELIX_VECTOR_DIMENSION` controls document and notebook embeddings and their Helix vector indexes;
+the code default is 1536. Existing indexes retain their created dimension across restarts. Changing
+configuration does not resize them: a conflicting definition stops bootstrap before the API binds.
+`text-embedding-3-large` supports the selected local 3072-dimensional configuration. Template
+subject/capability vectors have their own `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` setting and are not
+changed by the document setting.
+
+Keep application writers stopped during an explicitly authorized dimension change. Verify canonical
+document versions, notes and save jobs as well as Helix document/notebook projection counts. When
+all are empty, replace only the document `FileChunk.embedding` (partition `deal_id`) and notebook
+`QuarryNotebookChunk.embedding` (partition `owner_id`) vector definitions, retaining cosine distance,
+and wait for each drop/build operation to succeed. Preserve unrelated nodes, indexes and volumes.
+For populated projections, retain matching backups and plan re-embedding/publication with the target
+model; vectors cannot be resized by padding or truncation. No automatic migration or general
+reindex command is provided. Never use `clear_helix` to resolve a dimension conflict.
 
 ## Schema and adapter
 
@@ -52,9 +76,10 @@ query builders retain ASCII-only LIKE folding and explicit SQLite-compatible NUL
 | `QUARRY_DATABASE_ACQUIRE_TIMEOUT_SECONDS` | 5; 1–60 |
 | `QUARRY_DATABASE_STATEMENT_TIMEOUT_SECONDS` | 30; 1–300; also bounds lock waits and idle transactions |
 
-Database I/O is asynchronous. Bootstrap reserves a pooled connection for a session advisory
-writer lease on the selected schema. All router and detached-worker clones retain it; another
-application writer is rejected. The connection closes on drop rather than returning a session
+Database I/O is asynchronous. After transactional schema initialization/validation, bootstrap reserves
+a pooled connection for a session advisory writer lease on the selected schema. All router and
+detached-worker clones retain it; another application writer is rejected. The connection closes
+on drop rather than returning a session
 lock to the pool. Operations check the dedicated session and fail closed on ownership loss until
 restart. This retains the single active Axum writer boundary, rather than enabling a distributed
 application deployment. A write transaction takes a PostgreSQL advisory lock scoped to the
@@ -65,6 +90,16 @@ preserves the previous aggregate write serialization across processes; it does n
 parallel writers for independent deals. Read aggregates use REPEATABLE READ, READ ONLY on one
 connection. No database transaction wraps a provider call, graph write or native conversion.
 Pool wait/query/lock failures are bounded; uncertain commits are not automatically replayed.
+
+Each writer lease registers a fresh generation under `postgres_writer_generation` in the existing
+`app_metadata` table. Before committing, writes recheck the lease session and take a shared row
+lock on that generation, rejecting a missing or replaced value. Takeover updates the generation
+without waiting for the aggregate advisory lock, so an older in-flight transaction cannot publish
+after replacement ownership is established. If a transaction has already locked its matching
+generation for commit, takeover waits for that transaction to finish before returning ownership.
+This row lock closes the check-to-commit race; a session ping alone cannot do so. Aggregate reads
+recheck the live lease before returning their snapshot, without taking write locks. No schema DDL,
+stored document format, API contract or PostgreSQL schema-version change is required.
 
 ## Search and partial failure
 
@@ -113,3 +148,6 @@ configuration and binary. Drain writers for a coordinated restore. Never delete 
 hide a projection failure, reset valuable data, or run `clear_helix` as a test. The previous SQLite
 files and port-6969 graph remain historical stores for the old binary; they are not an automatic
 rollback/import source for this fresh PostgreSQL deployment.
+
+See [PostgreSQL storage verification](postgresql-storage-verification.md) for recorded branch checks
+and the separately documented local launcher/index validation.

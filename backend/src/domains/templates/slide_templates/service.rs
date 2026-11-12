@@ -361,15 +361,14 @@ impl ImportService {
     /// Prepare slides concurrently, then commit the entire deck and durable jobs atomically.
     pub async fn queue_classified_batch_import(
         &self,
-        source: &[u8],
+        source: Vec<u8>,
         kind: TemplateKind,
         cancellation: &RequestCancellation,
     ) -> SlideResult<BatchImportResponse> {
-        let bytes = source.to_vec();
         let cancelled = Some(cancellation.clone());
         let preparer = self.clone();
         let (records, response) = blocking(move || {
-            let source = bytes.as_slice();
+            let source = source.as_slice();
             let cancellation = cancelled
                 .as_ref()
                 .expect("required cancellation was cloned");

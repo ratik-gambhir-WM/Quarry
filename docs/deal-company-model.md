@@ -9,8 +9,7 @@ access/ownership constraints. The replacement starts fresh without importing pri
 converting statuses. See [storage setup and recovery](postgresql-storage.md).
 
 PostgreSQL owns the engagement aggregate. Helix owns only a document search projection; creating or
-editing a deal has no graph write. Diligence Studio's process-local template catalog is unrelated
-to deal persistence.
+editing a deal has no graph or template-catalog write.
 
 A deal represents one diligence engagement on a transaction. Companies are reusable within the
 current development user's directory. A company's name or website is never a unique identity and

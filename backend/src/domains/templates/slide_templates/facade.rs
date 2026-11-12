@@ -110,7 +110,7 @@ impl SlideTemplates {
         })
     }
     pub async fn parse_json(&self, bytes: Vec<u8>) -> SlideResult<Value> {
-        self.run(move |_, _, _| async move {
+        self.run_blocking(move || {
             serde_json::from_slice(&bytes).map_err(|_| {
                 SlideTemplateError::new(
                     FailureKind::Invalid,
@@ -125,7 +125,7 @@ impl SlideTemplates {
         &self,
         make: impl FnOnce() -> SlideResult<T> + Send + 'static,
     ) -> SlideResult<Vec<u8>> {
-        self.run(move |_, _, _| async move {
+        self.run_blocking(move || {
             use std::io::Write;
             struct Bounded(Vec<u8>);
             impl Write for Bounded {
@@ -152,6 +152,25 @@ impl SlideTemplates {
                 )
             })?;
             Ok(output.0)
+        })
+        .await
+    }
+    async fn run_blocking<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> SlideResult<T> + Send + 'static,
+    ) -> SlideResult<T> {
+        self.run(move |_, _, cancellation| async move {
+            tokio::task::spawn_blocking(move || {
+                if cancellation.is_cancelled() {
+                    return Err(unavailable(
+                        "request_cancelled",
+                        "Template processing was cancelled.",
+                    ));
+                }
+                work()
+            })
+            .await
+            .map_err(SlideTemplateError::internal)?
         })
         .await
     }
@@ -239,7 +258,7 @@ impl SlideTemplates {
     ) -> SlideResult<T> {
         self.run(move |import, export, cancellation| async move {
             let result = work(import, export, cancellation).await;
-            // Notify inside the blocking task after commit, even if the HTTP future
+            // Notify inside the spawned task after commit, even if the HTTP future
             // was dropped while awaiting it. Publication still checks cancellation.
             if result.is_ok() {
                 worker.notify();
@@ -407,7 +426,7 @@ impl SlideTemplates {
         })?;
         self.run_queued(worker.clone(), move |import, _, cancellation| async move {
             import
-                .queue_classified_batch_import(&bytes, kind, &cancellation)
+                .queue_classified_batch_import(bytes, kind, &cancellation)
                 .await
         })
         .await

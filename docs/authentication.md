@@ -89,7 +89,9 @@ search derives authorized deals and verifies current/live chunk identities befor
 before exposing text. Missing/foreign resources return 404, operation denials 403 and stale
 management revisions 409. See [shared deal policy and recovery](shared-deal-projects.md).
 
-Templates remain a shared Quarry app catalog: every registered user can read and mutate it.
+Embedded templates are private to their authenticated owner. Catalog, asset, preview, export,
+retrieval and retry operations enforce that scope; unassigned legacy records remain hidden.
+See [template ownership](template-ownership.md).
 Research endpoints require authentication but external WM AI resources do not gain organization
 membership policy from this change. These shared external capabilities need additional policy
 before public deployment.
@@ -133,6 +135,6 @@ build; backend fmt/check/Clippy/tests; and Tauri fmt/Clippy/tests. Security cove
 salted hashes, token digests, policy bounds, revocation/expiry, two-user resource access, removed
 bypasses, auth logging exclusions, forms, stale-session 401s and client cancellation.
 
-Open registration, shared catalog mutation, no email verification/recovery/MFA, JavaScript-readable
+Open registration, no email verification/recovery/MFA, JavaScript-readable
 client session persistence, process-local throttling, server TLS provisioning, and organization tenancy
 remain explicit limits. Authentication is not a claim of complete production readiness.
