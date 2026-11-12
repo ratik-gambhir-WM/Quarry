@@ -1,5 +1,10 @@
 # Getting started with Quarry
 
+PostgreSQL setup: use the existing server with a dedicated database named `Quarry`; export
+`QUARRY_DATABASE_URL=postgresql://localhost/Quarry` before launching. Tests use the separate
+`Quarry_test` database. The launcher selects a fresh Helix store on port 6970 and preserves old
+SQLite files and the port-6969 graph. See [storage setup and recovery](docs/postgresql-storage.md).
+
 This guide covers local development for Quarry's browser and desktop applications.
 For a product overview and upcoming features, see the [README](README.md).
 The [architecture guide](docs/ARCHITECTURE.md) is the detailed reference for configuration,
@@ -83,8 +88,8 @@ browser bundle. The backend does not read the external service's environment fil
 | `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH` | Backend | Absolute path to an installed Chromium executable for template previews |
 | `QUARRY_SLIDE_TEMPLATES_PREVIEW` | Backend | `chromium` by default; `disabled` turns preview generation off |
 | `QUARRY_SOFFICE` | Backend | Optional LibreOffice executable override |
-| `QUARRY_DATABASE_PATH` | Backend | Optional explicit SQLite file location |
-| `HELIX_URL` | Backend | Helix origin; defaults to `http://127.0.0.1:6969` |
+| `QUARRY_DATABASE_URL` | Backend | Required server-only PostgreSQL URL, e.g. `postgresql://localhost/Quarry` |
+| `HELIX_URL` | Backend | Helix origin; defaults to `http://127.0.0.1:6970` |
 
 Embedded previews can discover installed Chromium/Playwright caches. If discovery fails,
 set `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH` or disable previews when that capability is not needed.
@@ -119,14 +124,14 @@ The launcher starts Docker Desktop if needed on macOS, prepares Helix, starts th
 and then starts the selected UI. Open [localhost:1420](http://localhost:1420) for the web target;
 the desktop target opens a Tauri window. Register an account or sign in to use protected workflows.
 
-Templates run inside the backend by default and persist in Quarry's shared SQLite database.
+Templates run inside the backend by default and persist in Quarry's shared PostgreSQL database.
 The browser and desktop app call the backend; neither calls the legacy template service directly.
 
 ### Helix and local storage
 
-The launcher creates the `helix-quarry-v3-dev` container if absent, using the digest-pinned image
-in [`backend/helix.toml`](backend/helix.toml). It maps host port `6969` to container port `8080`,
-waits for `/healthz`, and stores graph data in the Docker volume `helix-quarry-v3-dev-data`.
+The launcher creates the `helix-quarry-postgres-dev` container if absent, using the digest-pinned image
+in [`backend/helix.toml`](backend/helix.toml). It maps host port `6970` to container port `8080`,
+waits for `/healthz`, and stores graph data in the Docker volume `helix-quarry-postgres-dev-data`.
 The Helix CLI is not required.
 
 An existing container is reused only if its image and persistent storage configuration match.
@@ -137,10 +142,10 @@ another name:
 QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
 ```
 
-That container must use host port `6969` and its matching `<container-name>-data` volume.
-Preserve existing data before deliberately replacing any container. SQLite is the canonical
+That container must use host port `6970` and its matching `<container-name>-data` volume.
+Preserve existing data before deliberately replacing any container. PostgreSQL is the canonical
 product store; Helix is the required graph/search projection. Startup opens and may upgrade
-SQLite and initializes graph indexes. Consult the architecture's recovery procedures if an
+PostgreSQL and initializes graph indexes. Consult the architecture's recovery procedures if an
 existing database or projection is incompatible; do not delete stores as a setup shortcut.
 
 ### Local addresses
@@ -149,7 +154,7 @@ existing database or projection is incompatible; do not delete stores as a setup
 | --- | --- | --- |
 | Web UI / desktop development UI | `http://localhost:1420` | Both launcher targets |
 | Backend API | `http://127.0.0.1:3001` | Health: `/api/v1/health` |
-| Helix | `http://127.0.0.1:6969` | Required by normal backend startup |
+| Helix | `http://127.0.0.1:6970` | Required by normal backend startup |
 | Legacy Diligence Studio | `http://127.0.0.1:43127` | Explicit legacy mode only |
 
 ### Stop the application
@@ -161,7 +166,7 @@ application processes too. Docker and Helix remain running.
 Stop Helix separately when appropriate:
 
 ```sh
-docker stop helix-quarry-v3-dev
+docker stop helix-quarry-postgres-dev
 ```
 
 Stopping the container preserves its named volume.
@@ -195,7 +200,7 @@ For standalone runtime work, run from `backend/`:
 cargo run --locked
 ```
 
-This loads `backend/.env`, opens/migrates SQLite, connects to Helix, and initializes indexes.
+This loads `backend/.env`, connects to PostgreSQL and initializes/validates the selected schema, connects to Helix, and initializes indexes.
 It is a runtime operation, not a compilation check. Do not run it alongside the root launcher
 on the same port. Client code targets `/api/v1`; `/api` is a temporary compatibility mount.
 
@@ -234,7 +239,7 @@ Run from `backend/`:
 cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 Use a name filter for focused tests, for example:
@@ -246,8 +251,7 @@ cargo test --locked domains::documents::search
 Backend tests are manually included from `tests/unit/` and `tests/integration/`; they are not
 independent `cargo test --test <file>` targets. Normal tests use temporary stores and test clients.
 Some opt-in tests require explicitly selected disposable services and remain ignored in the normal
-suite. Do not enable them against a live store. Do not use startup, `clear_helix`, or the destructive
-`reset_development` utility as verification commands.
+suite. Do not enable them against a live store. Do not use startup, `clear_helix`, or destructive graph maintenance as verification commands.
 
 Before adding or moving backend validation or authorization, use the
 [boundary placement decision and review checklist](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
@@ -264,7 +268,7 @@ Run from `frontend/src-tauri/` when native code, capabilities, or transport chan
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 Also check the frontend desktop target, shared boundary checks, and adapter tests for native
@@ -311,7 +315,7 @@ embedded mode for the maintained authenticated template workflow.
 - **Port already in use:** check `3001` and `1420`, plus `43127` only in legacy mode. Stop the owning
   process intentionally; the launcher will not stop an unknown listener.
 - **Docker or Helix timeout:** check `docker info`, `docker ps -a`, and
-  `docker logs helix-quarry-v3-dev`. Confirm registry access and the pinned image configuration.
+  `docker logs helix-quarry-postgres-dev`. Confirm registry access and the pinned image configuration.
 - **Helix image/storage mismatch:** preserve the live graph and follow the architecture's cutover
   procedure. The launcher intentionally leaves the incompatible container untouched.
 - **Embedded template preview failure:** check Chromium discovery or set its absolute executable
@@ -334,7 +338,7 @@ embedded mode for the maintained authenticated template workflow.
 | `quarry` | Repository-root development launcher |
 
 Web and desktop share the same product behavior. Web uses `BrowserRouter` and browser HTTP;
-desktop uses `HashRouter` and Tauri IPC to the same backend. SQLite owns durable product and
+desktop uses `HashRouter` and Tauri IPC to the same backend. PostgreSQL owns durable product and
 embedded template data; Helix is a recoverable projection. Document jobs and several caches
 remain in memory. Authentication and membership checks are implemented, but production tenancy,
 identity lifecycle, CI, and deployment automation remain incomplete.

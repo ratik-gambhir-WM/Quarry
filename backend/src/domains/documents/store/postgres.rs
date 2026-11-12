@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use crate::{
-    adapters::sqlite::{
-        client::{SqlRow, SqliteClient, SqliteClientError, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, PostgresTransaction, SqlRow},
         query::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlValue},
     },
     domains::documents::store::model::{
@@ -31,19 +31,19 @@ pub struct StoredDocumentBlob {
 
 #[derive(Clone)]
 pub struct DocumentStore {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 
 impl DocumentStore {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
 
     pub async fn manifest(
         &self,
         version: String,
     ) -> Result<Option<super::identity::IdentityManifest>, RepositoryError> {
-        super::identity::manifest(&self.sqlite, version).await
+        super::identity::manifest(&self.postgres, version).await
     }
     pub(crate) async fn image_assembly(
         &self,
@@ -51,7 +51,7 @@ impl DocumentStore {
     ) -> Result<Option<crate::domains::documents::formats::image::ImageAssembly>, RepositoryError>
     {
         let json = self
-            .sqlite
+            .postgres
             .read_one_with_async(
                 SqlBuilder::select("document_image_recovery")
                     .columns(["assembly_json"])
@@ -67,28 +67,32 @@ impl DocumentStore {
     }
     pub async fn authorize_read(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 crate::domains::memberships::require_deal(
                     tx,
                     &deal,
                     actor,
                     crate::domains::memberships::model::Capability::Read,
                 )
+                .await
                 .map(|_| ())
             })
             .await
     }
     pub async fn authorize_upload(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 crate::domains::memberships::require_deal(
                     tx,
                     &deal,
                     actor,
                     crate::domains::memberships::model::Capability::Upload,
                 )
+                .await
                 .map(|_| ())
             })
             .await
@@ -97,7 +101,7 @@ impl DocumentStore {
         &self,
         deal_id: &str,
     ) -> Result<Vec<DealDocumentSummary>, RepositoryError> {
-        list_current_deal_documents(&self.sqlite, deal_id)
+        list_current_deal_documents(&self.postgres, deal_id)
             .await
             .map_err(RepositoryError::storage)
     }
@@ -107,7 +111,7 @@ impl DocumentStore {
         deal_id: &str,
         file_id: &str,
     ) -> Result<Option<StoredDocumentBlob>, RepositoryError> {
-        get_current_deal_document_blob(&self.sqlite, deal_id, file_id)
+        get_current_deal_document_blob(&self.postgres, deal_id, file_id)
             .await
             .map_err(RepositoryError::storage)
     }
@@ -117,7 +121,7 @@ impl DocumentStore {
         deal_id: &str,
         content_sha256: &str,
     ) -> Result<Option<PersistedFileIdentity>, RepositoryError> {
-        find_current_sqlite_file_by_content_hash(&self.sqlite, deal_id, content_sha256)
+        find_current_postgres_file_by_content_hash(&self.postgres, deal_id, content_sha256)
             .await
             .map_err(RepositoryError::storage)
     }
@@ -126,12 +130,12 @@ impl DocumentStore {
         &self,
         input: FilePersistenceInput,
     ) -> Result<PersistedFileIdentity, RepositoryError> {
-        persist_file_blob(&self.sqlite, input).await
+        persist_file_blob(&self.postgres, input).await
     }
 }
 
 async fn list_current_deal_documents(
-    sqlite: &SqliteClient,
+    postgres: &PostgresClient,
     deal_id: &str,
 ) -> Result<Vec<DealDocumentSummary>, String> {
     let query = SqlBuilder::select("quarry_files")
@@ -158,7 +162,7 @@ async fn list_current_deal_documents(
         .order_by("quarry_files.display_name", SortDirection::Ascending)
         .order_by("quarry_files.file_id", SortDirection::Ascending)
         .build();
-    let rows = sqlite
+    let rows = postgres
         .read_async(query)
         .await
         .map_err(|error| format!("failed to list deal documents: {error}"))?;
@@ -187,12 +191,12 @@ async fn list_current_deal_documents(
                 .into(),
             })
         })
-        .collect::<Result<Vec<_>, SqliteClientError>>()
+        .collect::<Result<Vec<_>, PostgresError>>()
         .map_err(|error| format!("failed to decode deal document list: {error}"))
 }
 
 async fn get_current_deal_document_blob(
-    sqlite: &SqliteClient,
+    postgres: &PostgresClient,
     deal_id: &str,
     file_id: &str,
 ) -> Result<Option<StoredDocumentBlob>, String> {
@@ -218,7 +222,7 @@ async fn get_current_deal_document_blob(
         .and_where(Condition::is_null("quarry_files.deleted_at"))
         .and_where(Condition::equal("quarry_file_versions.is_current", true))
         .build();
-    let row = sqlite
+    let row = postgres
         .read_one_async(query)
         .await
         .map_err(|error| format!("failed to load document blob: {error}"))?;
@@ -232,11 +236,11 @@ async fn get_current_deal_document_blob(
         })
     })
     .transpose()
-    .map_err(|error: SqliteClientError| format!("failed to decode document blob: {error}"))
+    .map_err(|error: PostgresError| format!("failed to decode document blob: {error}"))
 }
 
-async fn find_current_sqlite_file_by_content_hash(
-    sqlite: &SqliteClient,
+async fn find_current_postgres_file_by_content_hash(
+    postgres: &PostgresClient,
     deal_id: &str,
     content_sha256: &str,
 ) -> Result<Option<PersistedFileIdentity>, String> {
@@ -265,7 +269,7 @@ async fn find_current_sqlite_file_by_content_hash(
             content_sha256,
         ))
         .build();
-    let rows = sqlite
+    let rows = postgres
         .read_async(query)
         .await
         .map_err(|error| format!("failed to find deal attachment: {error}"))?;
@@ -286,33 +290,38 @@ async fn find_current_sqlite_file_by_content_hash(
             })
         })
         .transpose()
-        .map_err(|error: SqliteClientError| format!("failed to decode deal attachment: {error}"))
+        .map_err(|error: PostgresError| format!("failed to decode deal attachment: {error}"))
 }
 
 async fn persist_file_blob(
-    sqlite: &SqliteClient,
+    postgres: &PostgresClient,
     file_persistence: FilePersistenceInput,
 ) -> Result<PersistedFileIdentity, RepositoryError> {
-    sqlite
-        .transaction_result_async(move |transaction| {
+    postgres
+        .transaction_result_async(move |transaction| async move {
+            let transaction = &transaction;
             crate::domains::memberships::require_deal(
                 transaction,
                 &file_persistence.deal_id,
                 file_persistence.actor_id,
                 crate::domains::memberships::model::Capability::Upload,
-            )?;
+            )
+            .await?;
 
-            if let Some(claim) = transaction.read_one_with(
-                SqlBuilder::select("quarry_current_content")
-                    .columns(["file_id"])
-                    .and_where(Condition::equal("deal_id", &file_persistence.deal_id))
-                    .and_where(Condition::equal(
-                        "content_sha256",
-                        &file_persistence.content_sha256,
-                    ))
-                    .build(),
-                |r| r.get::<_, String>(0),
-            )? {
+            if let Some(claim) = transaction
+                .read_one_with(
+                    SqlBuilder::select("quarry_current_content")
+                        .columns(["file_id"])
+                        .and_where(Condition::equal("deal_id", &file_persistence.deal_id))
+                        .and_where(Condition::equal(
+                            "content_sha256",
+                            &file_persistence.content_sha256,
+                        ))
+                        .build(),
+                    |r| r.get::<_, String>(0),
+                )
+                .await?
+            {
                 if claim != file_persistence.file_id {
                     return Err(RepositoryError::Conflict(
                         "identical content was accepted concurrently; retry the same file".into(),
@@ -320,53 +329,66 @@ async fn persist_file_blob(
                 }
             }
             // The aggregate is always mutated parent-to-child.
-            validate_existing_quarry_file(transaction, &file_persistence)?;
-            upsert_quarry_file(transaction, &file_persistence)?;
+            validate_existing_quarry_file(transaction, &file_persistence).await?;
+            upsert_quarry_file(transaction, &file_persistence).await?;
 
-            if let Some(existing) = find_existing_file_version(transaction, &file_persistence)? {
-                verify_idempotent_version_and_blob(transaction, &file_persistence, &existing)?;
-                make_existing_version_current(transaction, &file_persistence, &existing)?;
+            if let Some(existing) =
+                find_existing_file_version(transaction, &file_persistence).await?
+            {
+                verify_idempotent_version_and_blob(transaction, &file_persistence, &existing)
+                    .await?;
+                make_existing_version_current(transaction, &file_persistence, &existing).await?;
             } else {
-                let version_number = next_file_version_number(transaction, &file_persistence)?;
+                let version_number =
+                    next_file_version_number(transaction, &file_persistence).await?;
 
-                clear_current_file_version(transaction, &file_persistence)?;
-                insert_quarry_file_version(transaction, &file_persistence, version_number)?;
-                insert_quarry_file_blob(transaction, &file_persistence)?;
+                clear_current_file_version(transaction, &file_persistence).await?;
+                insert_quarry_file_version(transaction, &file_persistence, version_number).await?;
+                insert_quarry_file_blob(transaction, &file_persistence).await?;
                 crate::domains::memberships::record_activity(
                     transaction,
                     &file_persistence.deal_id,
                     Some(file_persistence.actor_id),
                     "document_uploaded",
                     Some(&file_persistence.version_id),
-                )?;
+                )
+                .await?;
             }
 
-            transaction.write(
-                SqlBuilder::delete_from("quarry_current_content")
-                    .and_where(Condition::equal("file_id", &file_persistence.file_id))
-                    .build(),
-            )?;
-            transaction.write(
-                SqlBuilder::insert_into("quarry_current_content")
-                    .value("deal_id", &file_persistence.deal_id)
-                    .value("content_sha256", &file_persistence.content_sha256)
-                    .value("file_id", &file_persistence.file_id)
-                    .value("version_id", &file_persistence.version_id)
-                    .build(),
-            )?;
-            let manifest = file_persistence.manifest.as_ref().ok_or_else(|| {
-                SqliteClientError::transaction_aborted("identity manifest required")
-            })?;
-            super::identity::save(transaction, &file_persistence.version_id, manifest, true)
-                .map_err(|e| SqliteClientError::transaction_aborted(e.to_string()))?;
-            if let Some(assembly) = &file_persistence.image_assembly_json {
-                let existing = transaction.read_one_with(
-                    SqlBuilder::select("document_image_recovery")
-                        .columns(["assembly_json"])
-                        .and_where(Condition::equal("version_id", &file_persistence.version_id))
+            transaction
+                .write(
+                    SqlBuilder::delete_from("quarry_current_content")
+                        .and_where(Condition::equal("file_id", &file_persistence.file_id))
                         .build(),
-                    |r| r.get::<_, String>(0),
-                )?;
+                )
+                .await?;
+            transaction
+                .write(
+                    SqlBuilder::insert_into("quarry_current_content")
+                        .value("deal_id", &file_persistence.deal_id)
+                        .value("content_sha256", &file_persistence.content_sha256)
+                        .value("file_id", &file_persistence.file_id)
+                        .value("version_id", &file_persistence.version_id)
+                        .build(),
+                )
+                .await?;
+            let manifest = file_persistence
+                .manifest
+                .as_ref()
+                .ok_or_else(|| PostgresError::transaction_aborted("identity manifest required"))?;
+            super::identity::save(transaction, &file_persistence.version_id, manifest, true)
+                .await
+                .map_err(|e| PostgresError::transaction_aborted(e.to_string()))?;
+            if let Some(assembly) = &file_persistence.image_assembly_json {
+                let existing = transaction
+                    .read_one_with(
+                        SqlBuilder::select("document_image_recovery")
+                            .columns(["assembly_json"])
+                            .and_where(Condition::equal("version_id", &file_persistence.version_id))
+                            .build(),
+                        |r| r.get::<_, String>(0),
+                    )
+                    .await?;
                 match existing {
                     Some(existing) if existing != *assembly => {
                         return Err(RepositoryError::Conflict(
@@ -375,46 +397,46 @@ async fn persist_file_blob(
                     }
                     Some(_) => {}
                     None => {
-                        transaction.write(
-                            SqlBuilder::insert_into("document_image_recovery")
-                                .value("version_id", &file_persistence.version_id)
-                                .value("assembly_json", assembly)
-                                .build(),
-                        )?;
+                        transaction
+                            .write(
+                                SqlBuilder::insert_into("document_image_recovery")
+                                    .value("version_id", &file_persistence.version_id)
+                                    .value("assembly_json", assembly)
+                                    .build(),
+                            )
+                            .await?;
                     }
                 }
             }
-            Ok(read_back_persisted_file_identity(
-                transaction,
-                &file_persistence,
-            )?)
+            Ok(read_back_persisted_file_identity(transaction, &file_persistence).await?)
         })
         .await
 }
 
-fn validate_existing_quarry_file(
-    transaction: &SqliteTransaction<'_>,
+async fn validate_existing_quarry_file(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let query = SqlBuilder::select("quarry_files")
         .columns(["deal_id", "deleted_at"])
         .and_where(Condition::equal("file_id", &input.file_id))
         .build();
     let Some(row) = transaction
         .read_one(query)
+        .await
         .map_err(|error| error.context("failed to read existing quarry file"))?
     else {
         return Ok(());
     };
 
     if required_text(&row, "deal_id")? != input.deal_id {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "file `{}` already belongs to another deal",
             input.file_id
         )));
     }
     if !matches!(row.get("deleted_at"), Some(SqlValue::Null)) {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "file `{}` is deleted and cannot be restored by persistence",
             input.file_id
         )));
@@ -422,10 +444,10 @@ fn validate_existing_quarry_file(
     Ok(())
 }
 
-fn upsert_quarry_file(
-    transaction: &SqliteTransaction<'_>,
+async fn upsert_quarry_file(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let query = SqlBuilder::insert_into("quarry_files")
         .value("file_id", &input.file_id)
         .value("deal_id", &input.deal_id)
@@ -446,16 +468,17 @@ fn upsert_quarry_file(
     require_one_row(
         transaction
             .write(query)
+            .await
             .map_err(|error| error.context("failed to upsert quarry file"))?
             .rows_affected,
         "quarry_files upsert",
     )
 }
 
-fn find_existing_file_version(
-    transaction: &SqliteTransaction<'_>,
+async fn find_existing_file_version(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<Option<ExistingFileVersion>, SqliteClientError> {
+) -> Result<Option<ExistingFileVersion>, PostgresError> {
     let query = SqlBuilder::select("quarry_file_versions")
         .columns(["version_id", "byte_size", "is_current"])
         .and_where(Condition::equal("file_id", &input.file_id))
@@ -463,11 +486,12 @@ fn find_existing_file_version(
         .build();
     transaction
         .read_one(query)
+        .await
         .map_err(|error| error.context("failed to read existing file version"))?
         .map(|row| {
             let is_current = required_integer(&row, "is_current")?;
             if !matches!(is_current, 0 | 1) {
-                return Err(SqliteClientError::transaction_aborted(
+                return Err(PostgresError::transaction_aborted(
                     "stored file version has an invalid is_current value",
                 ));
             }
@@ -480,13 +504,13 @@ fn find_existing_file_version(
         .transpose()
 }
 
-fn verify_idempotent_version_and_blob(
-    transaction: &SqliteTransaction<'_>,
+async fn verify_idempotent_version_and_blob(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
     existing: &ExistingFileVersion,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     if existing.version_id != input.version_id || existing.byte_size != input.byte_size {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "stored version for file `{}` does not match its derived identity or byte size",
             input.file_id
         )));
@@ -497,15 +521,16 @@ fn verify_idempotent_version_and_blob(
         .build();
     let row = transaction
         .read_one(query)
+        .await
         .map_err(|error| error.context("failed to read existing file blob"))?
         .ok_or_else(|| {
-            SqliteClientError::transaction_aborted(format!(
+            PostgresError::transaction_aborted(format!(
                 "stored version `{}` has no blob",
                 existing.version_id
             ))
         })?;
     if required_blob(&row, "file_bytes")? != input.file_bytes {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "stored blob for version `{}` is corrupt or collided",
             existing.version_id
         )));
@@ -513,15 +538,15 @@ fn verify_idempotent_version_and_blob(
     Ok(())
 }
 
-fn make_existing_version_current(
-    transaction: &SqliteTransaction<'_>,
+async fn make_existing_version_current(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
     existing: &ExistingFileVersion,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     if existing.is_current {
         return Ok(());
     }
-    clear_current_file_version(transaction, input)?;
+    clear_current_file_version(transaction, input).await?;
     let query = SqlBuilder::update("quarry_file_versions")
         .set("is_current", true)
         .and_where(Condition::equal("version_id", &existing.version_id))
@@ -530,16 +555,17 @@ fn make_existing_version_current(
     require_one_row(
         transaction
             .write(query)
+            .await
             .map_err(|error| error.context("failed to make existing file version current"))?
             .rows_affected,
         "existing file version current update",
     )
 }
 
-fn next_file_version_number(
-    transaction: &SqliteTransaction<'_>,
+async fn next_file_version_number(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<i64, SqliteClientError> {
+) -> Result<i64, PostgresError> {
     let query = SqlBuilder::select("quarry_file_versions")
         .column("version_number")
         .and_where(Condition::equal("file_id", &input.file_id))
@@ -548,17 +574,18 @@ fn next_file_version_number(
         .build();
     let latest = transaction
         .read_one(query)
+        .await
         .map_err(|error| error.context("failed to read latest file version"))?
         .map(|row| required_integer(&row, "version_number"))
         .transpose()?;
     match latest {
         Some(version) if version > 0 => version.checked_add(1).ok_or_else(|| {
-            SqliteClientError::transaction_aborted(format!(
+            PostgresError::transaction_aborted(format!(
                 "version number overflow for file `{}`",
                 input.file_id
             ))
         }),
-        Some(_) => Err(SqliteClientError::transaction_aborted(format!(
+        Some(_) => Err(PostgresError::transaction_aborted(format!(
             "file `{}` has an invalid stored version number",
             input.file_id
         ))),
@@ -566,10 +593,10 @@ fn next_file_version_number(
     }
 }
 
-fn clear_current_file_version(
-    transaction: &SqliteTransaction<'_>,
+async fn clear_current_file_version(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let query = SqlBuilder::update("quarry_file_versions")
         .set("is_current", false)
         .and_where(Condition::equal("file_id", &input.file_id))
@@ -577,10 +604,11 @@ fn clear_current_file_version(
         .build();
     let rows_affected = transaction
         .write(query)
+        .await
         .map_err(|error| error.context("failed to clear current file version"))?
         .rows_affected;
     if rows_affected > 1 {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "file `{}` had more than one current version",
             input.file_id
         )));
@@ -588,11 +616,11 @@ fn clear_current_file_version(
     Ok(())
 }
 
-fn insert_quarry_file_version(
-    transaction: &SqliteTransaction<'_>,
+async fn insert_quarry_file_version(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
     version_number: i64,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let query = SqlBuilder::insert_into("quarry_file_versions")
         .value("version_id", &input.version_id)
         .value("uploaded_by_user_id", input.actor_id)
@@ -608,16 +636,17 @@ fn insert_quarry_file_version(
     require_one_row(
         transaction
             .write(query)
+            .await
             .map_err(|error| error.context("failed to insert quarry file version"))?
             .rows_affected,
         "quarry_file_versions insert",
     )
 }
 
-fn insert_quarry_file_blob(
-    transaction: &SqliteTransaction<'_>,
+async fn insert_quarry_file_blob(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let query = SqlBuilder::insert_into("quarry_file_blobs")
         .value("version_id", &input.version_id)
         .value("file_bytes", input.file_bytes.clone())
@@ -625,16 +654,17 @@ fn insert_quarry_file_blob(
     require_one_row(
         transaction
             .write(query)
+            .await
             .map_err(|error| error.context("failed to insert quarry file blob"))?
             .rows_affected,
         "quarry_file_blobs insert",
     )
 }
 
-fn read_back_persisted_file_identity(
-    transaction: &SqliteTransaction<'_>,
+async fn read_back_persisted_file_identity(
+    transaction: &PostgresTransaction,
     input: &FilePersistenceInput,
-) -> Result<PersistedFileIdentity, SqliteClientError> {
+) -> Result<PersistedFileIdentity, PostgresError> {
     let query = SqlBuilder::select("quarry_files")
         .columns([
             "quarry_files.file_id",
@@ -655,9 +685,10 @@ fn read_back_persisted_file_identity(
         .build();
     let rows = transaction
         .read(query)
+        .await
         .map_err(|error| error.context("failed to read back persisted file identity"))?;
     if rows.len() != 1 {
-        return Err(SqliteClientError::transaction_aborted(format!(
+        return Err(PostgresError::transaction_aborted(format!(
             "persisted file identity read-back returned {} rows instead of one",
             rows.len()
         )));
@@ -674,50 +705,50 @@ fn read_back_persisted_file_identity(
         || identity.display_name != input.display_name
         || identity.version_id != input.version_id
     {
-        return Err(SqliteClientError::transaction_aborted(
+        return Err(PostgresError::transaction_aborted(
             "persisted file identity read-back did not match the validated input",
         ));
     }
     Ok(identity)
 }
 
-fn require_one_row(rows_affected: usize, operation: &str) -> Result<(), SqliteClientError> {
+fn require_one_row(rows_affected: usize, operation: &str) -> Result<(), PostgresError> {
     if rows_affected == 1 {
         Ok(())
     } else {
-        Err(SqliteClientError::transaction_aborted(format!(
+        Err(PostgresError::transaction_aborted(format!(
             "{operation} affected {rows_affected} rows instead of one"
         )))
     }
 }
 
-fn required_text(row: &SqlRow, column: &str) -> Result<String, SqliteClientError> {
+fn required_text(row: &SqlRow, column: &str) -> Result<String, PostgresError> {
     match row.get(column) {
         Some(SqlValue::Text(value)) => Ok(value.clone()),
         _ => Err(invalid_row_value(column, "TEXT")),
     }
 }
 
-fn required_integer(row: &SqlRow, column: &str) -> Result<i64, SqliteClientError> {
+fn required_integer(row: &SqlRow, column: &str) -> Result<i64, PostgresError> {
     match row.get(column) {
         Some(SqlValue::Integer(value)) => Ok(*value),
         _ => Err(invalid_row_value(column, "INTEGER")),
     }
 }
 
-fn required_blob(row: &SqlRow, column: &str) -> Result<Vec<u8>, SqliteClientError> {
+fn required_blob(row: &SqlRow, column: &str) -> Result<Vec<u8>, PostgresError> {
     match row.get(column) {
         Some(SqlValue::Blob(value)) => Ok(value.clone()),
         _ => Err(invalid_row_value(column, "BLOB")),
     }
 }
 
-fn invalid_row_value(column: &str, expected: &str) -> SqliteClientError {
-    SqliteClientError::transaction_aborted(format!(
+fn invalid_row_value(column: &str, expected: &str) -> PostgresError {
+    PostgresError::transaction_aborted(format!(
         "transaction row column `{column}` was missing or was not {expected}"
     ))
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/integration/domains/documents/store/sqlite_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/store/postgres_tests.rs"]
 mod tests;

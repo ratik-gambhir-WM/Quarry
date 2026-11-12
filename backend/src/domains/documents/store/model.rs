@@ -8,7 +8,7 @@ pub struct PersistedFileIdentity {
     pub version_id: String,
 }
 
-/// Fully validated values used to persist one logical file aggregate to SQLite.
+/// Fully validated values used to persist one logical file aggregate to PostgreSQL.
 ///
 /// The repository supplies the transaction-derived version number; every other
 /// value needed by `quarry_files`, `quarry_file_versions`, and
@@ -30,7 +30,7 @@ pub(crate) struct FilePersistenceInput {
     pub(crate) image_assembly_json: Option<String>,
 }
 
-/// SQLite projection used to verify or reactivate an existing file version.
+/// PostgreSQL projection used to verify or reactivate an existing file version.
 pub(crate) struct ExistingFileVersion {
     pub(crate) version_id: String,
     pub(crate) byte_size: i64,

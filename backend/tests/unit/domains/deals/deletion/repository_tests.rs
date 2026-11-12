@@ -4,12 +4,12 @@ use crate::{
     domains::memberships::{model::Capability, require_deal},
     integration_support::seed_identity,
 };
-fn fixture() -> DeletionRepository {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    seed_identity(&sqlite, "deletion-owner@example.com", 'a');
-    seed_identity(&sqlite, "deletion-member@example.com", 'b');
-    sqlite.with_connection(|c|c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DELETE-A',1,'Synthetic','buy_side','unknown','pipeline','now','now'),('KEEP-B',2,'Synthetic','buy_side','unknown','pipeline','now','now');
+async fn fixture() -> DeletionRepository {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    seed_identity(&postgres, "deletion-owner@example.com", 'a').await;
+    seed_identity(&postgres, "deletion-member@example.com", 'b').await;
+    postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DELETE-A',1,'Synthetic','buy_side','unknown','pipeline','now','now'),('KEEP-B',2,'Synthetic','buy_side','unknown','pipeline','now','now');
     INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DELETE-A',1,'owner','now','now'),('DELETE-A',2,'manager','now','now'),('KEEP-B',2,'owner','now','now');
     INSERT INTO deal_access_revisions(deal_id) VALUES('DELETE-A'),('KEEP-B');
     INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at) VALUES('owned-file','DELETE-A','synthetic','{}','now','now'),('other-file','KEEP-B','synthetic','{}','now','now');
@@ -17,20 +17,26 @@ fn fixture() -> DeletionRepository {
     INSERT INTO notebooks(notebook_id,user_id,deal_id,title,created_at,updated_at) VALUES('private-book',2,'DELETE-A','synthetic','now','now');
     INSERT INTO notebook_notes(note_id,notebook_id,title,blocks_json,created_at,updated_at) VALUES('private-note','private-book','synthetic','[]','now','now');
     INSERT INTO notebook_save_jobs(job_id,user_id,notebook_id,note_id,operation_id,request_hash,input_json,status,stage,created_at,updated_at) VALUES('save-job',2,'private-book','private-note','operation','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','{}','queued','persisting','now','now');
-    ")).unwrap();
-    DeletionRepository::new(sqlite)
+    ").await }).await.unwrap();
+    DeletionRepository::new(postgres)
 }
-fn count(repo: &DeletionRepository, table: &str) -> i64 {
+async fn count(repo: &DeletionRepository, table: &str) -> i64 {
     // Test-only table names are fixed by the test, never request input.
-    repo.sqlite
-        .with_connection(|c| {
-            c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+    repo.postgres
+        .with_connection(async |c| {
+            c.query_row(
+                &format!("SELECT count(*) FROM {table}"),
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                |r| r.get(0),
+            )
+            .await
         })
+        .await
         .unwrap()
 }
 #[tokio::test]
 async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_access() {
-    let repo = fixture();
+    let repo = fixture().await;
     assert!(matches!(
         repo.preflight("DELETE-A".into(), 2).await,
         Err(RepositoryError::Forbidden)
@@ -41,7 +47,7 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
     );
     let a = a.unwrap();
     assert_eq!(a.deletion_id, b.unwrap().deletion_id);
-    assert_eq!(count(&repo, "deal_deletions"), 1);
+    assert_eq!(count(&repo, "deal_deletions").await, 1);
     assert!(matches!(
         repo.status(a.deletion_id.clone(), 2).await,
         Err(RepositoryError::NotFound(_))
@@ -51,19 +57,23 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
         Err(RepositoryError::NotFound(_))
     ));
     let access = repo
-        .sqlite
-        .read_transaction_result_async(move |tx| require_deal(tx, "DELETE-A", 1, Capability::Read))
+        .postgres
+        .read_transaction_result_async(move |tx| async move {
+            let tx = &tx;
+            require_deal(tx, "DELETE-A", 1, Capability::Read).await
+        })
         .await;
     assert!(matches!(access, Err(RepositoryError::NotFound(_))));
     let write = repo
-        .sqlite
-        .read_transaction_result_async(move |tx| {
-            require_deal(tx, "DELETE-A", 2, Capability::ManageTeams)
+        .postgres
+        .read_transaction_result_async(move |tx| async move {
+            let tx = &tx;
+            require_deal(tx, "DELETE-A", 2, Capability::ManageTeams).await
         })
         .await;
     assert!(matches!(write, Err(RepositoryError::Conflict(_))));
     assert_eq!(
-        count(&repo, "quarry_files"),
+        count(&repo, "quarry_files").await,
         2,
         "acceptance has not purged canonical data"
     );
@@ -74,7 +84,7 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
 }
 #[tokio::test]
 async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_jobs() {
-    let repo = fixture();
+    let repo = fixture().await;
     let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
     repo.snapshot_and_purge(op.clone()).await.unwrap();
     repo.snapshot_and_purge(op.clone()).await.unwrap();
@@ -82,15 +92,23 @@ async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_j
         repo.files(op.deletion_id.clone()).await.unwrap(),
         vec!["owned-file"]
     );
-    assert_eq!(count(&repo, "deals"), 1);
-    assert_eq!(count(&repo, "quarry_files"), 1);
-    assert_eq!(count(&repo, "assistant_threads"), 2);
-    assert_eq!(count(&repo, "notebooks"), 1);
-    assert_eq!(count(&repo, "notebook_notes"), 1);
-    assert_eq!(count(&repo, "notebook_save_jobs"), 1);
+    assert_eq!(count(&repo, "deals").await, 1);
+    assert_eq!(count(&repo, "quarry_files").await, 1);
+    assert_eq!(count(&repo, "assistant_threads").await, 2);
+    assert_eq!(count(&repo, "notebooks").await, 1);
+    assert_eq!(count(&repo, "notebook_notes").await, 1);
+    assert_eq!(count(&repo, "notebook_save_jobs").await, 1);
     let linked: Option<String> = repo
-        .sqlite
-        .with_connection(|c| c.query_row("SELECT deal_id FROM notebooks", [], |r| r.get(0)))
+        .postgres
+        .with_connection(async |c| {
+            c.query_row(
+                "SELECT deal_id FROM notebooks",
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                |r| r.get(0),
+            )
+            .await
+        })
+        .await
         .unwrap();
     assert_eq!(linked, None);
     assert!(
@@ -101,33 +119,41 @@ async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_j
         .await
         .unwrap();
     repo.complete(op.deletion_id.clone()).await.unwrap();
-    assert_eq!(count(&repo, "deal_deletion_files"), 0);
-    assert_eq!(count(&repo, "deal_deletion_threads"), 0);
+    assert_eq!(count(&repo, "deal_deletion_files").await, 0);
+    assert_eq!(count(&repo, "deal_deletion_threads").await, 0);
     assert_eq!(
         repo.accept("DELETE-A".into(), 1).await.unwrap().status,
         DeletionStatus::Completed
     );
     assert!(repo.status(op.deletion_id, 2).await.is_err());
-    repo.sqlite
-        .with_connection(|c| {
-            let mut s = c.prepare("PRAGMA foreign_key_check").unwrap();
-            assert!(s.query([]).unwrap().next().unwrap().is_none());
+    repo.postgres
+        .with_connection(async |c| {
+            let mut s = c.prepare("SELECT conname FROM pg_constraint WHERE connamespace=current_schema()::regnamespace AND NOT convalidated").await.unwrap();
+            assert!(s.query(Vec::<crate::adapters::postgres::query::SqlValue>::new()).await.unwrap().next().unwrap().is_none());
             Ok(())
-        })
+         }).await
         .unwrap();
 }
 #[tokio::test]
 async fn purge_rollback_keeps_notebook_links_threads_targets_and_phase_consistent() {
-    let repo = fixture();
+    let repo = fixture().await;
     let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
-    repo.sqlite.with_connection(|c|c.execute_batch("CREATE TRIGGER stop_purge BEFORE DELETE ON deals BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;")).unwrap();
+    repo.postgres.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION stop_purge_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic failure' USING ERRCODE='23514'; END $$; CREATE TRIGGER stop_purge BEFORE DELETE ON deals FOR EACH ROW EXECUTE FUNCTION stop_purge_fn();").await }).await.unwrap();
     assert!(repo.snapshot_and_purge(op.clone()).await.is_err());
-    assert_eq!(count(&repo, "deals"), 2);
-    assert_eq!(count(&repo, "assistant_threads"), 4);
-    assert_eq!(count(&repo, "deal_deletion_files"), 0);
+    assert_eq!(count(&repo, "deals").await, 2);
+    assert_eq!(count(&repo, "assistant_threads").await, 4);
+    assert_eq!(count(&repo, "deal_deletion_files").await, 0);
     let linked: String = repo
-        .sqlite
-        .with_connection(|c| c.query_row("SELECT deal_id FROM notebooks", [], |r| r.get(0)))
+        .postgres
+        .with_connection(async |c| {
+            c.query_row(
+                "SELECT deal_id FROM notebooks",
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                |r| r.get(0),
+            )
+            .await
+        })
+        .await
         .unwrap();
     assert_eq!(linked, "DELETE-A");
     assert_eq!(
@@ -137,20 +163,20 @@ async fn purge_rollback_keeps_notebook_links_threads_targets_and_phase_consisten
 }
 #[tokio::test]
 async fn manifest_covers_more_than_one_batch_including_soft_deleted_files() {
-    let repo = fixture();
-    repo.sqlite.with_connection(|c|{
-        for n in 0..520 { c.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,deleted_at,created_at,updated_at) VALUES(?1,'DELETE-A','synthetic','{}','now','now','now')",[format!("batch-{n:04}")])?; } Ok(())
-    }).unwrap();
+    let repo = fixture().await;
+    repo.postgres.with_connection(async |c| {
+        for n in 0..520 { c.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,deleted_at,created_at,updated_at) VALUES(?1,'DELETE-A','synthetic','{}','now','now','now')",[format!("batch-{n:04}")]).await?; } Ok(())
+     }).await.unwrap();
     let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
     repo.snapshot_and_purge(op).await.unwrap();
-    assert_eq!(count(&repo, "deal_deletion_files"), 521);
-    assert_eq!(count(&repo, "quarry_files"), 1);
+    assert_eq!(count(&repo, "deal_deletion_files").await, 521);
+    assert_eq!(count(&repo, "quarry_files").await, 1);
 }
 
 #[tokio::test]
 async fn transferred_membership_owner_can_delete_but_creator_provenance_does_not_authorize_it() {
-    let repo = fixture();
-    repo.sqlite.with_connection(|c| c.execute_batch("UPDATE deal_memberships SET role='viewer' WHERE deal_id='DELETE-A' AND user_id=1; UPDATE deal_memberships SET role='owner' WHERE deal_id='DELETE-A' AND user_id=2;")).unwrap();
+    let repo = fixture().await;
+    repo.postgres.with_connection(async |c| { c.execute_batch("UPDATE deal_memberships SET role='viewer' WHERE deal_id='DELETE-A' AND user_id=1; UPDATE deal_memberships SET role='owner' WHERE deal_id='DELETE-A' AND user_id=2;").await }).await.unwrap();
     assert!(matches!(
         repo.accept("DELETE-A".into(), 1).await,
         Err(RepositoryError::Forbidden)

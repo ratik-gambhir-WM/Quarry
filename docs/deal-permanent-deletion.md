@@ -1,5 +1,9 @@
 # Permanent deal deletion and recovery
 
+Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 Implemented 2026-11-10. Archive remains a separate, synchronous timestamp operation.
 
 ## API and permissions
@@ -10,7 +14,7 @@ provide no permission. HTTP authentication verifies the bearer session and match
 the acceptance transaction repeats owner authorization. Unknown/hidden resources return 404,
 visible non-owners 403, malformed identifiers 400, and missing/revoked sessions 401.
 
-Acceptance commits one SQLite receipt and returns 202 with camelCase `DealDeletion` JSON,
+Acceptance commits one PostgreSQL receipt and returns 202 with camelCase `DealDeletion` JSON,
 `Location` and `statusUrl`. The committed receipt is the deletion barrier. Repeating DELETE
 returns the same operation; a completed receipt returns 204 without a body. Failed durable
 registration returns 503 without committing a barrier. Repeating DELETE can wake a blocked or
@@ -44,12 +48,12 @@ Free-text reminder names and textual mentions do not establish deletion ownershi
 
 A completed operation retains only its receipt and a non-content remote fence. Temporary file and
 thread manifests are removed. IDs remain reserved permanently; creating another deal must use a
-new ID. Deletion removes active application records, not SQLite free pages/WAL, backups, provider
+new ID. Deletion removes active application records, not PostgreSQL free pages/WAL, backups, provider
 retention or copies already held by other clients. No VACUUM, reset or global graph clear runs.
 
 ## Storage and worker lifecycle
 
-Schema 18 adds `deal_deletions`, `deal_deletion_files` and `deal_deletion_threads`. The ledger has
+PostgreSQL schema 1 includes `deal_deletions`, `deal_deletion_files` and `deal_deletion_threads`. The ledger has
 no cascading relationship to `deals`. Target rows reference the receipt, not the removed files or
 threads. Validated schemas 12–17 upgrade through their existing steps and the additive ledger DDL;
 fresh/current layouts, foreign keys and owner invariants are validated. Damaged layouts fail safely.
@@ -70,7 +74,7 @@ receipt and retried on the next scan; keyset pagination continues past busy page
 can progress. Every operation retains exclusive admission throughout its cleanup sweep.
 The shared Helix client still serializes remote writes.
 Barriers already apply to recovered operations before any route can serve them. Other deals remain
-usable while cleanup resumes. Canonical SQLite work uses the existing blocking-pool client.
+usable while cleanup resumes. Canonical PostgreSQL work uses the existing blocking-pool client.
 
 Admission guards cover HTTP response bodies and actual spawned ingestion/chat tasks. Ingestion
 workers recheck upload authorization after admission; job registration is also guarded. Chat
@@ -81,11 +85,11 @@ Chat revocation runs independently of stream backpressure after encoding settles
 loss leaves a private thread intact, cancellation persists the partial response and a terminal
 `cancelled` status before releasing admission. The same transaction barrier rejects this final
 write when deletion has been accepted; cancellation never recreates a removed thread. No
-SQLite transaction is held while waiting for tasks. A stalled producer delays that deal's completion; it does
+PostgreSQL transaction is held while waiting for tasks. A stalled producer delays that deal's completion; it does
 not justify purging underneath an active task. Preserved personal notebook workers may continue.
 
 The worker establishes the remote fence before deleting canonical data. With producers drained,
-one SQLite transaction snapshots every file/thread ID in bounded pages, detaches notebook links,
+one PostgreSQL transaction snapshots every file/thread ID in bounded pages, detaches notebook links,
 deletes threads and the deal, and advances to graph cleanup. File IDs identify all versions,
 generations and partial graph nodes, so targets need no content or duplicated version manifests.
 Capture and canonical purge commit together: a crash leaves either the original aggregate or a
@@ -109,16 +113,15 @@ also require a live control record. The writer checks the returned fence acknowl
 includes the additional request data in its existing exact 2 MiB preflight. The pinned Helix v3
 runtime's scalar/null behavior for `limit(1)` is avoided in vector-shaped verification queries.
 
-This is a single active Axum writer implementation. Normal bootstrap holds an OS file lock beside
-the canonical database (`.writer-lock` appended extension) until both the router and detached SQLite-owning workers release it, and rejects a second
-writer using that database. SQLite/process locks do not coordinate different databases, different
-hosts or independent direct Helix writers. Those deployments need distributed fencing/leases and
-are unsupported. Offline maintenance must drain the application first.
+This remains a single active Axum writer implementation. Bootstrap takes a PostgreSQL session
+advisory lease scoped to the selected schema. Router and detached-worker client clones retain the
+dedicated connection; other application writers are rejected. Operations fail closed if the lease
+session is lost. Aggregate mutations additionally use a transaction advisory lock, row constraints,
+revision checks and the retained worker/remote fences. Direct graph writers or different databases
+are outside this coordination boundary. Offline maintenance must drain the application first.
 
-Rollout requires a drained old binary, settled outstanding remote writes, matching SQLite/Helix
-backups, and the new binary/client set. Old prepared requests do not contain the new admission
-checks. Do not overlap old and new writers or assume the new lock retrofits older binaries.
-No graph backfill, embedding regeneration or reset is required for already migrated current stores.
+The PostgreSQL deployment starts with fresh canonical and graph stores and leaves previous SQLite
+stores untouched. No backfill, old-data conversion or destructive reset runs during startup.
 
 ## Failure, restart and rollback
 
@@ -138,8 +141,7 @@ remote fences to release reserved IDs.
 Rollback requires a drained window, a matching pre-upgrade database/binary and matching graph
 backup. Never restore pre-deletion data into active service without reconciling later deletion
 receipts/fences. Mixed-age restores are unsupported; there is no general restore/reindex utility.
-Preserve backups securely under a separate retention policy. Never use `clear_helix` or
-`reset_development` as deletion recovery.
+Preserve backups securely under a separate retention policy. Never use `clear_helix` as deletion recovery.
 
 ## Clients and verification
 
@@ -171,7 +173,7 @@ Use the repository backend/frontend/desktop verification gates. The ignored dele
 an explicitly disposable `QUARRY_HELIX_COMPAT_URL` and verify prepared late-write fencing, scoped
 current/historical graph/search cleanup, and restart after acceptance/canonical purge. Run only
 the selected deletion tests against that disposable store; never run all ignored suites against
-an unverified environment. Test fixtures use temporary SQLite files and synthetic data.
+an unverified environment. Test fixtures use isolated PostgreSQL test schemas and synthetic data.
 
 ### Verification record — 2026-11-10
 
@@ -199,5 +201,5 @@ Fixed review findings:
 | --- | --- | --- |
 | [Chat run](../backend/src/domains/assistant/chat/service.rs#L426) | A blocked stream send could delay cleanup indefinitely; revocation now runs outside the send/provider future. | Fixed; full backend gate passed. |
 | [Blocking preview](../backend/src/domains/documents/viewing/service.rs#L178) | HTTP cancellation could release admission before conversion finished; the blocking task now retains a cloned token. | Fixed; cancellation/lifetime test passed. |
-| [SQLite client](../backend/src/adapters/sqlite/client.rs#L218) | Router shutdown could release the writer lock before detached workers finished; client clones now retain the lease. | Fixed; detached-worker lease test passed. |
+| [PostgreSQL client](../backend/src/adapters/postgres/client.rs#L218) | Router shutdown could release the writer lock before detached workers finished; client clones now retain the lease. | Fixed; detached-worker lease test passed. |
 | [Graph purge](../backend/src/domains/documents/graph/deletion.rs#L167) | Cleanup must never remove a mismatched owner's node; removal requires both captured file identity and deal identity. | Fixed; disposable ownership-isolation and purge tests passed. |

@@ -55,7 +55,7 @@ pub(super) async fn find_for_finding(
     let repository = retrieval.repository.clone();
     let app = app_id.to_owned();
     let records =
-        tokio::task::spawn_blocking(move || repository.list_retrieval_classifications(&app))
+        tokio::spawn(async move { repository.list_retrieval_classifications(&app).await })
             .await??;
     let analysis = analyze_finding(&input.markdown, &records);
     let compatible: Vec<_> = records

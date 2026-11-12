@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::sync::Arc;
 
 use axum::Router;
 use thiserror::Error;
@@ -9,7 +9,7 @@ use crate::{
         helix::client::HelixClient,
         office::converter::OfficeConverter,
         openai::client::OpenAiClient,
-        sqlite::client::{SqliteClient, SqliteClientError},
+        postgres::client::{PostgresClient, PostgresError},
         wm_ai::client::{FileUploadServiceClient, GraphRagClient, IndexServiceClient},
     },
     app::{
@@ -32,7 +32,7 @@ use crate::{
             graph::repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
             search::{self, service::DocumentSearchService},
-            store::sqlite::DocumentStore,
+            store::postgres::DocumentStore,
             viewing::{self, service::StoredDocumentService},
         },
         identity::{
@@ -65,15 +65,9 @@ pub struct Application {
 pub enum BootstrapError {
     #[error("failed to load prompt catalog: {0}")]
     PromptCatalog(PromptCatalogError),
-    #[error("failed to create SQLite directory: {0}")]
-    SqliteDirectory(std::io::Error),
-    #[error("failed to open SQLite database: {0}")]
-    SqliteOpen(SqliteClientError),
-    #[error("another Quarry writer is active or the writer lease is unavailable")]
-    WriterLease(std::io::Error),
-    #[error("SQLite initialization worker failed: {0}")]
-    SqliteWorker(tokio::task::JoinError),
-    #[error("failed to migrate SQLite database: {0}")]
+    #[error("failed to connect to PostgreSQL: {0}")]
+    Postgres(PostgresError),
+    #[error("failed to initialize PostgreSQL schema: {0}")]
     Migration(MigrationError),
     #[error("failed to construct Slide Templates Studio: {0}")]
     SlideTemplates(String),
@@ -89,25 +83,24 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let prompts = Arc::new(
         PromptCatalog::load(&config.prompts.directory).map_err(BootstrapError::PromptCatalog)?,
     );
-    let path = config.sqlite.path.clone();
-    let (sqlite, writer_lease) = tokio::task::spawn_blocking(move || {
-        let sqlite = open_sqlite(&path)?;
-        let lease = acquire_writer_lease(&path)?;
-        let sqlite = sqlite.with_writer_lease(lease.clone());
-        migrations::migrate(&sqlite).map_err(BootstrapError::Migration)?;
-        Ok::<_, BootstrapError>((sqlite, lease))
-    })
-    .await
-    .map_err(BootstrapError::SqliteWorker)??;
+    let postgres = PostgresClient::connect(&config.postgres)
+        .await
+        .map_err(BootstrapError::Postgres)?
+        .with_writer_lease()
+        .await
+        .map_err(BootstrapError::Postgres)?;
+    migrations::migrate(&postgres)
+        .await
+        .map_err(BootstrapError::Migration)?;
 
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    if !crate::domains::documents::store::identity::ready(&sqlite)
+    if !crate::domains::documents::store::identity::ready(&postgres)
         .await
         .map_err(|e| BootstrapError::HelixIndexes(e.to_string()))?
     {
         return Err(BootstrapError::HelixIndexes(
-            "document scope checkpoint incomplete; keep writers drained and restore the matching verified SQLite/Helix backup before startup".into(),
+            "document scope checkpoint incomplete; keep writers drained and restore the matching verified PostgreSQL/Helix backup before startup".into(),
         ));
     }
     DocumentGraphWriter::new(helix.clone(), config.helix.vector_dimension)
@@ -132,10 +125,10 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         .build()
         .map_err(BootstrapError::HttpClient)?;
     let (templates, embedded) =
-        build_templates(&config, sqlite.clone(), helix.clone(), http.clone()).await?;
+        build_templates(&config, postgres.clone(), helix.clone(), http.clone()).await?;
     let api = assemble_api_with_templates(
         &config,
-        sqlite,
+        postgres,
         helix,
         http,
         prompts,
@@ -143,7 +136,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         embedded.clone(),
     );
     let bind_address = config.http.bind_address;
-    let router = create_router(api, &config.http).layer(axum::Extension(writer_lease));
+    let router = create_router(api, &config.http);
     Ok(Application {
         router,
         bind_address,
@@ -154,7 +147,7 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble_api_with_templates(
     config: &AppConfig,
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
     document_graph: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
@@ -162,18 +155,18 @@ pub(crate) fn assemble_api_with_templates(
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
 ) -> Router {
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
-        sqlite.clone(),
-        UserRepository::new(sqlite.clone()),
+        postgres.clone(),
+        UserRepository::new(postgres.clone()),
     )));
     let memberships = Arc::new(
         crate::domains::memberships::service::DealAccessService::new(
-            crate::domains::memberships::repository::MembershipRepository::new(sqlite.clone()),
+            crate::domains::memberships::repository::MembershipRepository::new(postgres.clone()),
         ),
     );
-    let access = ResourceAccess::new(sqlite.clone(), memberships.clone());
-    let users_repository = UserRepository::new(sqlite.clone());
-    let deals_repository = DealRepository::new(sqlite.clone());
-    let document_files = DocumentStore::new(sqlite.clone());
+    let access = ResourceAccess::new(postgres.clone(), memberships.clone());
+    let users_repository = UserRepository::new(postgres.clone());
+    let deals_repository = DealRepository::new(postgres.clone());
+    let document_files = DocumentStore::new(postgres.clone());
     let document_graph_reader = DocumentGraphReader::new(document_graph.clone());
     let document_graph_writer =
         DocumentGraphWriter::new(document_graph.clone(), config.helix.vector_dimension);
@@ -183,7 +176,7 @@ pub(crate) fn assemble_api_with_templates(
         .as_ref()
         .map(|openai_config| Arc::new(OpenAiClient::from_config(openai_config, prompts.clone())));
     let notebooks = NotebookService::new(
-        NotebookRepository::new(sqlite.clone()),
+        NotebookRepository::new(postgres.clone()),
         Arc::new(NotebookPipeline::new(
             document_graph.clone(),
             openai.clone(),
@@ -216,7 +209,7 @@ pub(crate) fn assemble_api_with_templates(
     });
     let user_directory = UserDirectory::new(users_repository.clone());
     let companies = Arc::new(CompanyService::new(
-        CompanyRepository::new(sqlite.clone()),
+        CompanyRepository::new(postgres.clone()),
         user_directory.clone(),
     ));
     let deals = Arc::new(DealService::new(
@@ -305,7 +298,7 @@ pub(crate) fn assemble_api_with_templates(
                 .as_ref()
                 .map(|config| config.chat_model.clone())
                 .unwrap_or_else(|| "gpt-5.5".to_string()),
-            AssistantChatRepository::new(sqlite.clone()),
+            AssistantChatRepository::new(postgres.clone()),
             user_directory,
             prompts,
         )
@@ -315,7 +308,7 @@ pub(crate) fn assemble_api_with_templates(
     );
 
     let deletions = deals::deletion::service::DealDeletionService::new(
-        deals::deletion::DeletionRepository::new(sqlite.clone()),
+        deals::deletion::DeletionRepository::new(postgres.clone()),
         document_graph_writer,
         memberships.lifecycle().clone(),
         document_jobs.clone(),
@@ -354,38 +347,13 @@ pub(crate) fn assemble_api_with_templates(
         .merge(identity::route::public(identity))
 }
 
-fn acquire_writer_lease(path: &Path) -> Result<Arc<fs::File>, BootstrapError> {
-    let canonical = fs::canonicalize(path).map_err(BootstrapError::WriterLease)?;
-    let lease = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(canonical.with_added_extension("writer-lock"))
-        .map_err(BootstrapError::WriterLease)?;
-    lease
-        .try_lock()
-        .map_err(|error| BootstrapError::WriterLease(error.into()))?;
-    Ok(Arc::new(lease))
-}
-
-fn open_sqlite(path: &Path) -> Result<SqliteClient, BootstrapError> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).map_err(BootstrapError::SqliteDirectory)?;
-    }
-    SqliteClient::open(path).map_err(BootstrapError::SqliteOpen)
-}
-
 #[cfg(test)]
 #[path = "../../tests/unit/app/bootstrap_tests.rs"]
 mod tests;
 
 async fn build_templates(
     config: &AppConfig,
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
     helix: Arc<HelixClient>,
     http: reqwest::Client,
 ) -> Result<
@@ -406,12 +374,11 @@ async fn build_templates(
             .map(|c| Arc::new(DiligenceStudioClient::new(http, c.base_url.clone())));
         return Ok((Arc::new(TemplateService::new(legacy)), None));
     }
-    let repository = tokio::task::spawn_blocking(move || initialize_template_repository(sqlite))
+    let repository = initialize_template_repository(postgres)
         .await
-        .map_err(|_| BootstrapError::SlideTemplates("template store worker failed".into()))?
         .map_err(|_| {
             BootstrapError::SlideTemplates(
-                "shared SQLite template catalog initialization failed".into(),
+                "shared PostgreSQL template catalog initialization failed".into(),
             )
         })?;
     let native_preview: Arc<dyn native::TemplatePreviewGenerator> = match &settings.chromium_path {
@@ -467,7 +434,8 @@ async fn build_templates(
     ));
     embedded.reconcile().await.map_err(|_| {
         BootstrapError::SlideTemplates(
-            "Helix template reconciliation failed; canonical SQLite records were preserved".into(),
+            "Helix template reconciliation failed; canonical PostgreSQL records were preserved"
+                .into(),
         )
     })?;
     embedded.resume_pending_jobs();
@@ -477,12 +445,12 @@ async fn build_templates(
     ))
 }
 /// The repository shares the migrated product connection; it never opens or initializes a store.
-fn initialize_template_repository(
-    sqlite: SqliteClient,
+async fn initialize_template_repository(
+    postgres: PostgresClient,
 ) -> anyhow::Result<Arc<dyn templates::slide_templates::TemplateRepository>> {
-    use templates::slide_templates::{SqliteTemplateRepository, APP_ID};
-    let repository = Arc::new(SqliteTemplateRepository::new(sqlite));
-    repository.ensure_app(APP_ID, None)?;
+    use templates::slide_templates::{PostgresTemplateRepository, APP_ID};
+    let repository = Arc::new(PostgresTemplateRepository::new(postgres));
+    repository.ensure_app(APP_ID, None).await?;
     Ok(repository)
 }
 

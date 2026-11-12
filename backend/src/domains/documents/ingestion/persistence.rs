@@ -8,7 +8,7 @@ use crate::domains::documents::{
     model::{Document, DocumentChunk},
     store::{
         model::{FilePersistenceInput, PersistedFileIdentity},
-        sqlite::DocumentStore,
+        postgres::DocumentStore,
     },
 };
 use crate::shared::file_policy::{infer_supported_image_mime_type, infer_supported_mime_type};
@@ -24,7 +24,7 @@ pub struct DocumentPersistenceResult {
     pub insert_document_chunk_result: Value,
 }
 
-/// Immutable SQLite input and graph request prepared before canonical
+/// Immutable PostgreSQL input and graph request prepared before canonical
 /// persistence. The graph request is built once, with one timestamp, and has
 /// already passed the writer's exact serialized-size preflight.
 struct PreparedDocumentPersistence {
@@ -174,7 +174,7 @@ async fn persist_prepared_document_and_chunks(
         .map_err(|error| error.to_string())
     .map_err(|error| {
         IngestionError::AfterCommit(format!(
-            "Helix indexing failed after SQLite committed file_id `{}` and version_id `{}`: {error}",
+            "Helix indexing failed after PostgreSQL committed file_id `{}` and version_id `{}`: {error}",
             insert_blob_result.file_id, insert_blob_result.version_id
         ))
     })?;
@@ -193,7 +193,7 @@ fn verify_committed_identity(
 ) -> Result<(), IngestionError> {
     if committed != expected {
         return Err(IngestionError::AfterCommit(
-            "committed SQLite identity does not match the prepared ingestion plan".into(),
+            "committed PostgreSQL identity does not match the prepared ingestion plan".into(),
         ));
     }
     if !graph.matches_identity(
@@ -203,7 +203,7 @@ fn verify_committed_identity(
         &committed.version_id,
     ) {
         return Err(IngestionError::AfterCommit(
-            "prepared Helix graph identity does not match the committed SQLite identity".into(),
+            "prepared Helix graph identity does not match the committed PostgreSQL identity".into(),
         ));
     }
     Ok(())
@@ -241,7 +241,7 @@ pub(crate) fn build_file_persistence_input(
         ));
     }
     let byte_size = i64::try_from(file_bytes.len())
-        .map_err(|_| "file byte length does not fit in SQLite INTEGER".to_string())?;
+        .map_err(|_| "file byte length does not fit in PostgreSQL INTEGER".to_string())?;
 
     let content_sha256 = sha256_hex(&file_bytes);
     if content_sha256 != document.content_hash {
@@ -311,13 +311,14 @@ fn build_helix_graph_nodes_at(
         || insert_blob_result.display_name != document.file_name
     {
         return Err(
-            "committed SQLite file identity does not match the ingestion document".to_string(),
+            "committed PostgreSQL file identity does not match the ingestion document".to_string(),
         );
     }
     let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
     if insert_blob_result.version_id != expected_version_id {
         return Err(
-            "committed SQLite version identity does not match the ingestion document".to_string(),
+            "committed PostgreSQL version identity does not match the ingestion document"
+                .to_string(),
         );
     }
 

@@ -16,10 +16,10 @@ fn fields() -> DealFields {
     }))
     .unwrap()
 }
-async fn fixture() -> (SqliteClient, DealRepository, CompanyRepository, i64) {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrate(&sqlite).unwrap();
-    let user = UserRepository::new(sqlite.clone())
+async fn fixture() -> (PostgresClient, DealRepository, CompanyRepository, i64) {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrate(&postgres).await.unwrap();
+    let user = UserRepository::new(postgres.clone())
         .create(AddUserInput {
             first_name: "Test".into(),
             last_name: "Owner".into(),
@@ -30,9 +30,9 @@ async fn fixture() -> (SqliteClient, DealRepository, CompanyRepository, i64) {
         .await
         .unwrap();
     (
-        sqlite.clone(),
-        DealRepository::new(sqlite.clone()),
-        CompanyRepository::new(sqlite),
+        postgres.clone(),
+        DealRepository::new(postgres.clone()),
+        CompanyRepository::new(postgres),
         user.id,
     )
 }
@@ -147,9 +147,9 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
 
 #[tokio::test]
 async fn joined_reads_keep_deals_without_metadata_or_children() {
-    let (sqlite, repo, directory, owner) = fixture().await;
+    let (postgres, repo, directory, owner) = fixture().await;
     create(&repo, owner, "DEAL-EMPTY", fields()).await.unwrap();
-    sqlite
+    postgres
         .write_async(
             SqlBuilder::delete_from("deal_metadata")
                 .and_where(Condition::equal("deal_id", "DEAL-EMPTY"))
@@ -250,7 +250,7 @@ async fn joined_children_round_trip_across_the_deal_batch_boundary() {
 }
 #[tokio::test]
 async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {
-    let (sqlite, repo, directory, owner) = fixture().await;
+    let (postgres, repo, directory, owner) = fixture().await;
     let c = company(&directory, owner, "Target").await;
     let mut input = fields();
     input
@@ -261,7 +261,7 @@ async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {
             notes: None,
         });
     let before = create(&repo, owner, "DEAL-1", input.clone()).await.unwrap();
-    sqlite.with_connection(|c| c.execute_batch("CREATE TRIGGER reject_scope BEFORE INSERT ON deal_scopes BEGIN SELECT RAISE(ABORT, 'test failure'); END;")).unwrap();
+    postgres.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION reject_scope_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test failure' USING ERRCODE='23514'; END $$; CREATE TRIGGER reject_scope BEFORE INSERT ON deal_scopes FOR EACH ROW EXECUTE FUNCTION reject_scope_fn();").await }).await.unwrap();
     input.deal_name = "Changed".into();
     input.parties.clear();
     input.scopes.push(DiligenceScope::Sdlc);
@@ -286,8 +286,8 @@ async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {
 }
 #[tokio::test]
 async fn missing_cross_owner_and_duplicate_assignments_never_commit() {
-    let (sqlite, repo, directory, owner) = fixture().await;
-    let second = UserRepository::new(sqlite)
+    let (postgres, repo, directory, owner) = fixture().await;
+    let second = UserRepository::new(postgres)
         .create(AddUserInput {
             first_name: "Other".into(),
             last_name: "Owner".into(),
@@ -348,8 +348,11 @@ async fn archive_is_idempotent_retains_status_and_nullable_dates_sort_last() {
 
 impl DealRepository {
     pub async fn list(&self) -> Result<Vec<DealWithMetadata>, RepositoryError> {
-        self.sqlite
-            .read_transaction_async(|tx| load(tx, None, None))
+        self.postgres
+            .read_transaction_async(move |tx| async move {
+                let tx = &tx;
+                load(tx, None, None).await
+            })
             .await
             .map_err(storage)
     }

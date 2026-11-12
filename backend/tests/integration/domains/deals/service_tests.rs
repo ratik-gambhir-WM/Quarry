@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    adapters::sqlite::client::SqliteClient,
+    adapters::postgres::client::PostgresClient,
     app::migrations::migrate,
     domains::{
         deals::repository::DealRepository,
@@ -28,13 +28,13 @@ fn input() -> SaveDealInput {
 
 #[tokio::test]
 async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrate(&sqlite).unwrap();
-    let users_repository = UserRepository::new(sqlite.clone());
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrate(&postgres).await.unwrap();
+    let users_repository = UserRepository::new(postgres.clone());
     let users = UserService::new(users_repository.clone());
     let deals = DealService::new(
         UserDirectory::new(users_repository),
-        DealRepository::new(sqlite),
+        DealRepository::new(postgres),
         None,
         "test-model".to_string(),
         crate::integration_support::prompt_catalog(),
@@ -75,11 +75,11 @@ async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
 
 #[tokio::test]
 async fn saves_submitted_links_before_optional_extraction_fails() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrate(&sqlite).unwrap();
-    let users_repository = UserRepository::new(sqlite.clone());
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrate(&postgres).await.unwrap();
+    let users_repository = UserRepository::new(postgres.clone());
     let users = UserService::new(users_repository.clone());
-    let deals_repository = DealRepository::new(sqlite);
+    let deals_repository = DealRepository::new(postgres);
     let deals = DealService::new(
         UserDirectory::new(users_repository),
         deals_repository.clone(),

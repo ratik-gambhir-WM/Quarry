@@ -1,5 +1,9 @@
 # Notebook API implementation verification
 
+Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
+Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
+reset and verification records below describe the earlier implementation, not current commands.
+
 This record covers the initial API/transport implementation before the subsequent explicit-Save
 editor integration. See [Save UI verification](notebook-save-ui-verification.md) for the current
 UI behavior and later checks.

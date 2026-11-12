@@ -1,4 +1,4 @@
-//! Namespaced, immutable revision projections. Readers must join the canonical SQLite revision.
+//! Namespaced, immutable revision projections. Readers must join the canonical PostgreSQL revision.
 use super::model::{Note, PIPELINE};
 use crate::adapters::{helix::client::HelixClient, openai::client::OpenAiClient};
 use futures_util::future::BoxFuture;

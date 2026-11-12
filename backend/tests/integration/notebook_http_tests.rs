@@ -79,7 +79,7 @@ async fn save(app: &App, path: &str, method: &str, body: Value) -> Value {
 }
 #[tokio::test]
 async fn notebook_http_complete_resource_lifecycle_and_terminal_sse() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     let id = book(&app).await;
     let base = format!("/api/v1/notebooks/{id}");
     let (status, _, folder) = call(
@@ -110,13 +110,35 @@ async fn notebook_http_complete_resource_lifecycle_and_terminal_sse() {
         .2["name"],
         "Site visit"
     );
-    let job=save(&app,&format!("{base}/notes"),"POST",json!({"operationId":uuid::Uuid::new_v4().to_string(),"folderId":fid,"title":"Interview","blocks":test_support::blocks(),"contentSchemaVersion":1})).await;
+    let job = save(
+        &app,
+        &format!("{base}/notes"),
+        "POST",
+        json!({
+            "operationId": uuid::Uuid::new_v4().to_string(),
+            "folderId": fid,
+            "title": "Interview",
+            "blocks": test_support::blocks(),
+            "contentSchemaVersion": 1
+        }),
+    )
+    .await;
     let nid = job["noteId"].as_str().unwrap();
     let path = format!("{base}/notes/{nid}");
     let note = call(&app, "GET", &path, None, 1).await.2;
     assert_eq!(note["blocks"], test_support::blocks());
     assert_eq!(note["revision"], 1);
-    let moved=save(&app,&path,"PATCH",json!({"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":1,"folderId":null})).await;
+    let moved = save(
+        &app,
+        &path,
+        "PATCH",
+        json!({
+            "operationId": uuid::Uuid::new_v4().to_string(),
+            "expectedRevision": 1,
+            "folderId": null
+        }),
+    )
+    .await;
     let note = call(&app, "GET", &path, None, 1).await.2;
     assert!(note["folderId"].is_null());
     assert_eq!(note["revision"], 2);
@@ -177,7 +199,7 @@ async fn notebook_http_complete_resource_lifecycle_and_terminal_sse() {
 }
 #[tokio::test]
 async fn notebook_http_ownership_authentication_validation_and_compatibility() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     let id = book(&app).await;
     let base = format!("/api/v1/notebooks/{id}");
     for (method, path, body) in [
@@ -245,7 +267,7 @@ async fn notebook_http_ownership_authentication_validation_and_compatibility() {
 }
 #[tokio::test]
 async fn notebook_http_media_type_streamed_body_limit_and_patch_preflight() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     for (content_type, body, expected) in [
         (None, "{}".to_owned(), 415),
         (Some("application/json"), "{".into(), 400),
@@ -299,7 +321,7 @@ async fn notebook_http_media_type_streamed_body_limit_and_patch_preflight() {
 #[tokio::test]
 async fn notebook_http_status_and_events_require_owned_parent_and_revoked_sessions_close() {
     use futures_util::StreamExt;
-    let app = test_support::application();
+    let app = test_support::application().await;
     app.pipeline
         .blocked
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -329,8 +351,15 @@ async fn notebook_http_status_and_events_require_owned_parent_and_revoked_sessio
         .unwrap();
     let mut stream = response.into_body().into_data_stream();
     assert!(stream.next().await.is_some());
-    app.sqlite
-        .with_connection(|c| c.execute("UPDATE auth_sessions SET revoked_at=1 WHERE user_id=1", []))
+    app.postgres
+        .with_connection(async |c| {
+            c.execute(
+                "UPDATE auth_sessions SET revoked_at=1 WHERE user_id=1",
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            )
+            .await
+        })
+        .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while stream.next().await.is_some() {}
@@ -340,11 +369,11 @@ async fn notebook_http_status_and_events_require_owned_parent_and_revoked_sessio
     assert_eq!(call(&app, "GET", status, None, 1).await.0, 401);
 }
 
-/// Explicit opt-in visual fixture: in-memory SQLite, fake embeddings/Helix, loopback only.
+/// Explicit opt-in visual fixture: isolated PostgreSQL, fake embeddings/Helix, loopback only.
 #[tokio::test]
 #[ignore = "interactive Computer visual fixture; listens on 127.0.0.1:39001 until stopped"]
 async fn notebook_visual_fixture() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     let (status,_,_)=call(&app,"POST","/api/v1/auth/register",Some(json!({"username":"notebook-visual","password":"Visual-test-only-2026!","email":"notebook.visual.test@westmonroe.com","firstName":"Visual","lastName":"Test"})),1).await;
     assert_eq!(status, 201);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:39001")
@@ -356,7 +385,7 @@ async fn notebook_visual_fixture() {
 
 #[tokio::test]
 async fn notebook_http_queue_capacity_returns_retry_after_without_losing_admitted_work() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     app.pipeline
         .blocked
         .store(true, std::sync::atomic::Ordering::SeqCst);

@@ -1,5 +1,9 @@
 # Slide Templates Studio migration evidence
 
+Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
+Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
+reset and verification records below describe the earlier implementation, not current commands.
+
 Current rollout (2026-11-05): schema **17** preserves validated **12/13/14/15/16** product and
 template records and adds authenticated user ownership. Existing shared records remain unassigned
 and hidden from user catalogs. See [private template rollout and recovery](template-ownership.md).

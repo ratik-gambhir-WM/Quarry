@@ -74,7 +74,7 @@ impl Stage {
         }
     }
 
-    fn record_failure(
+    async fn record_failure(
         self,
         repository: &dyn TemplateRepository,
         id: &str,
@@ -82,8 +82,16 @@ impl Stage {
         retry: Option<&str>,
     ) -> Result<(), crate::shared::error::RepositoryError> {
         match self {
-            Self::Classification => repository.record_slide_classification_failure(id, code, retry),
-            Self::Embedding => repository.record_slide_embedding_failure(id, code, retry),
+            Self::Classification => {
+                repository
+                    .record_slide_classification_failure(id, code, retry)
+                    .await
+            }
+            Self::Embedding => {
+                repository
+                    .record_slide_embedding_failure(id, code, retry)
+                    .await
+            }
         }
     }
 }
@@ -138,7 +146,7 @@ impl SlideClassificationWorker {
                 let now = (self.options.now)();
                 let worker = Arc::clone(&self);
                 let prefer = self.prefer_classification.load(Ordering::Acquire);
-                let work = tokio::task::spawn_blocking(move || worker.claim(now, prefer))
+                let work = tokio::spawn(async move { worker.claim(now, prefer).await })
                     .await
                     .map_err(anyhow::Error::from)
                     .and_then(|result| result);
@@ -163,7 +171,7 @@ impl SlideClassificationWorker {
                     return;
                 }
                 let repository = self.options.repository.clone();
-                match tokio::task::spawn_blocking(move || repository.has_pending_slide_processing())
+                match tokio::spawn(async move { repository.has_pending_slide_processing().await })
                     .await
                 {
                     Ok(Ok(false)) => {
@@ -182,12 +190,12 @@ impl SlideClassificationWorker {
             }
         }
     }
-    fn claim(
+    async fn claim(
         &self,
         now: DateTime<Utc>,
         prefer_classification: bool,
     ) -> anyhow::Result<Option<Work>> {
-        let classification = || {
+        let classification = || async {
             self.options
                 .repository
                 .claim_next_slide_classification(
@@ -197,9 +205,10 @@ impl SlideClassificationWorker {
                             self.options.classification_timeout + self.options.lease_padding,
                         )),
                 )
+                .await
                 .map(|job| job.map(Work::Classification))
         };
-        let embedding = || {
+        let embedding = || async {
             self.options
                 .repository
                 .claim_next_slide_embedding(
@@ -209,17 +218,18 @@ impl SlideClassificationWorker {
                             self.options.embedding_timeout + self.options.lease_padding,
                         )),
                 )
+                .await
                 .map(|job| job.map(Work::Embedding))
         };
         if prefer_classification {
-            match classification()? {
+            match classification().await? {
                 Some(work) => Ok(Some(work)),
-                None => Ok(embedding()?),
+                None => Ok(embedding().await?),
             }
         } else {
-            match embedding()? {
+            match embedding().await? {
                 Some(work) => Ok(Some(work)),
-                None => Ok(classification()?),
+                None => Ok(classification().await?),
             }
         }
     }
@@ -279,8 +289,10 @@ impl SlideClassificationWorker {
             let repository = self.options.repository.clone();
             let code = code.to_owned();
             let id = id.clone();
-            let recorded = tokio::task::spawn_blocking(move || {
-                stage.record_failure(repository.as_ref(), &id, &code, retry.as_deref())
+            let recorded = tokio::spawn(async move {
+                stage
+                    .record_failure(repository.as_ref(), &id, &code, retry.as_deref())
+                    .await
             })
             .await
             .map_err(anyhow::Error::from)
@@ -294,7 +306,7 @@ impl SlideClassificationWorker {
             // Serialize the snapshot + graph write with HTTP deletion/publication.
             let _mutation = self.options.mutations.lock().await;
             let import = self.options.import.clone();
-            let record = tokio::task::spawn_blocking(move || import.projection_record(&id)).await;
+            let record = tokio::spawn(async move { import.projection_record(&id).await }).await;
             match record {
                 Ok(Ok(Some(record))) => {
                     if !matches!(

@@ -6,18 +6,18 @@ use crate::{
         repository::{CreateDealRecord, DealRepository},
     },
 };
-async fn fixture() -> (SqliteClient, MembershipRepository, DealRepository) {
-    let db = SqliteClient::open_in_memory().unwrap();
-    migrate(&db).unwrap();
-    db.with_connection(|connection| {
+async fn fixture() -> (PostgresClient, MembershipRepository, DealRepository) {
+    let db = PostgresClient::test_database().await.unwrap();
+    migrate(&db).await.unwrap();
+    db.with_connection(async |connection| {
         for user_id in 1..=6 {
             connection.execute(
                 "INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(?1,?2,?3,'Test','Member','unusable')",
-                rusqlite::params![user_id, format!("user{user_id}"), format!("user{user_id}@example.test")],
-            )?;
+                crate::pg_params![user_id, format!("user{user_id}"), format!("user{user_id}@example.test")],
+            ).await?;
         }
         Ok(())
-    }).unwrap();
+     }).await.unwrap();
     let deals = DealRepository::new(db.clone());
     for id in ["DEAL-1", "DEAL-2"] {
         let fields: DealFields = serde_json::from_value(serde_json::json!({
@@ -282,7 +282,7 @@ async fn revisions_duplicates_and_activity_are_transactional_and_paginated() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), count);
-    db.with_connection(|c|c.execute_batch("CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events BEGIN SELECT RAISE(ABORT,'test'); END;")).unwrap();
+    db.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION deny_activity_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test' USING ERRCODE='23514'; END $$; CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events FOR EACH ROW EXECUTE FUNCTION deny_activity_fn();").await }).await.unwrap();
     assert!(repo
         .add_member(
             "DEAL-1".into(),
@@ -374,7 +374,7 @@ async fn service_dispatch_keeps_every_mutation_atomic_with_activity() {
     repo.set_team_member("DEAL-1".into(), 1, team_id.clone(), 2, true)
         .await
         .unwrap();
-    db.with_connection(|c| c.execute_batch("CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events BEGIN SELECT RAISE(ABORT,'test'); END;")).unwrap();
+    db.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION deny_activity_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test' USING ERRCODE='23514'; END $$; CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events FOR EACH ROW EXECUTE FUNCTION deny_activity_fn();").await }).await.unwrap();
     let before = roster_snapshot(&repo).await;
     for mutation in [
         Mutation::AddMember {
@@ -437,10 +437,14 @@ async fn service_dispatch_keeps_every_mutation_atomic_with_activity() {
         service.mutate("DEAL-1".into(), 1, mutation).await.unwrap();
         assert_eq!(roster_snapshot(&repo).await, before);
     }
-    db.with_connection(|c| c.execute_batch("DROP TRIGGER deny_activity;"))
-        .unwrap();
+    db.with_connection(async |c| {
+        c.execute_batch("DROP TRIGGER deny_activity ON deal_activity_events;")
+            .await
+    })
+    .await
+    .unwrap();
     repo.delete_team("DEAL-1".into(), 1, team_id).await.unwrap();
-    db.with_connection(|c| c.execute_batch("CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events BEGIN SELECT RAISE(ABORT,'test'); END;")).unwrap();
+    db.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION deny_activity_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test' USING ERRCODE='23514'; END $$; CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events FOR EACH ROW EXECUTE FUNCTION deny_activity_fn();").await }).await.unwrap();
     let before = roster_snapshot(&repo).await;
     assert!(matches!(
         service

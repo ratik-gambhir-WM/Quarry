@@ -1,6 +1,6 @@
 ---
 name: axum-development
-description: Develop, refactor, debug, review, and verify Quarry's Axum backend under backend/, including routes, handlers, services, repositories, configuration, SQLite, Helix, document jobs, parsers, and server integrations. Use for backend Rust or API behavior; do not use as the primary guide for frontend-only React changes or the Tauri desktop crate.
+description: Develop, refactor, debug, review, and verify Quarry's Axum backend under backend/, including routes, handlers, services, repositories, configuration, PostgreSQL, Helix, document jobs, parsers, and server integrations. Use for backend Rust or API behavior; do not use as the primary guide for frontend-only React changes or the Tauri desktop crate.
 ---
 
 # Quarry Axum development
@@ -14,7 +14,7 @@ valuable local data or external infrastructure.
    sections of `docs/ARCHITECTURE.md`.
 2. Run `git status --short` and preserve unrelated work.
 3. Confirm exact crate versions in `backend/Cargo.toml` and `Cargo.lock`. Quarry currently uses
-   Axum 0.8, Tower 0.5, tower-http 0.7, Tokio 1, reqwest 0.13, rusqlite 0.39, and Helix 2.
+   Axum 0.8, Tower 0.5, tower-http 0.7, Tokio 1, reqwest 0.13, SQLx 0.8.6 (PostgreSQL/Tokio/Rustls), and Helix 3.
 4. Inspect the route, extractor/handler, service, repository/client, DTO, and existing tests along
    the complete request path before editing.
 
@@ -27,12 +27,12 @@ request -> router -> handler -> service -> repository/client
 
 - `main.rs`: tracing, config, bootstrap, bind, serve, shutdown.
 - `config.rs`: all ambient environment parsing, defaults, validation, and secret wrappers.
-- `bootstrap.rs`: SQLite open/migration, shared client construction, repositories, services, state.
+- `bootstrap.rs`: bounded PostgreSQL pool and retained writer lease, fresh-schema validation, clients, repositories, services and state.
 - `state.rs`: cheap-to-clone `Arc<Service>` handles for Axum handlers.
 - `routes/`: route/middleware composition.
 - `handlers/`: extract/validate transport input, invoke service, adapt response.
 - `services/`: orchestration and preconditions derived from loaded or upstream state.
-- `repository/`: SQLite/Helix persistence and projection operations.
+- `repository/`: PostgreSQL/Helix persistence and projection operations.
 - `core/clients`, parsers, SQL/query/node modules: concrete infrastructure and pure mechanisms.
 
 Services and repositories must not depend on `AppState`, read ambient configuration, or construct
@@ -85,28 +85,35 @@ work and preserve necessary guards at the actual operation.
 
 ## Async and blocking work
 
-- Never block a Tokio worker with SQLite, filesystem traversal, Office subprocess work, or heavy
-  parsing. Use the existing blocking-pool and concurrency-control patterns.
+- Never block a Tokio worker with filesystem traversal, Office subprocess work or heavy parsing.
+  PostgreSQL I/O uses the asynchronous pool; do not wrap it in blocking tasks or block on futures. Use the existing blocking-pool and concurrency-control patterns.
 - Keep `AppState` lean and clone service `Arc`s, not large mutable objects.
-- Bound concurrency, response/upload sizes, retries, caches, and task retention deliberately.
-- Do not use `std::sync::Mutex` across an `.await`. The SQLite client intentionally contains its
-  synchronous connection and exposes async offloading methods; do not leak the connection outward.
+- Bound concurrency, response/upload sizes, pool acquisition, queries, retries and caches.
+- Never hold a blocking mutex across `.await`. The PostgreSQL transaction wrapper uses a Tokio
+  mutex on one owned transaction connection. Helpers must share it rather than commit independently.
 
 ## Persistence and graph rules
 
-- SQLite is canonical for users, deals, logical files, versions, and blobs.
-- Helix is the versioned search projection. SQLite commits before Helix indexing; re-uploading the
+- PostgreSQL is canonical for users, deals, logical files, versions, and blobs.
+- Helix is the versioned search projection. PostgreSQL commits before Helix indexing; re-uploading the
   same bytes can find the committed version by hash and retry indexing. There is no general
-  SQLite-to-Helix reindex command today.
+  PostgreSQL-to-Helix reindex command today.
 - Preserve content hashes, exact-content idempotency, foreign keys, one-current-version uniqueness,
   and transaction rollback behavior. Document IDs are content-derived; version and final chunk IDs
   are deterministic after a logical `file_id` is selected.
 - Parsers create a new random `file_id`, and the normal ingestion path reuses one only for an exact
   content-hash match. Changed content currently becomes a new logical file even though repository
   tests can create later versions by supplying the same `file_id` explicitly.
-- Schema marker 11 initializes fresh storage or validates/reuses the current schema. Older
-  profiles require the explicit offline reset, never startup deletion. Use disposable databases
-  in tests and keep authentication/recovery documentation aligned.
+- PostgreSQL schema 1 recreates final former SQLite marker 18 directly. Initialize only an empty
+  selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
+  restart. Unknown layouts fail without deletion. There is no SQLite import, fallback or reset.
+- Bootstrap retains a dedicated-session application writer lease through all client clones; database
+  operations fail closed on ownership loss. Writes additionally serialize with a schema-scoped
+  transaction advisory lock at READ COMMITTED, preserving guards/activity/revisions/leases. Aggregate
+  reads use REPEATABLE READ, READ ONLY. Do not claim distributed application support.
+- Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
+  owner/app scoping and stable ties. Its captured fixtures must continue to pass. Helix remains the
+  document/template graph projection and search boundary.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
 - Jobs and caches are currently process-local. Do not describe them as durable or distributed.
@@ -152,14 +159,13 @@ From `backend/`:
 cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 Run a focused `cargo test <filter>` before the full suite when practical. Add
 `cargo build --locked --release` for release/build-system changes.
 
-Do not use `cargo run` as a routine check: startup opens and may destructively migrate SQLite,
-requires Helix, and initializes indexes. A runtime smoke test needs explicit disposable
+Do not use `cargo run` as a routine check: startup initializes/validates the selected PostgreSQL schema, requires Helix and initializes indexes. A runtime smoke test needs explicit disposable
 configuration and live dependencies.
 
 If an authorized smoke test starts Axum or another port-listening dependency, record its process
@@ -177,3 +183,11 @@ behavior, or verification commands changed. If no edit is needed, hand off with
 
 Report exact checks and outcomes, skipped integration tests, remaining external-dependency
 uncertainty, and pre-existing failures separately.
+
+## PostgreSQL validation environment
+
+Server configuration requires redacted `QUARRY_DATABASE_URL`; the dedicated development database is
+`Quarry`. Pool/query/acquisition bounds are parsed only in `AppConfig`. Tests require an explicit URL
+ending in `_test`, use isolated random schemas and clean only namespaces they created. Match fresh
+PostgreSQL data with a separate fresh Helix store; the launcher defaults to the new port-6970 store
+and leaves older port-6969 data alone. See `docs/postgresql-storage.md` for setup/recovery.

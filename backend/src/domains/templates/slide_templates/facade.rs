@@ -110,7 +110,7 @@ impl SlideTemplates {
         })
     }
     pub async fn parse_json(&self, bytes: Vec<u8>) -> SlideResult<Value> {
-        self.run(move |_, _, _| {
+        self.run(move |_, _, _| async move {
             serde_json::from_slice(&bytes).map_err(|_| {
                 SlideTemplateError::new(
                     FailureKind::Invalid,
@@ -125,7 +125,7 @@ impl SlideTemplates {
         &self,
         make: impl FnOnce() -> SlideResult<T> + Send + 'static,
     ) -> SlideResult<Vec<u8>> {
-        self.run(move |_, _, _| {
+        self.run(move |_, _, _| async move {
             use std::io::Write;
             struct Bounded(Vec<u8>);
             impl Write for Bounded {
@@ -167,9 +167,12 @@ impl SlideTemplates {
             }
         }
     }
-    async fn run<T: Send + 'static>(
+    async fn run<
+        T: Send + 'static,
+        F: std::future::Future<Output = SlideResult<T>> + Send + 'static,
+    >(
         &self,
-        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> SlideResult<T>
+        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> F
             + Send
             + 'static,
     ) -> SlideResult<T> {
@@ -177,10 +180,13 @@ impl SlideTemplates {
         let _guard = CancelOnDrop(cancellation.clone());
         self.run_cancellable(cancellation, work).await
     }
-    async fn run_cancellable<T: Send + 'static>(
+    async fn run_cancellable<
+        T: Send + 'static,
+        F: std::future::Future<Output = SlideResult<T>> + Send + 'static,
+    >(
         &self,
         cancellation: RequestCancellation,
-        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> SlideResult<T>
+        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> F
             + Send
             + 'static,
     ) -> SlideResult<T> {
@@ -208,7 +214,7 @@ impl SlideTemplates {
         })?;
         let import = self.import.clone();
         let export = self.export.clone();
-        tokio::task::spawn_blocking(move || {
+        tokio::spawn(async move {
             let _permit = permit;
             if cancellation.is_cancelled() {
                 return Err(unavailable(
@@ -216,20 +222,23 @@ impl SlideTemplates {
                     "Template processing was cancelled.",
                 ));
             }
-            work(import, export, cancellation)
+            work(import, export, cancellation).await
         })
         .await
         .map_err(SlideTemplateError::internal)?
     }
-    async fn run_queued<T: Send + 'static>(
+    async fn run_queued<
+        T: Send + 'static,
+        F: std::future::Future<Output = SlideResult<T>> + Send + 'static,
+    >(
         &self,
         worker: Arc<SlideClassificationWorker>,
-        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> SlideResult<T>
+        work: impl FnOnce(Arc<ImportService>, Arc<ExportService>, RequestCancellation) -> F
             + Send
             + 'static,
     ) -> SlideResult<T> {
-        self.run(move |import, export, cancellation| {
-            let result = work(import, export, cancellation);
+        self.run(move |import, export, cancellation| async move {
+            let result = work(import, export, cancellation).await;
             // Notify inside the blocking task after commit, even if the HTTP future
             // was dropped while awaiting it. Publication still checks cancellation.
             if result.is_ok() {
@@ -240,8 +249,8 @@ impl SlideTemplates {
         .await
     }
     pub async fn get(&self, id: String) -> SlideResult<Option<Value>> {
-        self.run(move |i, _, _| {
-            let value = i.find_json(&id)?;
+        self.run(move |i, _, _| async move {
+            let value = i.find_json(&id).await?;
             if let Some(value) = &value {
                 bound_json(value)?;
             }
@@ -250,16 +259,20 @@ impl SlideTemplates {
         .await
     }
     pub async fn previews(&self, page: usize) -> SlideResult<TemplatePreviewListResponse> {
-        self.run(move |i, _, _| i.list_previews(page)).await
+        self.run(move |i, _, _| async move { i.list_previews(page).await })
+            .await
     }
     pub async fn catalog(&self, kind: Option<TemplateKind>) -> SlideResult<TemplateListResponse> {
-        self.run(move |i, _, _| i.list(kind)).await
+        self.run(move |i, _, _| async move { i.list(kind).await })
+            .await
     }
     pub async fn preview(&self, id: String) -> SlideResult<Option<StoredTemplatePreview>> {
-        self.run(move |i, _, _| i.find_preview(&id)).await
+        self.run(move |i, _, _| async move { i.find_preview(&id).await })
+            .await
     }
     pub async fn asset(&self, id: String, asset: String) -> SlideResult<Option<TemplateAsset>> {
-        self.run(move |i, _, _| i.find_asset(&id, &asset)).await
+        self.run(move |i, _, _| async move { i.find_asset(&id, &asset).await })
+            .await
     }
     pub async fn inspect(
         &self,
@@ -273,7 +286,7 @@ impl SlideTemplates {
                 "Embedding inspection is disabled.",
             ));
         }
-        self.run(move |i, _, _| i.find_v2(&id, metadata, embeddings))
+        self.run(move |i, _, _| async move { i.find_v2(&id, metadata, embeddings).await })
             .await
     }
     pub async fn retry_processing(&self, id: String) -> SlideResult<RetrySlideProcessingResponse> {
@@ -289,16 +302,18 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        self.run_queued(worker.clone(), move |import, _, _| {
-            import.retry_failed_processing(&id)
+        self.run_queued(worker.clone(), move |import, _, _| async move {
+            import.retry_failed_processing(&id).await
         })
         .await
     }
     pub async fn export(&self, input: Value) -> SlideResult<ExportedPowerPoint> {
-        self.run(move |_, e, _| e.export(input)).await
+        self.run(move |_, e, _| async move { e.export(input).await })
+            .await
     }
     pub async fn insert(&self, input: InsertPowerPointInput) -> SlideResult<ExportedPowerPoint> {
-        self.run(move |_, e, _| e.insert(input)).await
+        self.run(move |_, e, _| async move { e.insert(input).await })
+            .await
     }
     pub async fn import(&self, bytes: Vec<u8>, kind: TemplateKind) -> SlideResult<ImportResponse> {
         let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
@@ -308,7 +323,7 @@ impl SlideTemplates {
             )
         })?;
         let result = self
-            .run(move |i, _, c| i.import_cancellable(&bytes, kind, &c))
+            .run(move |i, _, c| async move { i.import_cancellable(&bytes, kind, &c).await })
             .await?;
         self.project(&result.template_id).await?;
         Ok(result)
@@ -325,7 +340,7 @@ impl SlideTemplates {
             )
         })?;
         let result = self
-            .run(move |i, _, c| i.batch_import_cancellable(&bytes, kind, &c))
+            .run(move |i, _, c| async move { i.batch_import_cancellable(&bytes, kind, &c).await })
             .await?;
         for template in &result.templates {
             self.project(&template.template_id).await?;
@@ -340,7 +355,9 @@ impl SlideTemplates {
             )
         })?;
         let key = id.clone();
-        let removed = self.run(move |i, _, _| i.delete(&key)).await?;
+        let removed = self
+            .run(move |i, _, _| async move { i.delete(&key).await })
+            .await?;
         // An inaccessible ID must never delete another owner's graph projection.
         if removed {
             if let Some(index) = &self.projection {
@@ -366,8 +383,8 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        self.run_queued(worker.clone(), move |i, _, c| {
-            i.queue_classified_import(&bytes, kind, &c)
+        self.run_queued(worker.clone(), move |i, _, c| async move {
+            i.queue_classified_import(&bytes, kind, &c).await
         })
         .await
     }
@@ -388,14 +405,16 @@ impl SlideTemplates {
                 "Template writes are busy. Try again shortly.",
             )
         })?;
-        self.run_queued(worker.clone(), move |import, _, cancellation| {
-            import.queue_classified_batch_import(&bytes, kind, &cancellation)
+        self.run_queued(worker.clone(), move |import, _, cancellation| async move {
+            import
+                .queue_classified_batch_import(&bytes, kind, &cancellation)
+                .await
         })
         .await
     }
     pub async fn reconcile(&self) -> SlideResult<()> {
         if let Some(index) = &self.projection {
-            // Reconcile only Quarry's template projection from canonical shared SQLite records.
+            // Reconcile only Quarry's template projection from canonical shared PostgreSQL records.
             let catalog = self.catalog(None).await?;
             let ids = catalog
                 .templates
@@ -415,7 +434,9 @@ impl SlideTemplates {
     async fn project(&self, id: &str) -> SlideResult<()> {
         if let Some(index) = &self.projection {
             let id = id.to_owned();
-            let record = self.run(move |i, _, _| i.projection_record(&id)).await?;
+            let record = self
+                .run(move |i, _, _| async move { i.projection_record(&id).await })
+                .await?;
             if let Some(record) = record {
                 index
                     .upsert(record)
@@ -427,7 +448,7 @@ impl SlideTemplates {
     }
 }
 fn projection_failure() -> SlideTemplateError {
-    unavailable("template_projection_failed","The template change was saved in SQLite, but Helix indexing could not be confirmed. Refresh before retrying.")
+    unavailable("template_projection_failed","The template change was saved in PostgreSQL, but Helix indexing could not be confirmed. Refresh before retrying.")
 }
 pub(super) fn unavailable(code: &'static str, message: &'static str) -> SlideTemplateError {
     SlideTemplateError::new(FailureKind::Unavailable, code, message)

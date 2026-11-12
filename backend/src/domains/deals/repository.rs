@@ -1,17 +1,18 @@
 pub use super::model::{Deal, DealFields};
 use super::model::{DealParty, DiligenceScope, PartyRole};
+use crate::adapters::postgres::client::Row;
+use crate::adapters::postgres::client::RowResult;
 use crate::domains::memberships::{
     model::Capability, record_activity as event, require_deal as require,
 };
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, PostgresTransaction},
         query::{Condition, ConflictUpdate, SqlBuilder},
     },
     domains::companies::company_from_row,
     shared::error::RepositoryError,
 };
-use rusqlite::Row;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 const DEAL_COLUMNS: [&str; 14] = [
@@ -76,28 +77,32 @@ pub struct CreateDealRecord {
 }
 #[derive(Clone)]
 pub struct DealRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 impl DealRepository {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
     pub async fn access(
         &self,
         id: String,
         actor: i64,
     ) -> Result<crate::domains::memberships::model::DealAccess, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| require(tx, &id, actor, Capability::Read))
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &id, actor, Capability::Read).await
+            })
             .await
     }
     pub async fn create(
         &self,
         record: CreateDealRecord,
     ) -> Result<DealWithMetadata, RepositoryError> {
-        self.sqlite
-            .transaction_async(move |tx| {
-                if super::deletion::barrier(tx, &record.deal_id)? {
+        self.postgres
+            .transaction_async(move |tx| async move {
+                let tx = &tx;
+                if super::deletion::barrier(tx, &record.deal_id).await? {
                     return Ok(Err(RepositoryError::Conflict("dealId is reserved".into())));
                 }
                 if !tx
@@ -105,14 +110,15 @@ impl DealRepository {
                         SqlBuilder::select("deals")
                             .and_where(Condition::equal("deal_id", &record.deal_id))
                             .build(),
-                    )?
+                    )
+                    .await?
                     .is_empty()
                 {
                     return Ok(Err(RepositoryError::Conflict(
                         "dealId already exists".into(),
                     )));
                 }
-                if let Err(error) = validate_companies(tx, record.user_id, &record.fields)? {
+                if let Err(error) = validate_companies(tx, record.user_id, &record.fields).await? {
                     return Ok(Err(error));
                 }
                 let now = chrono::Utc::now().to_rfc3339();
@@ -140,24 +146,26 @@ impl DealRepository {
                     .value("created_at", &now)
                     .value("updated_at", &now)
                     .build();
-                tx.write(insert)?;
+                tx.write(insert).await?;
                 tx.write(
                     SqlBuilder::insert_into("deal_metadata")
                         .value("deal_id", &record.deal_id)
                         .value("local_path", record.local_path.as_deref())
                         .value("sharepoint_link", record.sharepoint_link.as_deref())
                         .build(),
-                )?;
-                replace_children(tx, &record.deal_id, &record.fields)?;
+                )
+                .await?;
+                replace_children(tx, &record.deal_id, &record.fields).await?;
                 crate::domains::memberships::initialize_deal(
                     tx,
                     &record.deal_id,
                     record.user_id,
                     &now,
-                )?;
-                Ok(Ok(load_one(tx, &record.deal_id)?.ok_or_else(|| {
-                    SqliteClientError::transaction_aborted("created deal missing")
-                })?))
+                )
+                .await?;
+                Ok(Ok(load_one(tx, &record.deal_id).await?.ok_or_else(
+                    || PostgresError::transaction_aborted("created deal missing"),
+                )?))
             })
             .await
             .map_err(storage)?
@@ -168,15 +176,16 @@ impl DealRepository {
         actor: i64,
         fields: DealFields,
     ) -> Result<DealWithMetadata, RepositoryError> {
-        self.sqlite
-            .transaction_async(move |tx| {
-                if let Err(error) = require(tx, &id, actor, Capability::Edit) {
+        self.postgres
+            .transaction_async(move |tx| async move {
+                let tx = &tx;
+                if let Err(error) = require(tx, &id, actor, Capability::Edit).await {
                     return Ok(Err(error));
                 }
-                let Some(_existing) = load_one(tx, &id)? else {
+                let Some(_existing) = load_one(tx, &id).await? else {
                     return Ok(Err(RepositoryError::NotFound("deal not found".into())));
                 };
-                if let Err(error) = validate_companies_for_update(tx, &id, actor, &fields)? {
+                if let Err(error) = validate_companies_for_update(tx, &id, actor, &fields).await? {
                     return Ok(Err(error));
                 }
                 tx.write(
@@ -196,19 +205,23 @@ impl DealRepository {
                         .set("updated_at", chrono::Utc::now().to_rfc3339())
                         .and_where(Condition::equal("deal_id", &id))
                         .build(),
-                )?;
-                replace_children(tx, &id, &fields)?;
-                event(tx, &id, Some(actor), "deal_updated", Some(&id))?;
-                Ok(Ok(load_one(tx, &id)?.ok_or_else(|| {
-                    SqliteClientError::transaction_aborted("updated deal missing")
+                )
+                .await?;
+                replace_children(tx, &id, &fields).await?;
+                event(tx, &id, Some(actor), "deal_updated", Some(&id)).await?;
+                Ok(Ok(load_one(tx, &id).await?.ok_or_else(|| {
+                    PostgresError::transaction_aborted("updated deal missing")
                 })?))
             })
             .await
             .map_err(storage)?
     }
     pub async fn list_owned(&self, owner: i64) -> Result<Vec<DealWithMetadata>, RepositoryError> {
-        self.sqlite
-            .read_transaction_async(move |tx| load(tx, None, Some(owner)))
+        self.postgres
+            .read_transaction_async(move |tx| async move {
+                let tx = &tx;
+                load(tx, None, Some(owner)).await
+            })
             .await
             .map_err(storage)
     }
@@ -216,8 +229,11 @@ impl DealRepository {
         &self,
         id: String,
     ) -> Result<Option<DealWithMetadata>, RepositoryError> {
-        self.sqlite
-            .read_transaction_async(move |tx| load_one(tx, &id))
+        self.postgres
+            .read_transaction_async(move |tx| async move {
+                let tx = &tx;
+                load_one(tx, &id).await
+            })
             .await
             .map_err(storage)
     }
@@ -231,9 +247,10 @@ impl DealRepository {
         &self,
         id: String,
     ) -> Result<Option<String>, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                if super::deletion::barrier(tx, &id)?
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                if super::deletion::barrier(tx, &id).await?
                     || tx
                         .read_one_with(
                             SqlBuilder::select("deals")
@@ -241,7 +258,8 @@ impl DealRepository {
                                 .and_where(Condition::equal("deal_id", &id))
                                 .build(),
                             |_| Ok(()),
-                        )?
+                        )
+                        .await?
                         .is_none()
                 {
                     return Err(RepositoryError::NotFound("deal not found".into()));
@@ -253,13 +271,14 @@ impl DealRepository {
                             .and_where(Condition::equal("deal_id", id))
                             .build(),
                         |r| r.get::<_, Option<String>>(0),
-                    )?
+                    )
+                    .await?
                     .flatten())
             })
             .await
     }
     pub async fn metadata(&self, id: String) -> Result<Option<DealMetadata>, RepositoryError> {
-        self.sqlite
+        self.postgres
             .read_one_with_async(
                 SqlBuilder::select("deal_metadata")
                     .columns(METADATA_COLUMNS)
@@ -271,14 +290,15 @@ impl DealRepository {
             .map_err(storage)
     }
     pub async fn archive(&self, id: String, actor: i64) -> Result<Option<Deal>, RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let access = require(tx, &id, actor, Capability::Transfer)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let access = require(tx, &id, actor, Capability::Transfer).await?;
                 if access.archived {
-                    return Ok(load_one(tx, &id)?.map(|a| a.deal));
+                    return Ok(load_one(tx, &id).await?.map(|a| a.deal));
                 }
                 let now = chrono::Utc::now().to_rfc3339();
-                event(tx, &id, Some(actor), "deal_archived", Some(&id))?;
+                event(tx, &id, Some(actor), "deal_archived", Some(&id)).await?;
                 tx.write(
                     SqlBuilder::update("deals")
                         .set("archived_at", &now)
@@ -286,8 +306,9 @@ impl DealRepository {
                         .and_where(Condition::equal("deal_id", &id))
                         .and_where(Condition::is_null("archived_at"))
                         .build(),
-                )?;
-                Ok(load_one(tx, &id)?.map(|a| a.deal))
+                )
+                .await?;
+                Ok(load_one(tx, &id).await?.map(|a| a.deal))
             })
             .await
     }
@@ -298,9 +319,10 @@ impl DealRepository {
     ) -> Result<DealMetadata, RepositoryError> {
         serde_json::from_str::<Vec<String>>(&record.key_questions_json)
             .map_err(|_| RepositoryError::invalid("key questions must be an array of strings"))?;
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                require(tx, &record.deal_id, actor, Capability::Edit)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &record.deal_id, actor, Capability::Edit).await?;
                 let local_path = tx
                     .read_one_with(
                         SqlBuilder::select("deal_metadata")
@@ -308,10 +330,11 @@ impl DealRepository {
                             .and_where(Condition::equal("deal_id", &record.deal_id))
                             .build(),
                         |r| r.get::<_, Option<String>>(0),
-                    )?
+                    )
+                    .await?
                     .flatten();
                 if local_path != record.local_path {
-                    require(tx, &record.deal_id, actor, Capability::LocalSource)?;
+                    require(tx, &record.deal_id, actor, Capability::LocalSource).await?;
                 }
                 event(
                     tx,
@@ -319,7 +342,8 @@ impl DealRepository {
                     Some(actor),
                     "metadata_updated",
                     Some(&record.deal_id),
-                )?;
+                )
+                .await?;
                 tx.write(
                     SqlBuilder::insert_into("deal_metadata")
                         .value("deal_id", &record.deal_id)
@@ -339,37 +363,41 @@ impl DealRepository {
                                 .set_excluded("rl_link"),
                         )
                         .build(),
-                )?;
+                )
+                .await?;
                 tx.read_with(
                     SqlBuilder::select("deal_metadata")
                         .columns(METADATA_COLUMNS)
                         .and_where(Condition::equal("deal_id", &record.deal_id))
                         .build(),
                     metadata_from_row,
-                )?
+                )
+                .await?
                 .pop()
                 .ok_or_else(|| RepositoryError::storage("metadata missing"))
             })
             .await
     }
 }
-fn validate_companies(
-    tx: &SqliteTransaction<'_>,
+async fn validate_companies(
+    tx: &PostgresTransaction,
     owner: i64,
     fields: &DealFields,
-) -> Result<Result<(), RepositoryError>, SqliteClientError> {
+) -> Result<Result<(), RepositoryError>, PostgresError> {
     if fields.parties.is_empty() {
         return Ok(Ok(()));
     }
-    let companies = tx.read_with(
-        SqlBuilder::select("companies")
-            .and_where(Condition::in_values(
-                "company_id",
-                fields.parties.iter().map(|p| p.company_id.as_str()),
-            ))
-            .build(),
-        company_from_row,
-    )?;
+    let companies = tx
+        .read_with(
+            SqlBuilder::select("companies")
+                .and_where(Condition::in_values(
+                    "company_id",
+                    fields.parties.iter().map(|p| p.company_id.as_str()),
+                ))
+                .build(),
+            company_from_row,
+        )
+        .await?;
     let ids: HashSet<_> = companies.iter().map(|c| c.company_id.as_str()).collect();
     if fields
         .parties
@@ -387,12 +415,12 @@ fn validate_companies(
     }
     Ok(Ok(()))
 }
-fn validate_companies_for_update(
-    tx: &SqliteTransaction<'_>,
+async fn validate_companies_for_update(
+    tx: &PostgresTransaction,
     deal: &str,
     actor: i64,
     fields: &DealFields,
-) -> Result<Result<(), RepositoryError>, SqliteClientError> {
+) -> Result<Result<(), RepositoryError>, PostgresError> {
     let existing = tx
         .read_with(
             SqlBuilder::select("deal_parties")
@@ -400,20 +428,21 @@ fn validate_companies_for_update(
                 .and_where(Condition::equal("deal_id", deal))
                 .build(),
             |r| r.get::<_, String>(0),
-        )?
+        )
+        .await?
         .into_iter()
         .collect::<HashSet<_>>();
     let mut new_fields = fields.clone();
     new_fields
         .parties
         .retain(|p| !existing.contains(&p.company_id));
-    validate_companies(tx, actor, &new_fields)
+    validate_companies(tx, actor, &new_fields).await
 }
-fn replace_children(
-    tx: &SqliteTransaction<'_>,
+async fn replace_children(
+    tx: &PostgresTransaction,
     id: &str,
     fields: &DealFields,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let existing = tx
         .read_with(
             SqlBuilder::select("deal_parties")
@@ -428,7 +457,8 @@ fn replace_children(
                     r.get::<_, String>("deal_party_id")?,
                 ))
             },
-        )?
+        )
+        .await?
         .into_iter()
         .collect::<HashMap<_, _>>();
     for table in ["deal_parties", "deal_scopes"] {
@@ -436,7 +466,8 @@ fn replace_children(
             SqlBuilder::delete_from(table)
                 .and_where(Condition::equal("deal_id", id))
                 .build(),
-        )?;
+        )
+        .await?;
     }
     for party in &fields.parties {
         let party_id = existing
@@ -451,7 +482,8 @@ fn replace_children(
                 .value("role", party.role.code())
                 .value("notes", party.notes.as_deref())
                 .build(),
-        )?;
+        )
+        .await?;
     }
     for scope in &fields.scopes {
         tx.write(
@@ -459,22 +491,23 @@ fn replace_children(
                 .value("deal_id", id)
                 .value("scope", scope.code())
                 .build(),
-        )?;
+        )
+        .await?;
     }
     Ok(())
 }
-fn load_one(
-    tx: &SqliteTransaction<'_>,
+async fn load_one(
+    tx: &PostgresTransaction,
     id: &str,
-) -> Result<Option<DealWithMetadata>, SqliteClientError> {
-    Ok(load(tx, Some(id), None)?.pop())
+) -> Result<Option<DealWithMetadata>, PostgresError> {
+    Ok(load(tx, Some(id), None).await?.pop())
 }
 // Read each collection in bounded batches under one snapshot, without per-deal queries.
-fn load(
-    tx: &SqliteTransaction<'_>,
+async fn load(
+    tx: &PostgresTransaction,
     id: Option<&str>,
     owner: Option<i64>,
-) -> Result<Vec<DealWithMetadata>, SqliteClientError> {
+) -> Result<Vec<DealWithMetadata>, PostgresError> {
     let mut builder = SqlBuilder::select("deals")
         .columns(DEAL_COLUMNS.map(|column| format!("deals.{column}")))
         .columns(
@@ -505,37 +538,39 @@ fn load(
             .columns(["deal_memberships.role", "deal_access_revisions.revision"])
             .and_where(Condition::equal("deal_memberships.user_id", owner));
     }
-    let mut deals = tx.read_with(builder.build(), |row| {
-        // key_questions_json is NOT NULL on a metadata row, but nullable after the LEFT JOIN.
-        let metadata = if row
-            .get::<_, Option<String>>("key_questions_json")?
-            .is_some()
-        {
-            Some(metadata_from_row(row)?)
-        } else {
-            None
-        };
-        let mut aggregate = DealWithMetadata {
-            deal: deal_from_row(row)?,
-            metadata,
-        };
-        if let Some(actor) = owner {
-            let access = crate::domains::memberships::model::DealAccess::for_actor(
-                enum_from_row(row, "role")?,
-                aggregate.deal.user_id,
-                aggregate.deal.archived_at.is_some(),
-                row.get("revision")?,
-                actor,
-            );
-            if !access.capabilities.local_source {
-                if let Some(metadata) = &mut aggregate.metadata {
-                    metadata.local_path = None;
+    let mut deals = tx
+        .read_with(builder.build(), |row| {
+            // key_questions_json is NOT NULL on a metadata row, but nullable after the LEFT JOIN.
+            let metadata = if row
+                .get::<_, Option<String>>("key_questions_json")?
+                .is_some()
+            {
+                Some(metadata_from_row(row)?)
+            } else {
+                None
+            };
+            let mut aggregate = DealWithMetadata {
+                deal: deal_from_row(row)?,
+                metadata,
+            };
+            if let Some(actor) = owner {
+                let access = crate::domains::memberships::model::DealAccess::for_actor(
+                    enum_from_row(row, "role")?,
+                    aggregate.deal.user_id,
+                    aggregate.deal.archived_at.is_some(),
+                    row.get("revision")?,
+                    actor,
+                );
+                if !access.capabilities.local_source {
+                    if let Some(metadata) = &mut aggregate.metadata {
+                        metadata.local_path = None;
+                    }
                 }
+                aggregate.deal.access = Some(access);
             }
-            aggregate.deal.access = Some(access);
-        }
-        Ok(aggregate)
-    })?;
+            Ok(aggregate)
+        })
+        .await?;
     if deals.is_empty() {
         return Ok(Vec::new());
     }
@@ -547,66 +582,70 @@ fn load(
     let mut scope_map: HashMap<String, Vec<DiligenceScope>> = HashMap::new();
     // Both child reads use this transaction's connection and snapshot, off the Tokio worker.
     for batch in ids.chunks(500) {
-        let parties = tx.read_with(
-            SqlBuilder::select("deal_parties")
-                .columns([
-                    "deal_parties.deal_id",
-                    "deal_parties.deal_party_id",
-                    "deal_parties.role",
-                    "deal_parties.notes",
-                ])
-                .columns(
-                    [
-                        "company_id",
-                        "user_id",
-                        "name",
-                        "website",
-                        "industry",
-                        "description",
-                        "created_at",
-                        "updated_at",
-                    ]
-                    .map(|column| format!("companies.{column}")),
-                )
-                .inner_join(
-                    "companies",
-                    "deal_parties.company_id",
-                    "companies.company_id",
-                )
-                .and_where(Condition::in_values(
-                    "deal_parties.deal_id",
-                    batch.iter().copied(),
-                ))
-                .build(),
-            |row| {
-                let company = company_from_row(row)?;
-                Ok((
-                    row.get::<_, String>("deal_id")?,
-                    DealParty {
-                        deal_party_id: row.get("deal_party_id")?,
-                        company_id: company.company_id.clone(),
-                        role: enum_from_row::<PartyRole>(row, "role")?,
-                        notes: row.get("notes")?,
-                        company,
-                    },
-                ))
-            },
-        )?;
+        let parties = tx
+            .read_with(
+                SqlBuilder::select("deal_parties")
+                    .columns([
+                        "deal_parties.deal_id",
+                        "deal_parties.deal_party_id",
+                        "deal_parties.role",
+                        "deal_parties.notes",
+                    ])
+                    .columns(
+                        [
+                            "company_id",
+                            "user_id",
+                            "name",
+                            "website",
+                            "industry",
+                            "description",
+                            "created_at",
+                            "updated_at",
+                        ]
+                        .map(|column| format!("companies.{column}")),
+                    )
+                    .inner_join(
+                        "companies",
+                        "deal_parties.company_id",
+                        "companies.company_id",
+                    )
+                    .and_where(Condition::in_values(
+                        "deal_parties.deal_id",
+                        batch.iter().copied(),
+                    ))
+                    .build(),
+                |row| {
+                    let company = company_from_row(row)?;
+                    Ok((
+                        row.get::<_, String>("deal_id")?,
+                        DealParty {
+                            deal_party_id: row.get("deal_party_id")?,
+                            company_id: company.company_id.clone(),
+                            role: enum_from_row::<PartyRole>(row, "role")?,
+                            notes: row.get("notes")?,
+                            company,
+                        },
+                    ))
+                },
+            )
+            .await?;
         for (id, party) in parties {
             party_map.entry(id).or_default().push(party);
         }
-        let scopes = tx.read_with(
-            SqlBuilder::select("deal_scopes")
-                .columns(["deal_id", "scope"])
-                .and_where(Condition::in_values("deal_id", batch.iter().copied()))
-                .build(),
-            |row| {
-                Ok((
-                    row.get::<_, String>("deal_id")?,
-                    enum_from_row::<DiligenceScope>(row, "scope")?,
-                ))
-            },
-        )?;
+        let scopes = tx
+            .read_with(
+                SqlBuilder::select("deal_scopes")
+                    .columns(["deal_id", "scope"])
+                    .and_where(Condition::in_values("deal_id", batch.iter().copied()))
+                    .build(),
+                |row| {
+                    Ok((
+                        row.get::<_, String>("deal_id")?,
+                        enum_from_row::<DiligenceScope>(row, "scope")?,
+                    ))
+                },
+            )
+            .await?;
         for (id, scope) in scopes {
             scope_map.entry(id).or_default().push(scope);
         }
@@ -635,19 +674,15 @@ fn load(
     Ok(deals)
 }
 
-fn storage(e: SqliteClientError) -> RepositoryError {
+fn storage(e: PostgresError) -> RepositoryError {
     RepositoryError::storage(e.to_string())
 }
-fn enum_from_row<T: serde::de::DeserializeOwned>(
-    row: &Row<'_>,
-    column: &str,
-) -> rusqlite::Result<T> {
+fn enum_from_row<T: serde::de::DeserializeOwned>(row: &Row<'_>, column: &str) -> RowResult<T> {
     let value: String = row.get(column)?;
-    serde_json::from_value(serde_json::Value::String(value)).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-    })
+    serde_json::from_value(serde_json::Value::String(value))
+        .map_err(crate::adapters::postgres::client::PostgresError::decode)
 }
-fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
+fn deal_from_row(row: &Row<'_>) -> RowResult<Deal> {
     Ok(Deal {
         access: None,
         deal_id: row.get("deal_id")?,
@@ -668,7 +703,7 @@ fn deal_from_row(row: &Row<'_>) -> rusqlite::Result<Deal> {
         scopes: Vec::new(),
     })
 }
-fn metadata_from_row(row: &Row<'_>) -> rusqlite::Result<DealMetadata> {
+fn metadata_from_row(row: &Row<'_>) -> RowResult<DealMetadata> {
     Ok(DealMetadata {
         deal_id: row.get("deal_id")?,
         key_questions_json: row.get("key_questions_json")?,

@@ -2,7 +2,7 @@ use super::{
     graph::SavePipeline, model::*, repository::NotebookRepository, service::NotebookService,
 };
 use crate::{
-    adapters::sqlite::client::SqliteClient,
+    adapters::postgres::client::PostgresClient,
     app::{
         config::AppConfig,
         http::{
@@ -95,12 +95,12 @@ impl SavePipeline for FakePipeline {
         })
     }
 }
-pub(crate) fn database() -> SqliteClient {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    crate::integration_support::seed_identity(&sqlite, "one@example.invalid", 'a');
-    crate::integration_support::seed_identity(&sqlite, "two@example.invalid", 'b');
-    sqlite
+pub(crate) async fn database() -> PostgresClient {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    crate::integration_support::seed_identity(&postgres, "one@example.invalid", 'a').await;
+    crate::integration_support::seed_identity(&postgres, "two@example.invalid", 'b').await;
+    postgres
 }
 pub(super) fn input(title: &str) -> SaveInput {
     serde_json::from_value(serde_json::json!({"operationId":uuid::Uuid::new_v4().to_string(),"title":title,"blocks":[],"contentSchemaVersion":1})).unwrap()
@@ -113,18 +113,18 @@ pub(crate) fn blocks() -> serde_json::Value {
 }
 pub(crate) struct App {
     pub router: Router,
-    pub sqlite: SqliteClient,
+    pub postgres: PostgresClient,
     pub pipeline: Arc<FakePipeline>,
     pub service: Arc<NotebookService>,
 }
-pub(crate) fn application() -> App {
-    let sqlite = database();
+pub(crate) async fn application() -> App {
+    let postgres = database().await;
     let pipeline = Arc::new(FakePipeline::default());
     let service =
-        NotebookService::with_pipeline(NotebookRepository::new(sqlite.clone()), pipeline.clone());
+        NotebookService::with_pipeline(NotebookRepository::new(postgres.clone()), pipeline.clone());
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
-        sqlite.clone(),
-        UserRepository::new(sqlite.clone()),
+        postgres.clone(),
+        UserRepository::new(postgres.clone()),
     )));
     let protected = super::route::routes(service.clone())
         .merge(identity::route::protected(identity.clone()))
@@ -136,11 +136,11 @@ pub(crate) fn application() -> App {
             AuthBoundary {
                 identity: identity.clone(),
                 access: ResourceAccess::new(
-                    sqlite.clone(),
+                    postgres.clone(),
                     std::sync::Arc::new(
                         crate::domains::memberships::service::DealAccessService::new(
                             crate::domains::memberships::repository::MembershipRepository::new(
-                                sqlite.clone(),
+                                postgres.clone(),
                             ),
                         ),
                     ),
@@ -154,7 +154,7 @@ pub(crate) fn application() -> App {
         .merge(crate::domains::system::route::routes());
     App {
         router: create_router(api, &AppConfig::default().http),
-        sqlite,
+        postgres,
         pipeline,
         service,
     }

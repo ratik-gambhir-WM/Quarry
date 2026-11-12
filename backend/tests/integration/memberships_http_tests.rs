@@ -38,7 +38,7 @@ async fn call(
     )
 }
 async fn fixture() -> TestApplication {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     for (name, token) in [
         ("owner", 'a'),
         ("manager", 'b'),
@@ -46,15 +46,17 @@ async fn fixture() -> TestApplication {
         ("viewer", 'd'),
         ("outsider", 'e'),
     ] {
-        seed_identity(&app.sqlite, &format!("{name}@example.test"), token);
-        app.sqlite
-            .with_connection(|c| {
+        seed_identity(&app.postgres, &format!("{name}@example.test"), token).await;
+        app.postgres
+            .with_connection(async |c| {
                 c.execute(
                     "UPDATE users SET username=?1 WHERE email=?2",
                     [name, &format!("{name}@example.test")],
-                )?;
+                )
+                .await?;
                 Ok(())
             })
+            .await
             .unwrap();
     }
     let body = json!({
@@ -74,7 +76,7 @@ async fn fixture() -> TestApplication {
     // Retain legacy-ID coverage independently of the UUID-only creation API.
     let input: crate::domains::deals::service::SaveDealInput =
         serde_json::from_value(body).unwrap();
-    crate::domains::deals::repository::DealRepository::new(app.sqlite.clone())
+    crate::domains::deals::repository::DealRepository::new(app.postgres.clone())
         .create(crate::domains::deals::repository::CreateDealRecord {
             deal_id: "DEAL-SHARED".into(),
             user_id: 1,
@@ -733,9 +735,9 @@ async fn backend_generated_deal_uuids_work_across_product_boundaries() {
         StatusCode::BAD_REQUEST
     );
     let rows = app
-        .sqlite
+        .postgres
         .read_async(
-            crate::adapters::sqlite::query::SqlBuilder::select("deals")
+            crate::adapters::postgres::query::SqlBuilder::select("deals")
                 .columns(["deal_id"])
                 .build(),
         )

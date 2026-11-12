@@ -1,8 +1,9 @@
 //! Canonical deal policy and atomic roster/activity mutations.
 use super::model::{Activity, Capability, DealAccess, DealRole, Member, Page, Team};
+use crate::adapters::postgres::client::RowResult;
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, PostgresTransaction},
         query::{ComparisonOperator, Condition, SortDirection, SqlBuilder},
     },
     shared::error::RepositoryError,
@@ -10,11 +11,11 @@ use crate::{
 
 #[derive(Clone)]
 pub struct MembershipRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 impl MembershipRepository {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
     pub async fn access(
         &self,
@@ -22,13 +23,16 @@ impl MembershipRepository {
         actor: i64,
         capability: Capability,
     ) -> Result<DealAccess, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| require(tx, &deal, actor, capability))
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &deal, actor, capability).await
+            })
             .await
     }
     pub async fn accessible_deals(&self, actor: i64) -> Result<Vec<String>, RepositoryError> {
         Ok(self
-            .sqlite
+            .postgres
             .read_with_async(
                 SqlBuilder::select("deal_memberships")
                     .columns(["deal_memberships.deal_id"])
@@ -54,43 +58,46 @@ impl MembershipRepository {
         after: i64,
         limit: usize,
     ) -> Result<Page<Member>, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                require(tx, &deal, actor, Capability::Read)?;
-                let mut items = tx.read_with(
-                    SqlBuilder::select("deal_memberships")
-                        .columns([
-                            "users.id",
-                            "users.username",
-                            "users.first_name",
-                            "users.last_name",
-                            "deal_memberships.role",
-                            "deal_memberships.revision",
-                            "deal_memberships.joined_at",
-                        ])
-                        .inner_join("users", "deal_memberships.user_id", "users.id")
-                        .and_where(Condition::equal("deal_id", &deal))
-                        .and_where(Condition::compare(
-                            "users.id",
-                            ComparisonOperator::GreaterThan,
-                            after,
-                        ))
-                        .order_by("users.id", SortDirection::Ascending)
-                        .limit(limit + 1)
-                        .build(),
-                    |r| {
-                        Ok(Member {
-                            user_id: r.get("id")?,
-                            username: r.get("username")?,
-                            first_name: r.get("first_name")?,
-                            last_name: r.get("last_name")?,
-                            role: role_from_row(r, "role")?,
-                            revision: r.get("revision")?,
-                            joined_at: r.get("joined_at")?,
-                            team_ids: Vec::new(),
-                        })
-                    },
-                )?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &deal, actor, Capability::Read).await?;
+                let mut items = tx
+                    .read_with(
+                        SqlBuilder::select("deal_memberships")
+                            .columns([
+                                "users.id",
+                                "users.username",
+                                "users.first_name",
+                                "users.last_name",
+                                "deal_memberships.role",
+                                "deal_memberships.revision",
+                                "deal_memberships.joined_at",
+                            ])
+                            .inner_join("users", "deal_memberships.user_id", "users.id")
+                            .and_where(Condition::equal("deal_id", &deal))
+                            .and_where(Condition::compare(
+                                "users.id",
+                                ComparisonOperator::GreaterThan,
+                                after,
+                            ))
+                            .order_by("users.id", SortDirection::Ascending)
+                            .limit(limit + 1)
+                            .build(),
+                        |r| {
+                            Ok(Member {
+                                user_id: r.get("id")?,
+                                username: r.get("username")?,
+                                first_name: r.get("first_name")?,
+                                last_name: r.get("last_name")?,
+                                role: role_from_row(r, "role")?,
+                                revision: r.get("revision")?,
+                                joined_at: r.get("joined_at")?,
+                                team_ids: Vec::new(),
+                            })
+                        },
+                    )
+                    .await?;
                 let next_cursor = if items.len() > limit {
                     items.truncate(limit);
                     items.last().map(|m| m.user_id.to_string())
@@ -98,17 +105,19 @@ impl MembershipRepository {
                     None
                 };
                 if !items.is_empty() {
-                    let assignments = tx.read_with(
-                        SqlBuilder::select("deal_team_memberships")
-                            .and_where(Condition::equal("deal_id", &deal))
-                            .and_where(Condition::in_values(
-                                "user_id",
-                                items.iter().map(|m| m.user_id),
-                            ))
-                            .order_by("team_id", SortDirection::Ascending)
-                            .build(),
-                        |r| Ok((r.get::<_, i64>("user_id")?, r.get::<_, String>("team_id")?)),
-                    )?;
+                    let assignments = tx
+                        .read_with(
+                            SqlBuilder::select("deal_team_memberships")
+                                .and_where(Condition::equal("deal_id", &deal))
+                                .and_where(Condition::in_values(
+                                    "user_id",
+                                    items.iter().map(|m| m.user_id),
+                                ))
+                                .order_by("team_id", SortDirection::Ascending)
+                                .build(),
+                            |r| Ok((r.get::<_, i64>("user_id")?, r.get::<_, String>("team_id")?)),
+                        )
+                        .await?;
                     for member in &mut items {
                         member.team_ids = assignments
                             .iter()
@@ -128,29 +137,32 @@ impl MembershipRepository {
         after: String,
         limit: usize,
     ) -> Result<Page<Team>, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                require(tx, &deal, actor, Capability::Read)?;
-                let mut items = tx.read_with(
-                    SqlBuilder::select("deal_teams")
-                        .and_where(Condition::equal("deal_id", &deal))
-                        .and_where(Condition::compare(
-                            "team_id",
-                            ComparisonOperator::GreaterThan,
-                            after,
-                        ))
-                        .order_by("team_id", SortDirection::Ascending)
-                        .limit(limit + 1)
-                        .build(),
-                    |r| {
-                        Ok(Team {
-                            team_id: r.get("team_id")?,
-                            name: r.get("name")?,
-                            revision: r.get("revision")?,
-                            user_ids: Vec::new(),
-                        })
-                    },
-                )?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &deal, actor, Capability::Read).await?;
+                let mut items = tx
+                    .read_with(
+                        SqlBuilder::select("deal_teams")
+                            .and_where(Condition::equal("deal_id", &deal))
+                            .and_where(Condition::compare(
+                                "team_id",
+                                ComparisonOperator::GreaterThan,
+                                after,
+                            ))
+                            .order_by("team_id", SortDirection::Ascending)
+                            .limit(limit + 1)
+                            .build(),
+                        |r| {
+                            Ok(Team {
+                                team_id: r.get("team_id")?,
+                                name: r.get("name")?,
+                                revision: r.get("revision")?,
+                                user_ids: Vec::new(),
+                            })
+                        },
+                    )
+                    .await?;
                 let next_cursor = if items.len() > limit {
                     items.truncate(limit);
                     items.last().map(|m| m.team_id.clone())
@@ -158,17 +170,19 @@ impl MembershipRepository {
                     None
                 };
                 if !items.is_empty() {
-                    let assignments = tx.read_with(
-                        SqlBuilder::select("deal_team_memberships")
-                            .and_where(Condition::equal("deal_id", &deal))
-                            .and_where(Condition::in_values(
-                                "team_id",
-                                items.iter().map(|t| t.team_id.as_str()),
-                            ))
-                            .order_by("user_id", SortDirection::Ascending)
-                            .build(),
-                        |r| Ok((r.get::<_, String>("team_id")?, r.get::<_, i64>("user_id")?)),
-                    )?;
+                    let assignments = tx
+                        .read_with(
+                            SqlBuilder::select("deal_team_memberships")
+                                .and_where(Condition::equal("deal_id", &deal))
+                                .and_where(Condition::in_values(
+                                    "team_id",
+                                    items.iter().map(|t| t.team_id.as_str()),
+                                ))
+                                .order_by("user_id", SortDirection::Ascending)
+                                .build(),
+                            |r| Ok((r.get::<_, String>("team_id")?, r.get::<_, i64>("user_id")?)),
+                        )
+                        .await?;
                     for team in &mut items {
                         team.user_ids = assignments
                             .iter()
@@ -188,44 +202,47 @@ impl MembershipRepository {
         after: String,
         limit: usize,
     ) -> Result<Page<Activity>, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                require(tx, &deal, actor, Capability::Read)?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                require(tx, &deal, actor, Capability::Read).await?;
                 // Event IDs start with their fixed-width UTC timestamp; lexicographic order is (created_at,event_id).
-                let mut items = tx.read_with(
-                    SqlBuilder::select("deal_activity_events")
-                        .columns([
-                            "deal_activity_events.event_id",
-                            "deal_activity_events.actor_user_id",
-                            "deal_activity_events.kind",
-                            "deal_activity_events.target_id",
-                            "deal_activity_events.created_at",
-                            "users.first_name",
-                            "users.last_name",
-                        ])
-                        .left_join("users", "deal_activity_events.actor_user_id", "users.id")
-                        .and_where(Condition::equal("deal_id", &deal))
-                        .and_where(Condition::compare(
-                            "event_id",
-                            ComparisonOperator::GreaterThan,
-                            after,
-                        ))
-                        .order_by("event_id", SortDirection::Ascending)
-                        .limit(limit + 1)
-                        .build(),
-                    |r| {
-                        let first: Option<String> = r.get("first_name")?;
-                        let last: Option<String> = r.get("last_name")?;
-                        Ok(Activity {
-                            event_id: r.get("event_id")?,
-                            actor_user_id: r.get("actor_user_id")?,
-                            actor_name: first.zip(last).map(|(a, b)| format!("{a} {b}")),
-                            kind: r.get("kind")?,
-                            target_id: r.get("target_id")?,
-                            created_at: r.get("created_at")?,
-                        })
-                    },
-                )?;
+                let mut items = tx
+                    .read_with(
+                        SqlBuilder::select("deal_activity_events")
+                            .columns([
+                                "deal_activity_events.event_id",
+                                "deal_activity_events.actor_user_id",
+                                "deal_activity_events.kind",
+                                "deal_activity_events.target_id",
+                                "deal_activity_events.created_at",
+                                "users.first_name",
+                                "users.last_name",
+                            ])
+                            .left_join("users", "deal_activity_events.actor_user_id", "users.id")
+                            .and_where(Condition::equal("deal_id", &deal))
+                            .and_where(Condition::compare(
+                                "event_id",
+                                ComparisonOperator::GreaterThan,
+                                after,
+                            ))
+                            .order_by("event_id", SortDirection::Ascending)
+                            .limit(limit + 1)
+                            .build(),
+                        |r| {
+                            let first: Option<String> = r.get("first_name")?;
+                            let last: Option<String> = r.get("last_name")?;
+                            Ok(Activity {
+                                event_id: r.get("event_id")?,
+                                actor_user_id: r.get("actor_user_id")?,
+                                actor_name: first.zip(last).map(|(a, b)| format!("{a} {b}")),
+                                kind: r.get("kind")?,
+                                target_id: r.get("target_id")?,
+                                created_at: r.get("created_at")?,
+                            })
+                        },
+                    )
+                    .await?;
                 let next_cursor = if items.len() > limit {
                     items.truncate(limit);
                     items.last().map(|e| e.event_id.clone())
@@ -243,10 +260,11 @@ impl MembershipRepository {
         email: String,
         role: DealRole,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                let access = require(tx, deal, actor, Capability::ManageMembers)?;
+                let access = require(tx, deal, actor, Capability::ManageMembers).await?;
                 if role == DealRole::Owner {
                     return Err(RepositoryError::invalid("use ownership transfer"));
                 }
@@ -257,7 +275,8 @@ impl MembershipRepository {
                             .and_where(Condition::equal("email", email))
                             .build(),
                         |r| r.get::<_, i64>(0),
-                    )?
+                    )
+                    .await?
                     .ok_or_else(|| RepositoryError::NotFound("registered user not found".into()))?;
                 if tx
                     .read_one(
@@ -265,7 +284,8 @@ impl MembershipRepository {
                             .and_where(Condition::equal("deal_id", deal))
                             .and_where(Condition::equal("user_id", user))
                             .build(),
-                    )?
+                    )
+                    .await?
                     .is_some()
                 {
                     return Err(RepositoryError::Conflict("user is already a member".into()));
@@ -277,7 +297,8 @@ impl MembershipRepository {
                             .and_where(Condition::equal("deal_id", deal))
                             .build(),
                         |r| r.get::<_, i64>(0),
-                    )?
+                    )
+                    .await?
                     .unwrap_or(0);
                 if count >= 500 {
                     return Err(RepositoryError::Conflict("member limit reached".into()));
@@ -292,15 +313,17 @@ impl MembershipRepository {
                         .value("joined_at", &now)
                         .value("updated_at", now)
                         .build(),
-                )?;
-                bump(tx, deal, access.access_revision)?;
+                )
+                .await?;
+                bump(tx, deal, access.access_revision).await?;
                 event(
                     tx,
                     deal,
                     Some(actor),
                     "member_added",
                     Some(&user.to_string()),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -314,11 +337,12 @@ impl MembershipRepository {
         role: DealRole,
         revision: i64,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                let access = require(tx, deal, actor, Capability::ManageMembers)?;
-                let (old, actual) = member_role(tx, deal, user_id)?;
+                let access = require(tx, deal, actor, Capability::ManageMembers).await?;
+                let (old, actual) = member_role(tx, deal, user_id).await?;
                 if old == DealRole::Owner || role == DealRole::Owner {
                     return Err(RepositoryError::Forbidden);
                 }
@@ -330,15 +354,16 @@ impl MembershipRepository {
                 if old == role {
                     return Ok(());
                 }
-                set_role(tx, deal, user_id, role, actual)?;
-                bump(tx, deal, access.access_revision)?;
+                set_role(tx, deal, user_id, role, actual).await?;
+                bump(tx, deal, access.access_revision).await?;
                 event(
                     tx,
                     deal,
                     Some(actor),
                     "member_role_changed",
                     Some(&user_id.to_string()),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -350,8 +375,9 @@ impl MembershipRepository {
         actor: i64,
         user_id: i64,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
                 let access = require(
                     tx,
@@ -362,8 +388,9 @@ impl MembershipRepository {
                     } else {
                         Capability::RemoveMember
                     },
-                )?;
-                if member_role(tx, deal, user_id)?.0 == DealRole::Owner {
+                )
+                .await?;
+                if member_role(tx, deal, user_id).await?.0 == DealRole::Owner {
                     return Err(RepositoryError::Forbidden);
                 }
                 tx.write(
@@ -371,15 +398,17 @@ impl MembershipRepository {
                         .and_where(Condition::equal("deal_id", deal))
                         .and_where(Condition::equal("user_id", user_id))
                         .build(),
-                )?;
-                bump(tx, deal, access.access_revision)?;
+                )
+                .await?;
+                bump(tx, deal, access.access_revision).await?;
                 event(
                     tx,
                     deal,
                     Some(actor),
                     "member_removed",
                     Some(&user_id.to_string()),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -392,10 +421,11 @@ impl MembershipRepository {
         user_id: i64,
         revision: i64,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                let access = require(tx, deal, actor, Capability::Transfer)?;
+                let access = require(tx, deal, actor, Capability::Transfer).await?;
                 if revision != access.access_revision {
                     return Err(RepositoryError::Conflict(
                         "access changed; refresh and retry".into(),
@@ -404,18 +434,19 @@ impl MembershipRepository {
                 if user_id == actor {
                     return Err(RepositoryError::invalid("choose another member"));
                 }
-                let (_, target_revision) = member_role(tx, deal, user_id)?;
-                let (_, actor_revision) = member_role(tx, deal, actor)?;
-                set_role(tx, deal, actor, DealRole::Manager, actor_revision)?;
-                set_role(tx, deal, user_id, DealRole::Owner, target_revision)?;
-                bump(tx, deal, access.access_revision)?;
+                let (_, target_revision) = member_role(tx, deal, user_id).await?;
+                let (_, actor_revision) = member_role(tx, deal, actor).await?;
+                set_role(tx, deal, actor, DealRole::Manager, actor_revision).await?;
+                set_role(tx, deal, user_id, DealRole::Owner, target_revision).await?;
+                bump(tx, deal, access.access_revision).await?;
                 event(
                     tx,
                     deal,
                     Some(actor),
                     "ownership_transferred",
                     Some(&user_id.to_string()),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -427,11 +458,12 @@ impl MembershipRepository {
         actor: i64,
         name: String,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                require(tx, deal, actor, Capability::ManageTeams)?;
-                unique_name(tx, deal, &name, "")?;
+                require(tx, deal, actor, Capability::ManageTeams).await?;
+                unique_name(tx, deal, &name, "").await?;
                 let count = tx
                     .read_one_with(
                         SqlBuilder::select("deal_teams")
@@ -439,7 +471,8 @@ impl MembershipRepository {
                             .and_where(Condition::equal("deal_id", deal))
                             .build(),
                         |r| r.get::<_, i64>(0),
-                    )?
+                    )
+                    .await?
                     .unwrap_or(0);
                 if count >= 1 {
                     return Err(RepositoryError::Conflict(
@@ -458,8 +491,9 @@ impl MembershipRepository {
                         .value("created_at", &now)
                         .value("updated_at", &now)
                         .build(),
-                )?;
-                event(tx, deal, Some(actor), "team_created", Some(&id))?;
+                )
+                .await?;
+                event(tx, deal, Some(actor), "team_created", Some(&id)).await?;
                 Ok(())
             })
             .await
@@ -473,32 +507,35 @@ impl MembershipRepository {
         name: String,
         revision: i64,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                require(tx, deal, actor, Capability::ManageTeams)?;
-                team_exists(tx, deal, &team_id)?;
-                unique_name(tx, deal, &name, &team_id)?;
+                require(tx, deal, actor, Capability::ManageTeams).await?;
+                team_exists(tx, deal, &team_id).await?;
+                unique_name(tx, deal, &name, &team_id).await?;
                 if revision >= 9_007_199_254_740_991 {
                     return Err(RepositoryError::Conflict("team revision exhausted".into()));
                 }
-                let changed = tx.write(
-                    SqlBuilder::update("deal_teams")
-                        .set("name", &name)
-                        .set("normalized_name", name.to_lowercase())
-                        .set("revision", revision + 1)
-                        .set("updated_at", chrono::Utc::now().to_rfc3339())
-                        .and_where(Condition::equal("deal_id", deal))
-                        .and_where(Condition::equal("team_id", &team_id))
-                        .and_where(Condition::equal("revision", revision))
-                        .build(),
-                )?;
+                let changed = tx
+                    .write(
+                        SqlBuilder::update("deal_teams")
+                            .set("name", &name)
+                            .set("normalized_name", name.to_lowercase())
+                            .set("revision", revision + 1)
+                            .set("updated_at", chrono::Utc::now().to_rfc3339())
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("team_id", &team_id))
+                            .and_where(Condition::equal("revision", revision))
+                            .build(),
+                    )
+                    .await?;
                 if changed.rows_affected == 0 {
                     return Err(RepositoryError::Conflict(
                         "team changed; refresh and retry".into(),
                     ));
                 }
-                event(tx, deal, Some(actor), "team_renamed", Some(&team_id))?;
+                event(tx, deal, Some(actor), "team_renamed", Some(&team_id)).await?;
                 Ok(())
             })
             .await
@@ -510,18 +547,20 @@ impl MembershipRepository {
         actor: i64,
         team_id: String,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                require(tx, deal, actor, Capability::ManageTeams)?;
-                team_exists(tx, deal, &team_id)?;
+                require(tx, deal, actor, Capability::ManageTeams).await?;
+                team_exists(tx, deal, &team_id).await?;
                 tx.write(
                     SqlBuilder::delete_from("deal_teams")
                         .and_where(Condition::equal("deal_id", deal))
                         .and_where(Condition::equal("team_id", &team_id))
                         .build(),
-                )?;
-                event(tx, deal, Some(actor), "team_deleted", Some(&team_id))?;
+                )
+                .await?;
+                event(tx, deal, Some(actor), "team_deleted", Some(&team_id)).await?;
                 Ok(())
             })
             .await
@@ -535,12 +574,13 @@ impl MembershipRepository {
         user_id: i64,
         add: bool,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let deal = deal.as_str();
-                require(tx, deal, actor, Capability::ManageTeams)?;
-                team_exists(tx, deal, &team_id)?;
-                member_role(tx, deal, user_id)?;
+                require(tx, deal, actor, Capability::ManageTeams).await?;
+                team_exists(tx, deal, &team_id).await?;
+                member_role(tx, deal, user_id).await?;
                 let query = || {
                     SqlBuilder::select("deal_team_memberships")
                         .and_where(Condition::equal("deal_id", deal))
@@ -548,7 +588,7 @@ impl MembershipRepository {
                         .and_where(Condition::equal("user_id", user_id))
                         .build()
                 };
-                if tx.read_one(query())?.is_some() == add {
+                if tx.read_one(query()).await?.is_some() == add {
                     return Ok(());
                 }
                 if add {
@@ -558,7 +598,8 @@ impl MembershipRepository {
                             .value("team_id", &team_id)
                             .value("user_id", user_id)
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 } else {
                     tx.write(
                         SqlBuilder::delete_from("deal_team_memberships")
@@ -566,7 +607,8 @@ impl MembershipRepository {
                             .and_where(Condition::equal("team_id", &team_id))
                             .and_where(Condition::equal("user_id", user_id))
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 }
                 let kind = if add {
                     "team_member_added"
@@ -579,15 +621,16 @@ impl MembershipRepository {
                     Some(actor),
                     kind,
                     Some(&format!("{team_id}/{user_id}")),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
     }
 }
 
-pub(crate) fn require(
-    tx: &SqliteTransaction<'_>,
+pub(crate) async fn require(
+    tx: &PostgresTransaction,
     deal: &str,
     actor: i64,
     capability: Capability,
@@ -618,9 +661,10 @@ pub(crate) fn require(
                     r.get::<_, i64>("revision")?,
                 ))
             },
-        )?
+        )
+        .await?
         .ok_or_else(|| RepositoryError::NotFound("resource not found".into()))?;
-    if crate::domains::deals::deletion::barrier(tx, deal)? {
+    if crate::domains::deals::deletion::barrier(tx, deal).await? {
         return Err(match capability {
             Capability::Read | Capability::LocalSource => {
                 RepositoryError::NotFound("resource not found".into())
@@ -635,13 +679,13 @@ pub(crate) fn require(
     }
     Ok(access)
 }
-pub(crate) fn event(
-    tx: &SqliteTransaction<'_>,
+pub(crate) async fn event(
+    tx: &PostgresTransaction,
     deal: &str,
     actor: Option<i64>,
     kind: &str,
     target: Option<&str>,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     tx.write(
         SqlBuilder::insert_into("deal_activity_events")
@@ -652,15 +696,16 @@ pub(crate) fn event(
             .value("target_id", target)
             .value("created_at", now)
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-pub(crate) fn initialize(
-    tx: &SqliteTransaction<'_>,
+pub(crate) async fn initialize(
+    tx: &PostgresTransaction,
     deal: &str,
     actor: i64,
     now: &str,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), PostgresError> {
     tx.write(
         SqlBuilder::insert_into("deal_memberships")
             .value("deal_id", deal)
@@ -670,16 +715,18 @@ pub(crate) fn initialize(
             .value("joined_at", now)
             .value("updated_at", now)
             .build(),
-    )?;
+    )
+    .await?;
     tx.write(
         SqlBuilder::insert_into("deal_access_revisions")
             .value("deal_id", deal)
             .build(),
-    )?;
-    event(tx, deal, Some(actor), "project_created", Some(deal))
+    )
+    .await?;
+    event(tx, deal, Some(actor), "project_created", Some(deal)).await
 }
-fn member_role(
-    tx: &SqliteTransaction<'_>,
+async fn member_role(
+    tx: &PostgresTransaction,
     deal: &str,
     user: i64,
 ) -> Result<(DealRole, i64), RepositoryError> {
@@ -689,10 +736,11 @@ fn member_role(
             .and_where(Condition::equal("user_id", user))
             .build(),
         |r| Ok((role_from_row(r, "role")?, r.get("revision")?)),
-    )?
+    )
+    .await?
     .ok_or_else(|| RepositoryError::NotFound("member not found".into()))
 }
-fn bump(tx: &SqliteTransaction<'_>, deal: &str, current: i64) -> Result<(), RepositoryError> {
+async fn bump(tx: &PostgresTransaction, deal: &str, current: i64) -> Result<(), RepositoryError> {
     let next = current
         .checked_add(1)
         .filter(|v| *v <= 9_007_199_254_740_991)
@@ -702,11 +750,12 @@ fn bump(tx: &SqliteTransaction<'_>, deal: &str, current: i64) -> Result<(), Repo
             .set("revision", next)
             .and_where(Condition::equal("deal_id", deal))
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-fn set_role(
-    tx: &SqliteTransaction<'_>,
+async fn set_role(
+    tx: &PostgresTransaction,
     deal: &str,
     user: i64,
     role: DealRole,
@@ -725,25 +774,31 @@ fn set_role(
             .and_where(Condition::equal("deal_id", deal))
             .and_where(Condition::equal("user_id", user))
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-fn team_exists(tx: &SqliteTransaction<'_>, deal: &str, team: &str) -> Result<(), RepositoryError> {
+async fn team_exists(
+    tx: &PostgresTransaction,
+    deal: &str,
+    team: &str,
+) -> Result<(), RepositoryError> {
     if tx
         .read_one(
             SqlBuilder::select("deal_teams")
                 .and_where(Condition::equal("deal_id", deal))
                 .and_where(Condition::equal("team_id", team))
                 .build(),
-        )?
+        )
+        .await?
         .is_none()
     {
         return Err(RepositoryError::NotFound("team not found".into()));
     }
     Ok(())
 }
-fn unique_name(
-    tx: &SqliteTransaction<'_>,
+async fn unique_name(
+    tx: &PostgresTransaction,
     deal: &str,
     name: &str,
     except: &str,
@@ -755,21 +810,27 @@ fn unique_name(
                 .and_where(Condition::equal("normalized_name", name.to_lowercase()))
                 .and_where(Condition::not_equal("team_id", except))
                 .build(),
-        )?
+        )
+        .await?
         .is_some()
     {
         return Err(RepositoryError::Conflict("team name already exists".into()));
     }
     Ok(())
 }
-fn role_from_row(row: &rusqlite::Row<'_>, column: &str) -> rusqlite::Result<DealRole> {
+fn role_from_row(
+    row: &crate::adapters::postgres::client::Row<'_>,
+    column: &str,
+) -> RowResult<DealRole> {
     let role: String = row.get(column)?;
     match role.as_str() {
         "owner" => Ok(DealRole::Owner),
         "manager" => Ok(DealRole::Manager),
         "contributor" => Ok(DealRole::Contributor),
         "viewer" => Ok(DealRole::Viewer),
-        _ => Err(rusqlite::Error::InvalidQuery),
+        _ => Err(crate::adapters::postgres::client::PostgresError::decode(
+            "invalid persisted value",
+        )),
     }
 }
 #[cfg(test)]

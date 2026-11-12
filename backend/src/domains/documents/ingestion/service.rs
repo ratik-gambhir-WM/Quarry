@@ -23,7 +23,7 @@ use crate::{
         },
         graph::repository::{DocumentGraphReader, DocumentGraphWriter},
         ingestion::persistence::persist_document_and_chunks,
-        store::{model::PersistedFileIdentity, sqlite::DocumentStore},
+        store::{model::PersistedFileIdentity, postgres::DocumentStore},
     },
     shared::{
         error::{ServiceError, ServiceResult},

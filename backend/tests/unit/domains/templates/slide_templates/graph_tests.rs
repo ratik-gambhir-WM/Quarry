@@ -19,7 +19,7 @@ impl SlideEmbedder for Embedder {
     }
 }
 async fn record() -> TemplateProjectionRecord {
-    let repository = Arc::new(support::repository(Path::new(":memory:")).unwrap());
+    let repository = Arc::new(support::repository(Path::new(":memory:")).await.unwrap());
     let importer = ImportService::with_preview_generator(
         repository.clone(),
         Arc::new(support::FixturePreview),
@@ -31,9 +31,11 @@ async fn record() -> TemplateProjectionRecord {
             TemplateKind::Diagram,
             &RequestCancellation::default(),
         )
+        .await
         .unwrap();
     let job = repository
         .claim_next_slide_classification("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .await
         .unwrap()
         .unwrap();
     let classifier = SlideClassificationService::new(SlideClassificationServiceOptions {
@@ -47,9 +49,10 @@ async fn record() -> TemplateProjectionRecord {
         repository,
     });
     let processed = classifier.process(&job).await.unwrap();
-    importer.complete_processing(&processed).unwrap();
+    importer.complete_processing(&processed).await.unwrap();
     importer
         .projection_record(&job.template.template_id)
+        .await
         .unwrap()
         .unwrap()
 }
@@ -178,13 +181,14 @@ async fn live_helix_templates_metadata_dual_vectors_and_deletion() {
     }
 }
 
-#[test]
-fn imported_templates_project_preview_metadata_without_copying_binary_preview_data() {
-    let repository = Arc::new(support::repository(Path::new(":memory:")).unwrap());
-    let imported = support::import_fixture(repository.clone(), TemplateKind::Diagram);
+#[tokio::test]
+async fn imported_templates_project_preview_metadata_without_copying_binary_preview_data() {
+    let repository = Arc::new(support::repository(Path::new(":memory:")).await.unwrap());
+    let imported = support::import_fixture(repository.clone(), TemplateKind::Diagram).await;
     let importer = ImportService::new(repository);
     let record = importer
         .projection_record(&imported.template_id)
+        .await
         .unwrap()
         .unwrap();
     let preview = record.preview.as_ref().unwrap();

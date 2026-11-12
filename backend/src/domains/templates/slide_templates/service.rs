@@ -52,11 +52,12 @@ impl ExportService {
         Self { repository }
     }
 
-    pub fn for_app(&self, app_id: &str) -> SlideResult<Self> {
+    pub async fn for_app(&self, app_id: &str) -> SlideResult<Self> {
         Ok(Self {
             repository: self
                 .repository
                 .for_app(app_id)
+                .await
                 .map_err(SlideTemplateError::internal)?
                 .unwrap_or_else(|| Arc::clone(&self.repository)),
         })
@@ -68,20 +69,28 @@ impl ExportService {
     ///
     /// Returns a stable API error for complex/invalid JSON, unsafe images, missing assets,
     /// oversized embedded images, or rendering failures.
-    pub fn export(&self, input: Value) -> SlideResult<ExportedPowerPoint> {
-        assert_bounded_json(&input)?;
-        let (mut presentation, warnings) = normalize::normalize(&input)?;
-        // The reference's rendering normalizer drops empty image sources after canvas
-        // normalization, without adding to the export's canvas-normalization warnings.
-        for slide in &mut presentation.presentation.slides {
-            slide.elements.retain(
-                |element| !matches!(element, Element::Image(image) if image.src.is_empty()),
-            );
-        }
-        hydrate_template_assets(&mut presentation, self.repository.as_ref())?;
-        validate_image_sources(&presentation)?;
-        let file_name = suggested_file_name(&presentation.presentation.title);
-        let bytes = pptx::write(&presentation).map_err(SlideTemplateError::internal)?;
+    pub async fn export(&self, input: Value) -> SlideResult<ExportedPowerPoint> {
+        let (mut presentation, warnings) = blocking(move || {
+            assert_bounded_json(&input)?;
+            let (mut presentation, warnings) = normalize::normalize(&input)?;
+            // The reference's rendering normalizer drops empty image sources after canvas
+            // normalization, without adding to the export's canvas-normalization warnings.
+            for slide in &mut presentation.presentation.slides {
+                slide.elements.retain(
+                    |element| !matches!(element, Element::Image(image) if image.src.is_empty()),
+                );
+            }
+            Ok((presentation, warnings))
+        })
+        .await?;
+        hydrate_template_assets(&mut presentation, self.repository.as_ref()).await?;
+        let (bytes, file_name) = blocking(move || {
+            validate_image_sources(&presentation)?;
+            let file_name = suggested_file_name(&presentation.presentation.title);
+            let bytes = pptx::write(&presentation).map_err(SlideTemplateError::internal)?;
+            Ok((bytes, file_name))
+        })
+        .await?;
         Ok(ExportedPowerPoint {
             bytes,
             file_name,
@@ -95,7 +104,7 @@ impl ExportService {
     ///
     /// Returns a stable API error when the target deck or insert position is invalid, or when
     /// rendering/copying fails.
-    pub fn insert(&self, input: InsertPowerPointInput) -> SlideResult<ExportedPowerPoint> {
+    pub async fn insert(&self, input: InsertPowerPointInput) -> SlideResult<ExportedPowerPoint> {
         if input.insert_after_slide > 9_007_199_254_740_991 {
             return Err(SlideTemplateError::new(
                 FailureKind::Invalid,
@@ -103,21 +112,24 @@ impl ExportService {
                 "insertAfterSlide must be a non-negative whole number.",
             ));
         }
-        pptx::validate_package(&input.target_bytes)?;
-        let generated = self.export(input.presentation)?;
-        let bytes = pptx::insert(
-            &generated.bytes,
-            &input.target_bytes,
-            input.insert_after_slide,
-        )
-        .map_err(|error| {
-            SlideTemplateError::new(
-                FailureKind::Invalid,
-                "invalid_target_powerpoint",
-                "The target file is not a supported PowerPoint presentation.",
-            )
-            .with_source(error)
-        })?;
+        let target = blocking(move || {
+            pptx::validate_package(&input.target_bytes)?;
+            Ok(input.target_bytes)
+        })
+        .await?;
+        let generated = self.export(input.presentation).await?;
+        let generated_bytes = generated.bytes;
+        let bytes = blocking(move || {
+            pptx::insert(&generated_bytes, &target, input.insert_after_slide).map_err(|error| {
+                SlideTemplateError::new(
+                    FailureKind::Invalid,
+                    "invalid_target_powerpoint",
+                    "The target file is not a supported PowerPoint presentation.",
+                )
+                .with_source(error)
+            })
+        })
+        .await?;
         Ok(ExportedPowerPoint {
             bytes,
             file_name: inserted_file_name(&input.target_file_name),
@@ -166,12 +178,13 @@ impl ImportService {
         }
     }
 
-    pub fn for_app(&self, app_id: &str) -> SlideResult<Self> {
+    pub async fn for_app(&self, app_id: &str) -> SlideResult<Self> {
         Ok(Self {
             app_id: app_id.to_owned(),
             repository: self
                 .repository
                 .for_app(app_id)
+                .await
                 .map_err(SlideTemplateError::internal)?
                 .unwrap_or_else(|| Arc::clone(&self.repository)),
             preview_generator: Arc::clone(&self.preview_generator),
@@ -184,66 +197,81 @@ impl ImportService {
     ///
     /// Returns an API error for invalid packages, unsafe/oversized archives, unsafe images,
     /// or persistence failures.
-    pub fn import(&self, source: &[u8], kind: TemplateKind) -> SlideResult<ImportResponse> {
-        self.import_single(source, kind, false, None)
+    pub async fn import(&self, source: &[u8], kind: TemplateKind) -> SlideResult<ImportResponse> {
+        self.import_single(source, kind, false, None).await
     }
-    pub fn import_cancellable(
+    pub async fn import_cancellable(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: &RequestCancellation,
     ) -> SlideResult<ImportResponse> {
         self.import_single(source, kind, false, Some(cancellation))
+            .await
     }
     /// Save the JSON, generated preview and pending work in one transaction.
-    pub fn queue_classified_import(
+    pub async fn queue_classified_import(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: &RequestCancellation,
     ) -> SlideResult<ImportResponse> {
         self.import_single(source, kind, true, Some(cancellation))
+            .await
     }
-    pub fn complete_processing(&self, result: &CompleteSlideProcessing) -> SlideResult<()> {
+    pub async fn complete_processing(&self, result: &CompleteSlideProcessing) -> SlideResult<()> {
         self.repository
             .complete_slide_processing(result)
+            .await
             .map_err(SlideTemplateError::internal)
     }
-    fn import_single(
+    async fn import_single(
         &self,
         source: &[u8],
         kind: TemplateKind,
         queue_classification: bool,
         cancellation: Option<&RequestCancellation>,
     ) -> SlideResult<ImportResponse> {
-        let Conversion {
-            template_json,
-            warnings,
-        } = pptx::read(source)?;
-        if template_json.presentation.slides.len() != 1 {
-            return Err(SlideTemplateError::new(
-                FailureKind::Invalid,
-                "template_must_have_one_slide",
-                "Template PowerPoint files must contain exactly one slide.",
-            ));
-        }
-        let (record, result) = self.prepare_import(
-            source,
-            template_json,
-            warnings,
-            kind,
-            queue_classification,
-            cancellation,
-        )?;
+        let bytes = source.to_vec();
+        let cancelled = cancellation.cloned();
+        let preparer = self.clone();
+        let (record, result) = blocking(move || {
+            let source = bytes.as_slice();
+            let cancellation = cancelled.as_ref();
+            let Conversion {
+                template_json,
+                warnings,
+            } = pptx::read(source)?;
+            if template_json.presentation.slides.len() != 1 {
+                return Err(SlideTemplateError::new(
+                    FailureKind::Invalid,
+                    "template_must_have_one_slide",
+                    "Template PowerPoint files must contain exactly one slide.",
+                ));
+            }
+            let (record, result) = preparer.prepare_import(
+                source,
+                template_json,
+                warnings,
+                kind,
+                queue_classification,
+                cancellation,
+            )?;
+
+            Ok((record, result))
+        })
+        .await?;
         check_cancelled(cancellation)?;
         if queue_classification {
             let pending = pending_classification(&record)?;
             self.repository
                 .insert_with_pending_classification_cancellable(&record, &pending, cancellation)
+                .await
                 .map_err(map_repository_failure)?;
         } else {
             self.repository
                 .insert_many_cancellable(&[record], cancellation)
+                .await
                 .map_err(map_repository_failure)?;
         }
         Ok(result)
@@ -331,67 +359,80 @@ impl ImportService {
     }
 
     /// Prepare slides concurrently, then commit the entire deck and durable jobs atomically.
-    pub fn queue_classified_batch_import(
+    pub async fn queue_classified_batch_import(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: &RequestCancellation,
     ) -> SlideResult<BatchImportResponse> {
-        let Conversion {
-            template_json,
-            warnings,
-        } = pptx::read_parallel(source, cancellation)?;
-        let presentation = template_json.presentation;
-        let preserve_element_order = presentation.preserve_element_order;
-        let show_branding = presentation.show_branding;
-        let prepared = super::parallel::map(presentation.slides, |slide| {
-            check_cancelled(Some(cancellation))?;
-            let document = CanvasDocument {
-                presentation: Presentation {
-                    title: slide.name.clone(),
-                    preserve_element_order,
-                    show_branding,
-                    slides: vec![slide],
-                },
+        let bytes = source.to_vec();
+        let cancelled = Some(cancellation.clone());
+        let preparer = self.clone();
+        let (records, response) = blocking(move || {
+            let source = bytes.as_slice();
+            let cancellation = cancelled
+                .as_ref()
+                .expect("required cancellation was cloned");
+            let Conversion {
+                template_json,
+                warnings,
+            } = pptx::read_parallel(source, cancellation)?;
+            let presentation = template_json.presentation;
+            let preserve_element_order = presentation.preserve_element_order;
+            let show_branding = presentation.show_branding;
+            let prepared = super::parallel::map(presentation.slides, |slide| {
+                check_cancelled(Some(cancellation))?;
+                let document = CanvasDocument {
+                    presentation: Presentation {
+                        title: slide.name.clone(),
+                        preserve_element_order,
+                        show_branding,
+                        slides: vec![slide],
+                    },
+                };
+                // Source-only preview adapters must receive a single-slide package.
+                let single_source;
+                let preview_source = if preparer.preview_generator.supports_independent_slides() {
+                    source
+                } else {
+                    single_source = pptx::write(&document).map_err(SlideTemplateError::internal)?;
+                    &single_source
+                };
+                preparer.prepare_import(
+                    preview_source,
+                    document,
+                    Vec::new(),
+                    kind,
+                    true,
+                    Some(cancellation),
+                )
+            })?;
+            let mut records = Vec::with_capacity(prepared.len());
+            let mut templates = Vec::with_capacity(prepared.len());
+            let mut response = BatchImportResponse {
+                templates: Vec::new(),
+                warnings,
             };
-            // Source-only preview adapters must receive a single-slide package.
-            let single_source;
-            let preview_source = if self.preview_generator.supports_independent_slides() {
-                source
-            } else {
-                single_source = pptx::write(&document).map_err(SlideTemplateError::internal)?;
-                &single_source
-            };
-            self.prepare_import(
-                preview_source,
-                document,
-                Vec::new(),
-                kind,
-                true,
-                Some(cancellation),
-            )
-        })?;
-        let mut records = Vec::with_capacity(prepared.len());
-        let mut templates = Vec::with_capacity(prepared.len());
-        let mut response = BatchImportResponse {
-            templates: Vec::new(),
-            warnings,
-        };
-        for (record, imported) in prepared {
-            let pending = pending_classification(&record)?;
-            records.push((record, pending));
-            templates.push(BatchImportTemplate {
-                template_id: imported.template_id,
-                template_json: imported.template_json,
-                preview_available: true,
-            });
-        }
-        response.templates = templates;
-        // Bound the complete wire response before committing, including repeated IDs/metadata.
-        super::facade::bound_json(&classified_batch_json(&response)?)?;
+            for (record, imported) in prepared {
+                let pending = pending_classification(&record)?;
+                records.push((record, pending));
+                templates.push(BatchImportTemplate {
+                    template_id: imported.template_id,
+                    template_json: imported.template_json,
+                    preview_available: true,
+                });
+            }
+            response.templates = templates;
+            // Bound the complete wire response before committing, including repeated IDs/metadata.
+            super::facade::bound_json(&classified_batch_json(&response)?)?;
+
+            Ok((records, response))
+        })
+        .await?;
         check_cancelled(Some(cancellation))?;
         self.repository
             .insert_many_with_pending_classification_cancellable(&records, Some(cancellation))
+            .await
             .map_err(map_repository_failure)?;
         Ok(response)
     }
@@ -402,116 +443,128 @@ impl ImportService {
     ///
     /// Returns an API error for invalid packages, unsafe content, or persistence failures. No
     /// template from the batch remains stored if any record cannot be inserted.
-    pub fn batch_import(
+    pub async fn batch_import(
         &self,
         source: &[u8],
         kind: TemplateKind,
     ) -> SlideResult<BatchImportResponse> {
-        self.batch_import_inner(source, kind, None)
+        self.batch_import_inner(source, kind, None).await
     }
-    pub fn batch_import_cancellable(
+    pub async fn batch_import_cancellable(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: &RequestCancellation,
     ) -> SlideResult<BatchImportResponse> {
         self.batch_import_inner(source, kind, Some(cancellation))
+            .await
     }
-    fn batch_import_inner(
+    async fn batch_import_inner(
         &self,
         source: &[u8],
         kind: TemplateKind,
         cancellation: Option<&RequestCancellation>,
     ) -> SlideResult<BatchImportResponse> {
-        let Conversion {
-            template_json,
-            mut warnings,
-        } = pptx::read(source)?;
-        let presentation = template_json.presentation;
-        if presentation.slides.is_empty() {
-            return Err(SlideTemplateError::new(
-                FailureKind::Invalid,
-                "powerpoint_has_no_slides",
-                "The PowerPoint file must contain at least one slide.",
-            ));
-        }
-
-        let created_at = current_unix_millis();
-        let mut records = Vec::with_capacity(presentation.slides.len());
-        let mut templates = Vec::with_capacity(presentation.slides.len());
-        let mut response_bytes = 0usize;
-        for (index, slide) in presentation.slides.into_iter().enumerate() {
-            check_cancelled(cancellation)?;
-            let mut template_json = CanvasDocument {
-                presentation: Presentation {
-                    title: slide.name.clone(),
-                    preserve_element_order: presentation.preserve_element_order,
-                    show_branding: presentation.show_branding,
-                    slides: vec![slide],
-                },
-            };
-            repair_canvas_dimensions(&mut template_json);
-            let generated_preview =
-                if index > 0 && !self.preview_generator.supports_independent_slides() {
-                    None
-                } else {
-                    self.preview_generator
-                        .generate_document_cancellable(source, &template_json, cancellation)
-                        .unwrap_or(None)
-                };
-            check_cancelled(cancellation)?;
-            if generated_preview.is_none() {
-                warnings.push(format!(
-                    "Slide {}: A preview image could not be generated for this template.",
-                    index + 1
+        let bytes = source.to_vec();
+        let cancelled = cancellation.cloned();
+        let preparer = self.clone();
+        let (records, templates, warnings) = blocking(move || {
+            let source = bytes.as_slice();
+            let cancellation = cancelled.as_ref();
+            let Conversion {
+                template_json,
+                mut warnings,
+            } = pptx::read(source)?;
+            let presentation = template_json.presentation;
+            if presentation.slides.is_empty() {
+                return Err(SlideTemplateError::new(
+                    FailureKind::Invalid,
+                    "powerpoint_has_no_slides",
+                    "The PowerPoint file must contain at least one slide.",
                 ));
             }
 
-            let template_id = Uuid::new_v4().to_string();
-            let (stored_json, assets) = externalize_assets(&template_id, template_json)?;
-            let hydrated_json = hydrate_canvas_assets(stored_json.clone(), &assets)?;
-            response_bytes = response_bytes.saturating_add(super::facade::json_size(
-                &super::compact_document(&hydrated_json),
-            )?);
-            if response_bytes > super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES {
-                return Err(document_too_large());
-            }
-            let preview = generated_preview.map(|preview| StoredTemplatePreview {
-                template_id: template_id.clone(),
-                content_type: "image/png".to_owned(),
-                bytes: preview.bytes,
-                width: preview.width,
-                height: preview.height,
-            });
-            let preview_available = preview.is_some();
-            records.push(TemplateInsert {
-                template: StoredTemplate {
-                    template_id: template_id.clone(),
-                    template_json: stored_json,
-                },
-                assets,
-                metadata: StoredTemplateMetadata {
-                    template_id: template_id.clone(),
-                    kind,
-                    title: hydrated_json.presentation.title.clone(),
-                    description: "Imported PowerPoint template".to_owned(),
-                    source: TemplateSource::Import,
-                    created_at,
-                    catalog_version: None,
-                    catalog_checksum: None,
-                },
-                preview,
-            });
-            templates.push(BatchImportTemplate {
-                template_id,
-                preview_available,
-                template_json: hydrated_json,
-            });
-        }
+            let created_at = current_unix_millis();
+            let mut records = Vec::with_capacity(presentation.slides.len());
+            let mut templates = Vec::with_capacity(presentation.slides.len());
+            let mut response_bytes = 0usize;
+            for (index, slide) in presentation.slides.into_iter().enumerate() {
+                check_cancelled(cancellation)?;
+                let mut template_json = CanvasDocument {
+                    presentation: Presentation {
+                        title: slide.name.clone(),
+                        preserve_element_order: presentation.preserve_element_order,
+                        show_branding: presentation.show_branding,
+                        slides: vec![slide],
+                    },
+                };
+                repair_canvas_dimensions(&mut template_json);
+                let generated_preview =
+                    if index > 0 && !preparer.preview_generator.supports_independent_slides() {
+                        None
+                    } else {
+                        preparer
+                            .preview_generator
+                            .generate_document_cancellable(source, &template_json, cancellation)
+                            .unwrap_or(None)
+                    };
+                check_cancelled(cancellation)?;
+                if generated_preview.is_none() {
+                    warnings.push(format!(
+                        "Slide {}: A preview image could not be generated for this template.",
+                        index + 1
+                    ));
+                }
 
+                let template_id = Uuid::new_v4().to_string();
+                let (stored_json, assets) = externalize_assets(&template_id, template_json)?;
+                let hydrated_json = hydrate_canvas_assets(stored_json.clone(), &assets)?;
+                response_bytes = response_bytes.saturating_add(super::facade::json_size(
+                    &super::compact_document(&hydrated_json),
+                )?);
+                if response_bytes > super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES {
+                    return Err(document_too_large());
+                }
+                let preview = generated_preview.map(|preview| StoredTemplatePreview {
+                    template_id: template_id.clone(),
+                    content_type: "image/png".to_owned(),
+                    bytes: preview.bytes,
+                    width: preview.width,
+                    height: preview.height,
+                });
+                let preview_available = preview.is_some();
+                records.push(TemplateInsert {
+                    template: StoredTemplate {
+                        template_id: template_id.clone(),
+                        template_json: stored_json,
+                    },
+                    assets,
+                    metadata: StoredTemplateMetadata {
+                        template_id: template_id.clone(),
+                        kind,
+                        title: hydrated_json.presentation.title.clone(),
+                        description: "Imported PowerPoint template".to_owned(),
+                        source: TemplateSource::Import,
+                        created_at,
+                        catalog_version: None,
+                        catalog_checksum: None,
+                    },
+                    preview,
+                });
+                templates.push(BatchImportTemplate {
+                    template_id,
+                    preview_available,
+                    template_json: hydrated_json,
+                });
+            }
+
+            Ok((records, templates, warnings))
+        })
+        .await?;
         check_cancelled(cancellation)?;
         self.repository
             .insert_many_cancellable(&records, cancellation)
+            .await
             .map_err(map_repository_failure)?;
         Ok(BatchImportResponse {
             templates,
@@ -520,10 +573,11 @@ impl ImportService {
     }
 
     /// Retrieves a stored template and lazily migrates legacy images and line shapes.
-    pub fn find(&self, template_id: &str) -> SlideResult<Option<TemplateResponse>> {
+    pub async fn find(&self, template_id: &str) -> SlideResult<Option<TemplateResponse>> {
         let Some(stored) = self
             .repository
             .find_by_id_with_assets(template_id)
+            .await
             .map_err(SlideTemplateError::internal)?
         else {
             return Ok(None);
@@ -541,6 +595,7 @@ impl ImportService {
                     },
                     &migrated_assets,
                 )
+                .await
                 .map_err(SlideTemplateError::internal)?;
             assets.extend(migrated_assets);
         }
@@ -550,13 +605,14 @@ impl ImportService {
         }))
     }
 
-    pub fn find_json(&self, template_id: &str) -> SlideResult<Option<Value>> {
-        let Some(template) = self.find(template_id)? else {
+    pub async fn find_json(&self, template_id: &str) -> SlideResult<Option<Value>> {
+        let Some(template) = self.find(template_id).await? else {
             return Ok(None);
         };
         let builtin = self
             .repository
             .find_metadata(template_id)
+            .await
             .map_err(SlideTemplateError::internal)?
             .is_some_and(|metadata| metadata.source == TemplateSource::Builtin);
         Ok(Some(if builtin {
@@ -567,10 +623,11 @@ impl ImportService {
     }
 
     /// Lists lightweight metadata for every stored template.
-    pub fn list(&self, kind: Option<TemplateKind>) -> SlideResult<TemplateListResponse> {
+    pub async fn list(&self, kind: Option<TemplateKind>) -> SlideResult<TemplateListResponse> {
         let templates = self
             .repository
             .list(kind)
+            .await
             .map_err(SlideTemplateError::internal)?
             .into_iter()
             .map(|entry| {
@@ -599,7 +656,7 @@ impl ImportService {
     }
 
     /// Lists preview PNGs in fixed pages without hydrating template documents.
-    pub fn list_previews(&self, page: usize) -> SlideResult<TemplatePreviewListResponse> {
+    pub async fn list_previews(&self, page: usize) -> SlideResult<TemplatePreviewListResponse> {
         let offset = page
             .checked_sub(1)
             .and_then(|page_index| page_index.checked_mul(TEMPLATE_PREVIEW_PAGE_SIZE))
@@ -607,6 +664,7 @@ impl ImportService {
         let stored = self
             .repository
             .list_previews(TEMPLATE_PREVIEW_PAGE_SIZE, offset)
+            .await
             .map_err(SlideTemplateError::internal)?;
         let total_pages = stored.total.div_ceil(TEMPLATE_PREVIEW_PAGE_SIZE);
         let encoded_size = stored
@@ -650,37 +708,44 @@ impl ImportService {
     }
 
     /// Deletes a stored template and its associated assets.
-    pub fn delete(&self, template_id: &str) -> SlideResult<bool> {
+    pub async fn delete(&self, template_id: &str) -> SlideResult<bool> {
         self.repository
             .delete(template_id)
+            .await
             .map_err(SlideTemplateError::internal)
     }
 
     /// Retrieves a template-owned binary image asset.
-    pub fn find_asset(
+    pub async fn find_asset(
         &self,
         template_id: &str,
         asset_id: &str,
     ) -> SlideResult<Option<TemplateAsset>> {
         self.repository
             .find_asset(template_id, asset_id)
+            .await
             .map_err(SlideTemplateError::internal)
     }
 
     /// Retrieves the stored first-slide PNG preview for a template.
-    pub fn find_preview(&self, template_id: &str) -> SlideResult<Option<StoredTemplatePreview>> {
+    pub async fn find_preview(
+        &self,
+        template_id: &str,
+    ) -> SlideResult<Option<StoredTemplatePreview>> {
         self.repository
             .find_preview(template_id)
+            .await
             .map_err(SlideTemplateError::internal)
     }
 
-    pub(crate) fn projection_record(
+    pub(crate) async fn projection_record(
         &self,
         id: &str,
     ) -> SlideResult<Option<super::graph::TemplateProjectionRecord>> {
         let Some(template) = self
             .repository
             .find_by_id(id)
+            .await
             .map_err(SlideTemplateError::internal)?
         else {
             return Ok(None);
@@ -688,6 +753,7 @@ impl ImportService {
         let metadata = self
             .repository
             .find_metadata(id)
+            .await
             .map_err(SlideTemplateError::internal)?
             .ok_or_else(|| {
                 SlideTemplateError::internal(anyhow::anyhow!("missing template metadata"))
@@ -695,10 +761,12 @@ impl ImportService {
         let classification = self
             .repository
             .find_slide_classification(id)
+            .await
             .map_err(SlideTemplateError::internal)?;
         let preview = self
             .repository
             .find_preview(id)
+            .await
             .map_err(SlideTemplateError::internal)?
             .map(|p| super::graph::TemplatePreviewDescriptor {
                 content_type: p.content_type,
@@ -718,21 +786,23 @@ impl ImportService {
     }
 
     /// Checks whether a template exists without hydrating its assets.
-    pub fn has_template(&self, template_id: &str) -> SlideResult<bool> {
+    pub async fn has_template(&self, template_id: &str) -> SlideResult<bool> {
         self.repository
             .find_by_id(template_id)
+            .await
             .map(|template| template.is_some())
             .map_err(SlideTemplateError::internal)
     }
 
     /// Requeue only a failed stage, preserving the saved slide and completed artifacts.
-    pub fn retry_failed_processing(
+    pub async fn retry_failed_processing(
         &self,
         template_id: &str,
     ) -> SlideResult<RetrySlideProcessingResponse> {
         let outcome = self
             .repository
             .retry_failed_slide_processing(template_id)
+            .await
             .map_err(SlideTemplateError::internal)?;
         match outcome {
             RetrySlideProcessingOutcome::Queued(stage) => Ok(RetrySlideProcessingResponse {
@@ -756,19 +826,20 @@ impl ImportService {
     ///
     /// The caller must have already selected an app-scoped service, so checking the template
     /// first prevents classification data from being exposed across app boundaries.
-    pub fn find_v2(
+    pub async fn find_v2(
         &self,
         template_id: &str,
         include_metadata: bool,
         include_embeddings: bool,
     ) -> SlideResult<Option<Value>> {
-        if !self.has_template(template_id)? {
+        if !self.has_template(template_id).await? {
             return Ok(None);
         }
         let mut result = serde_json::json!({"templateId": template_id});
         let classification = self
             .repository
             .find_slide_classification(template_id)
+            .await
             .map_err(SlideTemplateError::internal)?;
         result["retrievalStatus"] = serde_json::json!(classification
             .as_ref()
@@ -997,4 +1068,12 @@ pub(super) fn classified_batch_json(result: &BatchImportResponse) -> SlideResult
         "importedCount": result.templates.len(),
         "retrieval": {"status": "pending", "embeddingStatus": "not_ready"},
     }))
+}
+
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> SlideResult<T> + Send + 'static,
+) -> SlideResult<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(SlideTemplateError::internal)?
 }

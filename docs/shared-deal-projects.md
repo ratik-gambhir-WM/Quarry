@@ -1,5 +1,9 @@
 # Shared deal projects: policy and recovery
 
+Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
+Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
+reset and verification records below describe the earlier implementation, not current commands.
+
 The existing deal is the shared project. SQLite owns access, files, attribution and activity;
 Helix owns a recoverable document projection. Teams organize active deal members and never grant
 access on their own. Organization tenancy, email invitations/guests, shared notebooks/chats,

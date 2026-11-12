@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn assemble_api(
     config: &AppConfig,
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
     document_graph: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
@@ -13,7 +13,7 @@ pub(crate) fn assemble_api(
         .map(|c| Arc::new(DiligenceStudioClient::new(http.clone(), c.base_url.clone())));
     assemble_api_with_templates(
         config,
-        sqlite,
+        postgres,
         document_graph,
         http,
         prompts,

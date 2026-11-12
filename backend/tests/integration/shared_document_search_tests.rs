@@ -5,7 +5,7 @@ use helix_db::dsl::prelude::*;
 use serde_json::Value;
 
 use crate::{
-    adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
     app::migrations,
     domains::{
         deals::{
@@ -24,7 +24,7 @@ use crate::{
                 model::HybridSearch,
                 service::DocumentSearchService,
             },
-            store::sqlite::DocumentStore,
+            store::postgres::DocumentStore,
         },
         identity::access::ResourceAccess,
         memberships::{
@@ -40,14 +40,14 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
     let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
     let writer = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
     writer.initialize().await.unwrap();
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    sqlite.with_connection(|connection| {
-        connection.execute("INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(1,'owner','owner@example.test','Test','Owner','unusable'),(2,'collaborator','collaborator@example.test','Test','Collaborator','unusable')",[])?;
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    postgres.with_connection(async |connection| {
+        connection.execute("INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(1,'owner','owner@example.test','Test','Owner','unusable'),(2,'collaborator','collaborator@example.test','Test','Collaborator','unusable')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
         Ok(())
-    }).unwrap();
-    let deals = DealRepository::new(sqlite.clone());
-    let store = DocumentStore::new(sqlite.clone());
+     }).await.unwrap();
+    let deals = DealRepository::new(postgres.clone());
+    let store = DocumentStore::new(postgres.clone());
     let mut source = Docx::default();
     source
         .document
@@ -77,7 +77,7 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
             .unwrap();
         index(&store, &writer, deal, file, 1, &bytes).await;
     }
-    let members = MembershipRepository::new(sqlite.clone());
+    let members = MembershipRepository::new(postgres.clone());
     members
         .add_member(
             "DEAL-SHARED-SEARCH".into(),
@@ -88,7 +88,7 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
         .await
         .unwrap();
     let access = ResourceAccess::new(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(DealAccessService::new(members.clone())),
     );
     let search = DocumentSearchService::new(DocumentGraphSearch::new(helix.clone()))

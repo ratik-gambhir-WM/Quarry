@@ -2,8 +2,9 @@
 mod apps;
 mod classification;
 use super::{compact_document, models::*, normalized_document, retrieval::*};
-use crate::adapters::sqlite::{
-    client::{SqliteClient, SqliteTransaction},
+use crate::adapters::postgres::client::RowResult;
+use crate::adapters::postgres::{
+    client::{PostgresClient, PostgresTransaction},
     query::{Condition, ConflictUpdate, JoinClause, JoinCondition, SortDirection, SqlBuilder},
 };
 use crate::shared::error::RepositoryError;
@@ -16,68 +17,75 @@ const MAX_STORED_PREVIEW_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STORED_PREVIEW_DIMENSION: u32 = 10_000;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 /// Persistence boundary used by both import and export services.
+#[async_trait::async_trait]
 pub trait TemplateRepository: Send + Sync {
     /// Whether this scope has unfinished stages, including delayed retries and leases.
-    fn has_pending_slide_processing(&self) -> RepositoryResult<bool>;
+    async fn has_pending_slide_processing(&self) -> RepositoryResult<bool>;
     /// Atomically reset only a terminal failed stage in this app's saved template.
-    fn retry_failed_slide_processing(
+    async fn retry_failed_slide_processing(
         &self,
         id: &str,
     ) -> RepositoryResult<RetrySlideProcessingOutcome>;
     /// Publish every slide and its pending job in the same transaction.
-    fn insert_many_with_pending_classification_cancellable(
+    async fn insert_many_with_pending_classification_cancellable(
         &self,
         records: &[(TemplateInsert, PendingSlideClassification)],
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()>;
-    fn insert_with_pending_classification(
+    async fn insert_with_pending_classification(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<()>;
-    fn insert_with_processing_classification(
+    async fn insert_with_processing_classification(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<()>;
-    fn find_slide_classification(
+    async fn find_slide_classification(
         &self,
         id: &str,
     ) -> RepositoryResult<Option<StoredSlideClassification>>;
-    fn claim_next_slide_classification(
+    async fn claim_next_slide_classification(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> RepositoryResult<Option<SlideClassificationJob>>;
-    fn claim_next_slide_embedding(
+    async fn claim_next_slide_embedding(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> RepositoryResult<Option<SlideEmbeddingJob>>;
-    fn complete_slide_classification(
+    async fn complete_slide_classification(
         &self,
         result: &CompleteSlideClassification,
     ) -> RepositoryResult<()>;
-    fn complete_slide_processing(&self, result: &CompleteSlideProcessing) -> RepositoryResult<()>;
-    fn complete_slide_embedding(&self, result: &CompleteSlideEmbedding) -> RepositoryResult<()>;
-    fn record_slide_classification_failure(
+    async fn complete_slide_processing(
+        &self,
+        result: &CompleteSlideProcessing,
+    ) -> RepositoryResult<()>;
+    async fn complete_slide_embedding(
+        &self,
+        result: &CompleteSlideEmbedding,
+    ) -> RepositoryResult<()>;
+    async fn record_slide_classification_failure(
         &self,
         id: &str,
         code: &str,
         retry: Option<&str>,
     ) -> RepositoryResult<()>;
-    fn record_slide_embedding_failure(
+    async fn record_slide_embedding_failure(
         &self,
         id: &str,
         code: &str,
         retry: Option<&str>,
     ) -> RepositoryResult<()>;
-    fn refresh_pending_slide_classification(
+    async fn refresh_pending_slide_classification(
         &self,
         id: &str,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<bool>;
-    fn refresh_pending_slide_embedding(
+    async fn refresh_pending_slide_embedding(
         &self,
         id: &str,
         subject_document: &str,
@@ -85,11 +93,11 @@ pub trait TemplateRepository: Send + Sync {
         capability_document: &str,
         capability_fingerprint: &str,
     ) -> RepositoryResult<bool>;
-    fn list_retrieval_classifications(
+    async fn list_retrieval_classifications(
         &self,
         app_id: &str,
     ) -> RepositoryResult<Vec<RetrievalClassificationRecord>>;
-    fn search_slide_classifications(
+    async fn search_slide_classifications(
         &self,
         app_id: &str,
         fts_query: &str,
@@ -103,7 +111,7 @@ pub trait TemplateRepository: Send + Sync {
     }
 
     /// Returns an independent, immutable app scope sharing the same durable store.
-    fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
+    async fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
         if app_id != DEFAULT_APP_ID {
             return Err(RepositoryError::invalid(
                 "this repository does not implement app isolation",
@@ -112,29 +120,29 @@ pub trait TemplateRepository: Send + Sync {
         Ok(None)
     }
 
-    fn ensure_app(
+    async fn ensure_app(
         &self,
         app_id: &str,
         registration: Option<&AppRegistration>,
     ) -> RepositoryResult<StoredApp>;
-    fn find_app(&self, app_id: &str) -> RepositoryResult<Option<StoredApp>>;
+    async fn find_app(&self, app_id: &str) -> RepositoryResult<Option<StoredApp>>;
     /// Inserts a template, metadata, assets, and optional preview atomically.
-    fn insert(
+    async fn insert(
         &self,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
         metadata: &StoredTemplateMetadata,
         preview: Option<&StoredTemplatePreview>,
     ) -> RepositoryResult<()>;
-    fn insert_many_cancellable(
+    async fn insert_many_cancellable(
         &self,
         records: &[TemplateInsert],
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
         check_publication(cancellation)?;
-        self.insert_many(records)
+        self.insert_many(records).await
     }
-    fn insert_with_pending_classification_cancellable(
+    async fn insert_with_pending_classification_cancellable(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
@@ -142,14 +150,19 @@ pub trait TemplateRepository: Send + Sync {
     ) -> RepositoryResult<()> {
         check_publication(cancellation)?;
         self.insert_with_pending_classification(record, pending)
+            .await
     }
 
     /// Inserts a group of templates and their related records atomically.
-    fn insert_many(&self, records: &[TemplateInsert]) -> RepositoryResult<()>;
+    async fn insert_many(&self, records: &[TemplateInsert]) -> RepositoryResult<()>;
     /// Updates a template and adds newly externalized assets atomically.
-    fn update(&self, template: &StoredTemplate, assets: &[TemplateAsset]) -> RepositoryResult<()>;
+    async fn update(
+        &self,
+        template: &StoredTemplate,
+        assets: &[TemplateAsset],
+    ) -> RepositoryResult<()>;
     /// Inserts or refreshes a server-owned built-in template.
-    fn upsert_builtin(
+    async fn upsert_builtin(
         &self,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
@@ -157,28 +170,37 @@ pub trait TemplateRepository: Send + Sync {
         preview: Option<&StoredTemplatePreview>,
     ) -> RepositoryResult<()>;
     /// Finds a template by its public identifier.
-    fn find_by_id(&self, template_id: &str) -> RepositoryResult<Option<StoredTemplate>>;
+    async fn find_by_id(&self, template_id: &str) -> RepositoryResult<Option<StoredTemplate>>;
     /// Finds metadata by template identifier.
-    fn find_metadata(&self, template_id: &str) -> RepositoryResult<Option<StoredTemplateMetadata>>;
+    async fn find_metadata(
+        &self,
+        template_id: &str,
+    ) -> RepositoryResult<Option<StoredTemplateMetadata>>;
     /// Finds a stored first-slide preview.
-    fn find_preview(&self, template_id: &str) -> RepositoryResult<Option<StoredTemplatePreview>>;
+    async fn find_preview(
+        &self,
+        template_id: &str,
+    ) -> RepositoryResult<Option<StoredTemplatePreview>>;
     /// Lists stored previews from newest to oldest without loading template JSON.
-    fn list_previews(
+    async fn list_previews(
         &self,
         limit: usize,
         offset: usize,
     ) -> RepositoryResult<StoredTemplatePreviewPage>;
     /// Lists catalog entries from newest to oldest without loading preview BLOBs.
-    fn list(&self, kind: Option<TemplateKind>) -> RepositoryResult<Vec<StoredTemplateCatalogItem>>;
+    async fn list(
+        &self,
+        kind: Option<TemplateKind>,
+    ) -> RepositoryResult<Vec<StoredTemplateCatalogItem>>;
     /// Deletes a template and its associated records, returning whether it existed.
-    fn delete(&self, template_id: &str) -> RepositoryResult<bool>;
+    async fn delete(&self, template_id: &str) -> RepositoryResult<bool>;
     /// Finds a template and all of its joined image BLOBs.
-    fn find_by_id_with_assets(
+    async fn find_by_id_with_assets(
         &self,
         template_id: &str,
     ) -> RepositoryResult<Option<StoredTemplateWithAssets>>;
     /// Finds an asset only when it belongs to the requested template.
-    fn find_asset(
+    async fn find_asset(
         &self,
         template_id: &str,
         asset_id: &str,
@@ -186,12 +208,12 @@ pub trait TemplateRepository: Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct SqliteTemplateRepository {
-    client: SqliteClient,
+pub struct PostgresTemplateRepository {
+    client: PostgresClient,
     app_id: String,
     owner_user_id: Option<i64>,
 }
-impl SqliteTemplateRepository {
+impl PostgresTemplateRepository {
     pub(crate) fn user_scope(&self, user_id: i64) -> RepositoryResult<Self> {
         if user_id <= 0 || self.owner_user_id.is_some_and(|owner| owner != user_id) {
             return Err(RepositoryError::Forbidden);
@@ -203,7 +225,7 @@ impl SqliteTemplateRepository {
         })
     }
 
-    pub fn new(client: SqliteClient) -> Self {
+    pub fn new(client: PostgresClient) -> Self {
         Self {
             client,
             app_id: DEFAULT_APP_ID.into(),
@@ -211,113 +233,122 @@ impl SqliteTemplateRepository {
         }
     }
 }
-impl TemplateRepository for SqliteTemplateRepository {
-    fn has_pending_slide_processing(&self) -> RepositoryResult<bool> {
-        repository_boundary(|| Self::has_pending_slide_processing(self))
+#[async_trait::async_trait]
+impl TemplateRepository for PostgresTemplateRepository {
+    async fn has_pending_slide_processing(&self) -> RepositoryResult<bool> {
+        repository_boundary(async { Self::has_pending_slide_processing(self).await }).await
     }
-    fn retry_failed_slide_processing(
+    async fn retry_failed_slide_processing(
         &self,
         id: &str,
     ) -> RepositoryResult<RetrySlideProcessingOutcome> {
-        repository_boundary(|| Self::retry_failed_slide_processing(self, id))
+        repository_boundary(async { Self::retry_failed_slide_processing(self, id).await }).await
     }
-    fn insert_many_with_pending_classification_cancellable(
+    async fn insert_many_with_pending_classification_cancellable(
         &self,
         records: &[(TemplateInsert, PendingSlideClassification)],
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| self.insert_classifications(records, cancellation))
+        repository_boundary(async { self.insert_classifications(records, cancellation).await })
+            .await
     }
-    fn insert_with_pending_classification(
+    async fn insert_with_pending_classification(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::insert_with_pending_classification(self, record, pending)
+        repository_boundary(async {
+            Self::insert_with_pending_classification(self, record, pending).await
         })
+        .await
     }
-    fn insert_with_processing_classification(
+    async fn insert_with_processing_classification(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::insert_with_processing_classification(self, record, pending)
+        repository_boundary(async {
+            Self::insert_with_processing_classification(self, record, pending).await
         })
+        .await
     }
-    fn find_slide_classification(
+    async fn find_slide_classification(
         &self,
         id: &str,
     ) -> RepositoryResult<Option<StoredSlideClassification>> {
-        repository_boundary(|| -> anyhow::Result<_> { Self::find_slide_classification(self, id) })
+        repository_boundary(async { Self::find_slide_classification(self, id).await }).await
     }
-    fn claim_next_slide_classification(
+    async fn claim_next_slide_classification(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> RepositoryResult<Option<SlideClassificationJob>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::claim_next_slide_classification(self, now, lease_expires_at)
+        repository_boundary(async {
+            Self::claim_next_slide_classification(self, now, lease_expires_at).await
         })
+        .await
     }
-    fn claim_next_slide_embedding(
+    async fn claim_next_slide_embedding(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> RepositoryResult<Option<SlideEmbeddingJob>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::claim_next_slide_embedding(self, now, lease_expires_at)
+        repository_boundary(async {
+            Self::claim_next_slide_embedding(self, now, lease_expires_at).await
         })
+        .await
     }
-    fn complete_slide_classification(
+    async fn complete_slide_classification(
         &self,
         result: &CompleteSlideClassification,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::complete_slide_classification(self, result)
-        })
+        repository_boundary(async { Self::complete_slide_classification(self, result).await }).await
     }
-    fn complete_slide_processing(&self, result: &CompleteSlideProcessing) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::complete_slide_processing(self, result)
-        })
+    async fn complete_slide_processing(
+        &self,
+        result: &CompleteSlideProcessing,
+    ) -> RepositoryResult<()> {
+        repository_boundary(async { Self::complete_slide_processing(self, result).await }).await
     }
-    fn complete_slide_embedding(&self, result: &CompleteSlideEmbedding) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::complete_slide_embedding(self, result)
-        })
+    async fn complete_slide_embedding(
+        &self,
+        result: &CompleteSlideEmbedding,
+    ) -> RepositoryResult<()> {
+        repository_boundary(async { Self::complete_slide_embedding(self, result).await }).await
     }
-    fn record_slide_classification_failure(
+    async fn record_slide_classification_failure(
         &self,
         id: &str,
         code: &str,
         retry: Option<&str>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::record_slide_classification_failure(self, id, code, retry)
+        repository_boundary(async {
+            Self::record_slide_classification_failure(self, id, code, retry).await
         })
+        .await
     }
-    fn record_slide_embedding_failure(
+    async fn record_slide_embedding_failure(
         &self,
         id: &str,
         code: &str,
         retry: Option<&str>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::record_slide_embedding_failure(self, id, code, retry)
+        repository_boundary(async {
+            Self::record_slide_embedding_failure(self, id, code, retry).await
         })
+        .await
     }
-    fn refresh_pending_slide_classification(
+    async fn refresh_pending_slide_classification(
         &self,
         id: &str,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<bool> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::refresh_pending_slide_classification(self, id, pending)
+        repository_boundary(async {
+            Self::refresh_pending_slide_classification(self, id, pending).await
         })
+        .await
     }
-    fn refresh_pending_slide_embedding(
+    async fn refresh_pending_slide_embedding(
         &self,
         id: &str,
         subject_document: &str,
@@ -325,7 +356,7 @@ impl TemplateRepository for SqliteTemplateRepository {
         capability_document: &str,
         capability_fingerprint: &str,
     ) -> RepositoryResult<bool> {
-        repository_boundary(|| -> anyhow::Result<_> {
+        repository_boundary(async {
             Self::refresh_pending_slide_embedding(
                 self,
                 id,
@@ -334,79 +365,81 @@ impl TemplateRepository for SqliteTemplateRepository {
                 capability_document,
                 capability_fingerprint,
             )
+            .await
         })
+        .await
     }
-    fn list_retrieval_classifications(
+    async fn list_retrieval_classifications(
         &self,
         app_id: &str,
     ) -> RepositoryResult<Vec<RetrievalClassificationRecord>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::list_retrieval_classifications(self, app_id)
-        })
+        repository_boundary(async { Self::list_retrieval_classifications(self, app_id).await })
+            .await
     }
-    fn search_slide_classifications(
+    async fn search_slide_classifications(
         &self,
         app_id: &str,
         fts_query: &str,
         limit: usize,
     ) -> RepositoryResult<Vec<String>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::search_slide_classifications(self, app_id, fts_query, limit)
+        repository_boundary(async {
+            Self::search_slide_classifications(self, app_id, fts_query, limit).await
         })
+        .await
     }
-    fn ensure_app(
+    async fn ensure_app(
         &self,
         app_id: &str,
         registration: Option<&AppRegistration>,
     ) -> RepositoryResult<StoredApp> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Self::ensure_app(self, app_id, registration)
-        })
+        repository_boundary(async { Self::ensure_app(self, app_id, registration).await }).await
     }
-    fn find_app(&self, app_id: &str) -> RepositoryResult<Option<StoredApp>> {
-        repository_boundary(|| -> anyhow::Result<_> { Self::find_app(self, app_id) })
+    async fn find_app(&self, app_id: &str) -> RepositoryResult<Option<StoredApp>> {
+        repository_boundary(async { Self::find_app(self, app_id).await }).await
     }
 
     fn for_user(&self, user_id: i64) -> RepositoryResult<Arc<dyn TemplateRepository>> {
         Ok(Arc::new(self.user_scope(user_id)?))
     }
-    fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
-        repository_boundary(|| -> anyhow::Result<Option<Arc<dyn TemplateRepository>>> {
-            self.ensure_app(app_id, None)?;
+    async fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
+        repository_boundary(async {
+            self.ensure_app(app_id, None).await?;
             Ok(Some(Arc::new(Self {
                 client: self.client.clone(),
                 app_id: app_id.into(),
                 owner_user_id: self.owner_user_id,
-            })))
+            }) as Arc<dyn TemplateRepository>))
         })
+        .await
     }
-    fn insert(
+    async fn insert(
         &self,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
         metadata: &StoredTemplateMetadata,
         preview: Option<&StoredTemplatePreview>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Ok(self.insert_many(&[TemplateInsert {
-                template: template.clone(),
-                assets: assets.to_vec(),
-                metadata: metadata.clone(),
-                preview: preview.cloned(),
-            }])?)
+        repository_boundary(async {
+            Ok(self
+                .insert_many(&[TemplateInsert {
+                    template: template.clone(),
+                    assets: assets.to_vec(),
+                    metadata: metadata.clone(),
+                    preview: preview.cloned(),
+                }])
+                .await?)
         })
+        .await
     }
-    fn insert_many(&self, records: &[TemplateInsert]) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            Ok(self.insert_many_cancellable(records, None)?)
-        })
+    async fn insert_many(&self, records: &[TemplateInsert]) -> RepositoryResult<()> {
+        repository_boundary(async { Ok(self.insert_many_cancellable(records, None).await?) }).await
     }
-    fn insert_many_cancellable(
+    async fn insert_many_cancellable(
         &self,
         records: &[TemplateInsert],
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
+        repository_boundary(async {
             for record in records {
                 validate_records(
                     &record.template,
@@ -415,250 +448,314 @@ impl TemplateRepository for SqliteTemplateRepository {
                     record.preview.as_ref(),
                 )?;
             }
-            self.client.transaction_result(|tx| -> anyhow::Result<()> {
-                check_publication(cancellation)?;
-                for record in records {
-                    self.write_new(
-                        tx,
-                        &record.template,
-                        &record.assets,
-                        &record.metadata,
-                        record.preview.as_ref(),
-                    )?;
-                    membership(tx, &self.app_id, &record.template.template_id)?;
-                }
-                check_publication(cancellation)
-            })
+            self.client
+                .transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    check_publication(cancellation)?;
+                    for record in records {
+                        self.write_new(
+                            tx,
+                            &record.template,
+                            &record.assets,
+                            &record.metadata,
+                            record.preview.as_ref(),
+                        )
+                        .await?;
+                        membership(tx, &self.app_id, &record.template.template_id).await?;
+                    }
+                    check_publication(cancellation)
+                })
+                .await
         })
+        .await
     }
-    fn insert_with_pending_classification_cancellable(
+    async fn insert_with_pending_classification_cancellable(
         &self,
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
+        repository_boundary(async {
             self.insert_classification(record, pending, false, cancellation)
+                .await
         })
+        .await
     }
 
-    fn update(&self, template: &StoredTemplate, assets: &[TemplateAsset]) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
+    async fn update(
+        &self,
+        template: &StoredTemplate,
+        assets: &[TemplateAsset],
+    ) -> RepositoryResult<()> {
+        repository_boundary(async {
             ensure!(
                 assets.iter().all(|a| a.template_id == template.template_id),
                 "asset ownership mismatch"
             );
-            self.client.transaction_result(|tx| -> anyhow::Result<()> {
-                ensure!(
-                    self.visible(tx, &template.template_id)?,
-                    "template is unavailable to this app"
-                );
-                let builtin = tx
-                    .read_one_with(
-                        SqlBuilder::select("template_metadata")
-                            .columns(["source"])
+            self.client
+                .transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    ensure!(
+                        self.visible(tx, &template.template_id).await?,
+                        "template is unavailable to this app"
+                    );
+                    let builtin = tx
+                        .read_one_with(
+                            SqlBuilder::select("template_metadata")
+                                .columns(["source"])
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .build(),
+                            |r| r.get::<_, String>(0),
+                        )
+                        .await?
+                        .is_some_and(|s| s == "builtin");
+                    let json = serde_json::to_string(&if builtin {
+                        normalized_document(&template.template_json)
+                    } else {
+                        compact_document(&template.template_json)
+                    })?;
+                    tx.write(
+                        SqlBuilder::update("templates")
+                            .set("template_json", json)
                             .and_where(Condition::equal("template_id", &template.template_id))
                             .build(),
-                        |r| r.get::<_, String>(0),
-                    )?
-                    .is_some_and(|s| s == "builtin");
-                let json = serde_json::to_string(&if builtin {
-                    normalized_document(&template.template_json)
-                } else {
-                    compact_document(&template.template_json)
-                })?;
-                tx.write(
-                    SqlBuilder::update("templates")
-                        .set("template_json", json)
-                        .and_where(Condition::equal("template_id", &template.template_id))
-                        .build(),
-                )?;
-                insert_assets(tx, assets)?;
-                Ok(())
-            })
+                    )
+                    .await?;
+                    insert_assets(tx, assets).await?;
+                    Ok(())
+                })
+                .await
         })
+        .await
     }
-    fn upsert_builtin(
+    async fn upsert_builtin(
         &self,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
         metadata: &StoredTemplateMetadata,
         preview: Option<&StoredTemplatePreview>,
     ) -> RepositoryResult<()> {
-        repository_boundary(|| -> anyhow::Result<_> {
+        repository_boundary(async {
             validate_records(template, assets, metadata, preview)?;
-            self.client.transaction_result(|tx| -> anyhow::Result<()> {
-                let existing = tx.read_one_with(
-                    SqlBuilder::select("template_metadata")
-                        .columns(["source", "checksum"])
-                        .and_where(Condition::equal("template_id", &template.template_id))
-                        .build(),
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
-                )?;
-                if existing.is_some_and(|(s, c)| s == "import" || c == metadata.catalog_checksum) {
-                    return Ok(());
-                }
-                let json = serde_json::to_string(&normalized_document(&template.template_json))?;
-                tx.write(
-                    SqlBuilder::insert_into("templates")
-                        .value("template_id", &template.template_id)
-                        .value("template_json", json)
-                        .value("owner_user_id", self.owner_user_id)
-                        .on_conflict_update(
-                            ConflictUpdate::new(["template_id"]).set_excluded("template_json"),
+            self.client
+                .transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    let existing = tx
+                        .read_one_with(
+                            SqlBuilder::select("template_metadata")
+                                .columns(["source", "checksum"])
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .build(),
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
                         )
-                        .build(),
-                )?;
-                for table in ["template_assets", "template_previews"] {
+                        .await?;
+                    if existing
+                        .is_some_and(|(s, c)| s == "import" || c == metadata.catalog_checksum)
+                    {
+                        return Ok(());
+                    }
+                    let json =
+                        serde_json::to_string(&normalized_document(&template.template_json))?;
                     tx.write(
-                        SqlBuilder::delete_from(table)
-                            .and_where(Condition::equal("template_id", &template.template_id))
+                        SqlBuilder::insert_into("templates")
+                            .value("template_id", &template.template_id)
+                            .value("template_json", json)
+                            .value("owner_user_id", self.owner_user_id)
+                            .on_conflict_update(
+                                ConflictUpdate::new(["template_id"]).set_excluded("template_json"),
+                            )
                             .build(),
-                    )?;
-                }
-                write_metadata(tx, metadata, true)?;
-                insert_assets(tx, assets)?;
-                write_preview(tx, preview)?;
-                let apps = tx.read_with(
-                    SqlBuilder::select("apps").columns(["app_id"]).build(),
-                    |r| r.get::<_, String>(0),
-                )?;
-                for app in apps {
-                    membership(tx, &app, &template.template_id)?;
-                }
-                Ok(())
-            })
-        })
-    }
-    fn find_by_id(&self, id: &str) -> RepositoryResult<Option<StoredTemplate>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(None);
-                }
-                let json = tx.read_one_with(
-                    SqlBuilder::select("templates")
-                        .columns(["template_json"])
-                        .and_where(Condition::equal("template_id", id))
-                        .build(),
-                    |r| r.get::<_, String>(0),
-                )?;
-                json.map(|json| {
-                    Ok(StoredTemplate {
-                        template_id: id.into(),
-                        template_json: decode_document(&json)?,
-                    })
+                    )
+                    .await?;
+                    for table in ["template_assets", "template_previews"] {
+                        tx.write(
+                            SqlBuilder::delete_from(table)
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .build(),
+                        )
+                        .await?;
+                    }
+                    write_metadata(tx, metadata, true).await?;
+                    insert_assets(tx, assets).await?;
+                    write_preview(tx, preview).await?;
+                    let apps = tx
+                        .read_with(
+                            SqlBuilder::select("apps").columns(["app_id"]).build(),
+                            |r| r.get::<_, String>(0),
+                        )
+                        .await?;
+                    for app in apps {
+                        membership(tx, &app, &template.template_id).await?;
+                    }
+                    Ok(())
                 })
-                .transpose()
-            })
+                .await
         })
+        .await
     }
-    fn find_metadata(&self, id: &str) -> RepositoryResult<Option<StoredTemplateMetadata>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(None);
-                }
-                metadata_in(tx, id)
-            })
+    async fn find_by_id(&self, id: &str) -> RepositoryResult<Option<StoredTemplate>> {
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(None);
+                    }
+                    let json = tx
+                        .read_one_with(
+                            SqlBuilder::select("templates")
+                                .columns(["template_json"])
+                                .and_where(Condition::equal("template_id", id))
+                                .build(),
+                            |r| r.get::<_, String>(0),
+                        )
+                        .await?;
+                    json.map(|json| {
+                        Ok(StoredTemplate {
+                            template_id: id.into(),
+                            template_json: decode_document(&json)?,
+                        })
+                    })
+                    .transpose()
+                })
+                .await
         })
+        .await
     }
-    fn find_preview(&self, id: &str) -> RepositoryResult<Option<StoredTemplatePreview>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(None);
-                }
-                Ok(tx.read_one_with(
-                    SqlBuilder::select("template_previews")
-                        .and_where(Condition::equal("template_id", id))
-                        .build(),
-                    map_preview,
-                )?)
-            })
+    async fn find_metadata(&self, id: &str) -> RepositoryResult<Option<StoredTemplateMetadata>> {
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(None);
+                    }
+                    metadata_in(tx, id).await
+                })
+                .await
         })
+        .await
     }
-    fn list_previews(
+    async fn find_preview(&self, id: &str) -> RepositoryResult<Option<StoredTemplatePreview>> {
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(None);
+                    }
+                    Ok(tx
+                        .read_one_with(
+                            SqlBuilder::select("template_previews")
+                                .and_where(Condition::equal("template_id", id))
+                                .build(),
+                            map_preview,
+                        )
+                        .await?)
+                })
+                .await
+        })
+        .await
+    }
+    async fn list_previews(
         &self,
         limit: usize,
         offset: usize,
     ) -> RepositoryResult<StoredTemplatePreviewPage> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                let query = SqlBuilder::select("template_previews")
-                    .columns(["template_previews.*"])
-                    .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
-                        "app_templates.template_id",
-                        "template_previews.template_id",
-                    )))
-                    .join(JoinClause::inner("templates").on(JoinCondition::equal(
-                        "templates.template_id",
-                        "template_previews.template_id",
-                    )))
-                    .join(
-                        JoinClause::inner("template_metadata").on(JoinCondition::equal(
-                            "template_metadata.template_id",
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    let query = SqlBuilder::select("template_previews")
+                        .columns(["template_previews.*"])
+                        .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
+                            "app_templates.template_id",
                             "template_previews.template_id",
-                        )),
-                    )
-                    .and_where(Condition::equal("app_templates.app_id", &self.app_id))
-                    .and_where(self.owner_condition());
-                let total = usize::try_from(
-                    tx.read_one_with(query.clone().count_rows().build(), |r| r.get::<_, i64>(0))?
-                        .unwrap_or(0),
-                )?;
-                let previews = tx.read_with(
-                    query
-                        .order_by("template_metadata.created_at", SortDirection::Descending)
-                        .order_by("templates.rowid", SortDirection::Descending)
-                        .limit(limit)
-                        .offset(offset)
-                        .build(),
-                    map_preview,
-                )?;
-                Ok(StoredTemplatePreviewPage { previews, total })
-            })
-        })
-    }
-    fn list(&self, kind: Option<TemplateKind>) -> RepositoryResult<Vec<StoredTemplateCatalogItem>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                let mut query = SqlBuilder::select("templates")
-                    .columns(["templates.template_id", "templates.template_json"])
-                    .join(
-                        JoinClause::inner("template_metadata").on(JoinCondition::equal(
-                            "template_metadata.template_id",
+                        )))
+                        .join(JoinClause::inner("templates").on(JoinCondition::equal(
                             "templates.template_id",
-                        )),
-                    )
-                    .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
-                        "app_templates.template_id",
-                        "templates.template_id",
-                    )))
-                    .and_where(Condition::equal("app_templates.app_id", &self.app_id))
-                    .and_where(self.owner_condition())
-                    .order_by("template_metadata.created_at", SortDirection::Descending)
-                    .order_by("templates.rowid", SortDirection::Descending);
-                if let Some(kind) = kind {
-                    query =
-                        query.and_where(Condition::equal("template_metadata.kind", kind.as_str()));
-                }
-                let rows = tx.read_with(query.build(), |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?;
-                rows.into_iter()
-                    .map(|(id, json)| {
-                        let metadata =
-                            metadata_in(tx, &id)?.context("missing template metadata")?;
+                            "template_previews.template_id",
+                        )))
+                        .join(
+                            JoinClause::inner("template_metadata").on(JoinCondition::equal(
+                                "template_metadata.template_id",
+                                "template_previews.template_id",
+                            )),
+                        )
+                        .and_where(Condition::equal("app_templates.app_id", &self.app_id))
+                        .and_where(self.owner_condition());
+                    let total = usize::try_from(
+                        tx.read_one_with(query.clone().count_rows().build(), |r| {
+                            r.get::<_, i64>(0)
+                        })
+                        .await?
+                        .unwrap_or(0),
+                    )?;
+                    let previews = tx
+                        .read_with(
+                            query
+                                .order_by("template_metadata.created_at", SortDirection::Descending)
+                                .order_by("templates.catalog_sequence", SortDirection::Descending)
+                                .limit(limit)
+                                .offset(offset)
+                                .build(),
+                            map_preview,
+                        )
+                        .await?;
+                    Ok(StoredTemplatePreviewPage { previews, total })
+                })
+                .await
+        })
+        .await
+    }
+    async fn list(
+        &self,
+        kind: Option<TemplateKind>,
+    ) -> RepositoryResult<Vec<StoredTemplateCatalogItem>> {
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    let mut query = SqlBuilder::select("templates")
+                        .columns(["templates.template_id", "templates.template_json"])
+                        .join(
+                            JoinClause::inner("template_metadata").on(JoinCondition::equal(
+                                "template_metadata.template_id",
+                                "templates.template_id",
+                            )),
+                        )
+                        .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
+                            "app_templates.template_id",
+                            "templates.template_id",
+                        )))
+                        .and_where(Condition::equal("app_templates.app_id", &self.app_id))
+                        .and_where(self.owner_condition())
+                        .order_by("template_metadata.created_at", SortDirection::Descending)
+                        .order_by("templates.catalog_sequence", SortDirection::Descending);
+                    if let Some(kind) = kind {
+                        query = query
+                            .and_where(Condition::equal("template_metadata.kind", kind.as_str()));
+                    }
+                    let rows = tx
+                        .read_with(query.build(), |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        })
+                        .await?;
+                    let mut items = Vec::with_capacity(rows.len());
+                    for (id, json) in rows {
+                        let metadata = metadata_in(tx, &id)
+                            .await?
+                            .context("missing template metadata")?;
                         let has_preview = tx
                             .read_one(
                                 SqlBuilder::select("template_previews")
                                     .columns(["template_id"])
                                     .and_where(Condition::equal("template_id", &id))
                                     .build(),
-                            )?
+                            )
+                            .await?
                             .is_some();
-                        Ok(StoredTemplateCatalogItem {
+                        items.push(StoredTemplateCatalogItem {
                             template: StoredTemplate {
                                 template_id: id,
                                 template_json: decode_document(&json)?,
@@ -666,99 +763,122 @@ impl TemplateRepository for SqliteTemplateRepository {
                             metadata,
                             has_preview,
                         })
-                    })
-                    .collect()
-            })
-        })
-    }
-    fn delete(&self, id: &str) -> RepositoryResult<bool> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(false);
-                }
-                let changed = tx
-                    .write(
-                        SqlBuilder::delete_from("app_templates")
-                            .and_where(Condition::equal("app_id", &self.app_id))
-                            .and_where(Condition::equal("template_id", id))
-                            .build(),
-                    )?
-                    .rows_affected;
-                // Keep the canonical built-in/checksum when its last membership is removed.
-                // Reseeding can then distinguish a deletion choice from an unseeded template.
-                let builtin = metadata_in(tx, id)?
-                    .is_some_and(|metadata| metadata.source == TemplateSource::Builtin);
-                if !builtin
-                    && tx
-                        .read_one(
-                            SqlBuilder::select("app_templates")
-                                .and_where(Condition::equal("template_id", id))
-                                .limit(1)
-                                .build(),
-                        )?
-                        .is_none()
-                {
-                    for table in ["slide_classifications_fts", "templates"] {
-                        tx.write(
-                            SqlBuilder::delete_from(table)
-                                .and_where(Condition::equal("template_id", id))
-                                .build(),
-                        )?;
                     }
-                }
-                Ok(changed > 0)
-            })
+                    Ok(items)
+                })
+                .await
         })
+        .await
     }
-    fn find_by_id_with_assets(
+    async fn delete(&self, id: &str) -> RepositoryResult<bool> {
+        repository_boundary(async {
+            self.client
+                .transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(false);
+                    }
+                    let changed = tx
+                        .write(
+                            SqlBuilder::delete_from("app_templates")
+                                .and_where(Condition::equal("app_id", &self.app_id))
+                                .and_where(Condition::equal("template_id", id))
+                                .build(),
+                        )
+                        .await?
+                        .rows_affected;
+                    // Keep the canonical built-in/checksum when its last membership is removed.
+                    // Reseeding can then distinguish a deletion choice from an unseeded template.
+                    let builtin = metadata_in(tx, id)
+                        .await?
+                        .is_some_and(|metadata| metadata.source == TemplateSource::Builtin);
+                    if !builtin
+                        && tx
+                            .read_one(
+                                SqlBuilder::select("app_templates")
+                                    .and_where(Condition::equal("template_id", id))
+                                    .limit(1)
+                                    .build(),
+                            )
+                            .await?
+                            .is_none()
+                    {
+                        for table in ["slide_classifications_fts", "templates"] {
+                            tx.write(
+                                SqlBuilder::delete_from(table)
+                                    .and_where(Condition::equal("template_id", id))
+                                    .build(),
+                            )
+                            .await?;
+                        }
+                    }
+                    Ok(changed > 0)
+                })
+                .await
+        })
+        .await
+    }
+    async fn find_by_id_with_assets(
         &self,
         id: &str,
     ) -> RepositoryResult<Option<StoredTemplateWithAssets>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(None);
-                }
-                let json = tx
-                    .read_one_with(
-                        SqlBuilder::select("templates")
-                            .columns(["template_json"])
-                            .and_where(Condition::equal("template_id", id))
-                            .build(),
-                        |r| r.get::<_, String>(0),
-                    )?
-                    .context("missing template")?;
-                let assets = tx.read_with(
-                    SqlBuilder::select("template_assets")
-                        .and_where(Condition::equal("template_id", id))
-                        .order_by("asset_id", SortDirection::Ascending)
-                        .build(),
-                    map_asset,
-                )?;
-                Ok(Some(StoredTemplateWithAssets {
-                    template_id: id.into(),
-                    template_json: decode_document(&json)?,
-                    assets,
-                }))
-            })
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(None);
+                    }
+                    let json = tx
+                        .read_one_with(
+                            SqlBuilder::select("templates")
+                                .columns(["template_json"])
+                                .and_where(Condition::equal("template_id", id))
+                                .build(),
+                            |r| r.get::<_, String>(0),
+                        )
+                        .await?
+                        .context("missing template")?;
+                    let assets = tx
+                        .read_with(
+                            SqlBuilder::select("template_assets")
+                                .and_where(Condition::equal("template_id", id))
+                                .order_by("asset_id", SortDirection::Ascending)
+                                .build(),
+                            map_asset,
+                        )
+                        .await?;
+                    Ok(Some(StoredTemplateWithAssets {
+                        template_id: id.into(),
+                        template_json: decode_document(&json)?,
+                        assets,
+                    }))
+                })
+                .await
         })
+        .await
     }
-    fn find_asset(&self, id: &str, asset: &str) -> RepositoryResult<Option<TemplateAsset>> {
-        repository_boundary(|| -> anyhow::Result<_> {
-            self.client.read_transaction_result(|tx| {
-                if !self.visible(tx, id)? {
-                    return Ok(None);
-                }
-                Ok(tx.read_one_with(
-                    SqlBuilder::select("template_assets")
-                        .and_where(Condition::equal("template_id", id))
-                        .and_where(Condition::equal("asset_id", asset))
-                        .build(),
-                    map_asset,
-                )?)
-            })
+    async fn find_asset(&self, id: &str, asset: &str) -> RepositoryResult<Option<TemplateAsset>> {
+        repository_boundary(async {
+            self.client
+                .read_transaction_result_async(move |tx| async move {
+                    let tx = &tx;
+                    if !self.visible(tx, id).await? {
+                        return Ok(None);
+                    }
+                    Ok(tx
+                        .read_one_with(
+                            SqlBuilder::select("template_assets")
+                                .and_where(Condition::equal("template_id", id))
+                                .and_where(Condition::equal("asset_id", asset))
+                                .build(),
+                            map_asset,
+                        )
+                        .await?)
+                })
+                .await
         })
+        .await
     }
 }
 fn validate_records(
@@ -865,10 +985,10 @@ fn timestamp_millis(value: &str) -> anyhow::Result<i64> {
 #[cfg(test)]
 #[path = "../../../../tests/unit/domains/templates/slide_templates/repository_tests.rs"]
 mod tests;
-impl SqliteTemplateRepository {
-    fn write_new(
+impl PostgresTemplateRepository {
+    async fn write_new(
         &self,
-        tx: &SqliteTransaction<'_>,
+        tx: &PostgresTransaction,
         template: &StoredTemplate,
         assets: &[TemplateAsset],
         metadata: &StoredTemplateMetadata,
@@ -886,13 +1006,14 @@ impl SqliteTemplateRepository {
                 .value("template_json", json)
                 .value("owner_user_id", self.owner_user_id)
                 .build(),
-        )?;
-        write_metadata(tx, metadata, false)?;
-        insert_assets(tx, assets)?;
-        write_preview(tx, preview)
+        )
+        .await?;
+        write_metadata(tx, metadata, false).await?;
+        insert_assets(tx, assets).await?;
+        write_preview(tx, preview).await
     }
 }
-fn membership(tx: &SqliteTransaction<'_>, app: &str, id: &str) -> anyhow::Result<()> {
+async fn membership(tx: &PostgresTransaction, app: &str, id: &str) -> anyhow::Result<()> {
     tx.write(
         SqlBuilder::insert_into("app_templates")
             .value("app_id", app)
@@ -900,17 +1021,18 @@ fn membership(tx: &SqliteTransaction<'_>, app: &str, id: &str) -> anyhow::Result
             .value("created_at", chrono::Utc::now().to_rfc3339())
             .on_conflict_do_nothing(["app_id", "template_id"])
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-impl SqliteTemplateRepository {
+impl PostgresTemplateRepository {
     fn owner_condition(&self) -> Condition {
         match self.owner_user_id {
             Some(owner) => Condition::equal("templates.owner_user_id", owner),
             None => Condition::is_not_null("templates.template_id"),
         }
     }
-    fn visible(&self, tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<bool> {
+    async fn visible(&self, tx: &PostgresTransaction, id: &str) -> anyhow::Result<bool> {
         Ok(tx
             .read_one(
                 SqlBuilder::select("app_templates")
@@ -924,13 +1046,14 @@ impl SqliteTemplateRepository {
                     .and_where(Condition::equal("app_templates.template_id", id))
                     .and_where(self.owner_condition())
                     .build(),
-            )?
+            )
+            .await?
             .is_some())
     }
 }
 
-fn write_metadata(
-    tx: &SqliteTransaction<'_>,
+async fn write_metadata(
+    tx: &PostgresTransaction,
     m: &StoredTemplateMetadata,
     upsert: bool,
 ) -> anyhow::Result<()> {
@@ -948,11 +1071,11 @@ fn write_metadata(
         }
         q = q.on_conflict_update(conflict);
     }
-    tx.write(q.build())?;
+    tx.write(q.build()).await?;
     Ok(())
 }
-fn write_preview(
-    tx: &SqliteTransaction<'_>,
+async fn write_preview(
+    tx: &PostgresTransaction,
     p: Option<&StoredTemplatePreview>,
 ) -> anyhow::Result<()> {
     if let Some(p) = p {
@@ -964,11 +1087,12 @@ fn write_preview(
                 .value("width", p.width)
                 .value("height", p.height)
                 .build(),
-        )?;
+        )
+        .await?;
     }
     Ok(())
 }
-fn insert_assets(tx: &SqliteTransaction<'_>, assets: &[TemplateAsset]) -> anyhow::Result<()> {
+async fn insert_assets(tx: &PostgresTransaction, assets: &[TemplateAsset]) -> anyhow::Result<()> {
     for a in assets {
         tx.write(
             SqlBuilder::insert_into("template_assets")
@@ -977,11 +1101,12 @@ fn insert_assets(tx: &SqliteTransaction<'_>, assets: &[TemplateAsset]) -> anyhow
                 .value("content_type", &a.content_type)
                 .value("asset_data", a.bytes.as_slice())
                 .build(),
-        )?;
+        )
+        .await?;
     }
     Ok(())
 }
-fn map_asset(r: &rusqlite::Row<'_>) -> rusqlite::Result<TemplateAsset> {
+fn map_asset(r: &crate::adapters::postgres::client::Row<'_>) -> RowResult<TemplateAsset> {
     Ok(TemplateAsset {
         asset_id: r.get("asset_id")?,
         template_id: r.get("template_id")?,
@@ -989,7 +1114,7 @@ fn map_asset(r: &rusqlite::Row<'_>) -> rusqlite::Result<TemplateAsset> {
         bytes: r.get("asset_data")?,
     })
 }
-fn map_preview(r: &rusqlite::Row<'_>) -> rusqlite::Result<StoredTemplatePreview> {
+fn map_preview(r: &crate::adapters::postgres::client::Row<'_>) -> RowResult<StoredTemplatePreview> {
     Ok(StoredTemplatePreview {
         template_id: r.get("template_id")?,
         content_type: r.get("content_type")?,
@@ -998,50 +1123,54 @@ fn map_preview(r: &rusqlite::Row<'_>) -> rusqlite::Result<StoredTemplatePreview>
         height: r.get("height")?,
     })
 }
-fn metadata_in(
-    tx: &SqliteTransaction<'_>,
+async fn metadata_in(
+    tx: &PostgresTransaction,
     id: &str,
 ) -> anyhow::Result<Option<StoredTemplateMetadata>> {
-    let row = tx.read_one_with(
-        SqlBuilder::select("template_metadata")
-            .and_where(Condition::equal("template_id", id))
-            .build(),
-        |r| {
-            Ok((
-                r.get::<_, String>("kind")?,
-                r.get::<_, String>("description")?,
-                r.get::<_, String>("source")?,
-                r.get::<_, String>("created_at")?,
-                r.get::<_, Option<String>>("checksum")?,
-            ))
-        },
-    )?;
-    row.map(|(kind, description, source, created, checksum)| {
-        let json = tx
-            .read_one_with(
-                SqlBuilder::select("templates")
-                    .columns(["template_json"])
-                    .and_where(Condition::equal("template_id", id))
-                    .build(),
-                |r| r.get::<_, String>(0),
-            )?
-            .context("missing template")?;
-        let title = serde_json::from_str::<serde_json::Value>(&json)?["presentation"]["title"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        map_metadata((
-            id.into(),
-            kind,
-            title,
-            description,
-            source,
-            created,
-            None,
-            checksum,
-        ))
-    })
-    .transpose()
+    let row = tx
+        .read_one_with(
+            SqlBuilder::select("template_metadata")
+                .and_where(Condition::equal("template_id", id))
+                .build(),
+            |r| {
+                Ok((
+                    r.get::<_, String>("kind")?,
+                    r.get::<_, String>("description")?,
+                    r.get::<_, String>("source")?,
+                    r.get::<_, String>("created_at")?,
+                    r.get::<_, Option<String>>("checksum")?,
+                ))
+            },
+        )
+        .await?;
+    let Some((kind, description, source, created, checksum)) = row else {
+        return Ok(None);
+    };
+    let json = tx
+        .read_one_with(
+            SqlBuilder::select("templates")
+                .columns(["template_json"])
+                .and_where(Condition::equal("template_id", id))
+                .build(),
+            |r| r.get::<_, String>(0),
+        )
+        .await?
+        .context("missing template")?;
+    let title = serde_json::from_str::<serde_json::Value>(&json)?["presentation"]["title"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    map_metadata((
+        id.into(),
+        kind,
+        title,
+        description,
+        source,
+        created,
+        None,
+        checksum,
+    ))
+    .map(Some)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1054,6 +1183,8 @@ fn check_publication(c: Option<&super::RequestCancellation>) -> anyhow::Result<(
     Ok(())
 }
 
-fn repository_boundary<T>(operation: impl FnOnce() -> anyhow::Result<T>) -> RepositoryResult<T> {
-    operation().map_err(RepositoryError::from)
+async fn repository_boundary<T>(
+    operation: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> RepositoryResult<T> {
+    operation.await.map_err(RepositoryError::from)
 }

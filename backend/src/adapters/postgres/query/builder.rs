@@ -3,14 +3,12 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use super::{QueryKind, SqlQuery, SqlValue};
-use crate::adapters::sqlite::client::SqliteClientError;
+use crate::adapters::postgres::client::PostgresError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SqlBuilderError {
     #[error("SQL identifier cannot be empty")]
     EmptyIdentifier,
-    #[error("BM25 weights must be finite")]
-    NonFiniteRankWeight,
     #[error("SQL identifier contains a null byte: `{0}`")]
     InvalidIdentifier(String),
     #[error("column `{0}` was specified more than once")]
@@ -137,10 +135,6 @@ enum Predicate {
         column: String,
         text: String,
     },
-    FullTextMatch {
-        table: String,
-        query: String,
-    },
     Comparison {
         column: String,
         operator: ComparisonOperator,
@@ -166,14 +160,6 @@ impl Condition {
         Self(Predicate::LiteralSubstring {
             column: column.into(),
             text: text.into(),
-        })
-    }
-
-    /// Match an FTS table using a bound search expression.
-    pub fn full_text_match(table: impl Into<String>, query: impl Into<String>) -> Self {
-        Self(Predicate::FullTextMatch {
-            table: table.into(),
-            query: query.into(),
         })
     }
 
@@ -373,7 +359,7 @@ impl ConflictUpdate {
         }
     }
 
-    /// Updates `column` from the value that SQLite attempted to insert.
+    /// Updates `column` from the value that PostgreSQL attempted to insert.
     pub fn set_excluded(mut self, column: impl Into<String>) -> Self {
         let column = column.into();
         self.assignments
@@ -388,7 +374,7 @@ impl ConflictUpdate {
         self
     }
 
-    /// Updates `column` using SQLite's `CURRENT_TIMESTAMP` expression.
+    /// Updates `column` using PostgreSQL's `CURRENT_TIMESTAMP` expression.
     pub fn set_current_timestamp(mut self, column: impl Into<String>) -> Self {
         self.assignments
             .push((column.into(), ConflictAssignmentValue::CurrentTimestamp));
@@ -412,7 +398,6 @@ pub struct SelectBuilder {
     joins: Vec<JoinClause>,
     conditions: Vec<ConnectedCondition>,
     order_by: Vec<(String, SortDirection)>,
-    bm25: Option<(String, Vec<f64>)>,
     limit: Option<usize>,
     offset: Option<usize>,
 }
@@ -428,7 +413,6 @@ impl SelectBuilder {
             joins: Vec::new(),
             conditions: Vec::new(),
             order_by: Vec::new(),
-            bm25: None,
             limit: None,
             offset: None,
         }
@@ -519,12 +503,6 @@ impl SelectBuilder {
         self
     }
 
-    /// Rank an FTS5 result before ordinary tie-break columns.
-    pub fn order_by_bm25(mut self, table: impl Into<String>, weights: Vec<f64>) -> Self {
-        self.bm25 = Some((table.into(), weights));
-        self
-    }
-
     pub fn order_by(mut self, column: impl Into<String>, direction: SortDirection) -> Self {
         self.order_by.push((column.into(), direction));
         self
@@ -540,7 +518,7 @@ impl SelectBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
+    pub fn build(self) -> Result<SqlQuery, PostgresError> {
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
         ensure_unique_columns(self.columns.iter().map(String::as_str))?;
         let columns = if self.count_rows {
@@ -562,23 +540,16 @@ impl SelectBuilder {
         append_conditions(&mut sql, &self.conditions, &mut parameters)?;
 
         let mut order_by = Vec::new();
-        if let Some((table, weights)) = self.bm25 {
-            if weights.iter().any(|weight| !weight.is_finite()) {
-                return Err(SqlBuilderError::NonFiniteRankWeight.into());
-            }
-            let mut rank = format!("bm25({}", quote_identifier(&table)?);
-            for weight in weights {
-                rank.push_str(", ?");
-                parameters.push(SqlValue::Real(weight));
-            }
-            rank.push(')');
-            order_by.push(rank);
-        }
         for (column, direction) in self.order_by {
             order_by.push(format!(
-                "{} {}",
+                "{} {} {}",
                 quote_identifier(&column)?,
-                direction.as_sql()
+                direction.as_sql(),
+                if direction == SortDirection::Ascending {
+                    "NULLS FIRST"
+                } else {
+                    "NULLS LAST"
+                }
             ));
         }
         if !order_by.is_empty() {
@@ -591,7 +562,7 @@ impl SelectBuilder {
                 sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
             }
             (Some(limit), None) => sql.push_str(&format!(" LIMIT {limit}")),
-            (None, Some(offset)) => sql.push_str(&format!(" LIMIT -1 OFFSET {offset}")),
+            (None, Some(offset)) => sql.push_str(&format!(" OFFSET {offset}")),
             (None, None) => {}
         }
 
@@ -636,7 +607,7 @@ impl InsertBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
+    pub fn build(self) -> Result<SqlQuery, PostgresError> {
         if self.values.is_empty() {
             return Err(SqlBuilderError::MissingInsertValues.into());
         }
@@ -657,6 +628,9 @@ impl InsertBuilder {
             .collect::<Vec<_>>();
         let mut sql = format!("INSERT INTO {table} ({columns}) VALUES ({placeholders})");
         append_insert_conflict(&mut sql, self.conflict, &mut parameters)?;
+        if self.table == "users" || self.table == "reminders" {
+            sql.push_str(" RETURNING id");
+        }
 
         Ok(SqlQuery::new(sql, parameters, QueryKind::Insert))
     }
@@ -708,7 +682,7 @@ impl UpdateBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
+    pub fn build(self) -> Result<SqlQuery, PostgresError> {
         if self.assignments.is_empty() && self.increments.is_empty() {
             return Err(SqlBuilderError::MissingUpdateAssignments.into());
         }
@@ -773,7 +747,7 @@ impl DeleteBuilder {
         self
     }
 
-    pub fn build(self) -> Result<SqlQuery, SqliteClientError> {
+    pub fn build(self) -> Result<SqlQuery, PostgresError> {
         require_conditions("DELETE", &self.conditions, self.allow_all_rows)?;
 
         let table = quote_identifier(&self.table)?;
@@ -838,7 +812,7 @@ fn append_insert_conflict(
                         format!("{column} = ?")
                     }
                     ConflictAssignmentValue::CurrentTimestamp => {
-                        format!("{column} = CURRENT_TIMESTAMP")
+                        format!("{column} = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')")
                     }
                 };
                 assignments.push(assignment);
@@ -965,18 +939,13 @@ fn append_conditions(
         sql.push('(');
         match &connected.condition.0 {
             Predicate::LiteralSubstring { column, text } => {
-                sql.push_str(&quote_identifier(column)?);
-                sql.push_str(" LIKE ? ESCAPE '\\'");
+                sql.push_str(&ascii_lower(&quote_identifier(column)?));
+                sql.push_str(" LIKE translate(?::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE '\\'");
                 let escaped = text
                     .replace('\\', "\\\\")
                     .replace('%', "\\%")
                     .replace('_', "\\_");
                 parameters.push(format!("%{escaped}%").into());
-            }
-            Predicate::FullTextMatch { table, query } => {
-                sql.push_str(&quote_identifier(table)?);
-                sql.push_str(" MATCH ?");
-                parameters.push(query.clone().into());
             }
             Predicate::Comparison {
                 column,
@@ -1034,7 +1003,7 @@ fn ensure_unique_columns<'a>(
     Ok(())
 }
 
-/// JOIN and WHERE comparisons share SQLite NULL semantics and parameter ordering.
+/// JOIN and WHERE comparisons share PostgreSQL NULL semantics and parameter ordering.
 fn append_comparison(
     sql: &mut String,
     column: &str,
@@ -1042,6 +1011,22 @@ fn append_comparison(
     value: &SqlValue,
     parameters: &mut Vec<SqlValue>,
 ) -> Result<(), SqlBuilderError> {
+    if matches!(
+        operator,
+        ComparisonOperator::Like | ComparisonOperator::NotLike
+    ) {
+        sql.push_str(&ascii_lower(&format!(
+            "{}::text",
+            quote_identifier(column)?
+        )));
+        sql.push(' ');
+        sql.push_str(operator.as_sql());
+        sql.push_str(
+            " translate(?::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')",
+        );
+        parameters.push(value.clone());
+        return Ok(());
+    }
     sql.push_str(&quote_identifier(column)?);
     match (operator, value) {
         (ComparisonOperator::Equal, SqlValue::Null) => sql.push_str(" IS NULL"),
@@ -1087,4 +1072,8 @@ fn quote_table(table: &str, alias: Option<&str>) -> Result<String, SqlBuilderErr
         Some(alias) => Ok(format!("{table} AS {}", quote_identifier(alias)?)),
         None => Ok(table),
     }
+}
+
+fn ascii_lower(expression: &str) -> String {
+    format!("translate({expression}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')")
 }

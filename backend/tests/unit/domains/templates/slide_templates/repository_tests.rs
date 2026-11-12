@@ -2,19 +2,28 @@ use serde_json::json;
 
 use super::*;
 
-#[test]
-fn insert_many_rolls_back_every_record_when_one_insert_fails() {
+#[tokio::test]
+async fn insert_many_rolls_back_every_record_when_one_insert_fails() {
     let repository =
         crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
             .expect("in-memory repository");
     let record = template_insert("duplicate-template");
 
-    assert!(repository.insert_many(&[record.clone(), record]).is_err());
+    assert!(repository
+        .insert_many(&[record.clone(), record])
+        .await
+        .is_err());
     assert!(repository
         .find_by_id("duplicate-template")
+        .await
         .expect("template lookup")
         .is_none());
-    assert!(repository.list(None).expect("template list").is_empty());
+    assert!(repository
+        .list(None)
+        .await
+        .expect("template list")
+        .is_empty());
 }
 
 fn template_insert(template_id: &str) -> TemplateInsert {

@@ -6,7 +6,7 @@ struct Row {
     embedding_lease: Option<String>,
 }
 
-fn map_row(row: &rusqlite::Row<'_>) -> anyhow::Result<Row> {
+fn map_row(row: &crate::adapters::postgres::client::Row<'_>) -> anyhow::Result<Row> {
     let metadata = row
         .get::<_, Option<String>>("metadata_json")?
         .map(|json| normalize_slide_retrieval_metadata(serde_json::from_str(&json)?))
@@ -59,7 +59,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> anyhow::Result<Row> {
     })
 }
 
-fn save(connection: &SqliteTransaction<'_>, row: &Row) -> anyhow::Result<()> {
+async fn save(connection: &PostgresTransaction, row: &Row) -> anyhow::Result<()> {
     let state = &row.state;
     let metadata = state.metadata.as_ref();
     let metadata_json = metadata.map(serde_json::to_string).transpose()?;
@@ -73,79 +73,81 @@ fn save(connection: &SqliteTransaction<'_>, row: &Row) -> anyhow::Result<()> {
         .as_deref()
         .map(serialize_embedding)
         .transpose()?;
-    connection.write(
-        SqlBuilder::update("template_classification_status")
-            .set("status", &state.status)
-            .set("metadata_json", metadata_json)
-            .set(
-                "archetype",
-                metadata.map(|m| m.template_fit.archetype.as_str()),
-            )
-            .set(
-                "layout_type",
-                metadata.map(|m| m.visual.layout_type.as_str()),
-            )
-            .set(
-                "content_density",
-                metadata.map(|m| m.visual.content_density.as_str()),
-            )
-            .set("embedding_status", &state.embedding_status)
-            .set(
-                "subject_embedding_document",
-                state.subject_embedding_document.as_deref(),
-            )
-            .set("subject_embedding", subject_embedding)
-            .set(
-                "subject_embedding_fingerprint",
-                state.subject_embedding_fingerprint.as_deref(),
-            )
-            .set(
-                "capability_embedding_document",
-                state.capability_embedding_document.as_deref(),
-            )
-            .set("capability_embedding", capability_embedding)
-            .set(
-                "capability_embedding_fingerprint",
-                state.capability_embedding_fingerprint.as_deref(),
-            )
-            .set("embedding_model", state.embedding_model.as_deref())
-            .set(
-                "embedding_dimensions",
-                state.embedding_dimensions.map(i64::try_from).transpose()?,
-            )
-            .set(
-                "embedding_attempt_count",
-                i64::try_from(state.embedding_attempt_count)?,
-            )
-            .set(
-                "embedding_next_attempt_at",
-                state.embedding_next_attempt_at.as_deref(),
-            )
-            .set("embedding_lease_expires_at", row.embedding_lease.as_deref())
-            .set(
-                "embedding_last_error_code",
-                state.embedding_last_error_code.as_deref(),
-            )
-            .set("input_fingerprint", &state.input_fingerprint)
-            .set(
-                "classified_fingerprint",
-                state.classified_fingerprint.as_deref(),
-            )
-            .set("schema_version", state.schema_version)
-            .set("prompt_version", &state.prompt_version)
-            .set("model", state.model.as_deref())
-            .set("attempt_count", i64::try_from(state.attempt_count)?)
-            .set("next_attempt_at", state.next_attempt_at.as_deref())
-            .set("lease_expires_at", row.lease.as_deref())
-            .set("classified_at", state.classified_at.as_deref())
-            .set("last_error_code", state.last_error_code.as_deref())
-            .and_where(Condition::equal("template_id", &state.template_id))
-            .build(),
-    )?;
+    connection
+        .write(
+            SqlBuilder::update("template_classification_status")
+                .set("status", &state.status)
+                .set("metadata_json", metadata_json)
+                .set(
+                    "archetype",
+                    metadata.map(|m| m.template_fit.archetype.as_str()),
+                )
+                .set(
+                    "layout_type",
+                    metadata.map(|m| m.visual.layout_type.as_str()),
+                )
+                .set(
+                    "content_density",
+                    metadata.map(|m| m.visual.content_density.as_str()),
+                )
+                .set("embedding_status", &state.embedding_status)
+                .set(
+                    "subject_embedding_document",
+                    state.subject_embedding_document.as_deref(),
+                )
+                .set("subject_embedding", subject_embedding)
+                .set(
+                    "subject_embedding_fingerprint",
+                    state.subject_embedding_fingerprint.as_deref(),
+                )
+                .set(
+                    "capability_embedding_document",
+                    state.capability_embedding_document.as_deref(),
+                )
+                .set("capability_embedding", capability_embedding)
+                .set(
+                    "capability_embedding_fingerprint",
+                    state.capability_embedding_fingerprint.as_deref(),
+                )
+                .set("embedding_model", state.embedding_model.as_deref())
+                .set(
+                    "embedding_dimensions",
+                    state.embedding_dimensions.map(i64::try_from).transpose()?,
+                )
+                .set(
+                    "embedding_attempt_count",
+                    i64::try_from(state.embedding_attempt_count)?,
+                )
+                .set(
+                    "embedding_next_attempt_at",
+                    state.embedding_next_attempt_at.as_deref(),
+                )
+                .set("embedding_lease_expires_at", row.embedding_lease.as_deref())
+                .set(
+                    "embedding_last_error_code",
+                    state.embedding_last_error_code.as_deref(),
+                )
+                .set("input_fingerprint", &state.input_fingerprint)
+                .set(
+                    "classified_fingerprint",
+                    state.classified_fingerprint.as_deref(),
+                )
+                .set("schema_version", state.schema_version)
+                .set("prompt_version", &state.prompt_version)
+                .set("model", state.model.as_deref())
+                .set("attempt_count", i64::try_from(state.attempt_count)?)
+                .set("next_attempt_at", state.next_attempt_at.as_deref())
+                .set("lease_expires_at", row.lease.as_deref())
+                .set("classified_at", state.classified_at.as_deref())
+                .set("last_error_code", state.last_error_code.as_deref())
+                .and_where(Condition::equal("template_id", &state.template_id))
+                .build(),
+        )
+        .await?;
     Ok(())
 }
-fn fts(
-    connection: &SqliteTransaction<'_>,
+async fn fts(
+    connection: &PostgresTransaction,
     id: &str,
     metadata: &SlideRetrievalMetadata,
 ) -> anyhow::Result<()> {
@@ -156,14 +158,17 @@ fn fts(
                 .and_where(Condition::equal("template_id", id))
                 .build(),
             |r| r.get::<_, String>(0),
-        )?
+        )
+        .await?
         .context("missing template")?;
     let document: CanvasDocument = decode_document(&json)?;
-    connection.write(
-        SqlBuilder::delete_from("slide_classifications_fts")
-            .and_where(Condition::equal("template_id", id))
-            .build(),
-    )?;
+    connection
+        .write(
+            SqlBuilder::delete_from("slide_classifications_fts")
+                .and_where(Condition::equal("template_id", id))
+                .build(),
+        )
+        .await?;
     let visual_structure = std::iter::once(metadata.visual.layout_type.as_str())
         .chain(metadata.visual.visual_elements.iter().map(String::as_str))
         .chain(
@@ -175,75 +180,85 @@ fn fts(
         )
         .collect::<Vec<_>>()
         .join(" ");
-    connection.write(
-        SqlBuilder::insert_into("slide_classifications_fts")
-            .value("template_id", id)
-            .value("title", &document.presentation.title)
-            .value("subject_summary", &metadata.subject.summary)
-            .value(
-                "domains",
-                metadata
-                    .subject
-                    .domains
-                    .iter()
-                    .map(|domain| domain.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
-            .value(
-                "topics",
-                metadata
-                    .subject
-                    .domains
-                    .iter()
-                    .flat_map(|domain| domain.topics.iter())
-                    .chain(metadata.subject.other_topics.iter())
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
-            .value("technologies", metadata.subject.technologies.join(" "))
-            .value("entities", metadata.subject.entities.join(" "))
-            .value("claims", metadata.subject.claims.join(" "))
-            .value("synonyms", metadata.subject.synonyms.join(" "))
-            .value("intents", metadata.communication.intents.join(" "))
-            .value(
-                "information_types",
-                metadata.communication.information_types.join(" "),
-            )
-            .value("audience", metadata.communication.audience.join(" "))
-            .value("archetype", &metadata.template_fit.archetype)
-            .value(
-                "content_slots",
-                metadata
-                    .template_fit
-                    .content_slots
-                    .iter()
-                    .map(|slot| format!("{} {}", slot.role, slot.capacity))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
-            .value("visual_structure", visual_structure)
-            .value("retrieval_keywords", metadata.retrieval_keywords.join(" "))
-            .build(),
-    )?;
+    let query = SqlBuilder::insert_into("slide_classifications_fts")
+        .value("template_id", id)
+        .value("title", &document.presentation.title)
+        .value("subject_summary", &metadata.subject.summary)
+        .value(
+            "domains",
+            metadata
+                .subject
+                .domains
+                .iter()
+                .map(|domain| domain.id.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .value(
+            "topics",
+            metadata
+                .subject
+                .domains
+                .iter()
+                .flat_map(|domain| domain.topics.iter())
+                .chain(metadata.subject.other_topics.iter())
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .value("technologies", metadata.subject.technologies.join(" "))
+        .value("entities", metadata.subject.entities.join(" "))
+        .value("claims", metadata.subject.claims.join(" "))
+        .value("synonyms", metadata.subject.synonyms.join(" "))
+        .value("intents", metadata.communication.intents.join(" "))
+        .value(
+            "information_types",
+            metadata.communication.information_types.join(" "),
+        )
+        .value("audience", metadata.communication.audience.join(" "))
+        .value("archetype", &metadata.template_fit.archetype)
+        .value(
+            "content_slots",
+            metadata
+                .template_fit
+                .content_slots
+                .iter()
+                .map(|slot| format!("{} {}", slot.role, slot.capacity))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .value("visual_structure", visual_structure)
+        .value("retrieval_keywords", metadata.retrieval_keywords.join(" "))
+        .build()?;
+    let fields = query
+        .parameters()
+        .iter()
+        .skip(1)
+        .map(|v| match v {
+            crate::adapters::postgres::query::SqlValue::Text(s) => Ok(s.clone()),
+            _ => Err(anyhow::anyhow!("invalid lexical field")),
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    connection.write(Ok(query)).await?;
+    crate::adapters::postgres::query::lexical::index(connection, id, &fields).await?;
     Ok(())
 }
-fn load(tx: &SqliteTransaction<'_>, id: &str) -> anyhow::Result<Option<Row>> {
+async fn load(tx: &PostgresTransaction, id: &str) -> anyhow::Result<Option<Row>> {
     Ok(tx
         .read_result_with(
             SqlBuilder::select("template_classification_status")
                 .and_where(Condition::equal("template_id", id))
                 .build(),
             map_row,
-        )?
+        )
+        .await?
         .pop())
 }
 // Claims and idle detection must apply identical ownership and stage prerequisites.
 fn stage_jobs(
-    scope: &SqliteTemplateRepository,
+    scope: &PostgresTemplateRepository,
     embedding: bool,
-) -> crate::adapters::sqlite::query::SelectBuilder {
+) -> crate::adapters::postgres::query::SelectBuilder {
     let mut query = SqlBuilder::select("template_classification_status")
         .inner_join(
             "app_templates",
@@ -271,13 +286,13 @@ fn stage_jobs(
 }
 
 // Select one due row instead of decoding every completed template/vector on each poll.
-fn next_job_row(
-    tx: &SqliteTransaction<'_>,
-    scope: &SqliteTemplateRepository,
+async fn next_job_row(
+    tx: &PostgresTransaction,
+    scope: &PostgresTemplateRepository,
     embedding: bool,
     now: &str,
 ) -> anyhow::Result<Option<Row>> {
-    use crate::adapters::sqlite::query::ComparisonOperator;
+    use crate::adapters::postgres::query::ComparisonOperator;
     let (status, retry, lease) = if embedding {
         (
             "embedding_status",
@@ -316,7 +331,8 @@ fn next_job_row(
                     .limit(1)
                     .build(),
                 map_row,
-            )?
+            )
+            .await?
             .pop()
         {
             return Ok(Some(row));
@@ -324,15 +340,16 @@ fn next_job_row(
     }
     Ok(None)
 }
-impl SqliteTemplateRepository {
-    pub(super) fn has_pending_slide_processing(&self) -> anyhow::Result<bool> {
+impl PostgresTemplateRepository {
+    pub(super) async fn has_pending_slide_processing(&self) -> anyhow::Result<bool> {
         for status in ["status", "embedding_status"] {
             let query = stage_jobs(self, status == "embedding_status")
                 .columns(["template_classification_status.template_id"])
                 .and_where(Condition::in_values(status, ["pending", "processing"]));
             if self
                 .client
-                .read_one_with(query.limit(1).build(), |_| Ok(()))
+                .read_one_with_async(query.limit(1).build(), |_| Ok(()))
+                .await
                 .context("read pending slide work")?
                 .is_some()
             {
@@ -342,221 +359,252 @@ impl SqliteTemplateRepository {
         Ok(false)
     }
 
-    pub fn complete_slide_classification(
+    pub async fn complete_slide_classification(
         &self,
         result: &CompleteSlideClassification,
     ) -> anyhow::Result<()> {
-        self.publish(result, None, None)
+        self.publish(result, None, None).await
     }
-    pub fn complete_slide_processing(
+    pub async fn complete_slide_processing(
         &self,
         result: &CompleteSlideProcessing,
     ) -> anyhow::Result<()> {
         self.publish(&result.classification, Some(result), None)
+            .await
     }
-    pub(super) fn publish(
+    pub(super) async fn publish(
         &self,
         result: &CompleteSlideClassification,
         processed: Option<&CompleteSlideProcessing>,
         cancellation: Option<&super::super::RequestCancellation>,
     ) -> anyhow::Result<()> {
-        self.client.transaction_result(|tx| {
-            let mut row =
-                load(tx, &result.template_id)?.context("classification no longer exists")?;
-            ensure!(
-                row.state.status == "processing"
-                    && row.state.input_fingerprint == result.classified_fingerprint,
-                "classification lease no longer active"
-            );
-            let metadata =
-                normalize_slide_retrieval_metadata(serde_json::to_value(&result.metadata)?)?;
-            row.state.status = "ready".into();
-            row.state.metadata = Some(metadata.clone());
-            row.state.classified_fingerprint = Some(result.classified_fingerprint.clone());
-            row.state.model = Some(result.model.clone());
-            row.state.classified_at = Some(result.classified_at.clone());
-            row.lease = None;
-            row.state.next_attempt_at = None;
-            row.state.last_error_code = None;
-            row.state.subject_embedding_document = Some(result.subject_embedding_document.clone());
-            row.state.subject_embedding_fingerprint =
-                Some(result.subject_embedding_fingerprint.clone());
-            row.state.capability_embedding_document =
-                Some(result.capability_embedding_document.clone());
-            row.state.capability_embedding_fingerprint =
-                Some(result.capability_embedding_fingerprint.clone());
-            row.state.embedding_next_attempt_at = None;
-            row.embedding_lease = None;
-            row.state.embedding_last_error_code = None;
-            if let Some(p) = processed {
-                serialize_embedding(&p.subject_vector)?;
-                serialize_embedding(&p.capability_vector)?;
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let mut row = load(tx, &result.template_id)
+                    .await?
+                    .context("classification no longer exists")?;
                 ensure!(
-                    p.subject_vector.len() == p.embedding_dimensions
-                        && p.capability_vector.len() == p.embedding_dimensions,
+                    row.state.status == "processing"
+                        && row.state.input_fingerprint == result.classified_fingerprint,
+                    "classification lease no longer active"
+                );
+                let metadata =
+                    normalize_slide_retrieval_metadata(serde_json::to_value(&result.metadata)?)?;
+                row.state.status = "ready".into();
+                row.state.metadata = Some(metadata.clone());
+                row.state.classified_fingerprint = Some(result.classified_fingerprint.clone());
+                row.state.model = Some(result.model.clone());
+                row.state.classified_at = Some(result.classified_at.clone());
+                row.lease = None;
+                row.state.next_attempt_at = None;
+                row.state.last_error_code = None;
+                row.state.subject_embedding_document =
+                    Some(result.subject_embedding_document.clone());
+                row.state.subject_embedding_fingerprint =
+                    Some(result.subject_embedding_fingerprint.clone());
+                row.state.capability_embedding_document =
+                    Some(result.capability_embedding_document.clone());
+                row.state.capability_embedding_fingerprint =
+                    Some(result.capability_embedding_fingerprint.clone());
+                row.state.embedding_next_attempt_at = None;
+                row.embedding_lease = None;
+                row.state.embedding_last_error_code = None;
+                if let Some(p) = processed {
+                    serialize_embedding(&p.subject_vector)?;
+                    serialize_embedding(&p.capability_vector)?;
+                    ensure!(
+                        p.subject_vector.len() == p.embedding_dimensions
+                            && p.capability_vector.len() == p.embedding_dimensions,
+                        "Embedding dimensions do not match the vector."
+                    );
+                    row.state.subject_vector = Some(p.subject_vector.clone());
+                    row.state.capability_vector = Some(p.capability_vector.clone());
+                    row.state.embedding_model = Some(p.embedding_model.clone());
+                    row.state.embedding_dimensions = Some(p.embedding_dimensions);
+                    row.state.embedding_status = "ready".into();
+                    row.state.embedding_attempt_count = 1;
+                } else {
+                    row.state.subject_vector = None;
+                    row.state.capability_vector = None;
+                    row.state.embedding_model = None;
+                    row.state.embedding_dimensions = None;
+                    row.state.embedding_status = "pending".into();
+                }
+                check_publication(cancellation)?;
+                save(tx, &row).await?;
+                fts(tx, &result.template_id, &metadata).await?;
+                check_publication(cancellation)?;
+                Ok(())
+            })
+            .await
+    }
+    pub async fn complete_slide_embedding(
+        &self,
+        result: &CompleteSlideEmbedding,
+    ) -> anyhow::Result<()> {
+        self.client
+            .transaction_result_async(move |c| async move {
+                let c = &c;
+                let mut row = load(c, &result.template_id)
+                    .await?
+                    .context("embedding no longer exists")?;
+                ensure!(
+                    row.state.embedding_status == "processing"
+                        && row.state.subject_embedding_fingerprint.as_deref()
+                            == Some(&result.subject_fingerprint)
+                        && row.state.capability_embedding_fingerprint.as_deref()
+                            == Some(&result.capability_fingerprint),
+                    "embedding lease no longer active"
+                );
+                serialize_embedding(&result.subject_vector)?;
+                serialize_embedding(&result.capability_vector)?;
+                ensure!(
+                    result.subject_vector.len() == result.dimensions
+                        && result.capability_vector.len() == result.dimensions,
                     "Embedding dimensions do not match the vector."
                 );
-                row.state.subject_vector = Some(p.subject_vector.clone());
-                row.state.capability_vector = Some(p.capability_vector.clone());
-                row.state.embedding_model = Some(p.embedding_model.clone());
-                row.state.embedding_dimensions = Some(p.embedding_dimensions);
+                row.state.subject_vector = Some(result.subject_vector.clone());
+                row.state.capability_vector = Some(result.capability_vector.clone());
+                row.state.embedding_model = Some(result.model.clone());
+                row.state.embedding_dimensions = Some(result.dimensions);
                 row.state.embedding_status = "ready".into();
-                row.state.embedding_attempt_count = 1;
-            } else {
-                row.state.subject_vector = None;
-                row.state.capability_vector = None;
-                row.state.embedding_model = None;
-                row.state.embedding_dimensions = None;
-                row.state.embedding_status = "pending".into();
-            }
-            check_publication(cancellation)?;
-            save(tx, &row)?;
-            fts(tx, &result.template_id, &metadata)?;
-            check_publication(cancellation)?;
-            Ok(())
-        })
-    }
-    pub fn complete_slide_embedding(&self, result: &CompleteSlideEmbedding) -> anyhow::Result<()> {
-        self.client.transaction_result(|c| {
-            let mut row = load(c, &result.template_id)?.context("embedding no longer exists")?;
-            ensure!(
-                row.state.embedding_status == "processing"
-                    && row.state.subject_embedding_fingerprint.as_deref()
-                        == Some(&result.subject_fingerprint)
-                    && row.state.capability_embedding_fingerprint.as_deref()
-                        == Some(&result.capability_fingerprint),
-                "embedding lease no longer active"
-            );
-            serialize_embedding(&result.subject_vector)?;
-            serialize_embedding(&result.capability_vector)?;
-            ensure!(
-                result.subject_vector.len() == result.dimensions
-                    && result.capability_vector.len() == result.dimensions,
-                "Embedding dimensions do not match the vector."
-            );
-            row.state.subject_vector = Some(result.subject_vector.clone());
-            row.state.capability_vector = Some(result.capability_vector.clone());
-            row.state.embedding_model = Some(result.model.clone());
-            row.state.embedding_dimensions = Some(result.dimensions);
-            row.state.embedding_status = "ready".into();
-            row.embedding_lease = None;
-            row.state.embedding_next_attempt_at = None;
-            row.state.embedding_last_error_code = None;
-            save(c, &row)
-        })
-    }
-    pub fn record_slide_classification_failure(
-        &self,
-        id: &str,
-        code: &str,
-        retry: Option<&str>,
-    ) -> anyhow::Result<()> {
-        self.client.transaction_result(|c| {
-            if let Some(mut row) = load(c, id)?.filter(|r| r.state.status == "processing") {
-                row.state.status = if retry.is_some() { "pending" } else { "failed" }.into();
-                row.state.next_attempt_at = retry.map(str::to_owned);
-                row.state.last_error_code = Some(code.into());
-                row.lease = None;
-                save(c, &row)?;
-            }
-            Ok(())
-        })
-    }
-    pub fn record_slide_embedding_failure(
-        &self,
-        id: &str,
-        code: &str,
-        retry: Option<&str>,
-    ) -> anyhow::Result<()> {
-        self.client.transaction_result(|c| {
-            if let Some(mut row) = load(c, id)?.filter(|r| r.state.embedding_status == "processing")
-            {
-                row.state.embedding_status =
-                    if retry.is_some() { "pending" } else { "failed" }.into();
-                row.state.embedding_next_attempt_at = retry.map(str::to_owned);
-                row.state.embedding_last_error_code = Some(code.into());
                 row.embedding_lease = None;
-                save(c, &row)?;
-            }
-            Ok(())
-        })
+                row.state.embedding_next_attempt_at = None;
+                row.state.embedding_last_error_code = None;
+                save(c, &row).await
+            })
+            .await
     }
-    pub fn retry_failed_slide_processing(
+    pub async fn record_slide_classification_failure(
+        &self,
+        id: &str,
+        code: &str,
+        retry: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.client
+            .transaction_result_async(move |c| async move {
+                let c = &c;
+                if let Some(mut row) = load(c, id)
+                    .await?
+                    .filter(|r| r.state.status == "processing")
+                {
+                    row.state.status = if retry.is_some() { "pending" } else { "failed" }.into();
+                    row.state.next_attempt_at = retry.map(str::to_owned);
+                    row.state.last_error_code = Some(code.into());
+                    row.lease = None;
+                    save(c, &row).await?;
+                }
+                Ok(())
+            })
+            .await
+    }
+    pub async fn record_slide_embedding_failure(
+        &self,
+        id: &str,
+        code: &str,
+        retry: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.client
+            .transaction_result_async(move |c| async move {
+                let c = &c;
+                if let Some(mut row) = load(c, id)
+                    .await?
+                    .filter(|r| r.state.embedding_status == "processing")
+                {
+                    row.state.embedding_status =
+                        if retry.is_some() { "pending" } else { "failed" }.into();
+                    row.state.embedding_next_attempt_at = retry.map(str::to_owned);
+                    row.state.embedding_last_error_code = Some(code.into());
+                    row.embedding_lease = None;
+                    save(c, &row).await?;
+                }
+                Ok(())
+            })
+            .await
+    }
+    pub async fn retry_failed_slide_processing(
         &self,
         id: &str,
     ) -> anyhow::Result<RetrySlideProcessingOutcome> {
-        self.client.transaction_result(|tx| {
-            if !self.visible(tx, id)? {
-                return Ok(RetrySlideProcessingOutcome::NotFound);
-            }
-            let Some(mut row) = load(tx, id)? else {
-                return Ok(RetrySlideProcessingOutcome::NotFailed);
-            };
-            // A duplicate request or an active worker must never reset an in-flight lease.
-            if row.state.status == "processing" || row.state.embedding_status == "processing" {
-                return Ok(RetrySlideProcessingOutcome::NotFailed);
-            }
-            let stage = if row.state.status == "failed" {
-                row.state.status = "pending".into();
-                row.state.attempt_count = 0;
-                row.state.next_attempt_at = None;
-                row.state.last_error_code = None;
-                row.lease = None;
-                // Successful classification will enqueue new embedding documents. Until then,
-                // retain existing artifacts but do not allow stale embedding work to be claimed.
-                row.state.embedding_status = "not_ready".into();
-                row.state.embedding_attempt_count = 0;
-                row.state.embedding_next_attempt_at = None;
-                row.state.embedding_last_error_code = None;
-                row.embedding_lease = None;
-                SlideProcessingStage::Classification
-            } else if row.state.status == "ready" && row.state.embedding_status == "failed" {
-                ensure!(
-                    row.state.metadata.is_some()
-                        && row.state.subject_embedding_document.is_some()
-                        && row.state.subject_embedding_fingerprint.is_some()
-                        && row.state.capability_embedding_document.is_some()
-                        && row.state.capability_embedding_fingerprint.is_some(),
-                    "failed embedding job is missing classification artifacts"
-                );
-                row.state.embedding_status = "pending".into();
-                row.state.embedding_attempt_count = 0;
-                row.state.embedding_next_attempt_at = None;
-                row.state.embedding_last_error_code = None;
-                row.embedding_lease = None;
-                SlideProcessingStage::Embedding
-            } else {
-                return Ok(RetrySlideProcessingOutcome::NotFailed);
-            };
-            save(tx, &row)?;
-            Ok(RetrySlideProcessingOutcome::Queued(stage))
-        })
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                if !self.visible(tx, id).await? {
+                    return Ok(RetrySlideProcessingOutcome::NotFound);
+                }
+                let Some(mut row) = load(tx, id).await? else {
+                    return Ok(RetrySlideProcessingOutcome::NotFailed);
+                };
+                // A duplicate request or an active worker must never reset an in-flight lease.
+                if row.state.status == "processing" || row.state.embedding_status == "processing" {
+                    return Ok(RetrySlideProcessingOutcome::NotFailed);
+                }
+                let stage = if row.state.status == "failed" {
+                    row.state.status = "pending".into();
+                    row.state.attempt_count = 0;
+                    row.state.next_attempt_at = None;
+                    row.state.last_error_code = None;
+                    row.lease = None;
+                    // Successful classification will enqueue new embedding documents. Until then,
+                    // retain existing artifacts but do not allow stale embedding work to be claimed.
+                    row.state.embedding_status = "not_ready".into();
+                    row.state.embedding_attempt_count = 0;
+                    row.state.embedding_next_attempt_at = None;
+                    row.state.embedding_last_error_code = None;
+                    row.embedding_lease = None;
+                    SlideProcessingStage::Classification
+                } else if row.state.status == "ready" && row.state.embedding_status == "failed" {
+                    ensure!(
+                        row.state.metadata.is_some()
+                            && row.state.subject_embedding_document.is_some()
+                            && row.state.subject_embedding_fingerprint.is_some()
+                            && row.state.capability_embedding_document.is_some()
+                            && row.state.capability_embedding_fingerprint.is_some(),
+                        "failed embedding job is missing classification artifacts"
+                    );
+                    row.state.embedding_status = "pending".into();
+                    row.state.embedding_attempt_count = 0;
+                    row.state.embedding_next_attempt_at = None;
+                    row.state.embedding_last_error_code = None;
+                    row.embedding_lease = None;
+                    SlideProcessingStage::Embedding
+                } else {
+                    return Ok(RetrySlideProcessingOutcome::NotFailed);
+                };
+                save(tx, &row).await?;
+                Ok(RetrySlideProcessingOutcome::Queued(stage))
+            })
+            .await
     }
-    pub fn refresh_pending_slide_classification(
+    pub async fn refresh_pending_slide_classification(
         &self,
         id: &str,
         pending: &PendingSlideClassification,
     ) -> anyhow::Result<bool> {
-        self.client.transaction_result(|c| {
-            let Some(mut row) = load(c, id)? else {
-                return Ok(false);
-            };
-            if row.state.input_fingerprint == pending.input_fingerprint {
-                return Ok(false);
-            };
-            row.state.status = "pending".into();
-            row.state.input_fingerprint = pending.input_fingerprint.clone();
-            row.state.schema_version = pending.schema_version;
-            row.state.prompt_version = pending.prompt_version.clone();
-            row.state.attempt_count = 0;
-            row.state.next_attempt_at = None;
-            row.state.last_error_code = None;
-            row.lease = None;
-            save(c, &row)?;
-            Ok(true)
-        })
+        self.client
+            .transaction_result_async(move |c| async move {
+                let c = &c;
+                let Some(mut row) = load(c, id).await? else {
+                    return Ok(false);
+                };
+                if row.state.input_fingerprint == pending.input_fingerprint {
+                    return Ok(false);
+                };
+                row.state.status = "pending".into();
+                row.state.input_fingerprint = pending.input_fingerprint.clone();
+                row.state.schema_version = pending.schema_version;
+                row.state.prompt_version = pending.prompt_version.clone();
+                row.state.attempt_count = 0;
+                row.state.next_attempt_at = None;
+                row.state.last_error_code = None;
+                row.lease = None;
+                save(c, &row).await?;
+                Ok(true)
+            })
+            .await
     }
-    pub fn refresh_pending_slide_embedding(
+    pub async fn refresh_pending_slide_embedding(
         &self,
         id: &str,
         subject_document: &str,
@@ -564,297 +612,290 @@ impl SqliteTemplateRepository {
         capability_document: &str,
         capability_fingerprint: &str,
     ) -> anyhow::Result<bool> {
-        self.client.transaction_result(|c| {
-            let Some(mut row) = load(c, id)? else {
-                return Ok(false);
-            };
-            if row.state.metadata.is_none()
-                || (row.state.subject_embedding_fingerprint.as_deref() == Some(subject_fingerprint)
-                    && row.state.capability_embedding_fingerprint.as_deref()
-                        == Some(capability_fingerprint))
-            {
-                return Ok(false);
-            };
-            row.state.embedding_status = "pending".into();
-            row.state.subject_embedding_document = Some(subject_document.into());
-            row.state.subject_embedding_fingerprint = Some(subject_fingerprint.into());
-            row.state.capability_embedding_document = Some(capability_document.into());
-            row.state.capability_embedding_fingerprint = Some(capability_fingerprint.into());
-            row.state.subject_vector = None;
-            row.state.capability_vector = None;
-            row.state.embedding_attempt_count = 0;
-            row.state.embedding_next_attempt_at = None;
-            row.state.embedding_last_error_code = None;
-            row.embedding_lease = None;
-            save(c, &row)?;
-            Ok(true)
-        })
+        self.client
+            .transaction_result_async(move |c| async move {
+                let c = &c;
+                let Some(mut row) = load(c, id).await? else {
+                    return Ok(false);
+                };
+                if row.state.metadata.is_none()
+                    || (row.state.subject_embedding_fingerprint.as_deref()
+                        == Some(subject_fingerprint)
+                        && row.state.capability_embedding_fingerprint.as_deref()
+                            == Some(capability_fingerprint))
+                {
+                    return Ok(false);
+                };
+                row.state.embedding_status = "pending".into();
+                row.state.subject_embedding_document = Some(subject_document.into());
+                row.state.subject_embedding_fingerprint = Some(subject_fingerprint.into());
+                row.state.capability_embedding_document = Some(capability_document.into());
+                row.state.capability_embedding_fingerprint = Some(capability_fingerprint.into());
+                row.state.subject_vector = None;
+                row.state.capability_vector = None;
+                row.state.embedding_attempt_count = 0;
+                row.state.embedding_next_attempt_at = None;
+                row.state.embedding_last_error_code = None;
+                row.embedding_lease = None;
+                save(c, &row).await?;
+                Ok(true)
+            })
+            .await
     }
 
-    pub fn insert_with_pending_classification(
+    pub async fn insert_with_pending_classification(
         &self,
         r: &TemplateInsert,
         p: &PendingSlideClassification,
     ) -> anyhow::Result<()> {
-        self.insert_classification(r, p, false, None)
+        self.insert_classification(r, p, false, None).await
     }
-    pub fn insert_with_processing_classification(
+    pub async fn insert_with_processing_classification(
         &self,
         r: &TemplateInsert,
         p: &PendingSlideClassification,
     ) -> anyhow::Result<()> {
-        self.insert_classification(r, p, true, None)
+        self.insert_classification(r, p, true, None).await
     }
-    pub(super) fn insert_classification(
+    pub(super) async fn insert_classification(
         &self,
         r: &TemplateInsert,
         p: &PendingSlideClassification,
         processing: bool,
         cancellation: Option<&super::super::RequestCancellation>,
     ) -> anyhow::Result<()> {
-        self.client.transaction_result(|tx| {
-            check_publication(cancellation)?;
-            self.write_new(tx, &r.template, &r.assets, &r.metadata, r.preview.as_ref())?;
-            membership(tx, &self.app_id, &r.template.template_id)?;
-            write_pending(tx, &r.template.template_id, p, processing)?;
-            check_publication(cancellation)
-        })
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                check_publication(cancellation)?;
+                self.write_new(tx, &r.template, &r.assets, &r.metadata, r.preview.as_ref())
+                    .await?;
+                membership(tx, &self.app_id, &r.template.template_id).await?;
+                write_pending(tx, &r.template.template_id, p, processing).await?;
+                check_publication(cancellation)
+            })
+            .await
     }
-    pub(super) fn insert_classifications(
+    pub(super) async fn insert_classifications(
         &self,
         records: &[(TemplateInsert, PendingSlideClassification)],
         cancellation: Option<&super::super::RequestCancellation>,
     ) -> anyhow::Result<()> {
-        self.client.transaction_result(|tx| {
-            check_publication(cancellation)?;
-            for (record, pending) in records {
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 check_publication(cancellation)?;
-                self.write_new(
-                    tx,
-                    &record.template,
-                    &record.assets,
-                    &record.metadata,
-                    record.preview.as_ref(),
-                )?;
-                membership(tx, &self.app_id, &record.template.template_id)?;
-                write_pending(tx, &record.template.template_id, pending, false)?;
-            }
-            check_publication(cancellation)
-        })
+                for (record, pending) in records {
+                    check_publication(cancellation)?;
+                    self.write_new(
+                        tx,
+                        &record.template,
+                        &record.assets,
+                        &record.metadata,
+                        record.preview.as_ref(),
+                    )
+                    .await?;
+                    membership(tx, &self.app_id, &record.template.template_id).await?;
+                    write_pending(tx, &record.template.template_id, pending, false).await?;
+                }
+                check_publication(cancellation)
+            })
+            .await
     }
-    pub fn find_slide_classification(
+    pub async fn find_slide_classification(
         &self,
         id: &str,
     ) -> anyhow::Result<Option<StoredSlideClassification>> {
-        self.client.read_transaction_result(|tx| {
-            if !self.visible(tx, id)? {
-                return Ok(None);
-            }
-            Ok(load(tx, id)?.map(|r| r.state))
-        })
+        self.client
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                if !self.visible(tx, id).await? {
+                    return Ok(None);
+                }
+                Ok(load(tx, id).await?.map(|r| r.state))
+            })
+            .await
     }
-    pub fn claim_next_slide_classification(
+    pub async fn claim_next_slide_classification(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideClassificationJob>> {
-        self.client.transaction_result(|tx| {
-            let Some(mut row) = next_job_row(tx, self, false, now)? else {
-                return Ok(None);
-            };
-            row.state.status = "processing".into();
-            row.state.attempt_count += 1;
-            row.lease = Some(lease_expires_at.into());
-            row.state.next_attempt_at = None;
-            row.state.last_error_code = None;
-            save(tx, &row)?;
-            let json = tx
-                .read_one_with(
-                    SqlBuilder::select("templates")
-                        .columns(["template_json"])
-                        .and_where(Condition::equal("template_id", &row.state.template_id))
-                        .build(),
-                    |r| r.get::<_, String>(0),
-                )?
-                .context("missing template")?;
-            let document = decode_document(&json)?;
-            let kind = metadata_in(tx, &row.state.template_id)?
-                .context("missing metadata")?
-                .kind
-                .as_str()
-                .to_owned();
-            let preview = tx.read_one_with(
-                SqlBuilder::select("template_previews")
-                    .and_where(Condition::equal("template_id", &row.state.template_id))
-                    .build(),
-                map_preview,
-            )?;
-            let job = SlideClassificationJob {
-                attempt_count: row.state.attempt_count,
-                input_fingerprint: row.state.input_fingerprint,
-                kind: if kind == "commentary" {
-                    TemplateKind::Commentary
-                } else {
-                    TemplateKind::Diagram
-                },
-                preview,
-                title: document.presentation.title.clone(),
-                template: StoredTemplate {
-                    template_id: row.state.template_id,
-                    template_json: document,
-                },
-            };
-            Ok(Some(job))
-        })
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let Some(mut row) = next_job_row(tx, self, false, now).await? else {
+                    return Ok(None);
+                };
+                row.state.status = "processing".into();
+                row.state.attempt_count += 1;
+                row.lease = Some(lease_expires_at.into());
+                row.state.next_attempt_at = None;
+                row.state.last_error_code = None;
+                save(tx, &row).await?;
+                let json = tx
+                    .read_one_with(
+                        SqlBuilder::select("templates")
+                            .columns(["template_json"])
+                            .and_where(Condition::equal("template_id", &row.state.template_id))
+                            .build(),
+                        |r| r.get::<_, String>(0),
+                    )
+                    .await?
+                    .context("missing template")?;
+                let document = decode_document(&json)?;
+                let kind = metadata_in(tx, &row.state.template_id)
+                    .await?
+                    .context("missing metadata")?
+                    .kind
+                    .as_str()
+                    .to_owned();
+                let preview = tx
+                    .read_one_with(
+                        SqlBuilder::select("template_previews")
+                            .and_where(Condition::equal("template_id", &row.state.template_id))
+                            .build(),
+                        map_preview,
+                    )
+                    .await?;
+                let job = SlideClassificationJob {
+                    attempt_count: row.state.attempt_count,
+                    input_fingerprint: row.state.input_fingerprint,
+                    kind: if kind == "commentary" {
+                        TemplateKind::Commentary
+                    } else {
+                        TemplateKind::Diagram
+                    },
+                    preview,
+                    title: document.presentation.title.clone(),
+                    template: StoredTemplate {
+                        template_id: row.state.template_id,
+                        template_json: document,
+                    },
+                };
+                Ok(Some(job))
+            })
+            .await
     }
-    pub fn claim_next_slide_embedding(
+    pub async fn claim_next_slide_embedding(
         &self,
         now: &str,
         lease_expires_at: &str,
     ) -> anyhow::Result<Option<SlideEmbeddingJob>> {
-        self.client.transaction_result(|tx| {
-            let Some(mut row) = next_job_row(tx, self, true, now)? else {
-                return Ok(None);
-            };
-            row.state.embedding_status = "processing".into();
-            row.state.embedding_attempt_count += 1;
-            row.embedding_lease = Some(lease_expires_at.into());
-            row.state.embedding_next_attempt_at = None;
-            row.state.embedding_last_error_code = None;
-            save(tx, &row)?;
-            let job = SlideEmbeddingJob {
-                attempt_count: row.state.embedding_attempt_count,
-                subject_document: row
-                    .state
-                    .subject_embedding_document
-                    .context("missing subject embedding document")?,
-                subject_fingerprint: row
-                    .state
-                    .subject_embedding_fingerprint
-                    .context("missing subject embedding fingerprint")?,
-                capability_document: row
-                    .state
-                    .capability_embedding_document
-                    .context("missing capability embedding document")?,
-                capability_fingerprint: row
-                    .state
-                    .capability_embedding_fingerprint
-                    .context("missing capability embedding fingerprint")?,
-                template_id: row.state.template_id,
-            };
-            Ok(Some(job))
-        })
+        self.client
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let Some(mut row) = next_job_row(tx, self, true, now).await? else {
+                    return Ok(None);
+                };
+                row.state.embedding_status = "processing".into();
+                row.state.embedding_attempt_count += 1;
+                row.embedding_lease = Some(lease_expires_at.into());
+                row.state.embedding_next_attempt_at = None;
+                row.state.embedding_last_error_code = None;
+                save(tx, &row).await?;
+                let job = SlideEmbeddingJob {
+                    attempt_count: row.state.embedding_attempt_count,
+                    subject_document: row
+                        .state
+                        .subject_embedding_document
+                        .context("missing subject embedding document")?,
+                    subject_fingerprint: row
+                        .state
+                        .subject_embedding_fingerprint
+                        .context("missing subject embedding fingerprint")?,
+                    capability_document: row
+                        .state
+                        .capability_embedding_document
+                        .context("missing capability embedding document")?,
+                    capability_fingerprint: row
+                        .state
+                        .capability_embedding_fingerprint
+                        .context("missing capability embedding fingerprint")?,
+                    template_id: row.state.template_id,
+                };
+                Ok(Some(job))
+            })
+            .await
     }
 
-    pub fn list_retrieval_classifications(
+    pub async fn list_retrieval_classifications(
         &self,
         app_id: &str,
     ) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
-        self.client.read_transaction_result(|tx| {
-            let rows = tx.read_result_with(
-                SqlBuilder::select("template_classification_status")
-                    .columns(["template_classification_status.*"])
-                    .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
-                        "app_templates.template_id",
-                        "template_classification_status.template_id",
-                    )))
-                    .inner_join(
-                        "templates",
-                        "templates.template_id",
-                        "app_templates.template_id",
-                    )
-                    .and_where(self.owner_condition())
-                    .and_where(Condition::equal("app_templates.app_id", app_id))
-                    .and_where(Condition::is_not_null("metadata_json"))
-                    .and_where(Condition::equal("schema_version", 2))
-                    .build(),
-                map_row,
-            )?;
-            let mut result = Vec::new();
-            for row in rows {
-                let id = &row.state.template_id;
-                let meta = metadata_in(tx, id)?.context("missing metadata")?;
-                let preview_available = tx
-                    .read_one(
-                        SqlBuilder::select("template_previews")
-                            .and_where(Condition::equal("template_id", id))
+        self.client
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let rows = tx
+                    .read_result_with(
+                        SqlBuilder::select("template_classification_status")
+                            .columns(["template_classification_status.*"])
+                            .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
+                                "app_templates.template_id",
+                                "template_classification_status.template_id",
+                            )))
+                            .inner_join(
+                                "templates",
+                                "templates.template_id",
+                                "app_templates.template_id",
+                            )
+                            .and_where(self.owner_condition())
+                            .and_where(Condition::equal("app_templates.app_id", app_id))
+                            .and_where(Condition::is_not_null("metadata_json"))
+                            .and_where(Condition::equal("schema_version", 2))
                             .build(),
-                    )?
-                    .is_some();
-                result.push(RetrievalClassificationRecord {
-                    template_id: id.clone(),
-                    classification: row.state,
-                    created_at: timestamp_iso(meta.created_at)?,
-                    kind: meta.kind,
-                    preview_available,
-                    title: meta.title,
+                        map_row,
+                    )
+                    .await?;
+                let mut result = Vec::new();
+                for row in rows {
+                    let id = &row.state.template_id;
+                    let meta = metadata_in(tx, id).await?.context("missing metadata")?;
+                    let preview_available = tx
+                        .read_one(
+                            SqlBuilder::select("template_previews")
+                                .and_where(Condition::equal("template_id", id))
+                                .build(),
+                        )
+                        .await?
+                        .is_some();
+                    result.push(RetrievalClassificationRecord {
+                        template_id: id.clone(),
+                        classification: row.state,
+                        created_at: timestamp_iso(meta.created_at)?,
+                        kind: meta.kind,
+                        preview_available,
+                        title: meta.title,
+                    });
+                }
+                result.sort_by(|a, b| {
+                    b.created_at
+                        .cmp(&a.created_at)
+                        .then(a.template_id.cmp(&b.template_id))
                 });
-            }
-            result.sort_by(|a, b| {
-                b.created_at
-                    .cmp(&a.created_at)
-                    .then(a.template_id.cmp(&b.template_id))
-            });
-            Ok(result)
-        })
+                Ok(result)
+            })
+            .await
     }
-    pub fn search_slide_classifications(
+    pub async fn search_slide_classifications(
         &self,
         app_id: &str,
         fts_query: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<String>> {
-        Ok(self.client.read_with(
-            SqlBuilder::select("slide_classifications_fts")
-                .column("slide_classifications_fts.template_id")
-                .inner_join(
-                    "app_templates",
-                    "app_templates.template_id",
-                    "slide_classifications_fts.template_id",
-                )
-                .inner_join(
-                    "template_classification_status",
-                    "template_classification_status.template_id",
-                    "slide_classifications_fts.template_id",
-                )
-                .inner_join(
-                    "templates",
-                    "templates.template_id",
-                    "app_templates.template_id",
-                )
-                .and_where(self.owner_condition())
-                .and_where(Condition::equal("app_templates.app_id", app_id))
-                .and_where(Condition::is_not_null(
-                    "template_classification_status.metadata_json",
-                ))
-                .and_where(Condition::equal(
-                    "template_classification_status.schema_version",
-                    2,
-                ))
-                .and_where(Condition::full_text_match(
-                    "slide_classifications_fts",
-                    fts_query,
-                ))
-                .order_by_bm25(
-                    "slide_classifications_fts",
-                    vec![
-                        0.0, 2.0, 5.0, 5.0, 5.0, 2.0, 2.0, 3.0, 3.0, 4.0, 3.0, 1.0, 4.0, 4.0, 2.0,
-                        3.0,
-                    ],
-                )
-                .order_by(
-                    "slide_classifications_fts.template_id",
-                    SortDirection::Ascending,
-                )
-                .limit(limit)
-                .build(),
-            |r| r.get(0),
-        )?)
+        Ok(crate::adapters::postgres::query::lexical::search(
+            &self.client,
+            self.owner_user_id,
+            app_id,
+            fts_query,
+            limit,
+        )
+        .await?)
     }
 }
 
-fn write_pending(
-    tx: &SqliteTransaction<'_>,
+async fn write_pending(
+    tx: &PostgresTransaction,
     id: &str,
     pending: &PendingSlideClassification,
     processing: bool,
@@ -868,6 +909,7 @@ fn write_pending(
             .value("schema_version", pending.schema_version)
             .value("attempt_count", i64::from(processing))
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }

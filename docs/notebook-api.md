@@ -1,5 +1,9 @@
 # Personal notebook API and save recovery
 
+Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 Notebooks, single-level folders, native BlockNote notes and save jobs are durable backend resources.
 The web and desktop adapters expose the same authenticated contract under `/api/v1`. The Notebook page integrates these APIs with an explicit Save button, saved-note loading and
 job feedback; edit buffers remain session-local until saved.
@@ -65,7 +69,7 @@ PATCH. Every committed PATCH increments revision, including metadata/move-only p
 are JS-safe positive integers, up to 9007199254740991, with checked overflow.
 
 Admission authorizes the parent, note, referenced folder and revision and stores an immutable full
-snapshot and request hash in SQLite. Actor-scoped operation IDs reconcile lost responses: identical
+snapshot and request hash in PostgreSQL. Actor-scoped operation IDs reconcile lost responses: identical
 request replay returns its job, different input is 409. Admission returns 202 promptly with IDs,
 statusUrl, eventsUrl and a Location pointing at status; it does not wait for providers. Another
 active save on the note is 409. At most 32 jobs per actor and 256 globally may be queued/processing;
@@ -75,7 +79,7 @@ One worker per application claims durable rows in immediate transactions. Claims
 and 180-second leases; attempts have a 120-second deadline. After restart, queued rows and expired
 claims are rediscovered. A process must not share an expired claim; all canonical checkpoints check
 the token, lease, ownership and current revision. Canonical writes and committed-revision/job-stage
-updates are atomic. No provider or graph operation holds a SQLite lock. Infrastructure is injected
+updates are atomic. No provider or graph operation holds a PostgreSQL lock. Infrastructure is injected
 at bootstrap; services do not read environment variables or construct clients.
 
 The pipeline persists native blocks, exports deterministic Markdown, prepares bounded chunks,
@@ -94,15 +98,15 @@ against the 2 MiB writer cap before graph writes. Ordered dimension-valid finite
 staged first; a revision root is published only after all stages acknowledge durability. Publication
 removes strictly older roots/chunks, never a newer revision. Immutable per-revision roots prevent
 an old worker from replacing a newer one. A published matching root is reused after a crash rather
-than embedding/writing again. Consumers must join canonical SQLite ownership/existence and current
+than embedding/writing again. Consumers must join canonical PostgreSQL ownership/existence and current
 content/revision state; generic document search does not query these labels. Folder/deal metadata
-is read from SQLite. Folder relocation changes row revisions without re-embedding unchanged text;
+is read from PostgreSQL. Folder relocation changes row revisions without re-embedding unchanged text;
 no notebook retrieval/search API is implemented yet.
 
 Completion is recorded only after Helix publication and another canonical revision/lease check.
-A failed projection preserves SQLite content and returns `status: failed`, `sqliteCommitted: true`,
+A failed projection preserves PostgreSQL content and returns `status: failed`, `sqliteCommitted: true`,
 committedRevision and a sanitized code. Failed pre-commit work reports sqliteCommitted false.
-Never infer completion from 202, a note GET, an embedding response or SQLite alone.
+Never infer completion from 202, a note GET, an embedding response or PostgreSQL alone.
 
 Explicit retry retains job identity and committed revision; it never reapplies an already committed
 mutation. Retryable codes include embedding/provider/unconfigured/indexing/interrupted/pipeline
@@ -131,29 +135,19 @@ transaction. Each worker handles one cleanup at a time, retries failure after 60
 confirmed cleanup hourly for 30 days to remove late stale work. Confirmed tombstones expire after
 30 days; unconfirmed cleanup is retained. Terminal jobs/immutable inputs expire after 30 days.
 Operation IDs must not be deliberately reused after retention. There is no cancellation endpoint,
-trash or automatic distributed transaction across SQLite/Helix.
+trash or automatic distributed transaction across PostgreSQL/Helix.
 
-## Additive schema 12 → 13 and recovery
+<a id="additive-schema-12--13-and-recovery"></a>
+## PostgreSQL schema and recovery
 
 The live pre-notebook schema is 12, not the plan's assumed 11. Marker 13 adds notebooks,
 notebook_folders, notebook_notes, notebook_save_jobs and notebook_cleanup to the shared database.
-Fresh initialization and the narrow upgrade share DDL. Startup validates the supported product and
-template layout and foreign keys before upgrade, creates notebook tables/indexes in the same
-immediate transaction, validates all notebook constraints/index DDL and FKs, advances the marker,
-then commits. Malformed/forged/unsupported layouts fail without deleting data. Marker 11 or older
-still requires the separately authorized offline development reset; there is no generic migration
-framework, downgrade or separate notebook database.
-
-For rollout, drain all writers first and take a consistent SQLite backup with the existing
-[backup/recovery procedure](ARCHITECTURE.md#9-data-architecture). Preserve the matching binary,
-configuration and Helix projection compatibility. Start the new binary against the selected copy;
-never run reset/clear_helix for this additive rollout. An old binary rejects marker 13. Rollback
-requires restoring the matching pre-upgrade backup and old binary while writers are drained;
-export/preserve any post-upgrade notebook writes first, because restoring loses those later writes.
-Projection failures never justify deleting canonical notes. Reopen with matching embedding/pipeline
-configuration to resume queued/expired jobs or explicitly retry a failed indexing stage. No live
-provider or Helix mutations are used in automated notebook verification.
-
+Notebook tables, durable save snapshots/jobs and cleanup tombstones are part of fresh PostgreSQL
+schema 1. There is no old-data upgrade/reset path. Startup validates the complete schema and rejects
+drift without deleting notes. Back up PostgreSQL and the matching Helix store/binary before any
+future rollout or restore; drain writers for recovery. Projection failures preserve canonical notes.
+Reopen with matching embedding/pipeline configuration to resume queued/expired jobs, or explicitly
+retry failed indexing. The historical `sqliteCommitted` field means a PostgreSQL canonical commit.
 
 ## Explicit Save editor
 

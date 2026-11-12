@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn retries_repair_published_versions_before_skipping() {
     use crate::{
-        adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+        adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
         domains::{
             documents::{
                 formats::docx::parse_docx_chunks_from_bytes, graph::query::FileChunkKeywordSearch,
@@ -68,9 +68,11 @@ async fn retries_repair_published_versions_before_skipping() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    let application = crate::integration_support::authenticated_test_application().unwrap();
-    let sqlite: SqliteClient = application.sqlite;
-    let files = DocumentStore::new(sqlite.clone());
+    let application = crate::integration_support::authenticated_test_application()
+        .await
+        .unwrap();
+    let postgres: PostgresClient = application.postgres;
+    let files = DocumentStore::new(postgres.clone());
     let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
     let writer = DocumentGraphWriter::new(helix.clone(), std::num::NonZeroUsize::new(2).unwrap());
     let mut source = Docx::default();
@@ -106,8 +108,8 @@ async fn retries_repair_published_versions_before_skipping() {
     });
     let search = DocumentSearchService::new(DocumentGraphSearch::new(helix.clone())).with_access(
         ResourceAccess::new(
-            sqlite.clone(),
-            Arc::new(DealAccessService::new(MembershipRepository::new(sqlite))),
+            postgres.clone(),
+            Arc::new(DealAccessService::new(MembershipRepository::new(postgres))),
         ),
     );
     let service = DocumentIngestionService::new(
@@ -287,7 +289,7 @@ fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
 
 #[tokio::test]
 async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batches() {
-    use crate::adapters::{helix::client::HelixClient, sqlite::client::SqliteClient};
+    use crate::adapters::{helix::client::HelixClient, postgres::client::PostgresClient};
     use axum::{routing::post, Json, Router};
     use serde_json::{json, Value};
     use std::num::NonZeroUsize;
@@ -333,7 +335,7 @@ async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batch
         );
         let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
         let service = DocumentIngestionService::new(
-            DocumentStore::new(SqliteClient::open_in_memory().unwrap()),
+            DocumentStore::new(PostgresClient::test_database().await.unwrap()),
             DocumentGraphReader::new(helix.clone()),
             DocumentGraphWriter::new(helix, dimensions),
             None,
@@ -488,7 +490,7 @@ fn shared_upload_errors_disclose_only_recovery_state() {
     let failed = failed_document(
         "synthetic.pdf".into(),
         IngestionError::BeforeCommit(
-            "provider failure containing secret details and after SQLite committed".into(),
+            "provider failure containing secret details and after PostgreSQL committed".into(),
         ),
     );
     assert!(!failed.sqlite_committed);
@@ -507,7 +509,7 @@ fn shared_upload_errors_disclose_only_recovery_state() {
 #[tokio::test]
 async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reopen() {
     use crate::{
-        adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+        adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
         app::migrations::migrate,
     };
     use axum::{routing::post, Json, Router};
@@ -548,14 +550,14 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     );
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("image-recovery.sqlite");
-    let sqlite = SqliteClient::open(&path).unwrap();
-    migrate(&sqlite).unwrap();
-    crate::integration_support::seed_identity(&sqlite, "image-test@example.com", 'i');
-    sqlite.with_connection(|c| {
+    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
+    migrate(&postgres).await.unwrap();
+    crate::integration_support::seed_identity(&postgres, "image-test@example.com", 'i').await;
+    postgres.with_connection(async |c| {
         c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,status,created_at,updated_at,engagement_type,transaction_type) VALUES('DEAL-IMAGE',1,'Image recovery','prepare','now','now','buy_side','unknown');
         INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-IMAGE',1,'owner','now','now');
-        INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-IMAGE');")
-    }).unwrap();
+        INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-IMAGE');").await
+     }).await.unwrap();
     let mut bytes = Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(1, 1)
         .write_to(&mut bytes, image::ImageOutputFormat::Png)
@@ -577,7 +579,7 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
         &accepted.document.file_id,
         &accepted.document.content_hash,
     );
-    let files = DocumentStore::new(sqlite.clone());
+    let files = DocumentStore::new(postgres.clone());
     let failure = persist_document_and_chunks(
         &files,
         &writer,
@@ -591,15 +593,15 @@ async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reop
     .unwrap_err();
     assert!(failure
         .to_string()
-        .contains("Helix indexing failed after SQLite committed"));
+        .contains("Helix indexing failed after PostgreSQL committed"));
     assert!(failure.sqlite_committed());
     let manifest = files.manifest(version.clone()).await.unwrap().unwrap();
     drop(files);
-    drop(sqlite);
+    drop(postgres);
 
-    let sqlite = SqliteClient::open(&path).unwrap();
-    migrate(&sqlite).unwrap();
-    let files = DocumentStore::new(sqlite);
+    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
+    migrate(&postgres).await.unwrap();
+    let files = DocumentStore::new(postgres);
     let recovery = files.image_assembly(&version).await.unwrap().unwrap();
     assert!(recovery.chunks.iter().all(|c| c.embedding.is_none()));
     let mut alternative = build_image_assembly(

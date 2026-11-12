@@ -1,5 +1,9 @@
 # Backend validation and authorization boundaries
 
+Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 The 2026-11-07 audit separates checks that can reject an HTTP request before product work from
 checks that require loaded state or must remain current during an operation. This document
 describes the boundary refactor; it is not a claim that all validation or authorization can be
@@ -123,7 +127,7 @@ No QuickLook code or timeout was changed.
 The ten live/browser/interactive opt-in checks were subsequently exercised at the user's request,
 as recorded below. Frontend, Tauri, and product browser walkthroughs were not rerun because their
 code and contracts were unchanged.
-The audit retained the existing uncommitted frontend, file-reference, and SQLite-pool work.
+The audit retained the existing uncommitted frontend, file-reference, and PostgreSQL-pool work.
 
 ### Requested opt-in rerun
 

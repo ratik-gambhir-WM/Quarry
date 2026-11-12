@@ -1,13 +1,14 @@
 //! Owner-scoped aggregate reads and immediate transactions; no network work under the DB lock.
 use super::model::*;
+use crate::adapters::postgres::client::Row;
+use crate::adapters::postgres::client::RowResult;
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresTransaction},
         query::{Condition as C, SortDirection as Sort, SqlBuilder as Q},
     },
     shared::error::RepositoryError as Error,
 };
-use rusqlite::Row;
 use serde_json::Value;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
@@ -23,7 +24,7 @@ pub(super) const SUMMARY: [&str; 8] = [
 ];
 #[derive(Clone)]
 pub(crate) struct NotebookRepository {
-    pub(super) sqlite: SqliteClient,
+    pub(super) postgres: PostgresClient,
 }
 pub(super) fn missing() -> Error {
     Error::NotFound("resource not found".into())
@@ -31,37 +32,44 @@ pub(super) fn missing() -> Error {
 pub(super) fn conflict() -> Error {
     Error::Conflict("note revision conflict; reload before saving".into())
 }
-pub(super) fn owned(tx: &SqliteTransaction<'_>, owner: i64, notebook: &str) -> Result<Notebook> {
+pub(super) async fn owned(
+    tx: &PostgresTransaction,
+    owner: i64,
+    notebook: &str,
+) -> Result<Notebook> {
     tx.read_one_with(
         Q::select("notebooks")
             .and_where(C::equal("notebook_id", notebook))
             .and_where(C::equal("user_id", owner))
             .build(),
         notebook_row,
-    )?
+    )
+    .await?
     .ok_or_else(missing)
 }
-pub(super) fn deal_owned(tx: &SqliteTransaction<'_>, owner: i64, deal: &str) -> Result<()> {
+pub(super) async fn deal_owned(tx: &PostgresTransaction, owner: i64, deal: &str) -> Result<()> {
     crate::domains::memberships::require_deal(
         tx,
         deal,
         owner,
         crate::domains::memberships::model::Capability::Read,
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
-pub(super) fn folder(tx: &SqliteTransaction<'_>, notebook: &str, id: &str) -> Result<Folder> {
+pub(super) async fn folder(tx: &PostgresTransaction, notebook: &str, id: &str) -> Result<Folder> {
     tx.read_one_with(
         Q::select("notebook_folders")
             .and_where(C::equal("notebook_id", notebook))
             .and_where(C::equal("folder_id", id))
             .build(),
         folder_row,
-    )?
+    )
+    .await?
     .ok_or_else(missing)
 }
-pub(super) fn note(tx: &SqliteTransaction<'_>, notebook: &str, id: &str) -> Result<Note> {
+pub(super) async fn note(tx: &PostgresTransaction, notebook: &str, id: &str) -> Result<Note> {
     let note = tx
         .read_one_with(
             Q::select("notebook_notes")
@@ -69,7 +77,8 @@ pub(super) fn note(tx: &SqliteTransaction<'_>, notebook: &str, id: &str) -> Resu
                 .and_where(C::equal("note_id", id))
                 .build(),
             note_row,
-        )?
+        )
+        .await?
         .ok_or_else(missing)?;
     if note.summary.content_schema_version != 1
         || !(1..=MAX_REVISION).contains(&note.summary.revision)
@@ -81,8 +90,8 @@ pub(super) fn note(tx: &SqliteTransaction<'_>, notebook: &str, id: &str) -> Resu
     Ok(note)
 }
 impl NotebookRepository {
-    pub(crate) fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub(crate) fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
     pub(super) async fn create(
         &self,
@@ -91,10 +100,11 @@ impl NotebookRepository {
         deal: Option<String>,
     ) -> Result<Notebook> {
         let id = uuid::Uuid::new_v4().to_string();
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 if let Some(deal) = &deal {
-                    deal_owned(tx, owner, deal)?;
+                    deal_owned(tx, owner, deal).await?;
                 }
                 let time = now();
                 tx.write(
@@ -106,14 +116,18 @@ impl NotebookRepository {
                         .value("created_at", &time)
                         .value("updated_at", time)
                         .build(),
-                )?;
-                owned(tx, owner, &id)
+                )
+                .await?;
+                owned(tx, owner, &id).await
             })
             .await
     }
     pub(super) async fn get(&self, owner: i64, id: String) -> Result<Notebook> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| owned(tx, owner, &id))
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &id).await
+            })
             .await
     }
     pub(super) async fn update(
@@ -123,11 +137,12 @@ impl NotebookRepository {
         title: Option<String>,
         deal: PatchField<String>,
     ) -> Result<Notebook> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let previous = owned(tx, owner, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let previous = owned(tx, owner, &id).await?;
                 if let PatchField::Value(deal) = &deal {
-                    deal_owned(tx, owner, deal)?;
+                    deal_owned(tx, owner, deal).await?;
                 }
                 tx.write(
                     Q::update("notebooks")
@@ -136,31 +151,35 @@ impl NotebookRepository {
                         .set("updated_at", now())
                         .and_where(C::equal("notebook_id", &id))
                         .build(),
-                )?;
-                owned(tx, owner, &id)
+                )
+                .await?;
+                owned(tx, owner, &id).await
             })
             .await
     }
     pub(super) async fn list(&self, owner: i64, options: ListOptions) -> Result<Page<Notebooks>> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let mut q = Q::select("notebooks").and_where(C::equal("user_id", owner));
                 if let Some(deal) = &options.relationship {
                     if deal == "none" {
                         q = q.and_where(C::is_null("deal_id"));
                     } else {
-                        deal_owned(tx, owner, deal)?;
+                        deal_owned(tx, owner, deal).await?;
                         q = q.and_where(C::equal("deal_id", deal.as_str()));
                     }
                 }
-                let rows = tx.read_with(
-                    q.order_by("updated_at", Sort::Descending)
-                        .order_by("notebook_id", Sort::Ascending)
-                        .limit(options.limit + 1)
-                        .offset(options.offset)
-                        .build(),
-                    notebook_row,
-                )?;
+                let rows = tx
+                    .read_with(
+                        q.order_by("updated_at", Sort::Descending)
+                            .order_by("notebook_id", Sort::Ascending)
+                            .limit(options.limit + 1)
+                            .offset(options.offset)
+                            .build(),
+                        notebook_row,
+                    )
+                    .await?;
                 Ok(Page::from_rows(rows, &options, |notebooks| Notebooks {
                     notebooks,
                 }))
@@ -168,9 +187,9 @@ impl NotebookRepository {
             .await
     }
     pub(super) async fn delete(&self, owner: i64, id: String) -> Result<()> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move { let tx = &tx;
+                owned(tx, owner, &id).await?;
                 // Include admitted creations that have not reached canonical persistence yet.
                 for table in ["notebook_notes", "notebook_save_jobs"] {
                     let mut after = String::new();
@@ -181,20 +200,20 @@ impl NotebookRepository {
                                 .and_where(C::equal("notebook_id", &id))
                                 .and_where(C::compare(
                                     "note_id",
-                                    crate::adapters::sqlite::query::ComparisonOperator::GreaterThan,
+                                    crate::adapters::postgres::query::ComparisonOperator::GreaterThan,
                                     after,
                                 ))
                                 .order_by("note_id", Sort::Ascending)
                                 .limit(500)
                                 .build(),
                             |r| r.get::<_, String>(0),
-                        )?;
+                        ).await?;
                         let Some(last) = ids.last() else {
                             break;
                         };
                         after = last.clone();
                         for note in ids {
-                            enqueue_cleanup(tx, owner, &note)?;
+                            enqueue_cleanup(tx, owner, &note).await?;
                         }
                     }
                 }
@@ -202,9 +221,9 @@ impl NotebookRepository {
                     Q::delete_from("notebooks")
                         .and_where(C::equal("notebook_id", id))
                         .build(),
-                )?;
+                ).await?;
                 Ok(())
-            })
+             })
             .await
     }
     pub(super) async fn create_folder(
@@ -213,9 +232,10 @@ impl NotebookRepository {
         notebook: String,
         name: String,
     ) -> Result<Folder> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
                 let id = uuid::Uuid::new_v4().to_string();
                 let time = now();
                 tx.write(
@@ -226,8 +246,9 @@ impl NotebookRepository {
                         .value("created_at", &time)
                         .value("updated_at", time)
                         .build(),
-                )?;
-                folder(tx, &notebook, &id)
+                )
+                .await?;
+                folder(tx, &notebook, &id).await
             })
             .await
     }
@@ -237,10 +258,11 @@ impl NotebookRepository {
         notebook: String,
         id: String,
     ) -> Result<Folder> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                folder(tx, &notebook, &id)
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                folder(tx, &notebook, &id).await
             })
             .await
     }
@@ -251,18 +273,20 @@ impl NotebookRepository {
         id: String,
         name: String,
     ) -> Result<Folder> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                folder(tx, &notebook, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                folder(tx, &notebook, &id).await?;
                 tx.write(
                     Q::update("notebook_folders")
                         .set("name", name)
                         .set("updated_at", now())
                         .and_where(C::equal("folder_id", &id))
                         .build(),
-                )?;
-                folder(tx, &notebook, &id)
+                )
+                .await?;
+                folder(tx, &notebook, &id).await
             })
             .await
     }
@@ -272,18 +296,21 @@ impl NotebookRepository {
         notebook: String,
         options: ListOptions,
     ) -> Result<Page<Folders>> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                let rows = tx.read_with(
-                    Q::select("notebook_folders")
-                        .and_where(C::equal("notebook_id", notebook))
-                        .order_by("folder_id", Sort::Ascending)
-                        .limit(options.limit + 1)
-                        .offset(options.offset)
-                        .build(),
-                    folder_row,
-                )?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                let rows = tx
+                    .read_with(
+                        Q::select("notebook_folders")
+                            .and_where(C::equal("notebook_id", notebook))
+                            .order_by("folder_id", Sort::Ascending)
+                            .limit(options.limit + 1)
+                            .offset(options.offset)
+                            .build(),
+                        folder_row,
+                    )
+                    .await?;
                 Ok(Page::from_rows(rows, &options, |folders| Folders {
                     folders,
                 }))
@@ -296,25 +323,28 @@ impl NotebookRepository {
         notebook: String,
         id: String,
     ) -> Result<()> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                folder(tx, &notebook, &id)?;
-                relocate_folder(tx, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                folder(tx, &notebook, &id).await?;
+                relocate_folder(tx, &id).await?;
                 tx.write(
                     Q::delete_from("notebook_folders")
                         .and_where(C::equal("folder_id", id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
     }
     pub(super) async fn get_note(&self, owner: i64, notebook: String, id: String) -> Result<Note> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                note(tx, &notebook, &id)
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                note(tx, &notebook, &id).await
             })
             .await
     }
@@ -324,9 +354,10 @@ impl NotebookRepository {
         notebook: String,
         options: ListOptions,
     ) -> Result<Page<Notes>> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
                 let mut q = Q::select("notebook_notes")
                     .columns(SUMMARY)
                     .and_where(C::equal("notebook_id", &notebook));
@@ -334,31 +365,34 @@ impl NotebookRepository {
                     if id == "none" {
                         q = q.and_where(C::is_null("folder_id"));
                     } else {
-                        folder(tx, &notebook, id)?;
+                        folder(tx, &notebook, id).await?;
                         q = q.and_where(C::equal("folder_id", id.as_str()));
                     }
                 }
                 if let Some(text) = &options.query {
                     q = q.and_where(C::literal_substring("title", text));
                 }
-                let rows = tx.read_with(
-                    q.order_by("updated_at", Sort::Descending)
-                        .order_by("note_id", Sort::Ascending)
-                        .limit(options.limit + 1)
-                        .offset(options.offset)
-                        .build(),
-                    summary_row,
-                )?;
+                let rows = tx
+                    .read_with(
+                        q.order_by("updated_at", Sort::Descending)
+                            .order_by("note_id", Sort::Ascending)
+                            .limit(options.limit + 1)
+                            .offset(options.offset)
+                            .build(),
+                        summary_row,
+                    )
+                    .await?;
                 Ok(Page::from_rows(rows, &options, |notes| Notes { notes }))
             })
             .await
     }
     pub(super) async fn delete_note(&self, owner: i64, notebook: String, id: String) -> Result<()> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                note(tx, &notebook, &id)?;
-                enqueue_cleanup(tx, owner, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                note(tx, &notebook, &id).await?;
+                enqueue_cleanup(tx, owner, &id).await?;
                 tx.write(
                     Q::update("notebook_save_jobs")
                         .set("status", "failed")
@@ -369,18 +403,20 @@ impl NotebookRepository {
                         .and_where(C::equal("note_id", &id))
                         .and_where(C::in_values("status", ["queued", "processing"]))
                         .build(),
-                )?;
+                )
+                .await?;
                 tx.write(
                     Q::delete_from("notebook_notes")
                         .and_where(C::equal("note_id", id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
     }
 }
-pub(super) fn relocate_folder(tx: &SqliteTransaction<'_>, id: &str) -> Result<()> {
+pub(super) async fn relocate_folder(tx: &PostgresTransaction, id: &str) -> Result<()> {
     tx.write(
         Q::update("notebook_notes")
             .set("folder_id", None::<String>)
@@ -388,10 +424,11 @@ pub(super) fn relocate_folder(tx: &SqliteTransaction<'_>, id: &str) -> Result<()
             .increment("revision")
             .and_where(C::equal("folder_id", id))
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-fn enqueue_cleanup(tx: &SqliteTransaction<'_>, owner: i64, note: &str) -> Result<()> {
+async fn enqueue_cleanup(tx: &PostgresTransaction, owner: i64, note: &str) -> Result<()> {
     tx.write(
         Q::insert_into("notebook_cleanup")
             .value("note_id", note)
@@ -399,10 +436,11 @@ fn enqueue_cleanup(tx: &SqliteTransaction<'_>, owner: i64, note: &str) -> Result
             .value("created_at", now())
             .on_conflict_do_nothing(["note_id"])
             .build(),
-    )?;
+    )
+    .await?;
     Ok(())
 }
-fn notebook_row(r: &Row<'_>) -> rusqlite::Result<Notebook> {
+fn notebook_row(r: &Row<'_>) -> RowResult<Notebook> {
     Ok(Notebook {
         notebook_id: r.get("notebook_id")?,
         title: r.get("title")?,
@@ -411,7 +449,7 @@ fn notebook_row(r: &Row<'_>) -> rusqlite::Result<Notebook> {
         updated_at: r.get("updated_at")?,
     })
 }
-fn folder_row(r: &Row<'_>) -> rusqlite::Result<Folder> {
+fn folder_row(r: &Row<'_>) -> RowResult<Folder> {
     Ok(Folder {
         folder_id: r.get("folder_id")?,
         notebook_id: r.get("notebook_id")?,
@@ -420,7 +458,7 @@ fn folder_row(r: &Row<'_>) -> rusqlite::Result<Folder> {
         updated_at: r.get("updated_at")?,
     })
 }
-fn summary_row(r: &Row<'_>) -> rusqlite::Result<NoteSummary> {
+fn summary_row(r: &Row<'_>) -> RowResult<NoteSummary> {
     Ok(NoteSummary {
         note_id: r.get("note_id")?,
         notebook_id: r.get("notebook_id")?,
@@ -432,11 +470,10 @@ fn summary_row(r: &Row<'_>) -> rusqlite::Result<NoteSummary> {
         updated_at: r.get("updated_at")?,
     })
 }
-fn note_row(r: &Row<'_>) -> rusqlite::Result<Note> {
+fn note_row(r: &Row<'_>) -> RowResult<Note> {
     let json: String = r.get("blocks_json")?;
-    let blocks: Value = serde_json::from_str(&json).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-    })?;
+    let blocks: Value = serde_json::from_str(&json)
+        .map_err(crate::adapters::postgres::client::PostgresError::decode)?;
     Ok(Note {
         summary: summary_row(r)?,
         blocks,

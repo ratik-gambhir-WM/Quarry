@@ -12,8 +12,8 @@ use axum::http::HeaderValue;
 const DEFAULT_API_PORT: u16 = 3001;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_CORS_ORIGINS: &str = "http://127.0.0.1:1420,http://localhost:1420";
-const DEFAULT_DATABASE_FILE_NAME: &str = "quarry.sqlite3";
-const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6969";
+
+const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6970";
 const DEFAULT_HELIX_VECTOR_DIMENSION: usize = 1536;
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -50,8 +50,11 @@ pub struct HttpConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct SqliteConfig {
-    pub path: PathBuf,
+pub struct PostgresConfig {
+    pub url: SecretString,
+    pub max_connections: u32,
+    pub acquire_timeout: Duration,
+    pub statement_timeout: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -114,7 +117,7 @@ pub struct PromptConfig {
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub http: HttpConfig,
-    pub sqlite: SqliteConfig,
+    pub postgres: PostgresConfig,
     pub helix: HelixConfig,
     pub openai: Option<OpenAiConfig>,
     pub wm_ai: Option<WmAiConfig>,
@@ -150,7 +153,7 @@ impl AppConfig {
 
         Ok(Self {
             http: parse_http_config(&values)?,
-            sqlite: parse_sqlite_config(&values),
+            postgres: parse_postgres_config(&values)?,
             helix,
             openai,
             wm_ai: parse_wm_ai_config(&values)?,
@@ -177,8 +180,11 @@ impl Default for AppConfig {
                     .collect(),
                 request_timeout: Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECONDS),
             },
-            sqlite: SqliteConfig {
-                path: PathBuf::from("data").join(DEFAULT_DATABASE_FILE_NAME),
+            postgres: PostgresConfig {
+                url: SecretString::new("postgresql://localhost/Quarry"),
+                max_connections: 16,
+                acquire_timeout: Duration::from_secs(5),
+                statement_timeout: Duration::from_secs(30),
             },
             helix: HelixConfig {
                 url: DEFAULT_HELIX_URL.to_string(),
@@ -287,15 +293,54 @@ fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, Str
     })
 }
 
-fn parse_sqlite_config(values: &HashMap<String, String>) -> SqliteConfig {
-    let path = value(values, "QUARRY_DATABASE_PATH")
-        .map(PathBuf::from)
-        .or_else(|| {
-            value(values, "QUARRY_DATA_DIR")
-                .map(|directory| PathBuf::from(directory).join(DEFAULT_DATABASE_FILE_NAME))
-        })
-        .unwrap_or_else(|| PathBuf::from("data").join(DEFAULT_DATABASE_FILE_NAME));
-    SqliteConfig { path }
+fn parse_postgres_config(values: &HashMap<String, String>) -> Result<PostgresConfig, String> {
+    let url = value(values, "QUARRY_DATABASE_URL").ok_or("QUARRY_DATABASE_URL is required")?;
+    let parsed =
+        url::Url::parse(url).map_err(|_| "QUARRY_DATABASE_URL must be a valid PostgreSQL URL")?;
+    if !matches!(parsed.scheme(), "postgres" | "postgresql")
+        || parsed.host_str().is_none()
+        || parsed.path().trim_matches('/').is_empty()
+        || parsed.fragment().is_some()
+    {
+        return Err("QUARRY_DATABASE_URL must select a PostgreSQL host and database".into());
+    }
+    fn bounded(
+        values: &HashMap<String, String>,
+        key: &str,
+        default: u32,
+        max: u32,
+    ) -> Result<u32, String> {
+        let n = match value(values, key) {
+            Some(v) => v
+                .parse::<u32>()
+                .map_err(|_| format!("{key} must be a positive integer"))?,
+            None => default,
+        };
+        if n == 0 || n > max {
+            return Err(format!("{key} must be between 1 and {max}"));
+        }
+        Ok(n)
+    }
+    let max_connections = bounded(values, "QUARRY_DATABASE_MAX_CONNECTIONS", 16, 128)?;
+    if max_connections < 2 {
+        return Err("QUARRY_DATABASE_MAX_CONNECTIONS must be between 2 and 128 (one connection retains writer ownership)".into());
+    }
+    Ok(PostgresConfig {
+        url: SecretString::new(url),
+        max_connections,
+        acquire_timeout: Duration::from_secs(u64::from(bounded(
+            values,
+            "QUARRY_DATABASE_ACQUIRE_TIMEOUT_SECONDS",
+            5,
+            60,
+        )?)),
+        statement_timeout: Duration::from_secs(u64::from(bounded(
+            values,
+            "QUARRY_DATABASE_STATEMENT_TIMEOUT_SECONDS",
+            30,
+            300,
+        )?)),
+    })
 }
 
 fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, String> {

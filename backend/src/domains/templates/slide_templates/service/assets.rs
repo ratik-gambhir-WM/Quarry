@@ -68,15 +68,41 @@ fn externalize_assets_with(
     Ok((document, assets))
 }
 
-pub(super) fn hydrate_template_assets(
+pub(super) async fn hydrate_template_assets(
     document: &mut CanvasDocument,
     repository: &dyn TemplateRepository,
 ) -> SlideResult<()> {
-    hydrate_assets(document, |template_id, asset_id| {
-        repository
-            .find_asset(template_id, asset_id)
-            .map(|asset| asset.map(Cow::Owned))
-            .map_err(SlideTemplateError::internal)
+    let mut assets = HashMap::new();
+    let mut bytes = 0usize;
+    for element in document
+        .presentation
+        .slides
+        .iter()
+        .flat_map(|s| &s.elements)
+    {
+        if let Element::Image(image) = element {
+            if let Some((template, id)) = parse_asset_path(&image.src) {
+                let key = (template.to_owned(), id.to_owned());
+                if let std::collections::hash_map::Entry::Vacant(entry) = assets.entry(key) {
+                    if let Some(asset) = repository
+                        .find_asset(template, id)
+                        .await
+                        .map_err(SlideTemplateError::internal)?
+                    {
+                        bytes = bytes.saturating_add(asset.bytes.len());
+                        if bytes > MAX_EMBEDDED_IMAGE_BYTES {
+                            return Err(document_too_large());
+                        }
+                        entry.insert(asset);
+                    }
+                }
+            }
+        }
+    }
+    hydrate_assets(document, |template, id| {
+        Ok(assets
+            .get(&(template.to_owned(), id.to_owned()))
+            .map(Cow::Borrowed))
     })
 }
 

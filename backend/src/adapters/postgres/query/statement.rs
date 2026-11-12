@@ -23,6 +23,25 @@ pub struct SqlQuery {
 
 impl SqlQuery {
     pub(crate) fn new(sql: String, parameters: Vec<SqlValue>, kind: QueryKind) -> Self {
+        let mut position = 0;
+        let mut quoted = false;
+        let mut literal = false;
+        let sql = sql
+            .chars()
+            .map(|c| {
+                match c {
+                    '"' if !literal => quoted = !quoted,
+                    '\'' if !quoted => literal = !literal,
+                    _ => {}
+                }
+                if c == '?' && !quoted && !literal {
+                    position += 1;
+                    format!("${position}")
+                } else {
+                    c.to_string()
+                }
+            })
+            .collect();
         Self {
             sql,
             parameters,

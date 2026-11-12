@@ -1,9 +1,9 @@
 use super::*;
-use crate::adapters::sqlite::client::SqliteClientError;
+use crate::adapters::postgres::client::PostgresError;
 
-fn build_error(result: Result<SqlQuery, SqliteClientError>) -> SqlBuilderError {
+fn build_error(result: Result<SqlQuery, PostgresError>) -> SqlBuilderError {
     match result.unwrap_err() {
-        SqliteClientError::QueryBuild(error) => error,
+        PostgresError::QueryBuild(error) => error,
         error => panic!("expected query construction error, got {error}"),
     }
 }
@@ -37,7 +37,7 @@ fn all_builders_preserve_construction_error_sources() {
             error.source().unwrap().downcast_ref::<SqlBuilderError>(),
             Some(&expected)
         );
-        assert!(matches!(error, SqliteClientError::QueryBuild(_)));
+        assert!(matches!(error, PostgresError::QueryBuild(_)));
     }
 }
 
@@ -55,7 +55,7 @@ fn builds_parameterized_selects() {
 
     assert_eq!(
         query.sql(),
-        "SELECT \"id\", \"email\" FROM \"users\" WHERE (\"status\" = ?) AND (\"role\" IN (?, ?)) ORDER BY \"updated_at\" DESC LIMIT 25 OFFSET 50"
+        "SELECT \"id\", \"email\" FROM \"users\" WHERE (\"status\" = $1) AND (\"role\" IN ($2, $3)) ORDER BY \"updated_at\" DESC NULLS LAST LIMIT 25 OFFSET 50"
     );
     assert_eq!(
         query.parameters(),
@@ -88,7 +88,7 @@ fn builds_insert_update_and_delete_queries() {
         .unwrap();
     assert_eq!(
         insert.sql(),
-        "INSERT INTO \"users\" (\"email\", \"active\") VALUES (?, ?)"
+        "INSERT INTO \"users\" (\"email\", \"active\") VALUES ($1, $2) RETURNING id"
     );
 
     let update = SqlBuilder::update("users")
@@ -98,14 +98,14 @@ fn builds_insert_update_and_delete_queries() {
         .unwrap();
     assert_eq!(
         update.sql(),
-        "UPDATE \"users\" SET \"active\" = ? WHERE (\"id\" = ?)"
+        "UPDATE \"users\" SET \"active\" = $1 WHERE (\"id\" = $2)"
     );
 
     let delete = SqlBuilder::delete_from("users")
         .and_where(Condition::equal("id", 7_i64))
         .build()
         .unwrap();
-    assert_eq!(delete.sql(), "DELETE FROM \"users\" WHERE (\"id\" = ?)");
+    assert_eq!(delete.sql(), "DELETE FROM \"users\" WHERE (\"id\" = $1)");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn builds_parameterized_insert_on_conflict_update() {
 
     assert_eq!(
         query.sql(),
-        "INSERT INTO \"deal_metadata\" (\"deal_id\", \"key_questions_json\", \"document_count\", \"data_room_size_bytes\") VALUES (?, ?, ?, ?) ON CONFLICT (\"deal_id\") DO UPDATE SET \"key_questions_json\" = excluded.\"key_questions_json\", \"document_count\" = excluded.\"document_count\", \"data_room_size_bytes\" = excluded.\"data_room_size_bytes\", \"updated_at\" = CURRENT_TIMESTAMP"
+        "INSERT INTO \"deal_metadata\" (\"deal_id\", \"key_questions_json\", \"document_count\", \"data_room_size_bytes\") VALUES ($1, $2, $3, $4) ON CONFLICT (\"deal_id\") DO UPDATE SET \"key_questions_json\" = excluded.\"key_questions_json\", \"document_count\" = excluded.\"document_count\", \"data_room_size_bytes\" = excluded.\"data_room_size_bytes\", \"updated_at\" = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"
     );
     assert_eq!(
         query.parameters(),
@@ -149,7 +149,7 @@ fn supports_bound_conflict_updates_and_do_nothing() {
         .unwrap();
     assert_eq!(
         update.sql(),
-        "INSERT INTO \"users\" (\"email\") VALUES (?) ON CONFLICT (\"email\") DO UPDATE SET \"status\" = ?"
+        "INSERT INTO \"users\" (\"email\") VALUES ($1) ON CONFLICT (\"email\") DO UPDATE SET \"status\" = $2 RETURNING id"
     );
     assert_eq!(
         update.parameters(),
@@ -166,7 +166,7 @@ fn supports_bound_conflict_updates_and_do_nothing() {
         .unwrap();
     assert_eq!(
         do_nothing.sql(),
-        "INSERT INTO \"users\" (\"email\") VALUES (?) ON CONFLICT (\"email\") DO NOTHING"
+        "INSERT INTO \"users\" (\"email\") VALUES ($1) ON CONFLICT (\"email\") DO NOTHING RETURNING id"
     );
 }
 
@@ -252,9 +252,25 @@ fn join_and_where_comparisons_share_null_and_parameter_semantics() {
                 }
                 _ => (format!("{sql_operator} ?"), vec![value.clone(), value]),
             };
-            assert_eq!(query.sql(), format!(
-                "SELECT * FROM \"users\" LEFT JOIN \"memberships\" ON (\"memberships\".\"role\" {comparison}) WHERE (\"users\".\"role\" {comparison})"
-            ));
+            let predicate = |table: &str, n| {
+                let column = format!("\"{table}\".\"role\"");
+                if matches!(
+                    operator,
+                    ComparisonOperator::Like | ComparisonOperator::NotLike
+                ) {
+                    format!("translate({column}::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') {sql_operator} translate(${n}::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')")
+                } else {
+                    format!("{column} {}", comparison.replace('?', &format!("${n}")))
+                }
+            };
+            assert_eq!(
+                query.sql(),
+                format!(
+                    "SELECT * FROM \"users\" LEFT JOIN \"memberships\" ON ({}) WHERE ({})",
+                    predicate("memberships", 1),
+                    predicate("users", 2)
+                )
+            );
             assert_eq!(query.parameters(), parameters);
         }
     }
@@ -270,7 +286,7 @@ fn updates_keep_assignments_increments_and_conditions_in_parameter_order() {
         .and_where(Condition::equal("id", "note-1"))
         .build()
         .unwrap();
-    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"title\" = ?, \"content\" = ?, \"revision\" = \"revision\" + 1, \"access_revision\" = \"access_revision\" + 1 WHERE (\"id\" = ?)");
+    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"title\" = $1, \"content\" = $2, \"revision\" = \"revision\" + 1, \"access_revision\" = \"access_revision\" + 1 WHERE (\"id\" = $3)");
     assert_eq!(
         query.parameters(),
         &["Changed".into(), "Body".into(), "note-1".into()]
@@ -328,7 +344,7 @@ fn builds_aliased_joins_with_composable_on_conditions() {
 
     assert_eq!(
         query.sql(),
-        "SELECT \"u\".\"id\", \"m\".\"role\" FROM \"users\" AS \"u\" LEFT JOIN \"memberships\" AS \"m\" ON (\"u\".\"id\" = \"m\".\"user_id\") AND (\"m\".\"active\" = ?) WHERE (\"u\".\"status\" = ?)"
+        "SELECT \"u\".\"id\", \"m\".\"role\" FROM \"users\" AS \"u\" LEFT JOIN \"memberships\" AS \"m\" ON (\"u\".\"id\" = \"m\".\"user_id\") AND (\"m\".\"active\" = $1) WHERE (\"u\".\"status\" = $2)"
     );
     assert_eq!(
         query.parameters(),
@@ -372,7 +388,7 @@ fn validates_join_conditions() {
 }
 
 #[test]
-fn count_rows_and_fts_keep_bound_input() {
+fn count_rows_keeps_bound_input() {
     let query = SqlBuilder::select("templates")
         .and_where(Condition::equal("template_id", "value' OR 1=1"))
         .count_rows()
@@ -380,31 +396,6 @@ fn count_rows_and_fts_keep_bound_input() {
         .unwrap();
     assert!(query.sql().starts_with("SELECT COUNT(*)"));
     assert_eq!(query.parameters(), &[SqlValue::from("value' OR 1=1")]);
-    let query = SqlBuilder::select("documents_fts")
-        .and_where(Condition::full_text_match(
-            "documents_fts",
-            "cloud OR attack",
-        ))
-        .order_by_bm25("documents_fts", vec![0.0, 2.0])
-        .order_by("id", SortDirection::Ascending)
-        .limit(10)
-        .build()
-        .unwrap();
-    assert!(!query.sql().contains("cloud OR attack"));
-    assert!(query.sql().contains("bm25("));
-    assert_eq!(query.parameters().len(), 3);
-}
-
-#[test]
-fn fts_ranking_rejects_nonfinite_weights() {
-    assert_eq!(
-        build_error(
-            SqlBuilder::select("documents_fts")
-                .order_by_bm25("documents_fts", vec![f64::NAN])
-                .build()
-        ),
-        SqlBuilderError::NonFiniteRankWeight
-    );
 }
 
 #[test]
@@ -428,7 +419,8 @@ fn notebook_query_increment_and_literal_substring_remain_typed_and_bound() {
         .build()
         .unwrap();
     assert!(!query.sql().contains("OR 1=1"));
-    assert!(query.sql().contains("LIKE ? ESCAPE"));
+    assert!(query.sql().contains("LIKE translate($1::text"));
+    assert!(query.sql().contains("ESCAPE"));
     assert_eq!(
         query.parameters(),
         &[SqlValue::Text("%\\%\\_\\\\' OR 1=1%".into())]

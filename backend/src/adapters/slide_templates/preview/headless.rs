@@ -142,7 +142,14 @@ impl HeadlessTemplatePreviewGenerator {
             json!({"patterns":[{"urlPattern":"*","requestStage":"Request"}]}),
         )?;
         let input = serde_json::to_string(document)?;
-        cdp.call("Page.addScriptToEvaluateOnNewDocument",json!({"source":format!("Object.defineProperty(window,'__TTS_MERMAID_TEMPLATE_PREVIEW_INPUT__',{{configurable:true,value:{input}}});")}))?;
+        cdp.call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({
+                "source": format!(
+                    "Object.defineProperty(window,'__TTS_MERMAID_TEMPLATE_PREVIEW_INPUT__',{{configurable:true,value:{input}}});"
+                )
+            }),
+        )?;
         cdp.deadline = Instant::now() + self.timeout;
         let navigation = cdp.call("Page.navigate", json!({"url":url.as_str()}))?;
         ensure!(
@@ -157,7 +164,10 @@ impl HeadlessTemplatePreviewGenerator {
         }
         cdp.deadline = Instant::now() + self.timeout;
         loop {
-            let result=cdp.evaluate("document.querySelector('[data-preview-state]')?.getAttribute('data-preview-state')",false)?;
+            let result = cdp.evaluate(
+                "document.querySelector('[data-preview-state]')?.getAttribute('data-preview-state')",
+                false,
+            )?;
             if let Some(state) = result.as_str() {
                 ensure!(state == "ready", "preview page could not render slide");
                 break;

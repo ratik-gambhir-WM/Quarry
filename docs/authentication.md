@@ -1,5 +1,9 @@
 # Password authentication and session design
 
+Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 Implemented 2026-10-28 for the web and Tauri distributions. This document describes the current
 identity boundary; organization membership, SSO, recovery, and production deployment remain future work.
 
@@ -13,7 +17,7 @@ trimming or normalization. Optional job title is display data and never an autho
 
 Passwords are salted Argon2id PHC hashes (19 MiB, two iterations, parallelism one). A four-permit
 worker semaphore stays held inside the blocking task, even if its HTTP caller times out. Sessions
-use 32 random bytes encoded as base64url; SQLite stores only the SHA-256 token digest. SHA-256 is
+use 32 random bytes encoded as base64url; PostgreSQL stores only the SHA-256 token digest. SHA-256 is
 not used for passwords. Each session expires after eight hours, allows explicit revocation, and
 survives a backend restart. Expired records are rejected regardless of bounded cleanup progress.
 
@@ -47,7 +51,7 @@ New clients use `/api/v1`; `/api` has identical authentication policy.
 Registration accepts `{username,password,email,firstName,lastName,jobTitle?}`; login accepts
 `{username,password}`, with `username` accepting either the registered username or email.
 Login trims and ASCII-lowercases either identity and selects the corresponding unique user column;
-usernames cannot contain `@`, so the two forms are unambiguous. Both columns already have SQLite
+usernames cannot contain `@`, so the two forms are unambiguous. Both columns already have PostgreSQL
 unique constraints and registration normalizes them; no schema change is needed. Auth bodies are
 capped at 8 KiB, reject unknown fields, and normalize JSON rejections to a sanitized 400 envelope. Duplicate username/email returns 409. Responses use
 `Cache-Control: no-store`. Public user DTOs never contain password hashes or provider keys.
@@ -108,41 +112,19 @@ The `/_internal/template-preview` route stays outside the product session guard.
 injected snapshots for Chromium and makes no authenticated API requests. It is not a secret
 bypass and supplies no backend credentials.
 
-## Schema 15 and development reset
+<a id="schema-15-and-development-reset"></a>
+## Canonical storage and fresh deployment
 
-Schema 13 added personal notebooks and durable save jobs. Schema 14 preserves validated schemas
-12/13 while adding deal memberships, teams, activity, uploader attribution, exact identity manifests
-and canonical deal document scope. A coordinated drained graph/index migration is required before
-startup serves existing document stores; see [rollout and recovery](shared-deal-projects.md#schema-14-rollout-and-recovery). Schema 12
-introduced the deal-status CHECK with nine diligence stages. Schema 11 and older
-layouts require the same explicit reset; no status remapping or credential backfill runs.
-Schema 15 adds immutable image recovery checkpoints without changing authentication or graph scope;
-see [image recovery rollout](shared-deal-projects.md#schema-15-image-recovery).
-Schema 16 preserves authentication while renaming the template classification state table and
-activating durable background classification/embedding; see [classified import recovery](slide-templates-migration.md#asynchronous-classified-imports-schema-16).
-Stop old clients/writers and rebuild/reload matching web and desktop clients after reset.
+PostgreSQL schema 1 includes password hashes, token digests, sessions, memberships and image
+checkpoints alongside all product records. Registration commits the user and initial session
+together. The existing password/session, per-resource ownership and consistency-header contracts
+remain unchanged. Direct configuration requires a server-only `QUARRY_DATABASE_URL`.
 
-`users` replaces `api_key`/authorization-looking `role` with username, password_hash and optional
-job_title. `auth_sessions` owns token digests, user FKs, creation/expiry/revocation times and owner/
-expiry indexes. Registration commits user and initial session together. SQLite remains canonical;
-Helix is a recoverable projection, not an identity database.
-
-Deploy the backend and updated web/desktop clients together: old profile-only clients cannot
-authenticate against the new contract. There is no conversion from old profiles to passwords. Normal startup initializes an empty
-database, preserves and upgrades validated schema 12/13/14/15, or validates schema 16; other older/newer/forged
-layouts fail without erasing records. See [notebook rollout and recovery](notebook-api.md#additive-schema-12--13-and-recovery)
-for backup, drained rollout and binary/backup rollback requirements. Use the
-explicit offline `reset_development --discard <absolute-disposable-database-path>` binary after
-stopping producers. Reset discards all dependent product and embedded template records together,
-including sessions, chats, blobs, notebooks/folders/notes/jobs/cleanup, previews, classification/embeddings and memberships. It is never
-called automatically at startup. New data survives normal restart.
-
-The single canonical local pair is `backend/data/quarry.sqlite3` and the launcher-managed
-`helix-quarry-v3-dev` on loopback port 6969. Pair a deliberate SQLite reset with a fresh isolated
-Helix store so recycled user IDs cannot expose old projections. The local launcher recreates the
-selected container from the digest pinned in `backend/helix.toml`; inspect its mounts before
-replacement. Leave unrelated test containers and historical standalone databases untouched.
-There is no recovery of discarded records without an intentionally retained snapshot.
+This deployment starts with a fresh `Quarry` database and a separate
+`helix-quarry-postgres-dev` store on port 6970. Existing SQLite files and the old port-6969 graph
+are preserved; no profiles, passwords or documents are imported or reset. Startup initializes or
+validates version 1 and refuses incompatible nonempty layouts without deletion. Follow
+[PostgreSQL storage and Helix](postgresql-storage.md) for backups and drained recovery.
 
 ## Verification and limits
 

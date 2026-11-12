@@ -4,7 +4,11 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_return() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let classification = Arc::new(SlideClassificationService::new(
         SlideClassificationServiceOptions {
             classifier: Arc::new(support::FixtureClassifier),
@@ -25,20 +29,22 @@ async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_re
         false,
     ));
     let (committed, saved) = tokio::sync::oneshot::channel();
-    let (release, released) = std::sync::mpsc::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
     let request_studio = studio.clone();
     let request = tokio::spawn(async move {
         request_studio
             .run_queued(
                 request_studio.worker.as_ref().unwrap().clone(),
-                move |import, _, cancellation| {
-                    let result = import.queue_classified_import(
-                        include_bytes!("../../../../fixtures/slide_templates/pptx/styled.pptx"),
-                        TemplateKind::Diagram,
-                        &cancellation,
-                    )?;
+                move |import, _, cancellation| async move {
+                    let result = import
+                        .queue_classified_import(
+                            include_bytes!("../../../../fixtures/slide_templates/pptx/styled.pptx"),
+                            TemplateKind::Diagram,
+                            &cancellation,
+                        )
+                        .await?;
                     committed.send(result.template_id.clone()).unwrap();
-                    released.recv().unwrap();
+                    released.await.unwrap();
                     Ok(result)
                 },
             )
@@ -50,7 +56,11 @@ async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_re
     release.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let state = repository.find_slide_classification(&id).unwrap().unwrap();
+            let state = repository
+                .find_slide_classification(&id)
+                .await
+                .unwrap()
+                .unwrap();
             if state.embedding_status == "ready" {
                 break;
             }

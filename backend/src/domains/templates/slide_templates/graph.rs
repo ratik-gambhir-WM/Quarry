@@ -1,4 +1,4 @@
-//! Recoverable Helix projection. SQLite remains authoritative for documents and retrieval artifacts.
+//! Recoverable Helix projection. PostgreSQL remains authoritative for documents and retrieval artifacts.
 use super::{
     repository::DEFAULT_APP_ID, StoredSlideClassification, StoredTemplate, StoredTemplateMetadata,
 };

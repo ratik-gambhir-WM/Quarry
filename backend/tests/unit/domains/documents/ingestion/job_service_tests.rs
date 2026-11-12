@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
     app::migrations::migrate,
     domains::{
         deals::{
@@ -9,7 +9,7 @@ use crate::{
         },
         documents::{
             graph::repository::{DocumentGraphReader, DocumentGraphWriter},
-            store::sqlite::DocumentStore,
+            store::postgres::DocumentStore,
         },
         memberships::{model::DealRole, repository::MembershipRepository},
     },
@@ -17,15 +17,14 @@ use crate::{
 
 #[tokio::test]
 async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_delivery() {
-    let db = SqliteClient::open_in_memory().unwrap();
-    migrate(&db).unwrap();
-    db.with_connection(|connection| {
+    let db = PostgresClient::test_database().await.unwrap();
+    migrate(&db).await.unwrap();
+    db.with_connection(async |connection| {
         connection.execute(
-            "INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(1,'owner','owner@example.test','Test','Owner','unusable'),(2,'viewer','viewer@example.test','Test','Viewer','unusable'),(3,'outsider','outsider@example.test','Test','Outsider','unusable')",
-            [],
-        )?;
+            "INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(1,'owner','owner@example.test','Test','Owner','unusable'),(2,'viewer','viewer@example.test','Test','Viewer','unusable'),(3,'outsider','outsider@example.test','Test','Outsider','unusable')", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+        ).await?;
         Ok(())
-    }).unwrap();
+     }).await.unwrap();
     let fields: DealFields = serde_json::from_value(serde_json::json!({
         "dealName": "Jobs",
         "dealCode": null,

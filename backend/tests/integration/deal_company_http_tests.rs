@@ -73,10 +73,10 @@ fn deal() -> Value {
     })
 }
 async fn app() -> Router {
-    let app = test_application().unwrap();
-    crate::integration_support::seed_identity(&app.sqlite, "owner@example.com", 'a');
-    crate::integration_support::seed_identity(&app.sqlite, "other@example.com", 'b');
-    crate::integration_support::with_test_credentials(app.router)
+    let app = test_application().await.unwrap();
+    crate::integration_support::seed_identity(&app.postgres, "owner@example.com", 'a').await;
+    crate::integration_support::seed_identity(&app.postgres, "other@example.com", 'b').await;
+    crate::integration_support::with_test_credentials(app.router).await
 }
 
 async fn save_metadata_links(

@@ -2,7 +2,7 @@ use super::*;
 use std::path::Path;
 
 use crate::{
-    adapters::sqlite::client::SqliteClient,
+    adapters::postgres::client::PostgresClient,
     app::migrations::migrate,
     domains::documents::{
         graph::repository::{map_document_version_response, HelixDocumentVersionResponse},
@@ -15,14 +15,14 @@ use crate::{
 const OWNER: &str = "1";
 const DEAL_ID: &str = "DEAL-FILES";
 
-fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]) {
+async fn seed_user_and_deals(state: &PostgresClient, owner: &str, deals: &[(&str, &str)]) {
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute(
                 "INSERT INTO users (id, first_name, last_name, email, username, password_hash) VALUES (?1, 'Avery', 'Analyst', ?2, ?2, 'unusable-test-hash')",
-                rusqlite::params![owner, format!("analyst{owner}@example.com")],
-            )?;
-            let user_id = connection.last_insert_rowid();
+                crate::pg_params![owner.parse::<i64>().unwrap(), format!("analyst{owner}@example.com")],
+            ).await?;
+            let user_id = owner.parse::<i64>().unwrap();
             for (deal_id, status) in deals {
                 connection.execute(
                     r#"
@@ -31,27 +31,27 @@ fn seed_user_and_deals(state: &SqliteClient, owner: &str, deals: &[(&str, &str)]
                     ) VALUES (?1, ?2, 'Project Test', ?3, '2026-01-01', '2026-02-01',
                               'buy_side', 'unknown')
                     "#,
-                    rusqlite::params![deal_id, user_id, "prepare"],
-                )?;
-                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",rusqlite::params![deal_id,user_id])?;
-                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id])?;
-                if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id])?; }
+                    crate::pg_params![deal_id, user_id, "prepare"],
+                ).await?;
+                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",crate::pg_params![deal_id,user_id]).await?;
+                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id]).await?;
+                if *status == "Archived" { connection.execute("UPDATE deals SET archived_at = '2026-01-01T00:00:00Z' WHERE deal_id = ?1", [deal_id]).await?; }
             }
             Ok(())
-        })
+         }).await
         .unwrap();
 }
 
-fn test_state() -> SqliteClient {
-    let state = empty_sqlite();
-    seed_user_and_deals(&state, OWNER, &[(DEAL_ID, "Active")]);
+async fn test_state() -> PostgresClient {
+    let state = empty_postgres().await;
+    seed_user_and_deals(&state, OWNER, &[(DEAL_ID, "Active")]).await;
     state
 }
 
-fn empty_sqlite() -> SqliteClient {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrate(&sqlite).unwrap();
-    sqlite
+async fn empty_postgres() -> PostgresClient {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrate(&postgres).await.unwrap();
+    postgres
 }
 
 fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Document {
@@ -75,7 +75,7 @@ fn document(file_id: &str, owner: &str, filename: &str, bytes: &[u8]) -> Documen
 }
 
 async fn persist_file_blob(
-    sqlite: &SqliteClient,
+    postgres: &PostgresClient,
     deal_id: &str,
     document: &Document,
     file_bytes: Vec<u8>,
@@ -89,30 +89,45 @@ async fn persist_file_blob(
             chunks: Vec::new(),
         },
     );
-    super::persist_file_blob(sqlite, file_persistence)
+    super::persist_file_blob(postgres, file_persistence)
         .await
         .map_err(|e| format!("{e:?}"))
 }
 
-fn table_counts(state: &SqliteClient) -> (i64, i64, i64) {
+async fn table_counts(state: &PostgresClient) -> (i64, i64, i64) {
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             Ok((
-                connection.query_row("SELECT COUNT(*) FROM quarry_files", [], |row| row.get(0))?,
-                connection.query_row("SELECT COUNT(*) FROM quarry_file_versions", [], |row| {
-                    row.get(0)
-                })?,
-                connection.query_row("SELECT COUNT(*) FROM quarry_file_blobs", [], |row| {
-                    row.get(0)
-                })?,
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM quarry_files",
+                        Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                        |row| row.get(0),
+                    )
+                    .await?,
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM quarry_file_versions",
+                        Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                        |row| row.get(0),
+                    )
+                    .await?,
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM quarry_file_blobs",
+                        Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                        |row| row.get(0),
+                    )
+                    .await?,
             ))
         })
+        .await
         .unwrap()
 }
 
 #[tokio::test]
 async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
-    let state = test_state();
+    let state = test_state().await;
     let file_bytes = b"binary\0file\xffbytes".to_vec();
     let document = document("file-1", DEAL_ID, "report.pdf", &file_bytes);
     let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
@@ -130,11 +145,12 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
             version_id: expected_version_id.clone(),
         }
     );
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
     let stored = state
-        .with_connection(|connection| {
-            connection.query_row(
-                r#"
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    r#"
                 SELECT f.deal_id, f.deal_id, f.display_name, f.source_uri, f.metadata_json,
                        v.version_id, v.version_number, v.mime_type, v.content_sha256,
                        v.byte_size, v.is_current, b.file_bytes
@@ -143,25 +159,27 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
                 JOIN quarry_file_blobs b ON b.version_id = v.version_id
                 WHERE f.file_id = ?1
                 "#,
-                [&document.file_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, i64>(9)?,
-                        row.get::<_, i64>(10)?,
-                        row.get::<_, Vec<u8>>(11)?,
-                    ))
-                },
-            )
+                    [&document.file_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, i64>(9)?,
+                            row.get::<_, i64>(10)?,
+                            row.get::<_, Vec<u8>>(11)?,
+                        ))
+                    },
+                )
+                .await
         })
+        .await
         .unwrap();
     assert_eq!(stored.0, DEAL_ID);
     assert_eq!(stored.1, DEAL_ID);
@@ -182,7 +200,7 @@ async fn persists_a_complete_file_aggregate_and_returns_the_logical_file_id() {
 
 #[tokio::test]
 async fn deal_ownership_rejects_email_in_place_of_authenticated_user_id() {
-    let state = test_state();
+    let state = test_state().await;
     let bytes = b"email identity".to_vec();
     let document = document("email-file", "analyst1@example.com", "report.pdf", &bytes);
 
@@ -191,17 +209,18 @@ async fn deal_ownership_rejects_email_in_place_of_authenticated_user_id() {
         .unwrap_err();
 
     assert!(error.contains("document deal does not match upload context"));
-    assert_eq!(table_counts(&state), (0, 0, 0));
+    assert_eq!(table_counts(&state).await, (0, 0, 0));
 }
 
 #[tokio::test]
 async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
-    let state = empty_sqlite();
+    let state = empty_postgres().await;
     seed_user_and_deals(
         &state,
         OWNER,
         &[("DEAL-FIRST", "Active"), ("DEAL-SECOND", "Active")],
-    );
+    )
+    .await;
     let bytes = b"identical attachment bytes".to_vec();
     let first = document("file-first", "DEAL-FIRST", "report.pdf", &bytes);
     let second = document("file-second", "DEAL-SECOND", "copy.pdf", &bytes);
@@ -213,12 +232,12 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
         .unwrap();
 
     let first_match =
-        find_current_sqlite_file_by_content_hash(&state, "DEAL-FIRST", &first.content_hash)
+        find_current_postgres_file_by_content_hash(&state, "DEAL-FIRST", &first.content_hash)
             .await
             .unwrap()
             .unwrap();
     let second_match =
-        find_current_sqlite_file_by_content_hash(&state, "DEAL-SECOND", &first.content_hash)
+        find_current_postgres_file_by_content_hash(&state, "DEAL-SECOND", &first.content_hash)
             .await
             .unwrap()
             .unwrap();
@@ -226,17 +245,19 @@ async fn content_hash_lookup_is_scoped_to_the_target_deal_attachment() {
     assert_eq!(first_match.file_id, "file-first");
     assert_eq!(second_match.file_id, "file-second");
     assert_ne!(first_match.version_id, second_match.version_id);
-    assert!(
-        find_current_sqlite_file_by_content_hash(&state, "DEAL-MISSING", &first.content_hash,)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(find_current_postgres_file_by_content_hash(
+        &state,
+        "DEAL-MISSING",
+        &first.content_hash,
+    )
+    .await
+    .unwrap()
+    .is_none());
 }
 
 #[tokio::test]
 async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
-    let state = test_state();
+    let state = test_state().await;
     let bytes = b"valid bytes".to_vec();
     let valid = document("file-valid", DEAL_ID, "report.pdf", &bytes);
     let mut cases = Vec::new();
@@ -268,19 +289,20 @@ async fn deterministic_validation_failures_leave_all_file_tables_unchanged() {
         assert!(persist_file_blob(&state, deal_id, &document, file_bytes)
             .await
             .is_err());
-        assert_eq!(table_counts(&state), (0, 0, 0));
+        assert_eq!(table_counts(&state).await, (0, 0, 0));
     }
 }
 
 #[tokio::test]
 async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() {
-    let state = empty_sqlite();
+    let state = empty_postgres().await;
     seed_user_and_deals(
         &state,
         OWNER,
         &[(DEAL_ID, "Active"), ("DEAL-ARCHIVED", "Archived")],
-    );
-    seed_user_and_deals(&state, "2", &[("DEAL-OTHER", "Active")]);
+    )
+    .await;
+    seed_user_and_deals(&state, "2", &[("DEAL-OTHER", "Active")]).await;
     let bytes = b"deal validation".to_vec();
     let document = document("file-deal", DEAL_ID, "report.pdf", &bytes);
 
@@ -288,13 +310,13 @@ async fn deal_validation_rejects_missing_archived_and_differently_owned_deals() 
         assert!(persist_file_blob(&state, deal_id, &document, bytes.clone())
             .await
             .is_err());
-        assert_eq!(table_counts(&state), (0, 0, 0));
+        assert_eq!(table_counts(&state).await, (0, 0, 0));
     }
 }
 
 #[tokio::test]
 async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current() {
-    let state = test_state();
+    let state = test_state().await;
     let first_bytes = b"first version".to_vec();
     let second_bytes = b"second version".to_vec();
     let first = document("file-versions", DEAL_ID, "report.pdf", &first_bytes);
@@ -307,7 +329,7 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
         .await
         .unwrap();
     assert_eq!(retry_insert_blob_result, first_insert_blob_result);
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
 
     let second_insert_blob_result = persist_file_blob(&state, DEAL_ID, &second, second_bytes)
         .await
@@ -320,27 +342,27 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
         second_insert_blob_result.version_id,
         first_insert_blob_result.version_id
     );
-    assert_eq!(table_counts(&state), (1, 2, 2));
+    assert_eq!(table_counts(&state).await, (1, 2, 2));
     persist_file_blob(&state, DEAL_ID, &first, first_bytes)
         .await
         .unwrap();
-    assert_eq!(table_counts(&state), (1, 2, 2));
+    assert_eq!(table_counts(&state).await, (1, 2, 2));
 
     let versions = state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             let mut statement = connection.prepare(
                 "SELECT version_number, content_sha256, is_current FROM quarry_file_versions WHERE file_id = 'file-versions' ORDER BY version_number",
-            )?;
-            let rows = statement.query_map([], |row| {
+            ).await?;
+            let rows = statement.query_map(Vec::<crate::adapters::postgres::query::SqlValue>::new(), |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                 ))
-            })?;
-            let versions = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            }).await?;
+            let versions = rows.collect::<crate::adapters::postgres::client::test_support::TestResult<Vec<_>>>()?;
             Ok(versions)
-        })
+         }).await
         .unwrap();
     assert_eq!(versions[0], (1, first.content_hash, 1));
     assert_eq!(versions[1], (2, second.content_hash, 0));
@@ -348,7 +370,7 @@ async fn identical_retry_is_idempotent_and_can_restore_that_version_as_current()
 
 #[tokio::test]
 async fn concurrent_logical_files_cannot_duplicate_current_content_in_one_deal() {
-    let state = test_state();
+    let state = test_state().await;
     let bytes = b"shared bytes".to_vec();
     let first = document("logical-1", DEAL_ID, "first.pdf", &bytes);
     let second = document("logical-2", DEAL_ID, "second.pdf", &bytes);
@@ -360,7 +382,7 @@ async fn concurrent_logical_files_cannot_duplicate_current_content_in_one_deal()
         .await
         .unwrap_err();
     assert!(conflict.contains("identical content was accepted concurrently"));
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
     assert_ne!(
         file_version_id(&first.file_id, &first.content_hash),
         file_version_id(&second.file_id, &second.content_hash)
@@ -369,12 +391,13 @@ async fn concurrent_logical_files_cannot_duplicate_current_content_in_one_deal()
 
 #[tokio::test]
 async fn reusing_a_file_id_cannot_move_or_restore_it() {
-    let state = empty_sqlite();
+    let state = empty_postgres().await;
     seed_user_and_deals(
         &state,
         OWNER,
         &[(DEAL_ID, "Active"), ("DEAL-SECOND", "Active")],
-    );
+    )
+    .await;
     let bytes = b"attached bytes".to_vec();
     let document = document("attached-file", DEAL_ID, "report.pdf", &bytes);
     persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
@@ -387,63 +410,68 @@ async fn reusing_a_file_id_cannot_move_or_restore_it() {
             .is_err()
     );
     let deal_id = state
-        .with_connection(|connection| {
-            connection.query_row(
-                "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |row| row.get::<_, String>(0),
+                )
+                .await
         })
+        .await
         .unwrap();
     assert_eq!(deal_id, DEAL_ID);
 
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute(
-                "UPDATE quarry_files SET deal_id = 'DEAL-SECOND' WHERE file_id = 'attached-file'",
-                [],
-            )?;
+                "UPDATE quarry_files SET deal_id = 'DEAL-SECOND' WHERE file_id = 'attached-file'", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
     assert!(persist_file_blob(&state, DEAL_ID, &document, bytes.clone())
         .await
         .is_err());
     let deal_id = state
-        .with_connection(|connection| {
-            connection.query_row(
-                "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    "SELECT deal_id FROM quarry_files WHERE file_id = 'attached-file'",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |row| row.get::<_, String>(0),
+                )
+                .await
         })
+        .await
         .unwrap();
     assert_eq!(deal_id, "DEAL-SECOND");
 
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute(
                 "UPDATE quarry_files SET deal_id = ?1, deleted_at = '2026-01-01T00:00:00Z' WHERE file_id = 'attached-file'",
                 [DEAL_ID],
-            )?;
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
     assert!(persist_file_blob(&state, DEAL_ID, &document, bytes)
         .await
         .is_err());
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
 }
 
 #[tokio::test]
 async fn file_table_failure_prevents_child_writes() {
-    let state = test_state();
+    let state = test_state().await;
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute_batch(
-                "CREATE TRIGGER reject_file BEFORE INSERT ON quarry_files BEGIN SELECT RAISE(ABORT, 'file rejected'); END;",
-            )
-        })
+                "CREATE OR REPLACE FUNCTION reject_file_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'file rejected' USING ERRCODE='23514'; END $$; CREATE TRIGGER reject_file BEFORE INSERT ON quarry_files FOR EACH ROW EXECUTE FUNCTION reject_file_fn();",
+            ).await
+         }).await
         .unwrap();
     let bytes = b"file trigger".to_vec();
     let document = document("trigger-file", DEAL_ID, "report.pdf", &bytes);
@@ -453,18 +481,18 @@ async fn file_table_failure_prevents_child_writes() {
         .unwrap_err();
 
     assert!(insert_blob_error.contains("file rejected"));
-    assert_eq!(table_counts(&state), (0, 0, 0));
+    assert_eq!(table_counts(&state).await, (0, 0, 0));
 }
 
 #[tokio::test]
 async fn version_insert_failure_rolls_back_the_parent_file() {
-    let state = test_state();
+    let state = test_state().await;
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute_batch(
-                "CREATE TRIGGER reject_version BEFORE INSERT ON quarry_file_versions BEGIN SELECT RAISE(ABORT, 'version rejected'); END;",
-            )
-        })
+                "CREATE OR REPLACE FUNCTION reject_version_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'version rejected' USING ERRCODE='23514'; END $$; CREATE TRIGGER reject_version BEFORE INSERT ON quarry_file_versions FOR EACH ROW EXECUTE FUNCTION reject_version_fn();",
+            ).await
+         }).await
         .unwrap();
     let bytes = b"version trigger".to_vec();
     let document = document("trigger-version", DEAL_ID, "report.pdf", &bytes);
@@ -474,18 +502,18 @@ async fn version_insert_failure_rolls_back_the_parent_file() {
         .unwrap_err();
 
     assert!(insert_blob_error.contains("version rejected"));
-    assert_eq!(table_counts(&state), (0, 0, 0));
+    assert_eq!(table_counts(&state).await, (0, 0, 0));
 }
 
 #[tokio::test]
 async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
-    let state = test_state();
+    let state = test_state().await;
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute_batch(
-                "CREATE TRIGGER erase_version_after_blob_insert AFTER INSERT ON quarry_file_blobs BEGIN DELETE FROM quarry_file_versions WHERE version_id = NEW.version_id; END;",
-            )
-        })
+                "CREATE FUNCTION erase_version_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM quarry_file_versions WHERE version_id=NEW.version_id; RETURN NEW; END $$; CREATE TRIGGER erase_version_after_blob_insert AFTER INSERT ON quarry_file_blobs FOR EACH ROW EXECUTE FUNCTION erase_version_fn();",
+            ).await
+         }).await
         .unwrap();
     let bytes = b"read-back rollback".to_vec();
     let document = document("read-back-file", DEAL_ID, "report.pdf", &bytes);
@@ -495,23 +523,23 @@ async fn final_identity_read_back_failure_rolls_back_the_aggregate() {
         .unwrap_err();
 
     assert!(!insert_blob_error.is_empty());
-    assert_eq!(table_counts(&state), (0, 0, 0));
+    assert_eq!(table_counts(&state).await, (0, 0, 0));
 }
 
 #[tokio::test]
 async fn blob_insert_failure_restores_the_previous_current_version() {
-    let state = test_state();
+    let state = test_state().await;
     let first_bytes = b"committed version".to_vec();
     let first = document("blob-rollback", DEAL_ID, "report.pdf", &first_bytes);
     persist_file_blob(&state, DEAL_ID, &first, first_bytes)
         .await
         .unwrap();
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute_batch(
-                "CREATE TRIGGER reject_blob BEFORE INSERT ON quarry_file_blobs BEGIN SELECT RAISE(ABORT, 'blob rejected'); END;",
-            )
-        })
+                "CREATE OR REPLACE FUNCTION reject_blob_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'blob rejected' USING ERRCODE='23514'; END $$; CREATE TRIGGER reject_blob BEFORE INSERT ON quarry_file_blobs FOR EACH ROW EXECUTE FUNCTION reject_blob_fn();",
+            ).await
+         }).await
         .unwrap();
     let second_bytes = b"rejected version".to_vec();
     let second = document("blob-rollback", DEAL_ID, "renamed.pdf", &second_bytes);
@@ -521,35 +549,34 @@ async fn blob_insert_failure_restores_the_previous_current_version() {
         .unwrap_err();
 
     assert!(insert_blob_error.contains("blob rejected"));
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
     let current = state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.query_row(
-                "SELECT f.display_name, v.content_sha256, v.is_current FROM quarry_files f JOIN quarry_file_versions v ON v.file_id = f.file_id WHERE f.file_id = 'blob-rollback'",
-                [],
+                "SELECT f.display_name, v.content_sha256, v.is_current FROM quarry_files f JOIN quarry_file_versions v ON v.file_id = f.file_id WHERE f.file_id = 'blob-rollback'", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)),
-            )
-        })
+            ).await
+         }).await
         .unwrap();
     assert_eq!(current, ("report.pdf".to_string(), first.content_hash, 1));
 }
 
 #[tokio::test]
 async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
-    let state = test_state();
+    let state = test_state().await;
     let bytes = b"original blob".to_vec();
     let original = document("corrupt-file", DEAL_ID, "report.pdf", &bytes);
     persist_file_blob(&state, DEAL_ID, &original, bytes.clone())
         .await
         .unwrap();
     state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.execute(
-                "UPDATE quarry_file_blobs SET file_bytes = X'00' WHERE version_id = ?1",
+                "UPDATE quarry_file_blobs SET file_bytes = decode('00','hex') WHERE version_id = ?1",
                 [file_version_id(&original.file_id, &original.content_hash)],
-            )?;
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
     let renamed = document("corrupt-file", DEAL_ID, "renamed.pdf", &bytes);
 
@@ -559,21 +586,24 @@ async fn corrupted_existing_blob_is_not_treated_as_an_idempotent_retry() {
 
     assert!(insert_blob_error.contains("corrupt or collided"));
     let display_name = state
-        .with_connection(|connection| {
-            connection.query_row(
-                "SELECT display_name FROM quarry_files WHERE file_id = 'corrupt-file'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    "SELECT display_name FROM quarry_files WHERE file_id = 'corrupt-file'",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |row| row.get::<_, String>(0),
+                )
+                .await
         })
+        .await
         .unwrap();
     assert_eq!(display_name, "report.pdf");
-    assert_eq!(table_counts(&state), (1, 1, 1));
+    assert_eq!(table_counts(&state).await, (1, 1, 1));
 }
 
 #[tokio::test]
 async fn concurrent_new_versions_receive_sequential_version_numbers() {
-    let state = test_state();
+    let state = test_state().await;
     let initial_bytes = b"initial".to_vec();
     let initial = document("concurrent-file", DEAL_ID, "report.pdf", &initial_bytes);
     persist_file_blob(&state, DEAL_ID, &initial, initial_bytes)
@@ -582,10 +612,10 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
 
     let mut tasks = Vec::new();
     for bytes in [b"second".to_vec(), b"third".to_vec()] {
-        let sqlite = state.clone();
+        let postgres = state.clone();
         let document = document("concurrent-file", DEAL_ID, "report.pdf", &bytes);
         tasks.push(tokio::spawn(async move {
-            persist_file_blob(&sqlite, DEAL_ID, &document, bytes).await
+            persist_file_blob(&postgres, DEAL_ID, &document, bytes).await
         }));
     }
     for task in tasks {
@@ -593,24 +623,23 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
     }
 
     let version_numbers = state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             let mut statement = connection.prepare(
                 "SELECT version_number FROM quarry_file_versions WHERE file_id = 'concurrent-file' ORDER BY version_number",
-            )?;
-            let rows = statement.query_map([], |row| row.get::<_, i64>(0))?;
-            let version_numbers = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            ).await?;
+            let rows = statement.query_map(Vec::<crate::adapters::postgres::query::SqlValue>::new(), |row| row.get::<_, i64>(0)).await?;
+            let version_numbers = rows.collect::<crate::adapters::postgres::client::test_support::TestResult<Vec<_>>>()?;
             Ok(version_numbers)
-        })
+         }).await
         .unwrap();
     assert_eq!(version_numbers, vec![1, 2, 3]);
     let current_count = state
-        .with_connection(|connection| {
+        .with_connection(async |connection| {
             connection.query_row(
-                "SELECT COUNT(*) FROM quarry_file_versions WHERE file_id = 'concurrent-file' AND is_current = 1",
-                [],
+                "SELECT COUNT(*) FROM quarry_file_versions WHERE file_id = 'concurrent-file' AND is_current = 1", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
                 |row| row.get::<_, i64>(0),
-            )
-        })
+            ).await
+         }).await
         .unwrap();
     assert_eq!(current_count, 1);
 }
@@ -701,8 +730,8 @@ fn rejects_partial_and_mismatched_document_responses() {
 #[tokio::test]
 async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry() {
     use crate::domains::memberships::{model::DealRole, repository::MembershipRepository};
-    let db = test_state();
-    seed_user_and_deals(&db, "2", &[("DEAL-SECOND", "Active")]);
+    let db = test_state().await;
+    seed_user_and_deals(&db, "2", &[("DEAL-SECOND", "Active")]).await;
     let members = MembershipRepository::new(db.clone());
     members
         .add_member(
@@ -769,12 +798,12 @@ async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry(
 
 #[tokio::test]
 async fn accepted_upload_activity_failure_rolls_back_bytes_manifest_and_claim() {
-    let db = test_state();
-    db.with_connection(|c|c.execute_batch("CREATE TRIGGER deny_upload_event BEFORE INSERT ON deal_activity_events WHEN NEW.kind='document_uploaded' BEGIN SELECT RAISE(ABORT,'denied'); END;")).unwrap();
+    let db = test_state().await;
+    db.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION deny_upload_event_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'denied' USING ERRCODE='23514'; END $$; CREATE TRIGGER deny_upload_event BEFORE INSERT ON deal_activity_events FOR EACH ROW WHEN (NEW.kind='document_uploaded') EXECUTE FUNCTION deny_upload_event_fn();").await }).await.unwrap();
     let bytes = b"atomic shared upload".to_vec();
     let doc = document("atomic-upload", DEAL_ID, "atomic.pdf", &bytes);
     assert!(persist_file_blob(&db, DEAL_ID, &doc, bytes).await.is_err());
-    assert_eq!(table_counts(&db), (0, 0, 0));
+    assert_eq!(table_counts(&db).await, (0, 0, 0));
     for table in [
         "quarry_current_content",
         "document_identity_manifests",

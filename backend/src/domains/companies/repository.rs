@@ -1,18 +1,19 @@
 use super::model::{Company, CompanyInput};
+use crate::adapters::postgres::client::RowResult;
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError},
         query::{ComparisonOperator, Condition, SortDirection, SqlBuilder},
     },
     shared::error::RepositoryError,
 };
 #[derive(Clone)]
 pub struct CompanyRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 impl CompanyRepository {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
     pub async fn list(
         &self,
@@ -34,7 +35,7 @@ impl CompanyRepository {
                 format!("%{query}%"),
             ));
         }
-        self.sqlite
+        self.postgres
             .read_with_async(builder.build(), company_from_row)
             .await
             .map_err(storage)
@@ -45,19 +46,22 @@ impl CompanyRepository {
         company_id: Option<String>,
         input: CompanyInput,
     ) -> Result<Company, RepositoryError> {
-        self.sqlite
-            .transaction_async(move |tx| {
+        self.postgres
+            .transaction_async(move |tx| async move {
+                let tx = &tx;
                 let now = chrono::Utc::now().to_rfc3339();
                 let id = company_id
                     .clone()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 if company_id.is_some() {
-                    let existing = tx.read(
-                        SqlBuilder::select("companies")
-                            .and_where(Condition::equal("company_id", &id))
-                            .and_where(Condition::equal("user_id", user_id))
-                            .build(),
-                    )?;
+                    let existing = tx
+                        .read(
+                            SqlBuilder::select("companies")
+                                .and_where(Condition::equal("company_id", &id))
+                                .and_where(Condition::equal("user_id", user_id))
+                                .build(),
+                        )
+                        .await?;
                     if existing.is_empty() {
                         return Ok(None);
                     }
@@ -71,7 +75,8 @@ impl CompanyRepository {
                             .and_where(Condition::equal("company_id", &id))
                             .and_where(Condition::equal("user_id", user_id))
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 } else {
                     tx.write(
                         SqlBuilder::insert_into("companies")
@@ -84,7 +89,8 @@ impl CompanyRepository {
                             .value("created_at", &now)
                             .value("updated_at", &now)
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 }
                 Ok(tx
                     .read_with(
@@ -92,7 +98,8 @@ impl CompanyRepository {
                             .and_where(Condition::equal("company_id", &id))
                             .build(),
                         company_from_row,
-                    )?
+                    )
+                    .await?
                     .pop())
             })
             .await
@@ -100,10 +107,12 @@ impl CompanyRepository {
             .ok_or_else(|| RepositoryError::NotFound("company not found".into()))
     }
 }
-fn storage(e: SqliteClientError) -> RepositoryError {
+fn storage(e: PostgresError) -> RepositoryError {
     RepositoryError::storage(e.to_string())
 }
-pub(crate) fn company_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
+pub(crate) fn company_from_row(
+    row: &crate::adapters::postgres::client::Row<'_>,
+) -> RowResult<Company> {
     Ok(Company {
         company_id: row.get("company_id")?,
         user_id: row.get("user_id")?,

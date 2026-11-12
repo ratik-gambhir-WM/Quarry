@@ -21,17 +21,15 @@ impl UserRepository {
             .value("job_title", input.role.trim())
             .build();
         let inserted =
-            self.sqlite.write_async(insert).await.map_err(|error| {
+            self.postgres.write_async(insert).await.map_err(|error| {
                 RepositoryError::storage(format!("failed to create user: {error}"))
             })?;
 
-        self.by_id(inserted.last_insert_row_id)
-            .await?
-            .ok_or_else(|| {
-                RepositoryError::storage(format!(
-                    "inserted user `{}` could not be loaded",
-                    inserted.last_insert_row_id
-                ))
-            })
+        self.by_id(inserted.inserted_id).await?.ok_or_else(|| {
+            RepositoryError::storage(format!(
+                "inserted user `{}` could not be loaded",
+                inserted.inserted_id
+            ))
+        })
     }
 }

@@ -100,7 +100,7 @@ cargo test <filter>
 cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 Add `cargo build --locked --release` when release compilation, feature flags, or packaging changed.
@@ -116,7 +116,7 @@ that a check runs before a provider call, job start, or mutation.
 live under `backend/tests/integration/**`. Both are manually included modules, so do not use
 `cargo test --test <filename>`. Confirm a new test file is actually included.
 
-Do not use `cargo run` as a build check. It opens and may migrate SQLite, requires live Helix, and
+Do not use `cargo run` as a build check. It initializes/validates the selected PostgreSQL schema, requires live Helix, and
 initializes indexes. Runtime smoke testing is authorized only when the task needs it and the
 database/configuration is explicitly disposable. Never run `clear_helix` as verification.
 
@@ -127,7 +127,7 @@ From `frontend/src-tauri/`:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 For any native command, IPC payload, desktop API relay, capability, CSP, or routing change, also
@@ -160,9 +160,9 @@ Do not claim contract compatibility from compilation alone.
 
 ## Data and external-system safety
 
-- Use temporary SQLite databases and fake/test clients.
+- Use real isolated schemas in a separately selected PostgreSQL database ending in `_test`, plus fake/test clients where appropriate. Tests never reset `Quarry`.
 - Do not read, copy, mutate, or delete `backend/data/` as verification.
-- Do not start migrations against valuable data.
+- Do not initialize incompatible or valuable data. Fresh-schema setup and restart validation must never delete records.
 - Do not call live OpenAI, Helix, WM AI, Microsoft Graph, or LibreOffice unless the task explicitly
   requires an integration test and the environment/side effects are authorized.
 - Do not print `.env`, secrets, document contents, user email, or absolute sensitive paths.
@@ -215,3 +215,9 @@ Before handoff:
 7. Report the architecture update made, or the explicit no-impact reason.
 
 Never claim a check passed when it was skipped, unavailable, timed out, or only partially ran.
+
+For PostgreSQL changes, include actual constraints/rollback, read snapshots, bounded pool failures,
+writer lease lifetime/loss, concurrent claims and captured template lexical parity. Run retained
+cross-store compatibility tests only against an explicitly selected fresh Helix instance. Preserve
+and report ownership of validation processes/ports, containers, volumes and schemas; clean only
+those created by the current task. See `docs/postgresql-storage.md`.

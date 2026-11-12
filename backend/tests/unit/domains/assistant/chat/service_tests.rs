@@ -36,7 +36,7 @@ impl Drop for RevocationServer {
 
 async fn assert_chat_revocation(deleting: bool) {
     use crate::{
-        adapters::sqlite::client::SqliteClient,
+        adapters::postgres::client::PostgresClient,
         app::migrations,
         domains::{
             deals::{repository::DealRepository, DealContextReader},
@@ -45,12 +45,12 @@ async fn assert_chat_revocation(deleting: bool) {
         integration_support::{prompt_catalog, seed_identity},
     };
     let mut upstream = RevocationServer::start().await;
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    seed_identity(&sqlite, "owner@example.com", 'a');
-    seed_identity(&sqlite, "member@example.com", 'b');
-    sqlite.with_connection(|c| c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('REVOKE-CHAT',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('REVOKE-CHAT',1,'owner','now','now'),('REVOKE-CHAT',2,'viewer','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('REVOKE-CHAT');")).unwrap();
-    let repository = AssistantChatRepository::new(sqlite.clone());
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    seed_identity(&postgres, "owner@example.com", 'a').await;
+    seed_identity(&postgres, "member@example.com", 'b').await;
+    postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('REVOKE-CHAT',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('REVOKE-CHAT',1,'owner','now','now'),('REVOKE-CHAT',2,'viewer','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('REVOKE-CHAT');").await }).await.unwrap();
+    let repository = AssistantChatRepository::new(postgres.clone());
     repository
         .create_thread(2, "revoked-thread".into(), Some("REVOKE-CHAT".into()))
         .await
@@ -64,10 +64,12 @@ async fn assert_chat_revocation(deleting: bool) {
         Some(Arc::new(client)),
         "test".into(),
         repository.clone(),
-        UserDirectory::new(UserRepository::new(sqlite.clone())),
+        UserDirectory::new(UserRepository::new(postgres.clone())),
         prompt_catalog(),
     )
-    .with_deal_context(DealContextReader::new(DealRepository::new(sqlite.clone())));
+    .with_deal_context(DealContextReader::new(DealRepository::new(
+        postgres.clone(),
+    )));
     let mut events = service
         .ask_with_history(PersistentQueryInput {
             assistant_message_id: "revoked-a".into(),
@@ -90,15 +92,17 @@ async fn assert_chat_revocation(deleting: bool) {
         assert!(matches!(events.recv().await, Some(SendQueryEvent::Delta { delta }) if delta == "partial"));
     }).await.unwrap();
     if deleting {
-        sqlite.with_connection(|c| c.execute_batch("INSERT INTO deal_deletions(deletion_id,deal_id,owner_user_id,status,phase,created_at,updated_at) VALUES('revoked-deletion','REVOKE-CHAT',1,'pending','draining','now','now');")).unwrap();
+        postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deal_deletions(deletion_id,deal_id,owner_user_id,status,phase,created_at,updated_at) VALUES('revoked-deletion','REVOKE-CHAT',1,'pending','draining','now','now');").await }).await.unwrap();
     } else {
-        sqlite
-            .with_connection(|c| {
+        postgres
+            .with_connection(async |c| {
                 c.execute(
                     "DELETE FROM deal_memberships WHERE deal_id='REVOKE-CHAT' AND user_id=2",
-                    [],
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
                 )
+                .await
             })
+            .await
             .unwrap();
     }
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -110,9 +114,9 @@ async fn assert_chat_revocation(deleting: bool) {
     .await
     .unwrap();
     upstream.stop().await;
-    let (status, content, completed_at): (String, String, Option<String>) = sqlite.with_connection(|c| {
-        c.query_row("SELECT status,content,completed_at FROM assistant_messages WHERE message_id='revoked-a'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-    }).unwrap();
+    let (status, content, completed_at): (String, String, Option<String>) = postgres.with_connection(async |c| {
+        c.query_row("SELECT status,content,completed_at FROM assistant_messages WHERE message_id='revoked-a'", Vec::<crate::adapters::postgres::query::SqlValue>::new(), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).await
+     }).await.unwrap();
     if deleting {
         assert_eq!(
             status, "streaming",
@@ -224,7 +228,7 @@ fn message(
 #[tokio::test]
 async fn completed_request_replays_without_provider_or_current_deal_context() {
     use crate::{
-        adapters::sqlite::client::SqliteClient,
+        adapters::postgres::client::PostgresClient,
         app::migrations,
         domains::{
             assistant::chat::repository::{AssistantChatRepository, StartRunInput},
@@ -234,9 +238,9 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
             },
         },
     };
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    let users = UserRepository::new(sqlite.clone());
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    let users = UserRepository::new(postgres.clone());
     let user = users
         .create(AddUserInput {
             first_name: "Test".into(),
@@ -247,17 +251,19 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         })
         .await
         .unwrap();
-    sqlite.with_connection(|c| c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now')", [user.id])).unwrap();
-    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [user.id])).unwrap();
-    sqlite
-        .with_connection(|c| {
+    postgres.with_connection(async |c| { c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now')", [user.id]).await }).await.unwrap();
+    postgres.with_connection(async |c| { c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [user.id]).await }).await.unwrap();
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
-    let repository = AssistantChatRepository::new(sqlite.clone());
+    let repository = AssistantChatRepository::new(postgres.clone());
     repository
         .create_thread(user.id, "thread-a".into(), Some("DEAL-A".into()))
         .await
@@ -279,13 +285,15 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         .finish_run("a1".into(), "completed", "Persisted answer".into(), None)
         .await
         .unwrap();
-    sqlite
-        .with_connection(|c| {
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE deals SET deal_name='Changed', archived_at='now'",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
     let service = AssistantChatService::with_persistence(
         None,
@@ -323,13 +331,14 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
 #[tokio::test]
 async fn file_references_resolve_canonical_bytes_and_enforce_current_membership() {
     use crate::{
-        adapters::{office::converter::OfficeConverter, sqlite::client::SqliteClient},
+        adapters::{office::converter::OfficeConverter, postgres::client::PostgresClient},
         app::migrations,
         domains::{
             deals::{repository::DealRepository, DealContextReader},
             documents::{
                 store::{
-                    identity::IdentityManifest, model::FilePersistenceInput, sqlite::DocumentStore,
+                    identity::IdentityManifest, model::FilePersistenceInput,
+                    postgres::DocumentStore,
                 },
                 viewing::service::StoredDocumentService,
             },
@@ -337,18 +346,20 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
         shared::ids::{document_id_from_content, file_version_id, sha256_hex},
     };
     let directory = tempfile::tempdir().unwrap();
-    let sqlite = SqliteClient::open(directory.path().join("references.sqlite")).unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    sqlite.with_connection(|c| {
-        c.execute("INSERT INTO users (id,first_name,last_name,email,username,password_hash) VALUES (1,'Test','Owner','one@example.com','one','unusable'),(2,'Test','Other','two@example.com','two','unusable')", [])?;
+    let postgres = PostgresClient::test_database_at(directory.path().join("references.sqlite"))
+        .await
+        .unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    postgres.with_connection(async |c| {
+        c.execute("INSERT INTO users (id,first_name,last_name,email,username,password_hash) VALUES (1,'Test','Owner','one@example.com','one','unusable'),(2,'Test','Other','two@example.com','two','unusable')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
         for deal in ["DEAL-A", "DEAL-B"] {
-            c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES (?1,1,'Test','buy_side','unknown','prepare','now','now')", [deal])?;
-            c.execute("INSERT INTO deal_memberships (deal_id,user_id,role,joined_at,updated_at) VALUES (?1,1,'owner','now','now')", [deal])?;
-            c.execute("INSERT INTO deal_access_revisions (deal_id) VALUES (?1)", [deal])?;
+            c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES (?1,1,'Test','buy_side','unknown','prepare','now','now')", [deal]).await?;
+            c.execute("INSERT INTO deal_memberships (deal_id,user_id,role,joined_at,updated_at) VALUES (?1,1,'owner','now','now')", [deal]).await?;
+            c.execute("INSERT INTO deal_access_revisions (deal_id) VALUES (?1)", [deal]).await?;
         }
         Ok(())
-    }).unwrap();
-    let store = DocumentStore::new(sqlite.clone());
+     }).await.unwrap();
+    let store = DocumentStore::new(postgres.clone());
     for (deal, file) in [("DEAL-A", "file-a"), ("DEAL-B", "file-b")] {
         let bytes = b"%PDF-1.7\nCanonical stored contents".to_vec();
         let hash = sha256_hex(&bytes);
@@ -383,7 +394,9 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
         "test".into(),
         crate::integration_support::prompt_catalog(),
     )
-    .with_deal_context(DealContextReader::new(DealRepository::new(sqlite.clone())))
+    .with_deal_context(DealContextReader::new(DealRepository::new(
+        postgres.clone(),
+    )))
     .with_documents(Arc::new(StoredDocumentService::new(
         store,
         OfficeConverter::new(None),
@@ -430,13 +443,15 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
             .await,
         Err(ServiceError::NotFound(_))
     ));
-    sqlite
-        .with_connection(|c| {
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "DELETE FROM deal_memberships WHERE deal_id='DEAL-A' AND user_id=1",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
     assert!(matches!(
         service

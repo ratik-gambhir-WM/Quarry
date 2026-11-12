@@ -16,11 +16,12 @@ readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template
 readonly TEMPLATE_BACKEND="${QUARRY_TEMPLATE_BACKEND:-embedded}"
 readonly DILIGENCE_STUDIO_ROOT="${QUARRY_DILIGENCE_STUDIO_ROOT:-${HOME}/diligence-studio-server}"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-postgres-dev}"
 readonly HELIX_VOLUME_NAME="${HELIX_CONTAINER_NAME}-data"
 readonly HELIX_DATA_DIR="/var/lib/helix"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
-readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
+readonly LOCAL_HELIX_PORT="${QUARRY_HELIX_PORT:-6970}"
+readonly LOCAL_HELIX_URL="http://127.0.0.1:${LOCAL_HELIX_PORT}"
 
 backend_pid=""
 ui_pid=""
@@ -33,7 +34,9 @@ Usage: quarry <web|desktop>
   web      Start Docker, Helix, Axum, and the React web UI.
   desktop  Start Docker, Helix, Axum, and the Tauri desktop UI.
 
-Templates run in Axum and persist in Quarry's shared SQLite database by default.
+Templates run in Axum and persist in the Quarry PostgreSQL database by default.
+Set server-only QUARRY_DATABASE_URL before starting (postgresql://localhost/Quarry locally).
+The fresh Helix store uses port 6970; QUARRY_HELIX_PORT overrides it.
 Helix uses disk storage in the Docker volume <container-name>-data.
 QUARRY_TEMPLATE_BACKEND=diligence-studio selects the retained Node rollback service.
 
@@ -179,6 +182,15 @@ if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]]; then
     || fail "port ${DILIGENCE_STUDIO_PORT} is already in use; refusing to start Diligence Studio"
 fi
 
+printf 'Checking the selected PostgreSQL connection...\n'
+(
+  cd "$QUARRY_ROOT/backend" || exit 1
+  cargo run --locked --bin check_database
+) || fail "PostgreSQL is unavailable; configure QUARRY_DATABASE_URL for the Quarry database"
+
+node -e 'const value = process.argv[1]; if (!/^[0-9]{1,5}$/.test(value) || Number(value) < 1 || Number(value) > 65535) process.exit(1)' "$LOCAL_HELIX_PORT" \
+  || fail "QUARRY_HELIX_PORT must be a port between 1 and 65535"
+
 docker_daemon_is_ready() {
   docker info >/dev/null 2>&1
 }
@@ -244,12 +256,17 @@ else
   docker create \
     --name "$HELIX_CONTAINER_NAME" \
     --restart unless-stopped \
-    --publish 127.0.0.1:6969:8080 \
+    --publish "127.0.0.1:${LOCAL_HELIX_PORT}:8080" \
     --env "HELIX_DATA_DIR=${HELIX_DATA_DIR}" \
     --mount "type=volume,source=${HELIX_VOLUME_NAME},target=${HELIX_DATA_DIR}" \
     "$HELIX_IMAGE" >/dev/null \
     || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
 fi
+
+helix_host_port="$(docker container inspect --format '{{range (index .HostConfig.PortBindings "8080/tcp")}}{{.HostIp}}:{{.HostPort}}{{end}}' "$HELIX_CONTAINER_NAME")" \
+  || fail "could not inspect Helix port mapping"
+[[ "$helix_host_port" == "127.0.0.1:${LOCAL_HELIX_PORT}" ]] \
+  || fail "the selected Helix container uses a different port; select its matching QUARRY_HELIX_PORT or a fresh container"
 
 helix_disk_storage="$(docker container inspect --format '{{range .Config.Env}}{{if eq . "HELIX_DATA_DIR=/var/lib/helix"}}true{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
   || fail "could not inspect Helix storage configuration"
@@ -283,6 +300,7 @@ set -m
 (
   cd "$QUARRY_ROOT/backend" || exit 1
   exec env \
+    HELIX_URL="$LOCAL_HELIX_URL" \
     QUARRY_API_HOST="$QUARRY_API_HOST" \
     QUARRY_API_PORT="$QUARRY_API_PORT" \
     QUARRY_TEMPLATE_BACKEND="$TEMPLATE_BACKEND" \

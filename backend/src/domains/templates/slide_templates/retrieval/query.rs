@@ -215,7 +215,7 @@ impl SlideRetrievalService {
         let repository = self.repository.clone();
         let app = app_id.to_owned();
         let app_records =
-            tokio::task::spawn_blocking(move || repository.list_retrieval_classifications(&app))
+            tokio::spawn(async move { repository.list_retrieval_classifications(&app).await })
                 .await??;
         let records = apply_filters(&app_records, &input.filters);
         if input.mode == "facets" {
@@ -347,8 +347,10 @@ impl SlideRetrievalService {
             .collect();
         let repository = self.repository.clone();
         let app = app_id.to_owned();
-        let ids = tokio::task::spawn_blocking(move || {
-            repository.search_slide_classifications(&app, &expression, 200)
+        let ids = tokio::spawn(async move {
+            repository
+                .search_slide_classifications(&app, &expression, 200)
+                .await
         })
         .await??;
         Ok(ids
@@ -687,9 +689,9 @@ pub struct SlideAgentTools {
     pub templates: super::super::ImportService,
 }
 impl SlideAgentTools {
-    pub fn get_slide(&self, input: &Value) -> anyhow::Result<Value> {
+    pub async fn get_slide(&self, input: &Value) -> anyhow::Result<Value> {
         let id = Self::parse_get_slide_input(input)?;
-        match self.templates.for_app(&self.app_id)?.find(id)? {
+        match self.templates.for_app(&self.app_id).await?.find(id).await? {
             Some(slide) => Ok(serde_json::to_value(slide)?),
             None => Ok(json!({"error":{"code":"slide_not_available"}})),
         }

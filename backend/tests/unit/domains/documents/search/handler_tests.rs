@@ -18,6 +18,7 @@ async fn hybrid_http_validates_text_limits_path_and_unknown_fields_before_retrie
     };
     use tower::ServiceExt;
     let app = crate::integration_support::authenticated_test_application()
+        .await
         .unwrap()
         .router;
     for (path, body) in [
@@ -85,6 +86,7 @@ async fn hybrid_http_validates_text_limits_path_and_unknown_fields_before_retrie
         assert_eq!(response.status(), status);
     }
     let unauthenticated = crate::integration_support::test_application()
+        .await
         .unwrap()
         .router;
     let response = unauthenticated
@@ -135,11 +137,13 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
             })
         }
     }
-    let application = crate::integration_support::authenticated_test_application().unwrap();
+    let application = crate::integration_support::authenticated_test_application()
+        .await
+        .unwrap();
     let access = ResourceAccess::new(
-        application.sqlite.clone(),
+        application.postgres.clone(),
         Arc::new(DealAccessService::new(MembershipRepository::new(
-            application.sqlite,
+            application.postgres,
         ))),
     );
     let provider = Arc::new(Provider(Mutex::new(Vec::new())));

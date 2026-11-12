@@ -1,12 +1,14 @@
 # Deal, company, and chat model
 
-Current rollout (2026-10-28): schema **12** adds nine diligence stages to the password/session schema.
-There is no automatic schema upgrade, status conversion, or password backfill. Use the deliberately selected,
-drained development reset described in [authentication](authentication.md#schema-15-and-development-reset),
-paired with a fresh isolated Helix store. Any schema-9/10 upgrade instructions below describe the
-previous rollout and do not authorize running an old migration against the current schema.
+Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
 
-SQLite owns the engagement aggregate. Helix owns only a document search projection; creating or
+Current storage uses PostgreSQL schema 1, including the existing nine diligence stages and all
+access/ownership constraints. The replacement starts fresh without importing prior records or
+converting statuses. See [storage setup and recovery](postgresql-storage.md).
+
+PostgreSQL owns the engagement aggregate. Helix owns only a document search projection; creating or
 editing a deal has no graph write. Diligence Studio's process-local template catalog is unrelated
 to deal persistence.
 
@@ -60,31 +62,11 @@ never paths, credentials, unrelated deals, or document contents. That reference 
 not policy or retrieval evidence. Completed request replay precedes current-context/provider
 resolution and returns persisted text unchanged. Archiving a deal retains its chats.
 
-## Deliberate development reset
+## Fresh storage and recovery
 
-Normal startup creates a truly empty database or validates/reuses marker 9. It does not call the
-destructive reset path. Incompatible databases fail clearly instead of being erased. Development
-uses one configured SQLite database (default `backend/data/quarry.sqlite3`) and one active Helix
-instance (the root launcher selects `helix-quarry-v3-dev`). Temporary test databases are isolated.
-
-For an authorized disposable reset:
-
-1. Identify the configured SQLite path and selected local Helix instance. Drain/stop the backend,
-   uploads, and chat runs. Do not stop ambiguously owned processes.
-2. From `backend/`, run `cargo run --locked --bin reset_development -- --discard /absolute/path/to/disposable.sqlite3`.
-   This deletes development records, recreates all tables/indexes transactionally, and restores
-   foreign-key enforcement on both success and failure. It has no network or graph side effects.
-3. Before restarting, pair SQLite with a fresh isolated Helix store. For the local Docker setup,
-   stop and retire the old container without deleting its writable graph storage, and create the
-   pinned image with fresh storage under the launcher's selected name/port. Only the replacement
-   should be active. Never resume the new SQLite database against the old populated graph.
-4. Start the backend, recreate development profiles, and upload fresh test documents. Reload
-   clients and restart desktop state to clear old user/thread/resource selections and folder grants.
-5. Reopen/restart once more and confirm newly created records remain. Reset is a one-time command,
-   never a startup hook, fallback, or recurring operation.
-
-No recovery of discarded SQLite records is promised. On rollout failure, fix the code and recreate
-an empty compatible schema, or revert code and recreate its empty schema. Do not run old code
-against marker 9 or invoke `clear_helix` as verification. Document upload remains a separate
-SQLite-then-Helix operation: failed indexing may leave a durable version and exact-byte re-upload
-can retry it. There is no distributed transaction or general SQLite-to-Helix reindex command.
+Startup creates or validates the selected PostgreSQL schema without deleting records. Use the
+`Quarry` database and a matching fresh Helix store; leave old SQLite files and graph data untouched.
+There is no reset binary, historical data migration, distributed transaction or general bulk
+reindex command. Back up PostgreSQL and Helix with the matching binary/configuration, and drain
+writers before a coordinated restore. A Helix failure preserves committed file identities and
+bytes; exact-content re-upload retries the projection. See [storage operations](postgresql-storage.md).

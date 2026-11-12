@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
     app::{
         bootstrap::test_support::assemble_api, config::AppConfig, http::create_router, migrations,
     },
@@ -13,21 +13,21 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
-fn app() -> (Router, SqliteClient) {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    seed_identity(&sqlite, "deletion-owner@example.com", 'a');
-    seed_identity(&sqlite, "deletion-member@example.com", 'b');
-    sqlite.with_connection(|c|c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'owner','now','now'),('DEAL-DELETE-HTTP',2,'manager','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-DELETE-HTTP');")).unwrap();
+async fn app() -> (Router, PostgresClient) {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    seed_identity(&postgres, "deletion-owner@example.com", 'a').await;
+    seed_identity(&postgres, "deletion-member@example.com", 'b').await;
+    postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'owner','now','now'),('DEAL-DELETE-HTTP',2,'manager','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-DELETE-HTTP');").await }).await.unwrap();
     let config = AppConfig::default();
     let api = assemble_api(
         &config,
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
         reqwest::Client::new(),
         prompt_catalog(),
     );
-    (create_router(api, &config.http), sqlite)
+    (create_router(api, &config.http), postgres)
 }
 async fn request(
     app: &Router,
@@ -60,7 +60,7 @@ async fn request(
 }
 #[tokio::test]
 async fn deletion_http_checks_identity_owner_and_syntax_before_accepting_and_hides_pending_deals() {
-    let (app, sqlite) = app();
+    let (app, postgres) = app().await;
     assert_eq!(
         request(&app, "DELETE", "/api/v1/deals/DEAL-DELETE-HTTP", None)
             .await
@@ -80,11 +80,16 @@ async fn deletion_http_checks_identity_owner_and_syntax_before_accepting_and_hid
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        sqlite
-            .with_connection(
-                |c| c.query_row("SELECT count(*) FROM deal_deletions", [], |r| r
-                    .get::<_, i64>(0))
-            )
+        postgres
+            .with_connection(async |c| {
+                c.query_row(
+                    "SELECT count(*) FROM deal_deletions",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |r| r.get::<_, i64>(0),
+                )
+                .await
+            })
+            .await
             .unwrap(),
         0
     );
