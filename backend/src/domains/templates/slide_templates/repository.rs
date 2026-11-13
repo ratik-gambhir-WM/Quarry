@@ -656,14 +656,14 @@ impl TemplateRepository for PostgresTemplateRepository {
                             |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>("revision")?)),
                         )
                         .await?;
-                    json.map(|(json, revision)| {
-                        Ok(StoredTemplate {
+                    match json {
+                        Some((json, revision)) => Ok(Some(StoredTemplate {
                             revision,
                             template_id: id.into(),
-                            template_json: decode_document(&json)?,
-                        })
-                    })
-                    .transpose()
+                            template_json: decode_document(json).await?,
+                        })),
+                        None => Ok(None),
+                    }
                 })
                 .await
         })
@@ -820,7 +820,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                             template: StoredTemplate {
                                 revision,
                                 template_id: id,
-                                template_json: decode_document(&json)?,
+                                template_json: decode_document(json).await?,
                             },
                             metadata,
                             has_preview,
@@ -926,7 +926,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                     Ok(Some(StoredTemplateWithAssets {
                         revision,
                         template_id: id.into(),
-                        template_json: decode_document(&json)?,
+                        template_json: decode_document(json).await?,
                         assets,
                     }))
                 })
@@ -1037,9 +1037,12 @@ pub(super) fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     (width > 0 && height > 0).then_some((width, height))
 }
 
-fn decode_document(json: &str) -> anyhow::Result<CanvasDocument> {
-    let value = serde_json::from_str(json)?;
-    Ok(super::normalize::normalize(&value)?.0)
+async fn decode_document(json: String) -> anyhow::Result<CanvasDocument> {
+    tokio::task::spawn_blocking(move || {
+        let value = serde_json::from_str(&json)?;
+        Ok(super::normalize::normalize(&value)?.0)
+    })
+    .await?
 }
 
 fn timestamp_iso(millis: i64) -> anyhow::Result<String> {

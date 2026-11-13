@@ -201,6 +201,11 @@ impl DealService {
                 .ok_or_else(|| {
                     ServiceError::not_found(format!("deal metadata not found for id `{deal_id}`"))
                 })?;
+        // This loaded-state preflight avoids provider work for an already stale draft.
+        // The repository repeats the revision and authority checks at the final write.
+        if existing_metadata.revision != input.expected_revision {
+            return Err(crate::shared::revision::conflict().into());
+        }
         let sharepoint_link =
             updated_optional_value(input.sharepoint_link, existing_metadata.sharepoint_link);
         let sow_link = updated_optional_value(input.sow_link, existing_metadata.sow_link);
@@ -212,22 +217,6 @@ impl DealService {
                 "localPath and sharepointLink cannot both be provided",
             ));
         }
-        let mut metadata = self
-            .deals
-            .upsert_metadata(
-                UpsertDealMetadataRecord {
-                    expected_revision: input.expected_revision,
-                    deal_id: deal.deal_id.clone(),
-                    key_questions_json: existing_metadata.key_questions_json,
-                    local_path: existing_metadata.local_path,
-                    sharepoint_link,
-                    sow_link,
-                    fact_sheet_link,
-                    rl_link,
-                },
-                actor,
-            )
-            .await?;
         let files = input
             .uploaded_files
             .into_iter()
@@ -242,40 +231,27 @@ impl DealService {
                 mime_type: file.mime_type,
             })
             .collect::<Vec<_>>();
-        if files.is_empty() {
-            if !deal
-                .access
-                .as_ref()
-                .is_some_and(|a| a.capabilities.local_source)
-            {
-                metadata.local_path = None;
-            }
-            return Ok(SaveDealMetadataResponse {
-                deal,
-                files: Vec::new(),
-                extraction: DealExtraction {
-                    key_questions: Vec::new(),
-                },
-                metadata,
-            });
-        }
         let extraction = self.extract_from_files(&deal, &files).await?;
-        let key_questions_json =
+        let key_questions_json = if files.is_empty() {
+            existing_metadata.key_questions_json
+        } else {
             serde_json::to_string(&extraction.key_questions).map_err(|error| {
                 ServiceError::internal(format!("failed to serialize deal key questions: {error}"))
-            })?;
+            })?
+        };
+        // Publish once, after extraction succeeds, so a failed attempt retains its revision.
         let mut metadata = self
             .deals
             .upsert_metadata(
                 UpsertDealMetadataRecord {
-                    expected_revision: metadata.revision,
+                    expected_revision: input.expected_revision,
                     deal_id: deal.deal_id.clone(),
                     key_questions_json,
-                    local_path: metadata.local_path,
-                    sharepoint_link: metadata.sharepoint_link,
-                    sow_link: metadata.sow_link,
-                    fact_sheet_link: metadata.fact_sheet_link,
-                    rl_link: metadata.rl_link,
+                    local_path: existing_metadata.local_path,
+                    sharepoint_link,
+                    sow_link,
+                    fact_sheet_link,
+                    rl_link,
                 },
                 actor,
             )

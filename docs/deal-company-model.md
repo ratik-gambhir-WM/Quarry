@@ -50,8 +50,11 @@ validation under that lock. Any failed write rolls the entire operation back. Re
 aggregates in one snapshot using bounded batches. Shared company changes become visible in every
 linked deal. A company explicitly saved from the directory picker remains a directory entry if
 subsequent deal creation fails or is cancelled; it was saved by a separate user operation.
-Extraction still saves links before optional provider work and returns only explicitly listed
-qualifying key questions, never inferred questions.
+Metadata saves perform optional extraction before committing links and extracted questions together
+with one revision increment. Provider or parsing failures leave stored metadata unchanged, allowing
+the retained draft to retry. Stale revisions fail before provider work and are checked again at
+commit, so concurrent changes are preserved. Extraction returns only explicitly listed qualifying
+key questions, never inferred questions.
 
 Assistant association is optional and immutable. Freeform threads store null; linked threads
 reference an existing same-owner deal. List scope is All, Freeform, or a specific Deal and is

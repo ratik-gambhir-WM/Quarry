@@ -161,7 +161,7 @@ async fn fts(
         )
         .await?
         .context("missing template")?;
-    let document: CanvasDocument = decode_document(&json)?;
+    let document: CanvasDocument = decode_document(json).await?;
     connection
         .write(
             SqlBuilder::delete_from("slide_classifications_fts")
@@ -781,7 +781,7 @@ impl PostgresTemplateRepository {
                     )
                     .await?
                     .context("missing template")?;
-                let document = decode_document(&json)?;
+                let document = decode_document(json).await?;
                 let kind = metadata_in(tx, &row.state.template_id)
                     .await?
                     .context("missing metadata")?

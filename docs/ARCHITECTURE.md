@@ -1089,7 +1089,7 @@ method allowlist.
 | POST | `/deals` | Atomically create deal, metadata, parties, and scopes | Backend-generated UUID; typed codes; optional dates/parties; same-owner company references |
 | POST | `/deals/{deal_id}/update` | Replace complete editable fields, parties, and scopes atomically | Creator/ID immutable; owner/manager capability; metadata preserved; unchanged assignments retain row IDs |
 | GET | `/deals/{deal_id}` | Get one deal and metadata | 404 when absent |
-| POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
+| POST | `/deals/{deal_id}/metadata` | Save links and upload/extract deal metadata | Accepts only multipart `expectedRevision`, `sharepointLink`, `sowLink`, `factSheetLink`, `rlLink`, and `files`; OpenAI required when files are present |
 | POST | `/deals/{deal_id}/extraction/upload` | Compatibility alias for metadata upload | Same handler |
 | POST | `/deals/{deal_id}/archive` | Set `archivedAt` idempotently | Preserves status, metadata, parties, scopes, files, and linked chats |
 | DELETE | `/deals/{deal_id}` | Accept durable permanent deletion or return completed receipt | Current membership owner; archived deals allowed; 202 JSON/Location or completed 204; no-store |
@@ -1702,7 +1702,9 @@ repositories map the resulting client error to their storage error at the reposi
   application instances are not enabled.
 - Database calls never block on an async runtime from synchronous wrappers. Template preparation,
   native previews, Office, filesystem and expensive parsing/rendering retain blocking-pool offload.
-  Template JSON parsing and bounded response serialization also run on the blocking pool, retaining
+  Template retrieval offloads stored JSON decoding/normalization, image externalization/hydration,
+  response document conversion and preview base64 encoding. PostgreSQL I/O stays async.
+  Template JSON parsing and bounded response serialization run on the blocking pool, retaining
   the shared two-operation capacity permit until processing finishes even if its request is dropped.
   Independent-slide preparation and asynchronous provider/database concurrency remain unchanged.
 - Document batch ingestion retains bounded unordered concurrency, default eight. Search retains
@@ -1844,6 +1846,13 @@ note operations retain parent-before-folder-before-note ordering. Assistant sequ
 the thread after its deal guard; terminal publication retains revocation/deletion checks. Template
 refresh, classification SQL updates and deletion lock the canonical template parent; standalone
 content replacements use revision CAS. No provider or graph call runs inside these transactions.
+
+Metadata saves run optional extraction before publishing links and extracted questions in one
+revision-checked transaction. Provider/parse failures leave stored metadata and its revision
+unchanged, so the retained client draft can retry with the same revision. A loaded-state revision
+preflight rejects already stale drafts before provider work; final transactional authorization and
+revision checks reject changes made while extraction was running. Link-only saves preserve existing
+questions. An uncertain response after commit still requires a reload/review before another edit.
 
 Clients capture the revision of the loaded/submitted content, preserve drafts after conflicts, and
 never silently replay against a newer revision. Destructive confirmations retain the displayed target

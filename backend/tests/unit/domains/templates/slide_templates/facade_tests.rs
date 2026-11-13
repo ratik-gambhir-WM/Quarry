@@ -172,3 +172,44 @@ async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_re
     studio.shutdown();
     studio.stop_worker().await;
 }
+
+#[test]
+fn retrieval_waits_for_the_blocking_pool_without_blocking_the_runtime() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).await.unwrap());
+        let imported = support::import_fixture(repository.clone(), TemplateKind::Diagram).await;
+        let studio = Arc::new(SlideTemplates::new(repository, Arc::new(support::FixturePreview), None, None, false));
+        let (release, released) = std::sync::mpsc::channel();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let occupied = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        ready.await.unwrap();
+        let documents = studio.clone();
+        let id = imported.template_id.clone();
+        let mut document = tokio::spawn(async move { documents.get(id).await });
+        let mut previews = tokio::spawn(async move { studio.previews(1).await });
+        // Both requests must yield while their CPU work is queued; this timer must run.
+        let queued = tokio::time::timeout(Duration::from_millis(100), async {
+            tokio::select! {
+                result = &mut document => panic!("document processing bypassed the blocking pool: {result:?}"),
+                result = &mut previews => panic!("preview encoding bypassed the blocking pool: {result:?}"),
+            }
+        }).await;
+        release.send(()).unwrap();
+        occupied.await.unwrap();
+        assert!(queued.is_err());
+        let value = tokio::time::timeout(Duration::from_secs(3), document).await.unwrap().unwrap().unwrap().unwrap();
+        assert_eq!(value["revision"], 1);
+        assert!(value["document"]["presentation"].is_object());
+        let previews = tokio::time::timeout(Duration::from_secs(3), previews).await.unwrap().unwrap().unwrap();
+        assert_eq!(previews.previews[0].template_id, imported.template_id);
+        assert!(previews.previews[0].data_url.starts_with("data:image/png;base64,"));
+    });
+}

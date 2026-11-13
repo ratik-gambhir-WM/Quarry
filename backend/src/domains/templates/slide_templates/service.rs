@@ -585,32 +585,37 @@ impl ImportService {
         else {
             return Ok(None);
         };
-        let (mut template_json, migrated_assets) =
-            externalize_assets(template_id, stored.template_json)?;
-        let repaired = repair_canvas_dimensions(&mut template_json);
-        let mut assets = stored.assets;
-        let mut revision = stored.revision;
-        if repaired || !migrated_assets.is_empty() {
+        let id = template_id.to_owned();
+        let (mut stored, migrated_assets, update) = blocking(move || {
+            let mut stored = stored;
+            let (mut document, migrated_assets) = externalize_assets(&id, stored.template_json)?;
+            let repaired = repair_canvas_dimensions(&mut document);
+            let update = (repaired || !migrated_assets.is_empty()).then(|| StoredTemplate {
+                template_id: id,
+                template_json: document.clone(),
+                revision: stored.revision,
+            });
+            stored.template_json = document;
+            Ok((stored, migrated_assets, update))
+        })
+        .await?;
+        if let Some(update) = update {
             self.repository
-                .update(
-                    &StoredTemplate {
-                        template_id: template_id.to_owned(),
-                        template_json: template_json.clone(),
-                        revision,
-                    },
-                    &migrated_assets,
-                )
+                .update(&update, &migrated_assets)
                 .await
                 .map_err(SlideTemplateError::repository)?;
-            revision =
-                crate::shared::revision::next(revision).map_err(SlideTemplateError::repository)?;
+            stored.revision = crate::shared::revision::next(stored.revision)
+                .map_err(SlideTemplateError::repository)?;
         }
-        assets.extend(migrated_assets);
-        Ok(Some(TemplateResponse {
-            revision,
-            template_id: template_id.to_owned(),
-            template_json: hydrate_canvas_assets(template_json, &assets)?,
-        }))
+        blocking(move || {
+            stored.assets.extend(migrated_assets);
+            Ok(Some(TemplateResponse {
+                revision: stored.revision,
+                template_id: stored.template_id,
+                template_json: hydrate_canvas_assets(stored.template_json, &stored.assets)?,
+            }))
+        })
+        .await
     }
 
     pub async fn find_json(&self, template_id: &str) -> SlideResult<Option<Value>> {
@@ -623,14 +628,17 @@ impl ImportService {
             .await
             .map_err(SlideTemplateError::internal)?
             .is_some_and(|metadata| metadata.source == TemplateSource::Builtin);
-        let document = if builtin {
-            super::normalized_document(&template.template_json)
-        } else {
-            super::compact_document(&template.template_json)
-        };
-        Ok(Some(
-            serde_json::json!({ "revision": template.revision, "document": document }),
-        ))
+        blocking(move || {
+            let document = if builtin {
+                super::normalized_document(&template.template_json)
+            } else {
+                super::compact_document(&template.template_json)
+            };
+            Ok(Some(
+                serde_json::json!({ "revision": template.revision, "document": document }),
+            ))
+        })
+        .await
     }
 
     /// Lists lightweight metadata for every stored template.
@@ -678,46 +686,50 @@ impl ImportService {
             .list_previews(TEMPLATE_PREVIEW_PAGE_SIZE, offset)
             .await
             .map_err(SlideTemplateError::internal)?;
-        let total_pages = stored.total.div_ceil(TEMPLATE_PREVIEW_PAGE_SIZE);
-        let encoded_size = stored
-            .previews
-            .iter()
-            .map(|p| p.bytes.len().saturating_mul(4).div_ceil(3) + 128)
-            .fold(0usize, usize::saturating_add);
-        if encoded_size > super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES {
-            return Err(document_too_large());
-        }
-        let previews = stored
-            .previews
-            .into_iter()
-            .map(|preview| TemplatePreviewListItem {
-                revision: preview.revision,
-                preview_url: format!(
-                    "/api/v1/templates/slide-templates/catalog/{}/preview?appId={}",
-                    preview.template_id, self.app_id
-                ),
-                data_url: format!(
-                    "data:{};base64,{}",
-                    preview.content_type,
-                    STANDARD.encode(&preview.bytes)
-                ),
-                template_id: preview.template_id,
-                content_type: preview.content_type,
-                width: preview.width,
-                height: preview.height,
+        let app_id = self.app_id.clone();
+        blocking(move || {
+            let total_pages = stored.total.div_ceil(TEMPLATE_PREVIEW_PAGE_SIZE);
+            let encoded_size = stored
+                .previews
+                .iter()
+                .map(|p| p.bytes.len().saturating_mul(4).div_ceil(3) + 128)
+                .fold(0usize, usize::saturating_add);
+            if encoded_size > super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES {
+                return Err(document_too_large());
+            }
+            let previews = stored
+                .previews
+                .into_iter()
+                .map(|preview| TemplatePreviewListItem {
+                    revision: preview.revision,
+                    preview_url: format!(
+                        "/api/v1/templates/slide-templates/catalog/{}/preview?appId={}",
+                        preview.template_id, app_id
+                    ),
+                    data_url: format!(
+                        "data:{};base64,{}",
+                        preview.content_type,
+                        STANDARD.encode(&preview.bytes)
+                    ),
+                    template_id: preview.template_id,
+                    content_type: preview.content_type,
+                    width: preview.width,
+                    height: preview.height,
+                })
+                .collect::<Vec<_>>();
+            Ok(TemplatePreviewListResponse {
+                pagination: TemplatePreviewPageMetadata {
+                    page,
+                    page_size: TEMPLATE_PREVIEW_PAGE_SIZE,
+                    total_items: stored.total,
+                    total_pages,
+                    has_previous_page: page > 1 && stored.total > 0,
+                    has_next_page: offset.saturating_add(previews.len()) < stored.total,
+                },
+                previews,
             })
-            .collect::<Vec<_>>();
-        Ok(TemplatePreviewListResponse {
-            pagination: TemplatePreviewPageMetadata {
-                page,
-                page_size: TEMPLATE_PREVIEW_PAGE_SIZE,
-                total_items: stored.total,
-                total_pages,
-                has_previous_page: page > 1 && stored.total > 0,
-                has_next_page: offset.saturating_add(previews.len()) < stored.total,
-            },
-            previews,
         })
+        .await
     }
 
     /// Deletes a stored template and its associated assets.
