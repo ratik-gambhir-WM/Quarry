@@ -313,6 +313,7 @@ impl ImportService {
         let template_id = Uuid::new_v4().to_string();
         let (template_json, assets) = externalize_assets(&template_id, template_json)?;
         let template = StoredTemplate {
+            revision: 1,
             template_id: template_id.clone(),
             template_json,
         };
@@ -327,6 +328,7 @@ impl ImportService {
             catalog_checksum: None,
         };
         let preview = generated_preview.map(|preview| StoredTemplatePreview {
+            revision: 1,
             template_id: template_id.clone(),
             content_type: "image/png".to_owned(),
             bytes: preview.bytes,
@@ -525,6 +527,7 @@ impl ImportService {
                     return Err(document_too_large());
                 }
                 let preview = generated_preview.map(|preview| StoredTemplatePreview {
+                    revision: 1,
                     template_id: template_id.clone(),
                     content_type: "image/png".to_owned(),
                     bytes: preview.bytes,
@@ -534,6 +537,7 @@ impl ImportService {
                 let preview_available = preview.is_some();
                 records.push(TemplateInsert {
                     template: StoredTemplate {
+                        revision: 1,
                         template_id: template_id.clone(),
                         template_json: stored_json,
                     },
@@ -583,22 +587,27 @@ impl ImportService {
         };
         let (mut template_json, migrated_assets) =
             externalize_assets(template_id, stored.template_json)?;
-        let repaired_dimensions = repair_canvas_dimensions(&mut template_json);
+        let repaired = repair_canvas_dimensions(&mut template_json);
         let mut assets = stored.assets;
-        if repaired_dimensions || !migrated_assets.is_empty() {
+        let mut revision = stored.revision;
+        if repaired || !migrated_assets.is_empty() {
             self.repository
                 .update(
                     &StoredTemplate {
                         template_id: template_id.to_owned(),
                         template_json: template_json.clone(),
+                        revision,
                     },
                     &migrated_assets,
                 )
                 .await
-                .map_err(SlideTemplateError::internal)?;
-            assets.extend(migrated_assets);
+                .map_err(SlideTemplateError::repository)?;
+            revision =
+                crate::shared::revision::next(revision).map_err(SlideTemplateError::repository)?;
         }
+        assets.extend(migrated_assets);
         Ok(Some(TemplateResponse {
+            revision,
             template_id: template_id.to_owned(),
             template_json: hydrate_canvas_assets(template_json, &assets)?,
         }))
@@ -614,11 +623,14 @@ impl ImportService {
             .await
             .map_err(SlideTemplateError::internal)?
             .is_some_and(|metadata| metadata.source == TemplateSource::Builtin);
-        Ok(Some(if builtin {
+        let document = if builtin {
             super::normalized_document(&template.template_json)
         } else {
             super::compact_document(&template.template_json)
-        }))
+        };
+        Ok(Some(
+            serde_json::json!({ "revision": template.revision, "document": document }),
+        ))
     }
 
     /// Lists lightweight metadata for every stored template.
@@ -632,6 +644,7 @@ impl ImportService {
             .map(|entry| {
                 let presentation = entry.template.template_json.presentation;
                 TemplateListItem {
+                    revision: entry.template.revision,
                     template_id: entry.template.template_id.clone(),
                     title: presentation.title,
                     description: entry.metadata.description,
@@ -678,6 +691,7 @@ impl ImportService {
             .previews
             .into_iter()
             .map(|preview| TemplatePreviewListItem {
+                revision: preview.revision,
                 preview_url: format!(
                     "/api/v1/templates/slide-templates/catalog/{}/preview?appId={}",
                     preview.template_id, self.app_id
@@ -707,11 +721,11 @@ impl ImportService {
     }
 
     /// Deletes a stored template and its associated assets.
-    pub async fn delete(&self, template_id: &str) -> SlideResult<bool> {
+    pub async fn delete(&self, template_id: &str, expected_revision: i64) -> SlideResult<bool> {
         self.repository
-            .delete(template_id)
+            .delete(template_id, expected_revision)
             .await
-            .map_err(SlideTemplateError::internal)
+            .map_err(SlideTemplateError::repository)
     }
 
     /// Retrieves a template-owned binary image asset.

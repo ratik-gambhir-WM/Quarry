@@ -238,7 +238,7 @@ async fn v3_shared_search_authorizes_current_candidates_and_exact_byte_retries()
         .await
         .unwrap();
     members
-        .remove_member("DEAL-SHARED-SEARCH".into(), 2, 1)
+        .remove_member("DEAL-SHARED-SEARCH".into(), 2, 1, 1)
         .await
         .unwrap();
     assert!(search

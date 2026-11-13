@@ -16,6 +16,7 @@ fn record(id: &str, source: TemplateSource) -> TemplateInsert {
     .unwrap();
     TemplateInsert {
         template: StoredTemplate {
+            revision: 1,
             template_id: id.into(),
             template_json: document,
         },
@@ -105,7 +106,7 @@ async fn builtin_deletion_is_app_scoped_and_unchanged_reseed_keeps_deletion() {
         .unwrap();
     let a = repo.for_app("AppA").await.unwrap().unwrap();
     let b = repo.for_app("AppB").await.unwrap().unwrap();
-    assert!(a.delete("builtin").await.unwrap());
+    assert!(a.delete("builtin", 1).await.unwrap());
     assert!(a.find_by_id("builtin").await.unwrap().is_none());
     assert!(b.find_by_id("builtin").await.unwrap().is_some());
     repo.upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
@@ -115,9 +116,9 @@ async fn builtin_deletion_is_app_scoped_and_unchanged_reseed_keeps_deletion() {
     assert!(a.find_by_id("builtin").await.unwrap().is_none());
     let c = repo.for_app("AppC").await.unwrap().unwrap();
     assert!(c.find_by_id("builtin").await.unwrap().is_some());
-    assert!(b.delete("builtin").await.unwrap());
-    assert!(c.delete("builtin").await.unwrap());
-    assert!(repo.delete("builtin").await.unwrap());
+    assert!(b.delete("builtin", 1).await.unwrap());
+    assert!(c.delete("builtin", 1).await.unwrap());
+    assert!(repo.delete("builtin", 1).await.unwrap());
     assert!(repo.find_by_id("builtin").await.unwrap().is_none());
 }
 #[tokio::test]
@@ -138,7 +139,7 @@ async fn cross_app_assets_updates_and_deletes_cannot_access_imports() {
     assert!(b.find_asset("private", "image").await.unwrap().is_none());
     assert!(b.find_by_id_with_assets("private").await.unwrap().is_none());
     assert!(b.update(&record.template, &[]).await.is_err());
-    assert!(!b.delete("private").await.unwrap());
+    assert!(!b.delete("private", 1).await.unwrap());
     assert!(a.find_asset("private", "image").await.unwrap().is_some());
     assert_eq!(a.list(None).await.unwrap().len(), 1);
     assert!(b.list(None).await.unwrap().is_empty());

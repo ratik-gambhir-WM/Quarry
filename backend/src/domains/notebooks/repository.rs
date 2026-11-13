@@ -5,7 +5,7 @@ use crate::adapters::postgres::client::RowResult;
 use crate::{
     adapters::postgres::{
         client::{PostgresClient, PostgresTransaction},
-        query::{Condition as C, SortDirection as Sort, SqlBuilder as Q},
+        query::{Condition as C, LockWait, RowLock, SortDirection as Sort, SqlBuilder as Q},
     },
     shared::error::RepositoryError as Error,
 };
@@ -47,7 +47,44 @@ pub(super) async fn owned(
     .await?
     .ok_or_else(missing)
 }
+pub(super) async fn lock_parent(
+    tx: &PostgresTransaction,
+    owner: i64,
+    notebook: &str,
+    mode: RowLock,
+) -> Result<Notebook> {
+    tx.lock_with(
+        Q::select("notebooks")
+            .and_where(C::equal("notebook_id", notebook))
+            .and_where(C::equal("user_id", owner))
+            .lock(mode, LockWait::Wait)
+            .build(),
+        notebook_row,
+    )
+    .await?
+    .pop()
+    .ok_or_else(missing)
+}
+pub(super) async fn lock_folder(
+    tx: &PostgresTransaction,
+    notebook: &str,
+    id: &str,
+    mode: RowLock,
+) -> Result<Folder> {
+    tx.lock_with(
+        Q::select("notebook_folders")
+            .and_where(C::equal("notebook_id", notebook))
+            .and_where(C::equal("folder_id", id))
+            .lock(mode, LockWait::Wait)
+            .build(),
+        folder_row,
+    )
+    .await?
+    .pop()
+    .ok_or_else(missing)
+}
 pub(super) async fn deal_owned(tx: &PostgresTransaction, owner: i64, deal: &str) -> Result<()> {
+    crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Share).await?;
     crate::domains::memberships::require_deal(
         tx,
         deal,
@@ -140,19 +177,21 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                let previous = owned(tx, owner, &id).await?;
                 if let PatchField::Value(deal) = &deal {
                     deal_owned(tx, owner, deal).await?;
                 }
-                tx.write(
-                    Q::update("notebooks")
-                        .set("title", title.unwrap_or(previous.title))
-                        .set("deal_id", deal.apply(previous.deal_id))
-                        .set("updated_at", now())
-                        .and_where(C::equal("notebook_id", &id))
-                        .build(),
-                )
-                .await?;
+                lock_parent(tx, owner, &id, RowLock::Update).await?;
+                let mut update = Q::update("notebooks").set("updated_at", now());
+                if let Some(title) = title {
+                    update = update.set("title", title);
+                }
+                match deal {
+                    PatchField::Missing => {}
+                    PatchField::Null => update = update.set("deal_id", None::<String>),
+                    PatchField::Value(value) => update = update.set("deal_id", value),
+                }
+                tx.write(update.and_where(C::equal("notebook_id", &id)).build())
+                    .await?;
                 owned(tx, owner, &id).await
             })
             .await
@@ -166,7 +205,13 @@ impl NotebookRepository {
                     if deal == "none" {
                         q = q.and_where(C::is_null("deal_id"));
                     } else {
-                        deal_owned(tx, owner, deal).await?;
+                        crate::domains::memberships::require_deal(
+                            tx,
+                            deal,
+                            owner,
+                            crate::domains::memberships::model::Capability::Read,
+                        )
+                        .await?;
                         q = q.and_where(C::equal("deal_id", deal.as_str()));
                     }
                 }
@@ -189,7 +234,7 @@ impl NotebookRepository {
     pub(super) async fn delete(&self, owner: i64, id: String) -> Result<()> {
         self.postgres
             .transaction_result_async(move |tx| async move { let tx = &tx;
-                owned(tx, owner, &id).await?;
+                lock_parent(tx, owner, &id, RowLock::Update).await?;
                 // Include admitted creations that have not reached canonical persistence yet.
                 for table in ["notebook_notes", "notebook_save_jobs"] {
                     let mut after = String::new();
@@ -235,7 +280,7 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
+                lock_parent(tx, owner, &notebook, RowLock::Share).await?;
                 let id = uuid::Uuid::new_v4().to_string();
                 let time = now();
                 tx.write(
@@ -276,7 +321,7 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
+                lock_parent(tx, owner, &notebook, RowLock::Share).await?;
                 folder(tx, &notebook, &id).await?;
                 tx.write(
                     Q::update("notebook_folders")
@@ -326,8 +371,8 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
-                folder(tx, &notebook, &id).await?;
+                lock_parent(tx, owner, &notebook, RowLock::Share).await?;
+                lock_folder(tx, &notebook, &id, RowLock::Update).await?;
                 relocate_folder(tx, &id).await?;
                 tx.write(
                     Q::delete_from("notebook_folders")
@@ -386,12 +431,30 @@ impl NotebookRepository {
             })
             .await
     }
-    pub(super) async fn delete_note(&self, owner: i64, notebook: String, id: String) -> Result<()> {
+    pub(super) async fn delete_note(
+        &self,
+        owner: i64,
+        notebook: String,
+        id: String,
+        expected_revision: i64,
+    ) -> Result<()> {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
-                note(tx, &notebook, &id).await?;
+                lock_parent(tx, owner, &notebook, RowLock::Share).await?;
+                let changed = tx
+                    .write(
+                        Q::delete_from("notebook_notes")
+                            .and_where(C::equal("notebook_id", &notebook))
+                            .and_where(C::equal("note_id", &id))
+                            .and_where(C::equal("revision", expected_revision))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    note(tx, &notebook, &id).await?;
+                    return Err(conflict());
+                }
                 enqueue_cleanup(tx, owner, &id).await?;
                 tx.write(
                     Q::update("notebook_save_jobs")
@@ -405,18 +468,25 @@ impl NotebookRepository {
                         .build(),
                 )
                 .await?;
-                tx.write(
-                    Q::delete_from("notebook_notes")
-                        .and_where(C::equal("note_id", id))
-                        .build(),
-                )
-                .await?;
                 Ok(())
             })
             .await
     }
 }
 pub(super) async fn relocate_folder(tx: &PostgresTransaction, id: &str) -> Result<()> {
+    if tx
+        .read_one(
+            Q::select("notebook_notes")
+                .and_where(C::equal("folder_id", id))
+                .and_where(C::equal("revision", MAX_REVISION))
+                .limit(1)
+                .build(),
+        )
+        .await?
+        .is_some()
+    {
+        return Err(conflict());
+    }
     tx.write(
         Q::update("notebook_notes")
             .set("folder_id", None::<String>)

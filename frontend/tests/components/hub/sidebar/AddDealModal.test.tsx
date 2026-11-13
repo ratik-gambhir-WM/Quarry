@@ -201,6 +201,7 @@ describe("AddDealModal", () => {
     await user.click(screen.getByRole("button", { name: "Save deal" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(updateDeal).toHaveBeenCalledWith(initialDeal.dealId, {
+      expectedRevision: initialDeal.revision,
       dealName: initialDeal.dealName,
       dealCode: null,
       engagementType: "buy_side",
@@ -305,6 +306,7 @@ describe("AddDealModal", () => {
 
     await waitFor(() => {
       expect(saveDealMetadata).toHaveBeenCalledWith(savedDeal.dealId, {
+      expectedRevision: 1,
         factSheetLink: "https://example.com/fact-sheet",
         files: [],
         rlLink: "https://example.com/request-list",

@@ -46,7 +46,7 @@ export function DealTeamCard({ team, canManage, pending, mutate, dealId, onConfi
           <Button ref={deleteTrigger} variant="ghost" className="text-destructive" disabled={pending} onClick={() => onConfirm({
             title: `Delete ${team.name}?`,
             description: "Team assignments will be removed. Everyone will keep their deal access and uploaded documents.",
-            action: () => runtime.api.deleteDealTeam(dealId, team.teamId),
+            action: () => runtime.api.deleteDealTeam(dealId, team.teamId, team.revision),
           }, deleteTrigger.current)}>Delete team</Button>
         </div>
       </CollapsiblePanel> : null}

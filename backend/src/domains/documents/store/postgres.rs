@@ -300,6 +300,12 @@ async fn persist_file_blob(
     postgres
         .transaction_result_async(move |transaction| async move {
             let transaction = &transaction;
+            crate::domains::deals::coordination::lock_authority(
+                transaction,
+                &file_persistence.deal_id,
+                crate::adapters::postgres::query::RowLock::Share,
+            )
+            .await?;
             crate::domains::memberships::require_deal(
                 transaction,
                 &file_persistence.deal_id,

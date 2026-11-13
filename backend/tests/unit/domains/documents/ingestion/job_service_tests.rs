@@ -112,7 +112,7 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
             .contains("event: processing")
     );
     memberships
-        .remove_member("DEAL-JOBS".into(), 1, 2)
+        .remove_member("DEAL-JOBS".into(), 1, 2, 1)
         .await
         .unwrap();
     sender.send_replace(DocumentJobEvent::completed(

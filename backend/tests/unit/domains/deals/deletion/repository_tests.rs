@@ -42,8 +42,8 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
         Err(RepositoryError::Forbidden)
     ));
     let (a, b) = tokio::join!(
-        repo.accept("DELETE-A".into(), 1),
-        repo.accept("DELETE-A".into(), 1)
+        repo.accept("DELETE-A".into(), 1, 1),
+        repo.accept("DELETE-A".into(), 1, 1)
     );
     let a = a.unwrap();
     assert_eq!(a.deletion_id, b.unwrap().deletion_id);
@@ -53,7 +53,7 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
         Err(RepositoryError::NotFound(_))
     ));
     assert!(matches!(
-        repo.accept("DELETE-A".into(), 2).await,
+        repo.accept("DELETE-A".into(), 2, 1).await,
         Err(RepositoryError::NotFound(_))
     ));
     let access = repo
@@ -78,14 +78,14 @@ async fn acceptance_is_durable_idempotent_owner_scoped_and_hides_all_member_acce
         "acceptance has not purged canonical data"
     );
     repo.failure(a.deletion_id.clone(), false).await.unwrap();
-    let retry = repo.accept("DELETE-A".into(), 1).await.unwrap();
+    let retry = repo.accept("DELETE-A".into(), 1, 1).await.unwrap();
     assert_eq!(retry.deletion_id, a.deletion_id);
     assert_eq!(retry.status, DeletionStatus::Pending);
 }
 #[tokio::test]
 async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_jobs() {
     let repo = fixture().await;
-    let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
+    let op = repo.accept("DELETE-A".into(), 1, 1).await.unwrap();
     repo.snapshot_and_purge(op.clone()).await.unwrap();
     repo.snapshot_and_purge(op.clone()).await.unwrap();
     assert_eq!(
@@ -122,7 +122,7 @@ async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_j
     assert_eq!(count(&repo, "deal_deletion_files").await, 0);
     assert_eq!(count(&repo, "deal_deletion_threads").await, 0);
     assert_eq!(
-        repo.accept("DELETE-A".into(), 1).await.unwrap().status,
+        repo.accept("DELETE-A".into(), 1, 1).await.unwrap().status,
         DeletionStatus::Completed
     );
     assert!(repo.status(op.deletion_id, 2).await.is_err());
@@ -137,7 +137,7 @@ async fn aggregate_purge_preserves_other_deals_free_chats_and_private_notebook_j
 #[tokio::test]
 async fn purge_rollback_keeps_notebook_links_threads_targets_and_phase_consistent() {
     let repo = fixture().await;
-    let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
+    let op = repo.accept("DELETE-A".into(), 1, 1).await.unwrap();
     repo.postgres.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION stop_purge_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic failure' USING ERRCODE='23514'; END $$; CREATE TRIGGER stop_purge BEFORE DELETE ON deals FOR EACH ROW EXECUTE FUNCTION stop_purge_fn();").await }).await.unwrap();
     assert!(repo.snapshot_and_purge(op.clone()).await.is_err());
     assert_eq!(count(&repo, "deals").await, 2);
@@ -167,7 +167,7 @@ async fn manifest_covers_more_than_one_batch_including_soft_deleted_files() {
     repo.postgres.with_connection(async |c| {
         for n in 0..520 { c.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,deleted_at,created_at,updated_at) VALUES(?1,'DELETE-A','synthetic','{}','now','now','now')",[format!("batch-{n:04}")]).await?; } Ok(())
      }).await.unwrap();
-    let op = repo.accept("DELETE-A".into(), 1).await.unwrap();
+    let op = repo.accept("DELETE-A".into(), 1, 1).await.unwrap();
     repo.snapshot_and_purge(op).await.unwrap();
     assert_eq!(count(&repo, "deal_deletion_files").await, 521);
     assert_eq!(count(&repo, "quarry_files").await, 1);
@@ -178,11 +178,59 @@ async fn transferred_membership_owner_can_delete_but_creator_provenance_does_not
     let repo = fixture().await;
     repo.postgres.with_connection(async |c| { c.execute_batch("UPDATE deal_memberships SET role='viewer' WHERE deal_id='DELETE-A' AND user_id=1; UPDATE deal_memberships SET role='owner' WHERE deal_id='DELETE-A' AND user_id=2;").await }).await.unwrap();
     assert!(matches!(
-        repo.accept("DELETE-A".into(), 1).await,
+        repo.accept("DELETE-A".into(), 1, 1).await,
         Err(RepositoryError::Forbidden)
     ));
-    let op = repo.accept("DELETE-A".into(), 2).await.unwrap();
+    let op = repo.accept("DELETE-A".into(), 2, 1).await.unwrap();
     repo.snapshot_and_purge(op.clone()).await.unwrap();
     assert!(repo.status(op.deletion_id.clone(), 1).await.is_err());
     assert!(repo.status(op.deletion_id, 2).await.is_ok());
+}
+
+#[tokio::test]
+async fn stale_deletion_rolls_back_barrier_and_purge_permanently_reserves_identity() {
+    use crate::domains::deals::{
+        model::DealFields,
+        repository::{CreateDealRecord, DealRepository},
+    };
+    let repo = fixture().await;
+    let deals = DealRepository::new(repo.postgres.clone());
+    let fields: DealFields = serde_json::from_value(serde_json::json!({
+        "dealName":"Changed", "dealCode":null, "engagementType":"buy_side", "transactionType":"unknown", "status":"pipeline", "startDate":null,"expectedCloseDate":null,"actualCloseDate":null,"engagementCompletedDate":null,"parties":[],"scopes":[]
+    })).unwrap();
+    deals
+        .update("DELETE-A".into(), 1, fields.clone(), 1)
+        .await
+        .unwrap();
+    assert!(matches!(
+        repo.accept("DELETE-A".into(), 1, 1).await,
+        Err(RepositoryError::Conflict(_))
+    ));
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM deal_lifecycle_guards WHERE deal_id='DELETE-A'")
+            .fetch_one(repo.postgres.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, "active");
+    let receipt = repo.accept("DELETE-A".into(), 1, 2).await.unwrap();
+    assert_eq!(
+        repo.accept("DELETE-A".into(), 1, 1)
+            .await
+            .unwrap()
+            .deletion_id,
+        receipt.deletion_id
+    );
+    repo.snapshot_and_purge(receipt).await.unwrap();
+    assert!(matches!(
+        deals
+            .create(CreateDealRecord {
+                deal_id: "DELETE-A".into(),
+                user_id: 1,
+                fields,
+                local_path: None,
+                sharepoint_link: None
+            })
+            .await,
+        Err(RepositoryError::Conflict(_))
+    ));
 }

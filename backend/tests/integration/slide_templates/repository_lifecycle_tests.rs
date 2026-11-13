@@ -11,6 +11,7 @@ fn insert(id: &str) -> TemplateInsert {
     .unwrap();
     TemplateInsert {
         template: StoredTemplate {
+            revision: 1,
             template_id: id.into(),
             template_json,
         },
@@ -400,6 +401,7 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
     let (width, height) = (decoded.width(), decoded.height());
     let stored_template;
     record.preview = Some(StoredTemplatePreview {
+        revision: 1,
         template_id: record.template.template_id.clone(),
         content_type: "image/png".into(),
         bytes: png.to_vec(),
@@ -564,6 +566,7 @@ async fn pending_classification_and_template_preview_commit_atomically() {
         .unwrap()
         .unwrap();
     record.preview = Some(StoredTemplatePreview {
+        revision: 1,
         template_id: "rolled-back".into(),
         content_type: "image/png".into(),
         bytes: preview.bytes,
@@ -664,4 +667,44 @@ async fn classified_batch_jobs_and_previews_survive_reopen_and_cancelled_publica
         assert_eq!(state.status, "pending");
         assert_eq!(state.attempt_count, 0);
     }
+}
+
+#[tokio::test]
+async fn independent_template_pools_reject_stale_replacement_and_deletion() {
+    use crate::adapters::postgres::client::PostgresClient;
+    let (a, b) = PostgresClient::concurrent_test_clients().await;
+    let ra = PostgresTemplateRepository::new(a.clone());
+    ra.ensure_app("Quarry_WestMonroe", None).await.unwrap();
+    let rb = PostgresTemplateRepository::new(b.clone());
+    let record = insert("cas-template");
+    ra.insert_with_pending_classification(&record, &pending("v1"))
+        .await
+        .unwrap();
+    let (first, second) = tokio::join!(
+        TemplateRepository::update(&ra, &record.template, &[]),
+        TemplateRepository::update(&rb, &record.template, &[])
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    assert!(matches!(
+        first.err().or(second.err()),
+        Some(crate::shared::error::RepositoryError::Conflict(_))
+    ));
+    assert!(matches!(
+        TemplateRepository::delete(&ra, "cas-template", 1).await,
+        Err(crate::shared::error::RepositoryError::Conflict(_))
+    ));
+    assert_eq!(
+        ra.find_by_id("cas-template")
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    TemplateRepository::delete(&rb, "cas-template", 2)
+        .await
+        .unwrap();
+    assert!(ra.find_by_id("cas-template").await.unwrap().is_none());
+    a.close().await;
+    b.close().await;
 }

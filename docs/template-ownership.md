@@ -1,6 +1,6 @@
 # Private template ownership
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -28,7 +28,7 @@ fails after canonical deletion, startup reconciliation removes the stale project
 <a id="schema-17-rollout-and-recovery"></a>
 ## PostgreSQL setup and recovery
 
-Fresh PostgreSQL schema 1 includes nullable `templates.owner_user_id`, its restricted user foreign
+Fresh PostgreSQL schema 2 includes nullable `templates.owner_user_id`, its restricted user foreign
 key and owner/template index. Every authenticated import assigns the verified actor inside the
 publication transaction. Unassigned records stay hidden; no automatic ownership claim is allowed.
 This deployment does not import older shared catalogs or run former SQLite upgrades.
@@ -64,3 +64,8 @@ isolation, and the complete suite passed with four test threads. No tests were n
 The nine opt-in tests, live application startup, live Helix/provider calls and desktop packaging
 were not run. Frontend source and transport signatures did not change, so frontend production
 builds and native Rust checks were not rerun for this backend-only ownership change.
+
+Schema 2 templates expose bounded content revisions in catalog/previews and document envelopes
+`{revision, document}`. DELETE requires the displayed `expectedRevision` query value. Repository
+replacement uses the stored revision as a conditional guard. Classification SQL mutations, refresh
+and deletion coordinate on the canonical parent; provider and graph work remain outside SQL.

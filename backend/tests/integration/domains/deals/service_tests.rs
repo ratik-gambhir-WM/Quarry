@@ -106,6 +106,7 @@ async fn saves_submitted_links_before_optional_extraction_fails() {
         .save_metadata(
             &deal_id,
             SaveDealMetadataInput {
+                expected_revision: 1,
                 uploaded_files: vec![UploadedDealFile {
                     relative_path: "Acme SOW.txt".to_string(),
                     filename: "Acme SOW.txt".to_string(),

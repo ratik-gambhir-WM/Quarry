@@ -8,15 +8,16 @@ use crate::domains::memberships::{
 use crate::{
     adapters::postgres::{
         client::{PostgresClient, PostgresError, PostgresTransaction},
-        query::{Condition, ConflictUpdate, SqlBuilder},
+        query::{Condition, RowLock, SqlBuilder},
     },
     domains::companies::company_from_row,
     shared::error::RepositoryError,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-const DEAL_COLUMNS: [&str; 14] = [
+const DEAL_COLUMNS: [&str; 15] = [
     "deal_id",
+    "content_revision",
     "user_id",
     "deal_name",
     "deal_code",
@@ -31,8 +32,9 @@ const DEAL_COLUMNS: [&str; 14] = [
     "created_at",
     "updated_at",
 ];
-const METADATA_COLUMNS: [&str; 7] = [
+const METADATA_COLUMNS: [&str; 8] = [
     "deal_id",
+    "metadata_revision",
     "key_questions_json",
     "local_path",
     "sharepoint_link",
@@ -43,6 +45,7 @@ const METADATA_COLUMNS: [&str; 7] = [
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealMetadata {
+    pub revision: i64,
     pub deal_id: String,
     pub key_questions_json: String,
     pub local_path: Option<String>,
@@ -53,6 +56,7 @@ pub struct DealMetadata {
 }
 #[derive(Debug, Clone)]
 pub struct UpsertDealMetadataRecord {
+    pub expected_revision: i64,
     pub deal_id: String,
     pub key_questions_json: String,
     pub local_path: Option<String>,
@@ -100,27 +104,9 @@ impl DealRepository {
         record: CreateDealRecord,
     ) -> Result<DealWithMetadata, RepositoryError> {
         self.postgres
-            .transaction_async(move |tx| async move {
+            .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                if super::deletion::barrier(tx, &record.deal_id).await? {
-                    return Ok(Err(RepositoryError::Conflict("dealId is reserved".into())));
-                }
-                if !tx
-                    .read(
-                        SqlBuilder::select("deals")
-                            .and_where(Condition::equal("deal_id", &record.deal_id))
-                            .build(),
-                    )
-                    .await?
-                    .is_empty()
-                {
-                    return Ok(Err(RepositoryError::Conflict(
-                        "dealId already exists".into(),
-                    )));
-                }
-                if let Err(error) = validate_companies(tx, record.user_id, &record.fields).await? {
-                    return Ok(Err(error));
-                }
+                validate_companies(tx, record.user_id, &record.fields).await??;
                 let now = chrono::Utc::now().to_rfc3339();
                 let insert = SqlBuilder::insert_into("deals")
                     .value("deal_id", &record.deal_id)
@@ -146,7 +132,13 @@ impl DealRepository {
                     .value("created_at", &now)
                     .value("updated_at", &now)
                     .build();
-                tx.write(insert).await?;
+                tx.write(insert).await.map_err(|error| {
+                    if error.is_unique_violation() {
+                        RepositoryError::Conflict("dealId is reserved".into())
+                    } else {
+                        error.into()
+                    }
+                })?;
                 tx.write(
                     SqlBuilder::insert_into("deal_metadata")
                         .value("deal_id", &record.deal_id)
@@ -163,58 +155,58 @@ impl DealRepository {
                     &now,
                 )
                 .await?;
-                Ok(Ok(load_one(tx, &record.deal_id).await?.ok_or_else(
-                    || PostgresError::transaction_aborted("created deal missing"),
-                )?))
+                load_one(tx, &record.deal_id)
+                    .await?
+                    .ok_or_else(|| RepositoryError::storage("created deal missing"))
             })
             .await
-            .map_err(storage)?
     }
     pub async fn update(
         &self,
         id: String,
         actor: i64,
         fields: DealFields,
+        expected_revision: i64,
     ) -> Result<DealWithMetadata, RepositoryError> {
         self.postgres
-            .transaction_async(move |tx| async move {
+            .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                if let Err(error) = require(tx, &id, actor, Capability::Edit).await {
-                    return Ok(Err(error));
+                super::coordination::lock_authority(tx, &id, RowLock::Share).await?;
+                require(tx, &id, actor, Capability::Edit).await?;
+                validate_companies_for_update(tx, &id, actor, &fields).await??;
+                let next = crate::shared::revision::next(expected_revision)?;
+                let changed = tx
+                    .write(
+                        SqlBuilder::update("deals")
+                            .set("deal_name", fields.deal_name.trim())
+                            .set("deal_code", fields.deal_code.as_deref())
+                            .set("engagement_type", fields.engagement_type.code())
+                            .set("transaction_type", fields.transaction_type.code())
+                            .set("status", fields.status.code())
+                            .set("start_date", fields.start_date.as_deref())
+                            .set("expected_close_date", fields.expected_close_date.as_deref())
+                            .set("actual_close_date", fields.actual_close_date.as_deref())
+                            .set(
+                                "engagement_completed_date",
+                                fields.engagement_completed_date.as_deref(),
+                            )
+                            .set("updated_at", chrono::Utc::now().to_rfc3339())
+                            .set("content_revision", next)
+                            .and_where(Condition::equal("deal_id", &id))
+                            .and_where(Condition::equal("content_revision", expected_revision))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
                 }
-                let Some(_existing) = load_one(tx, &id).await? else {
-                    return Ok(Err(RepositoryError::NotFound("deal not found".into())));
-                };
-                if let Err(error) = validate_companies_for_update(tx, &id, actor, &fields).await? {
-                    return Ok(Err(error));
-                }
-                tx.write(
-                    SqlBuilder::update("deals")
-                        .set("deal_name", fields.deal_name.trim())
-                        .set("deal_code", fields.deal_code.as_deref())
-                        .set("engagement_type", fields.engagement_type.code())
-                        .set("transaction_type", fields.transaction_type.code())
-                        .set("status", fields.status.code())
-                        .set("start_date", fields.start_date.as_deref())
-                        .set("expected_close_date", fields.expected_close_date.as_deref())
-                        .set("actual_close_date", fields.actual_close_date.as_deref())
-                        .set(
-                            "engagement_completed_date",
-                            fields.engagement_completed_date.as_deref(),
-                        )
-                        .set("updated_at", chrono::Utc::now().to_rfc3339())
-                        .and_where(Condition::equal("deal_id", &id))
-                        .build(),
-                )
-                .await?;
                 replace_children(tx, &id, &fields).await?;
                 event(tx, &id, Some(actor), "deal_updated", Some(&id)).await?;
-                Ok(Ok(load_one(tx, &id).await?.ok_or_else(|| {
-                    PostgresError::transaction_aborted("updated deal missing")
-                })?))
+                load_one(tx, &id)
+                    .await?
+                    .ok_or_else(|| RepositoryError::storage("updated deal missing"))
             })
             .await
-            .map_err(storage)?
     }
     pub async fn list_owned(&self, owner: i64) -> Result<Vec<DealWithMetadata>, RepositoryError> {
         self.postgres
@@ -293,21 +285,31 @@ impl DealRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                super::coordination::lock_authority(tx, &id, RowLock::Update).await?;
                 let access = require(tx, &id, actor, Capability::Transfer).await?;
                 if access.archived {
                     return Ok(load_one(tx, &id).await?.map(|a| a.deal));
                 }
                 let now = chrono::Utc::now().to_rfc3339();
+                let current = load_one(tx, &id)
+                    .await?
+                    .ok_or_else(|| RepositoryError::NotFound("deal not found".into()))?;
+                let next = crate::shared::revision::next(current.deal.revision)?;
+                let changed = tx
+                    .write(
+                        SqlBuilder::update("deals")
+                            .set("content_revision", next)
+                            .set("archived_at", &now)
+                            .set("updated_at", &now)
+                            .and_where(Condition::equal("deal_id", &id))
+                            .and_where(Condition::is_null("archived_at"))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
                 event(tx, &id, Some(actor), "deal_archived", Some(&id)).await?;
-                tx.write(
-                    SqlBuilder::update("deals")
-                        .set("archived_at", &now)
-                        .set("updated_at", &now)
-                        .and_where(Condition::equal("deal_id", &id))
-                        .and_where(Condition::is_null("archived_at"))
-                        .build(),
-                )
-                .await?;
                 Ok(load_one(tx, &id).await?.map(|a| a.deal))
             })
             .await
@@ -322,6 +324,7 @@ impl DealRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                super::coordination::lock_authority(tx, &record.deal_id, RowLock::Share).await?;
                 require(tx, &record.deal_id, actor, Capability::Edit).await?;
                 let local_path = tx
                     .read_one_with(
@@ -336,33 +339,36 @@ impl DealRepository {
                 if local_path != record.local_path {
                     require(tx, &record.deal_id, actor, Capability::LocalSource).await?;
                 }
+                let changed = tx
+                    .write(
+                        SqlBuilder::update("deal_metadata")
+                            .set("key_questions_json", &record.key_questions_json)
+                            .set("local_path", record.local_path.as_deref())
+                            .set("sharepoint_link", record.sharepoint_link.as_deref())
+                            .set("sow_link", record.sow_link.as_deref())
+                            .set("fact_sheet_link", record.fact_sheet_link.as_deref())
+                            .set("rl_link", record.rl_link.as_deref())
+                            .set(
+                                "metadata_revision",
+                                crate::shared::revision::next(record.expected_revision)?,
+                            )
+                            .and_where(Condition::equal("deal_id", &record.deal_id))
+                            .and_where(Condition::equal(
+                                "metadata_revision",
+                                record.expected_revision,
+                            ))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
                 event(
                     tx,
                     &record.deal_id,
                     Some(actor),
                     "metadata_updated",
                     Some(&record.deal_id),
-                )
-                .await?;
-                tx.write(
-                    SqlBuilder::insert_into("deal_metadata")
-                        .value("deal_id", &record.deal_id)
-                        .value("key_questions_json", &record.key_questions_json)
-                        .value("local_path", record.local_path.as_deref())
-                        .value("sharepoint_link", record.sharepoint_link.as_deref())
-                        .value("sow_link", record.sow_link.as_deref())
-                        .value("fact_sheet_link", record.fact_sheet_link.as_deref())
-                        .value("rl_link", record.rl_link.as_deref())
-                        .on_conflict_update(
-                            ConflictUpdate::new(["deal_id"])
-                                .set_excluded("key_questions_json")
-                                .set_excluded("local_path")
-                                .set_excluded("sharepoint_link")
-                                .set_excluded("sow_link")
-                                .set_excluded("fact_sheet_link")
-                                .set_excluded("rl_link"),
-                        )
-                        .build(),
                 )
                 .await?;
                 tx.read_with(
@@ -594,6 +600,7 @@ async fn load(
                     .columns(
                         [
                             "company_id",
+                            "revision",
                             "user_id",
                             "name",
                             "website",
@@ -685,6 +692,7 @@ fn enum_from_row<T: serde::de::DeserializeOwned>(row: &Row<'_>, column: &str) ->
 fn deal_from_row(row: &Row<'_>) -> RowResult<Deal> {
     Ok(Deal {
         access: None,
+        revision: row.get("content_revision")?,
         deal_id: row.get("deal_id")?,
         user_id: row.get("user_id")?,
         deal_name: row.get("deal_name")?,
@@ -705,6 +713,7 @@ fn deal_from_row(row: &Row<'_>) -> RowResult<Deal> {
 }
 fn metadata_from_row(row: &Row<'_>) -> RowResult<DealMetadata> {
     Ok(DealMetadata {
+        revision: row.get("metadata_revision")?,
         deal_id: row.get("deal_id")?,
         key_questions_json: row.get("key_questions_json")?,
         local_path: row.get("local_path")?,

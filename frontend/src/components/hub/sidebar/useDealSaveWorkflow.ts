@@ -39,6 +39,7 @@ export function useDealSaveWorkflow({
   onClose: () => void;
   onCoreFailure: () => void;
 }) {
+  const loadedDeal = useRef(initialDeal).current;
   const navigate = useNavigate();
   const { saveDealResult } = useWorkspace();
   const [progress, setProgress] = useState<{ stage: SaveStage; error: string }>({ stage: "idle", error: "" });
@@ -62,10 +63,10 @@ export function useDealSaveWorkflow({
     try {
       if (!savedCore) {
         const input = buildSaveDealInput(form);
-        savedCore = initialDeal
+        savedCore = loadedDeal
           ? await runtime.api.updateDeal(
-              initialDeal.dealId,
-              editableFields(input),
+              loadedDeal.dealId,
+              { ...editableFields(input), expectedRevision: loadedDeal.revision },
             )
           : await runtime.api.createDeal(input);
         if (!mounted.current) return;
@@ -149,6 +150,7 @@ export function useDealSaveWorkflow({
         : selections.filter((file): file is File => file instanceof File);
     if (!mounted.current) return;
     const response = await runtime.api.saveDealMetadata(core.deal.dealId, {
+      expectedRevision: core.metadata.revision,
       factSheetLink: optionalLink(form.factSheetLink),
       files: uploads,
       rlLink: optionalLink(form.rlLink),

@@ -35,7 +35,7 @@ async fn insert(
     id: &str,
     title: &str,
 ) -> SlideClassificationJob {
-    let template = StoredTemplate {
+    let template = StoredTemplate { revision: 1,
         template_id: id.to_owned(),
         template_json: serde_json::from_value(json!({
             "presentation":{"title":title,"preserveElementOrder":true,"showBranding":false,"slides":[{

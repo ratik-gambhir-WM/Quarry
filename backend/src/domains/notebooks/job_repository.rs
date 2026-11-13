@@ -103,7 +103,13 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
+                super::repository::lock_parent(
+                    tx,
+                    owner,
+                    &notebook,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
                 let bytes = serde_json::to_vec(&(&notebook, &note_id, &input))
                     .map_err(|_| Error::storage("invalid save input"))?;
                 let hash = format!("{:x}", Sha256::digest(bytes));
@@ -251,7 +257,13 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                owned(tx, owner, &notebook).await?;
+                super::repository::lock_parent(
+                    tx,
+                    owner,
+                    &notebook,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
                 let job = load(tx, &id).await?;
                 if job.notebook_id != notebook {
                     return Err(missing());
@@ -433,6 +445,22 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                super::repository::lock_parent(
+                    tx,
+                    claim.owner,
+                    &claim.input.note.summary.notebook_id,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
+                if let Some(id) = &claim.input.note.summary.folder_id {
+                    super::repository::lock_folder(
+                        tx,
+                        &claim.input.note.summary.notebook_id,
+                        id,
+                        crate::adapters::postgres::query::RowLock::Share,
+                    )
+                    .await?;
+                }
                 let job = fence(tx, &claim).await?;
                 if job.committed_revision.is_some() {
                     return Ok(());
@@ -448,18 +476,24 @@ impl NotebookRepository {
                     if note(tx, &s.notebook_id, &s.note_id).await?.summary.revision != expected {
                         return Err(conflict());
                     }
-                    tx.write(
-                        Q::update("notebook_notes")
-                            .set("title", &s.title)
-                            .set("folder_id", s.folder_id.as_deref())
-                            .set("blocks_json", blocks)
-                            .set("content_schema_version", 1_i64)
-                            .set("revision", s.revision)
-                            .set("updated_at", &s.updated_at)
-                            .and_where(C::equal("note_id", &s.note_id))
-                            .build(),
-                    )
-                    .await?;
+                    let changed = tx
+                        .write(
+                            Q::update("notebook_notes")
+                                .set("title", &s.title)
+                                .set("folder_id", s.folder_id.as_deref())
+                                .set("blocks_json", blocks)
+                                .set("content_schema_version", 1_i64)
+                                .set("revision", s.revision)
+                                .set("updated_at", &s.updated_at)
+                                .and_where(C::equal("note_id", &s.note_id))
+                                .and_where(C::equal("notebook_id", &s.notebook_id))
+                                .and_where(C::equal("revision", expected))
+                                .build(),
+                        )
+                        .await?;
+                    if changed.rows_affected != 1 {
+                        return Err(conflict());
+                    }
                 } else {
                     // A deletion tombstone fences a worker even before an admitted create commits.
                     if tx

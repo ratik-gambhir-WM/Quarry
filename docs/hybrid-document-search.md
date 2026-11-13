@@ -1,11 +1,11 @@
 # Hybrid document search
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 Updated 2026-11-06. The initial bounded-scan implementation is available behind
-`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It requires no additional change to PostgreSQL schema 1,
+`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It requires no additional change to PostgreSQL schema 2,
 Helix publication, stored embeddings, or the model used for ingestion.
 
 ## Request and result contract

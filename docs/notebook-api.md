@@ -1,6 +1,6 @@
 # Personal notebook API and save recovery
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -141,7 +141,7 @@ trash or automatic distributed transaction across PostgreSQL/Helix.
 ## PostgreSQL schema and recovery
 
 Notebook tables, durable save snapshots/jobs and cleanup tombstones are part of fresh PostgreSQL
-schema 1. There is no old-data upgrade/reset path. Startup validates the complete schema and rejects
+schema 2. There is no old-data upgrade/reset path. Startup validates the complete schema and rejects
 drift without deleting notes. Back up PostgreSQL and the matching Helix store/binary before any
 future rollout or restore; drain writers for recovery. Projection failures preserve canonical notes.
 Reopen with matching embedding/pipeline configuration to resume queued/expired jobs, or explicitly
@@ -164,3 +164,8 @@ editor or discard subsequent edits. Server-backed deletion retains local content
 is blocked while an admission/save is unresolved. Unsaved changes warn on browser unload and are
 lost on reload/authentication changes; canonical notes reload after signing in again. Folder
 organization, autosave and offline sync remain deferred.
+
+Note DELETE requires `?expectedRevision=` with the displayed note revision. Missing or invalid
+values fail before product work; an authorized stale revision returns 409 without invalidating jobs
+or creating cleanup. Child writes retain shared notebook parent locks; notebook deletion uses an
+exclusive parent lock. Folder relocation locks the folder and increments bounded note revisions.

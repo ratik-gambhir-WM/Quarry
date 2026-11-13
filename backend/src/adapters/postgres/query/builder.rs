@@ -32,6 +32,31 @@ pub enum SqlBuilderError {
     },
     #[error("a CROSS JOIN on `{0}` cannot have an ON condition")]
     UnexpectedCrossJoinCondition(String),
+    #[error("row locking cannot be combined with DISTINCT or COUNT")]
+    InvalidLockingSelect,
+}
+
+/// Explicit PostgreSQL resource locks. Ordinary reads never use these modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowLock {
+    Share,
+    Update,
+}
+
+impl RowLock {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::Share => "FOR SHARE",
+            Self::Update => "FOR UPDATE",
+        }
+    }
+}
+
+/// Queue selection can skip a busy resource; normal resource mutations wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockWait {
+    Wait,
+    SkipLocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +156,10 @@ impl JoinCondition {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Predicate {
+    EpochDeadline {
+        column: String,
+        expired: bool,
+    },
     LiteralSubstring {
         column: String,
         text: String,
@@ -155,6 +184,20 @@ enum Predicate {
 pub struct Condition(Predicate);
 
 impl Condition {
+    /// Compare an integer epoch-second deadline with the database clock.
+    pub fn expired(column: impl Into<String>) -> Self {
+        Self(Predicate::EpochDeadline {
+            column: column.into(),
+            expired: true,
+        })
+    }
+
+    pub fn unexpired(column: impl Into<String>) -> Self {
+        Self(Predicate::EpochDeadline {
+            column: column.into(),
+            expired: false,
+        })
+    }
     /// ASCII case-insensitive literal substring; wildcards and the escape are always bound.
     pub fn literal_substring(column: impl Into<String>, text: impl Into<String>) -> Self {
         Self(Predicate::LiteralSubstring {
@@ -400,6 +443,7 @@ pub struct SelectBuilder {
     order_by: Vec<(String, SortDirection)>,
     limit: Option<usize>,
     offset: Option<usize>,
+    row_lock: Option<(RowLock, LockWait)>,
 }
 
 impl SelectBuilder {
@@ -415,6 +459,7 @@ impl SelectBuilder {
             order_by: Vec::new(),
             limit: None,
             offset: None,
+            row_lock: None,
         }
     }
 
@@ -518,7 +563,16 @@ impl SelectBuilder {
         self
     }
 
+    /// Lock matching resources until this write transaction commits or rolls back.
+    pub fn lock(mut self, mode: RowLock, wait: LockWait) -> Self {
+        self.row_lock = Some((mode, wait));
+        self
+    }
+
     pub fn build(self) -> Result<SqlQuery, PostgresError> {
+        if self.row_lock.is_some() && (self.distinct || self.count_rows) {
+            return Err(SqlBuilderError::InvalidLockingSelect.into());
+        }
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
         ensure_unique_columns(self.columns.iter().map(String::as_str))?;
         let columns = if self.count_rows {
@@ -566,7 +620,17 @@ impl SelectBuilder {
             (None, None) => {}
         }
 
-        Ok(SqlQuery::new(sql, parameters, QueryKind::Select))
+        let kind = if let Some((mode, wait)) = self.row_lock {
+            sql.push(' ');
+            sql.push_str(mode.as_sql());
+            if wait == LockWait::SkipLocked {
+                sql.push_str(" SKIP LOCKED");
+            }
+            QueryKind::LockingSelect
+        } else {
+            QueryKind::Select
+        };
+        Ok(SqlQuery::new(sql, parameters, kind))
     }
 }
 
@@ -628,21 +692,32 @@ impl InsertBuilder {
             .collect::<Vec<_>>();
         let mut sql = format!("INSERT INTO {table} ({columns}) VALUES ({placeholders})");
         append_insert_conflict(&mut sql, self.conflict, &mut parameters)?;
-        if self.table == "users" || self.table == "reminders" {
+        let kind = if self.table == "users" || self.table == "reminders" {
             sql.push_str(" RETURNING id");
-        }
-
-        Ok(SqlQuery::new(sql, parameters, QueryKind::Insert))
+            QueryKind::InsertReturningId
+        } else {
+            QueryKind::Insert
+        };
+        Ok(SqlQuery::new(sql, parameters, kind))
     }
 }
 
 #[derive(Debug, Clone)]
+enum UpdateValue {
+    Bound(SqlValue),
+    EpochAfter(u32),
+}
+
+const EPOCH_SECONDS: &str = "floor(extract(epoch FROM clock_timestamp()))::bigint";
+
+#[derive(Debug, Clone)]
 pub struct UpdateBuilder {
     table: String,
-    assignments: Vec<(String, SqlValue)>,
+    assignments: Vec<(String, UpdateValue)>,
     increments: Vec<String>,
     conditions: Vec<ConnectedCondition>,
     allow_all_rows: bool,
+    returning: Vec<String>,
 }
 
 impl UpdateBuilder {
@@ -653,17 +728,31 @@ impl UpdateBuilder {
             increments: Vec::new(),
             conditions: Vec::new(),
             allow_all_rows: false,
+            returning: Vec::new(),
         }
     }
 
     pub fn set(mut self, column: impl Into<String>, value: impl Into<SqlValue>) -> Self {
-        self.assignments.push((column.into(), value.into()));
+        self.assignments
+            .push((column.into(), UpdateValue::Bound(value.into())));
         self
     }
 
     /// Increment an integer column by one. Storage CHECK constraints enforce its domain bound.
     pub fn increment(mut self, column: impl Into<String>) -> Self {
         self.increments.push(column.into());
+        self
+    }
+
+    /// Set an integer epoch-second deadline from database time and a bound offset.
+    pub fn set_epoch_seconds_after(mut self, column: impl Into<String>, seconds: u32) -> Self {
+        self.assignments
+            .push((column.into(), UpdateValue::EpochAfter(seconds)));
+        self
+    }
+
+    pub fn returning(mut self, column: impl Into<String>) -> Self {
+        self.returning.push(column.into());
         self
     }
 
@@ -696,23 +785,33 @@ impl UpdateBuilder {
                 .chain(self.increments.iter().map(String::as_str)),
         )?;
         let mut assignments = Vec::with_capacity(self.assignments.len() + self.increments.len());
-        for (column, _) in &self.assignments {
-            assignments.push(format!("{} = ?", quote_identifier(column)?));
+        let mut parameters = Vec::with_capacity(self.assignments.len());
+        for (column, value) in self.assignments {
+            let quoted = quote_identifier(&column)?;
+            let expression = match value {
+                UpdateValue::Bound(value) => {
+                    parameters.push(value);
+                    "?".to_owned()
+                }
+                UpdateValue::EpochAfter(seconds) => {
+                    parameters.push(i64::from(seconds).into());
+                    format!("{EPOCH_SECONDS} + ?::bigint")
+                }
+            };
+            assignments.push(format!("{quoted} = {expression}"));
         }
-        for column in &self.increments {
-            let quoted = quote_identifier(column)?;
+        for column in self.increments {
+            let quoted = quote_identifier(&column)?;
             assignments.push(format!("{quoted} = {quoted} + 1"));
         }
-        let assignments = assignments.join(", ");
-        let mut parameters = self
-            .assignments
-            .into_iter()
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>();
-        let mut sql = format!("UPDATE {table} SET {assignments}");
+        let mut sql = format!("UPDATE {table} SET {}", assignments.join(", "));
         append_conditions(&mut sql, &self.conditions, &mut parameters)?;
-
-        Ok(SqlQuery::new(sql, parameters, QueryKind::Update))
+        let kind = if append_returning(&mut sql, &self.returning)? {
+            QueryKind::UpdateReturning
+        } else {
+            QueryKind::Update
+        };
+        Ok(SqlQuery::new(sql, parameters, kind))
     }
 }
 
@@ -721,6 +820,7 @@ pub struct DeleteBuilder {
     table: String,
     conditions: Vec<ConnectedCondition>,
     allow_all_rows: bool,
+    returning: Vec<String>,
 }
 
 impl DeleteBuilder {
@@ -729,6 +829,7 @@ impl DeleteBuilder {
             table: table.into(),
             conditions: Vec::new(),
             allow_all_rows: false,
+            returning: Vec::new(),
         }
     }
 
@@ -747,6 +848,11 @@ impl DeleteBuilder {
         self
     }
 
+    pub fn returning(mut self, column: impl Into<String>) -> Self {
+        self.returning.push(column.into());
+        self
+    }
+
     pub fn build(self) -> Result<SqlQuery, PostgresError> {
         require_conditions("DELETE", &self.conditions, self.allow_all_rows)?;
 
@@ -755,8 +861,27 @@ impl DeleteBuilder {
         let mut parameters = Vec::new();
         append_conditions(&mut sql, &self.conditions, &mut parameters)?;
 
-        Ok(SqlQuery::new(sql, parameters, QueryKind::Delete))
+        let kind = if append_returning(&mut sql, &self.returning)? {
+            QueryKind::DeleteReturning
+        } else {
+            QueryKind::Delete
+        };
+        Ok(SqlQuery::new(sql, parameters, kind))
     }
+}
+
+fn append_returning(sql: &mut String, columns: &[String]) -> Result<bool, SqlBuilderError> {
+    if columns.is_empty() {
+        return Ok(false);
+    }
+    ensure_unique_columns(columns.iter().map(String::as_str))?;
+    let columns = columns
+        .iter()
+        .map(|column| quote_identifier(column))
+        .collect::<Result<Vec<_>, _>>()?;
+    sql.push_str(" RETURNING ");
+    sql.push_str(&columns.join(", "));
+    Ok(true)
 }
 
 fn push_condition(
@@ -938,6 +1063,11 @@ fn append_conditions(
 
         sql.push('(');
         match &connected.condition.0 {
+            Predicate::EpochDeadline { column, expired } => {
+                sql.push_str(&quote_identifier(column)?);
+                sql.push_str(if *expired { " <= " } else { " > " });
+                sql.push_str(EPOCH_SECONDS);
+            }
             Predicate::LiteralSubstring { column, text } => {
                 sql.push_str(&ascii_lower(&quote_identifier(column)?));
                 sql.push_str(" LIKE translate(?::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE '\\'");

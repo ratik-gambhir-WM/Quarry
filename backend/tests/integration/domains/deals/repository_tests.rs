@@ -51,6 +51,7 @@ async fn company(
             industry: None,
             description: None,
         },
+        None,
     )
     .await
     .unwrap()
@@ -112,6 +113,7 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
                 industry: Some("Software".into()),
                 description: None,
             },
+            Some(1),
         )
         .await
         .unwrap();
@@ -130,7 +132,7 @@ async fn role_reuse_shared_company_edits_and_duplicate_names_round_trip() {
         );
     }
     input.parties[0].notes = Some("Deal-specific".into());
-    let updated = repo.update("DEAL-1".into(), owner, input).await.unwrap();
+    let updated = repo.update("DEAL-1".into(), owner, input, 1).await.unwrap();
     for party in &updated.deal.parties {
         assert_eq!(
             first
@@ -171,6 +173,7 @@ async fn joined_reads_keep_deals_without_metadata_or_children() {
     let metadata = repo
         .upsert_metadata(
             UpsertDealMetadataRecord {
+                expected_revision: 1,
                 deal_id: "DEAL-FULL".into(),
                 key_questions_json: "[\"Question?\"]".into(),
                 local_path: None,
@@ -266,7 +269,7 @@ async fn failed_child_write_rolls_back_scalars_parties_scopes_and_creation() {
     input.parties.clear();
     input.scopes.push(DiligenceScope::Sdlc);
     assert!(repo
-        .update("DEAL-1".into(), owner, input.clone())
+        .update("DEAL-1".into(), owner, input.clone(), 1)
         .await
         .is_err());
     let after = repo.by_id("DEAL-1".into()).await.unwrap().unwrap();

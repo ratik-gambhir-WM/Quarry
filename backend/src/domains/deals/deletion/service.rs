@@ -45,24 +45,30 @@ impl DealDeletionService {
         self: &Arc<Self>,
         deal: String,
         actor: i64,
+        expected_revision: i64,
     ) -> ServiceResult<DealDeletion> {
         // Once admission starts, request cancellation must not separate a committed
         // receipt from its notification. The task ends after acceptance, not cleanup.
         let service = self.clone();
-        tokio::spawn(async move { service.accept_and_notify(deal, actor).await })
-            .await
-            .map_err(|_| {
-                crate::shared::error::ServiceError::unavailable("deletion acceptance interrupted")
-            })?
+        tokio::spawn(async move {
+            service
+                .accept_and_notify(deal, actor, expected_revision)
+                .await
+        })
+        .await
+        .map_err(|_| {
+            crate::shared::error::ServiceError::unavailable("deletion acceptance interrupted")
+        })?
     }
     async fn accept_and_notify(
         self: &Arc<Self>,
         deal: String,
         actor: i64,
+        expected_revision: i64,
     ) -> ServiceResult<DealDeletion> {
         let receipt = self
             .repository
-            .accept(deal, actor)
+            .accept(deal, actor, expected_revision)
             .await
             .map_err(|error| match error {
                 RepositoryError::Storage(_)

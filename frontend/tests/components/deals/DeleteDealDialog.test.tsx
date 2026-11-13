@@ -38,7 +38,7 @@ function Harness() {
   const onClose = useCallback(() => setOpen(false), []);
   return <div ref={fallback} tabIndex={-1}>
     <button ref={trigger} onClick={() => setOpen(true)}>Open deletion</button>
-    {open ? <DeleteDealDialog deal={{ id: "DEAL-1", name: "Project Alpha", trigger: trigger.current }} fallbackFocus={fallback} onClose={onClose} /> : null}
+    {open ? <DeleteDealDialog deal={{ revision: 1, id: "DEAL-1", name: "Project Alpha", trigger: trigger.current }} fallbackFocus={fallback} onClose={onClose} /> : null}
   </div>;
 }
 
@@ -90,7 +90,7 @@ describe("DeleteDealDialog", () => {
     await user.keyboard("{Escape}");
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(deleteDeal).toHaveBeenCalledExactlyOnceWith("DEAL-1");
+    expect(deleteDeal).toHaveBeenCalledExactlyOnceWith("DEAL-1", 1);
     await act(async () => finish(null));
     expect(await screen.findByText("Deal deleted")).toBeTruthy();
     expect(getDealDeletion).not.toHaveBeenCalled();

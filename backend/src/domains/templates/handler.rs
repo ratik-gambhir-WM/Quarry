@@ -63,14 +63,22 @@ pub(super) async fn list_template_previews_handler(
         .map_err(AppError::from)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct DeleteRevision {
+    expected_revision: i64,
+}
+
 pub(super) async fn delete_template_handler(
     Extension(state): Extension<TemplatesHttpState>,
     Path(template_id): Path<String>,
+    Query(input): Query<DeleteRevision>,
 ) -> AppResult<StatusCode> {
     validate_template_id(&template_id)?;
+    validate::revision(input.expected_revision)?;
     state
         .templates
-        .delete(&template_id)
+        .delete(&template_id, input.expected_revision)
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(AppError::from)

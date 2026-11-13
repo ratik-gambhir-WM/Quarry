@@ -20,6 +20,13 @@ async fn request(app: &Router, method: &str, path: &str, value: Value) -> (Statu
         });
     let other = email == "other@example.com";
     let mut value = value;
+    if path.ends_with("/update") {
+        value
+            .as_object_mut()
+            .unwrap()
+            .entry("expectedRevision")
+            .or_insert(json!(1));
+    }
     if let Some(object) = value.as_object_mut() {
         object.remove("userEmail");
     }
@@ -79,13 +86,113 @@ async fn app() -> Router {
     crate::integration_support::with_test_credentials(app.router).await
 }
 
+#[tokio::test]
+async fn protected_forms_require_revisions_and_reject_stale_replacements_without_losing_content() {
+    let app = app().await;
+    let (_, company) = request(
+        &app,
+        "POST",
+        "/api/v1/companies",
+        json!({"name":"Original"}),
+    )
+    .await;
+    assert_eq!(company["revision"], 1);
+    let company_path = format!(
+        "/api/v1/companies/{}/update",
+        company["companyId"].as_str().unwrap()
+    );
+    let raw = |body: Value| {
+        Request::post(&company_path)
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", "a".repeat(43)))
+            .header("x-user-id", "1")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let missing = app
+        .clone()
+        .oneshot(raw(json!({"name":"No revision"})))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    for revision in [json!(0), json!(-1), json!(9_007_199_254_740_992_i64)] {
+        assert_eq!(
+            app.clone()
+                .oneshot(raw(json!({"name":"Invalid","expectedRevision":revision})))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let (status, saved) = request(
+        &app,
+        "POST",
+        &company_path,
+        json!({"name":"Accepted","expectedRevision":1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["revision"], 2);
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &company_path,
+            json!({"name":"Lost","expectedRevision":1})
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let (_, created) = request(&app, "POST", "/api/v1/deals", deal()).await;
+    let id = created["deal"]["dealId"].as_str().unwrap();
+    assert_eq!(created["deal"]["revision"], 1);
+    assert_eq!(created["metadata"]["revision"], 1);
+    let path = format!("/api/v1/deals/{id}/update");
+    let mut submitted = deal();
+    submitted["expectedRevision"] = json!(1);
+    submitted["dealName"] = json!("Accepted");
+    let (status, saved) = request(&app, "POST", &path, submitted.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["deal"]["revision"], 2);
+    submitted["dealName"] = json!("Lost");
+    assert_eq!(
+        request(&app, "POST", &path, submitted).await.0,
+        StatusCode::CONFLICT
+    );
+    let (_, loaded) = request(&app, "GET", &format!("/api/v1/deals/{id}"), Value::Null).await;
+    assert_eq!(loaded["dealName"], "Accepted");
+    assert_eq!(loaded["metadata"]["revision"], 1);
+    // A stale deletion must not install a barrier or hide the deal.
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("/api/v1/deals/{id}?expectedRevision=1"),
+            Value::Null
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        request(&app, "GET", &format!("/api/v1/deals/{id}"), Value::Null)
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
 async fn save_metadata_links(
     app: &Router,
     deal_id: &str,
     fields: &[(&str, &str)],
 ) -> (StatusCode, Value) {
     const BOUNDARY: &str = "quarry-optional-links";
-    let mut body = String::new();
+    let (_, loaded) = request(app, "GET", &format!("/api/v1/deals/{deal_id}"), Value::Null).await;
+    let revision = loaded["metadata"]["revision"].as_i64().unwrap();
+    let mut body = format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"expectedRevision\"\r\n\r\n{revision}\r\n");
     for (name, value) in fields {
         body.push_str(&format!(
             "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
@@ -224,6 +331,7 @@ async fn company_directory_is_bounded_scoped_and_deal_updates_preserve_metadata(
     assert_eq!(updated["deal"]["parties"][0]["dealPartyId"], party_id);
     assert_eq!(updated["metadata"], created["metadata"]);
     assert!(updated["deal"]["actualCloseDate"].is_null());
+    input["expectedRevision"] = updated["deal"]["revision"].clone();
     input["parties"] = json!([]);
     input["scopes"] = json!([]);
     assert_eq!(
@@ -377,6 +485,7 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
     let deal_id = initial["deal"]["dealId"].as_str().unwrap();
     input.as_object_mut().unwrap().remove("dealId");
     let frontend = include_str!("../../../frontend/src/data/dealModel.ts");
+    let mut revision = 1;
     for code in [
         "pipeline",
         "prepare",
@@ -390,10 +499,12 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
     ] {
         assert!(frontend.contains(&format!("\"{code}\"")));
         input["status"] = json!(code);
-        let create = input.clone();
+        let mut create = input.clone();
+        create.as_object_mut().unwrap().remove("expectedRevision");
         let (created_status, created) = request(&app, "POST", "/api/v1/deals", create).await;
         assert_eq!(created_status, StatusCode::CREATED, "{created}");
         assert_eq!(created["deal"]["status"], code);
+        input["expectedRevision"] = json!(revision);
         let (status, saved) = request(
             &app,
             "POST",
@@ -402,6 +513,7 @@ async fn diligence_status_contract_roundtrips_and_archive_preserves_terminal_sta
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{saved}");
+        revision = saved["deal"]["revision"].as_i64().unwrap();
         assert_eq!(saved["deal"]["status"], code);
         assert_eq!(saved["deal"]["actualCloseDate"], Value::Null);
         assert_eq!(saved["deal"]["engagementCompletedDate"], Value::Null);

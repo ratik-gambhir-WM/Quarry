@@ -32,6 +32,7 @@ async fn store_assets(
     repository
         .insert(
             &StoredTemplate {
+                revision: 1,
                 template_id: "template".into(),
                 template_json: document,
             },

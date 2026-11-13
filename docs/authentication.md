@@ -1,6 +1,6 @@
 # Password authentication and session design
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -117,7 +117,7 @@ bypass and supplies no backend credentials.
 <a id="schema-15-and-development-reset"></a>
 ## Canonical storage and fresh deployment
 
-PostgreSQL schema 1 includes password hashes, token digests, sessions, memberships and image
+PostgreSQL schema 2 includes password hashes, token digests, sessions, memberships and image
 checkpoints alongside all product records. Registration commits the user and initial session
 together. The existing password/session, per-resource ownership and consistency-header contracts
 remain unchanged. Direct configuration requires a server-only `QUARRY_DATABASE_URL`.

@@ -38,6 +38,16 @@ impl SlideTemplateError {
             source: None,
         }
     }
+    pub fn repository(error: crate::shared::error::RepositoryError) -> Self {
+        match error {
+            crate::shared::error::RepositoryError::Conflict(_) => Self::new(
+                FailureKind::Conflict,
+                "revision_conflict",
+                "This template changed. Refresh it before editing.",
+            ),
+            other => Self::internal(other),
+        }
+    }
     pub fn internal(source: impl Into<anyhow::Error>) -> Self {
         Self::new(
             FailureKind::Internal,

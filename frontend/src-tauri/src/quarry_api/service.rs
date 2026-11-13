@@ -90,7 +90,9 @@ impl QuarryApiService {
 
     pub async fn delete_json(&self, path: &str) -> Result<Option<Value>, String> {
         validate_api_path(path)?;
-        let id = path
+        super::revisions::query(path)?;
+        let resource = path.split('?').next().unwrap_or(path);
+        let id = resource
             .strip_prefix("/api/v1/deals/")
             .ok_or("Quarry deletion path is not allowed")?;
         if id.is_empty()
@@ -106,6 +108,14 @@ impl QuarryApiService {
 
     pub async fn delete(&self, path: &str) -> Result<(), String> {
         validate_api_path(path)?;
+        let resource = path.split('?').next().unwrap_or(path);
+        let parts = resource.split('/').collect::<Vec<_>>();
+        if (parts.len() == 7 && parts[3] == "deals" && matches!(parts[5], "members" | "teams"))
+            || (parts.len() == 7 && parts[3] == "notebooks" && parts[5] == "notes")
+            || resource.starts_with("/api/v1/templates/")
+        {
+            super::revisions::query(path)?;
+        }
         self.client.delete(path).await
     }
 
@@ -134,6 +144,12 @@ impl QuarryApiService {
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         validate_api_path(path)?;
         let resource_path = path.split('?').next().unwrap_or(path);
+        if resource_path.ends_with("/update")
+            && (resource_path.starts_with("/api/v1/deals/")
+                || resource_path.starts_with("/api/v1/companies/"))
+        {
+            super::revisions::json(&body)?;
+        }
         if resource_path == "/api/v1/notebooks" || resource_path.starts_with("/api/v1/notebooks/") {
             super::notebooks::validate_body(&body)?;
         }
@@ -214,6 +230,19 @@ impl QuarryApiService {
         validate_api_path(&request.path)?;
         if let Some(mode) = super::templates::import_mode(&request.path) {
             return super::templates::import(&self.client, request, mode).await;
+        }
+        if request.path.starts_with("/api/v1/deals/")
+            && (request.path.ends_with("/metadata") || request.path.ends_with("/extraction/upload"))
+        {
+            let revisions = request
+                .fields
+                .iter()
+                .filter(|field| field.name == "expectedRevision")
+                .collect::<Vec<_>>();
+            if revisions.len() != 1 {
+                return Err("expectedRevision is required exactly once".into());
+            }
+            super::revisions::value(&revisions[0].value)?;
         }
         let mut total_bytes = 0usize;
         let mut form = Form::new();

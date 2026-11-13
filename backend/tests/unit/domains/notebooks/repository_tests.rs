@@ -217,6 +217,19 @@ async fn notebook_constraints_parent_membership_deal_ownership_and_literal_searc
         .await
         .unwrap()
         .notebook_id;
+    // Filtering is an ordinary read; it must not request a lifecycle row lock.
+    let linked = repo
+        .list(
+            1,
+            ListOptions {
+                relationship: Some("DEAL-A".into()),
+                limit: 10,
+                ..ListOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(linked.items.notebooks[0].notebook_id, book);
     assert!(repo
         .postgres
         .with_connection(async |c| {

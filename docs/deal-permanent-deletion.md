@@ -1,6 +1,6 @@
 # Permanent deal deletion and recovery
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -8,7 +8,9 @@ Implemented 2026-11-10. Archive remains a separate, synchronous timestamp operat
 
 ## API and permissions
 
-`DELETE /api/v1/deals/{dealId}` accepts no body. Only the current membership owner may
+`DELETE /api/v1/deals/{dealId}?expectedRevision={revision}` accepts no body. The revision
+is captured from the displayed deal; a stale authorized request returns 409 without a receipt or
+barrier. An authorized replay of an existing receipt remains idempotent after purge. Only the current membership owner may
 accept deletion, including for archived deals. Creator provenance and uploader attribution
 provide no permission. HTTP authentication verifies the bearer session and matching user header;
 the acceptance transaction repeats owner authorization. Unknown/hidden resources return 404,
@@ -53,7 +55,7 @@ retention or copies already held by other clients. No VACUUM, reset or global gr
 
 ## Storage and worker lifecycle
 
-PostgreSQL schema 1 includes `deal_deletions`, `deal_deletion_files` and `deal_deletion_threads`. The ledger has
+PostgreSQL schema 2 includes `deal_deletions`, `deal_deletion_files` and `deal_deletion_threads`. The ledger has
 no cascading relationship to `deals`. Target rows reference the receipt, not the removed files or
 threads. Validated schemas 12–17 upgrade through their existing steps and the additive ledger DDL;
 fresh/current layouts, foreign keys and owner invariants are validated. Damaged layouts fail safely.
@@ -204,3 +206,8 @@ Fixed review findings:
 | [Blocking preview](../backend/src/domains/documents/viewing/service.rs#L178) | HTTP cancellation could release admission before conversion finished; the blocking task now retains a cloned token. | Fixed; cancellation/lifetime test passed. |
 | [PostgreSQL client](../backend/src/adapters/postgres/client.rs#L218) | Router shutdown could release the writer lock before detached workers finished; client clones now retain the lease. | Fixed; detached-worker lease test passed. |
 | [Graph purge](../backend/src/domains/documents/graph/deletion.rs#L167) | Cleanup must never remove a mismatched owner's node; removal requires both captured file identity and deal identity. | Fixed; disposable ownership-isolation and purge tests passed. |
+
+Schema 2 retains a `deal_lifecycle_guards` row after purge. Acceptance locks it exclusively before
+current ownership and content-revision checks, and atomically marks it deleting with the receipt.
+Purge marks it deleted. Its trigger permanently rejects reusing that deal ID. Protected mutations
+retain shared guard locks through canonical commit; authority changes take exclusive locks.

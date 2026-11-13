@@ -5,9 +5,10 @@ export type * from "./notebooks";
 import type {
   Company,
   CompanyInput,
+  CompanyUpdateInput,
+  UpdateDealInput,
   CompanyPage,
   CompanySearch,
-  DealFields,
 } from "../data/dealModel";
 import type {
   LocalDealDataRoom,
@@ -225,6 +226,7 @@ export type TemplatePreviewPage = {
   };
   previews: Array<{
     templateId: string;
+    revision: number;
     contentType: "image/png";
     dataUrl: string;
     previewUrl: string;
@@ -327,13 +329,13 @@ export type DealDeletion = {
 
 export interface QuarryApi extends NotebookApi, DealMembershipApi {
   createCompany(input: CompanyInput): Promise<Company>;
-  updateCompany(companyId: string, input: CompanyInput): Promise<Company>;
+  updateCompany(companyId: string, input: CompanyUpdateInput): Promise<Company>;
   listCompanies(options?: CompanySearch): Promise<CompanyPage>;
-  updateDeal(dealId: string, input: DealFields): Promise<SaveDealResponse>;
+  updateDeal(dealId: string, input: UpdateDealInput): Promise<SaveDealResponse>;
   archiveAssistantThread(threadId: string): Promise<void>;
   archiveDeal(dealId: string): Promise<SavedDeal>;
   /** Null means the retained receipt already proves completed deletion (HTTP 204). */
-  deleteDeal(dealId: string): Promise<DealDeletion | null>;
+  deleteDeal(dealId: string, expectedRevision: number): Promise<DealDeletion | null>;
   getDealDeletion(deletionId: string): Promise<DealDeletion>;
   createAssistantThread(
     threadId?: string,
@@ -344,7 +346,7 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
   register(input: RegisterInput): Promise<SessionResponse>;
   currentUser(): Promise<CurrentUserResponse>;
   logout(): Promise<void>;
-  deleteTemplate(templateId: string): Promise<void>;
+  deleteTemplate(templateId: string, expectedRevision: number): Promise<void>;
   deleteAssistantThread(threadId: string): Promise<void>;
   exportPowerPoint(
     document: DiligenceCanvasDocument,

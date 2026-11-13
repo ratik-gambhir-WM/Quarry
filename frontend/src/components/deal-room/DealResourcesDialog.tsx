@@ -30,6 +30,8 @@ export function DealResourcesDialog({
       ? document.activeElement
       : null,
   );
+  const [expectedRevision] = useState(() => deal.persistedMetadata?.revision);
+  const inFlight = useRef(false);
   const [links, setLinks] = useState<DealSourceLinks>(() => ({
     sharepointLink: deal.persistedMetadata?.sharepointLink ?? "",
     sowLink: deal.persistedMetadata?.sowLink ?? "",
@@ -46,7 +48,9 @@ export function DealResourcesDialog({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    if (inFlight.current) return;
+    if (expectedRevision === undefined) { setError("Reload this deal before saving resources."); return; }
+    inFlight.current = true;
     setSaving(true);
     setError("");
     try {
@@ -54,6 +58,7 @@ export function DealResourcesDialog({
         (file): file is File => file instanceof File,
       );
       const response = await runtime.api.saveDealMetadata(deal.room.id, {
+        expectedRevision,
         files,
         sharepointLink: links.sharepointLink.trim() || null,
         sowLink: links.sowLink.trim() || null,
@@ -67,9 +72,10 @@ export function DealResourcesDialog({
       onClose();
     } catch (cause) {
       setError(
-        `Resources could not be saved. Your entries are kept here; try Save resources again. ${cause instanceof Error ? cause.message : String(cause)}`,
+        `Resources could not be saved. Your entries are kept here. If the deal changed, close and reload it before saving. ${cause instanceof Error ? cause.message : String(cause)}`,
       );
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   }

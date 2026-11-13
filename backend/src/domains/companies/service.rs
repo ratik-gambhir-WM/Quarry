@@ -40,9 +40,19 @@ impl CompanyService {
             has_more,
         })
     }
-    pub async fn save(&self, id: Option<String>, input: CompanyInput) -> ServiceResult<Company> {
+    pub async fn save(
+        &self,
+        id: Option<String>,
+        input: CompanyInput,
+        expected_revision: Option<i64>,
+    ) -> ServiceResult<Company> {
         self.companies
-            .save(self.owner(&input.user_email).await?, id, input)
+            .save(
+                self.owner(&input.user_email).await?,
+                id,
+                input,
+                expected_revision,
+            )
             .await
             .map_err(Into::into)
     }

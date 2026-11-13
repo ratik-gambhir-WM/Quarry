@@ -56,7 +56,8 @@ async fn writer_pid(client: &PostgresClient) -> i32 {
         .unwrap()
 }
 async fn terminate_writer(client: &PostgresClient, pid: i32) {
-    let stopped: bool = sqlx::query_scalar("SELECT pg_terminate_backend($1)")
+    // Wait for actual termination, not just signal delivery, before testing takeover.
+    let stopped: bool = sqlx::query_scalar("SELECT pg_terminate_backend($1, 5000)")
         .bind(pid)
         .fetch_one(client.pool())
         .await
@@ -227,10 +228,11 @@ async fn application_writer_ownership_lives_through_clones_and_fails_closed_on_l
         detached_worker.write_async(insert("lost")).await,
         Err(PostgresError::WriterLeaseLost)
     ));
-    assert!(matches!(
-        detached_worker.read_one_async(select("owned")).await,
-        Err(PostgresError::WriterLeaseLost)
-    ));
+    assert!(detached_worker
+        .read_one_async(select("owned"))
+        .await
+        .unwrap()
+        .is_some());
     drop(detached_worker);
     let next = c.clone().with_writer_lease().await.unwrap();
     next.write_async(insert("next-owner")).await.unwrap();
@@ -238,49 +240,43 @@ async fn application_writer_ownership_lives_through_clones_and_fails_closed_on_l
 }
 
 #[tokio::test]
-async fn writer_loss_during_transactions_rejects_results_and_rolls_back_before_takeover_writes() {
-    for read_only in [false, true] {
-        let c = client().await;
-        let writer = c.clone().with_writer_lease().await.unwrap();
-        let pid = writer_pid(&writer).await;
-        let old = writer.clone();
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let (release, released) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            old.scoped(read_only, |tx| async move {
-                if read_only {
-                    tx.read(select("old-owner-write")).await?;
-                } else {
-                    tx.write(insert("old-owner-write")).await?;
-                }
-                started.send(()).unwrap();
-                released.await.unwrap();
-                Ok::<_, PostgresError>(())
-            })
-            .await
-        });
-        ready.await.unwrap();
-        terminate_writer(&c, pid).await;
-        // Takeover must complete even while the stale aggregate holds WRITE_LOCK.
-        let next = c.clone().with_writer_lease().await.unwrap();
-        release.send(()).unwrap();
-        assert!(matches!(
-            task.await.unwrap(),
-            Err(PostgresError::WriterLeaseLost)
-        ));
-        assert!(next
-            .read_one_async(select("old-owner-write"))
-            .await
-            .unwrap()
-            .is_none());
-        next.write_async(insert("replacement-write")).await.unwrap();
-        assert!(matches!(
-            writer.write_async(insert("stale-retry")).await,
-            Err(PostgresError::WriterLeaseLost)
-        ));
-        drop(writer);
-        next.close().await;
-    }
+async fn writer_loss_during_write_transactions_rolls_back_before_takeover_writes() {
+    let c = client().await;
+    let writer = c.clone().with_writer_lease().await.unwrap();
+    let pid = writer_pid(&writer).await;
+    let old = writer.clone();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        old.transaction_async(|tx| async move {
+            tx.write(insert("old-owner-write")).await?;
+            started.send(()).unwrap();
+            released.await.unwrap();
+            Ok::<_, PostgresError>(())
+        })
+        .await
+    });
+    ready.await.unwrap();
+    terminate_writer(&c, pid).await;
+    // Takeover must complete even while the stale aggregate holds WRITE_LOCK.
+    let next = c.clone().with_writer_lease().await.unwrap();
+    release.send(()).unwrap();
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(PostgresError::WriterLeaseLost)
+    ));
+    assert!(next
+        .read_one_async(select("old-owner-write"))
+        .await
+        .unwrap()
+        .is_none());
+    next.write_async(insert("replacement-write")).await.unwrap();
+    assert!(matches!(
+        writer.write_async(insert("stale-retry")).await,
+        Err(PostgresError::WriterLeaseLost)
+    ));
+    drop(writer);
+    next.close().await;
 }
 
 #[tokio::test]
@@ -317,7 +313,7 @@ async fn takeover_waits_for_a_transaction_already_at_the_commit_fence() {
         .fetch_one(&mut *tx)
         .await
         .unwrap();
-    writer.fence_commit(&mut tx, false).await.unwrap();
+    writer.fence_commit(&mut tx).await.unwrap();
     terminate_writer(&c, pid).await;
     let replacement = c.clone();
     let takeover = tokio::spawn(async move { replacement.with_writer_lease().await });

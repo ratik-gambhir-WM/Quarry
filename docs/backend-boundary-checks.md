@@ -1,6 +1,6 @@
 # Backend validation and authorization boundaries
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -159,3 +159,8 @@ exact test names, `--exact --ignored --nocapture`, using test ports 3002 and 390
 Both fixture processes were stopped, the owned test container was removed, and all three test
 ports were verified free. The existing API process and normal Helix container remained running.
 No application code changed for this rerun.
+
+Revision request shape (required, positive, at most 9,007,199,254,740,991) is validated at the
+handler before service work. Revision equality/exhaustion, current membership, deletion state and
+parent existence remain transaction guards because they depend on loaded state and must protect
+the final mutation. A valid preflight never substitutes for the conditional write.

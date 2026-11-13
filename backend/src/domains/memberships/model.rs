@@ -146,6 +146,7 @@ pub enum Mutation {
     },
     RemoveMember {
         user_id: i64,
+        revision: i64,
     },
     Transfer {
         user_id: i64,
@@ -161,6 +162,7 @@ pub enum Mutation {
     },
     DeleteTeam {
         team_id: String,
+        revision: i64,
     },
     Assign {
         team_id: String,

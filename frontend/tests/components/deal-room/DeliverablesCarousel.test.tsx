@@ -18,7 +18,7 @@ describe("DeliverablesCarousel", () => {
     const onSelectSlide = vi.fn();
     const slide = {
       id: "template-exact-id",
-      thumbnailAlt: "Template preview: template exact id",
+      revision: 1, thumbnailAlt: "Template preview: template exact id",
       thumbnailHeight: 720,
       thumbnailSrc: "data:image/png;base64,dGVtcGxhdGU=",
       thumbnailWidth: 1280,

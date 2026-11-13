@@ -104,13 +104,20 @@ work and preserve necessary guards at the actual operation.
 - Parsers create a new random `file_id`, and the normal ingestion path reuses one only for an exact
   content-hash match. Changed content currently becomes a new logical file even though repository
   tests can create later versions by supplying the same `file_id` explicitly.
-- PostgreSQL schema 1 recreates final former SQLite marker 18 directly. Initialize only an empty
+- PostgreSQL schema 2 adds resource revisions and lifecycle guards to the former marker-18 layout. Initialize only an empty
   selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
   restart. Unknown layouts fail without deletion. There is no SQLite import, fallback or reset.
 - Bootstrap retains a dedicated-session application writer lease through all client clones; database
-  operations fail closed on ownership loss. Writes additionally serialize with a schema-scoped
+  writes fail closed on ownership loss. Writes additionally serialize with a schema-scoped
   transaction advisory lock at READ COMMITTED, preserving guards/activity/revisions/leases. Aggregate
-  reads use REPEATABLE READ, READ ONLY. Do not claim distributed application support.
+  reads use REPEATABLE READ, READ ONLY and ordinary reads use MVCC. Neither read path checks
+  writer ownership, session health or generation, including snapshot commit. Current access and
+  final-result/session checks remain in their owning domain/HTTP layers. Typed resource locks,
+  mutation RETURNING and database-clock deadlines are available; read APIs and READ ONLY
+  transactions reject locking queries/mutations. Resource CAS and lifecycle/parent locks protect canonical aggregates. Schema initialization has
+  its own startup-only advisory lock. Global write controls still protect worker/remote protocols
+  during the concurrency transition. Do not claim distributed application support from
+  independent reads or test-only transactions that bypass the global guard.
 - Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
   owner/app scoping and stable ties. Its captured fixtures must continue to pass. Helix remains the
   document/template graph projection and search boundary.

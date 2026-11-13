@@ -108,8 +108,8 @@ async fn role_matrix_including_archived_and_local_creator_policy() {
             ));
         }
     }
-    repo.remove_member("DEAL-1".into(), 1, 4).await.unwrap();
-    repo.remove_member("DEAL-1".into(), 3, 3).await.unwrap();
+    repo.remove_member("DEAL-1".into(), 1, 4, 1).await.unwrap();
+    repo.remove_member("DEAL-1".into(), 3, 3, 1).await.unwrap();
     repo.transfer_ownership("DEAL-1".into(), 1, 2, 6)
         .await
         .unwrap();
@@ -130,7 +130,7 @@ async fn ownership_transfer_is_atomic_and_removed_creator_has_no_access() {
     let (db, repo, deals) = fixture().await;
     add(&repo, 2, DealRole::Contributor).await;
     assert!(matches!(
-        repo.remove_member("DEAL-1".into(), 1, 1).await,
+        repo.remove_member("DEAL-1".into(), 1, 1, 1).await,
         Err(RepositoryError::Forbidden)
     ));
     assert!(repo
@@ -153,7 +153,7 @@ async fn ownership_transfer_is_atomic_and_removed_creator_has_no_access() {
             .role,
         DealRole::Manager
     );
-    repo.remove_member("DEAL-1".into(), 2, 1).await.unwrap();
+    repo.remove_member("DEAL-1".into(), 2, 1, 2).await.unwrap();
     assert!(repo
         .access("DEAL-1".into(), 1, Capability::Read)
         .await
@@ -207,7 +207,7 @@ async fn teams_only_organize_active_deal_members_and_cascade_on_leave() {
         .await
         .is_err());
     assert!(repo
-        .delete_team("DEAL-1".into(), 3, team.team_id.clone())
+        .delete_team("DEAL-1".into(), 3, team.team_id.clone(), 1)
         .await
         .is_err());
     assert!(repo
@@ -220,7 +220,7 @@ async fn teams_only_organize_active_deal_members_and_cascade_on_leave() {
         )
         .await
         .is_err());
-    repo.remove_member("DEAL-1".into(), 3, 3).await.unwrap();
+    repo.remove_member("DEAL-1".into(), 3, 3, 1).await.unwrap();
     assert!(repo
         .teams("DEAL-1".into(), 2, String::new(), 30)
         .await
@@ -329,7 +329,7 @@ async fn concurrent_team_creation_allows_one_per_deal_and_replacement_after_dele
     repo.create_team("DEAL-2".into(), 1, "Independent".into())
         .await
         .unwrap();
-    repo.delete_team("DEAL-1".into(), 1, teams.items[0].team_id.clone())
+    repo.delete_team("DEAL-1".into(), 1, teams.items[0].team_id.clone(), 1)
         .await
         .unwrap();
     repo.create_team("DEAL-1".into(), 1, "Replacement".into())
@@ -386,7 +386,10 @@ async fn service_dispatch_keeps_every_mutation_atomic_with_activity() {
             role: DealRole::Manager,
             revision: 1,
         },
-        Mutation::RemoveMember { user_id: 2 },
+        Mutation::RemoveMember {
+            revision: 1,
+            user_id: 2,
+        },
         Mutation::Transfer {
             user_id: 2,
             revision: 2,
@@ -397,6 +400,7 @@ async fn service_dispatch_keeps_every_mutation_atomic_with_activity() {
             revision: 1,
         },
         Mutation::DeleteTeam {
+            revision: 1,
             team_id: team_id.clone(),
         },
         Mutation::Assign {
@@ -443,7 +447,9 @@ async fn service_dispatch_keeps_every_mutation_atomic_with_activity() {
     })
     .await
     .unwrap();
-    repo.delete_team("DEAL-1".into(), 1, team_id).await.unwrap();
+    repo.delete_team("DEAL-1".into(), 1, team_id, 1)
+        .await
+        .unwrap();
     db.with_connection(async |c| { c.execute_batch("CREATE OR REPLACE FUNCTION deny_activity_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test' USING ERRCODE='23514'; END $$; CREATE TRIGGER deny_activity BEFORE INSERT ON deal_activity_events FOR EACH ROW EXECUTE FUNCTION deny_activity_fn();").await }).await.unwrap();
     let before = roster_snapshot(&repo).await;
     assert!(matches!(

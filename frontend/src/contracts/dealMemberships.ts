@@ -57,7 +57,7 @@ export interface DealMembershipApi {
     userId: number,
     input: { role: AssignableDealRole; expectedRevision: number },
   ): Promise<void>;
-  removeDealMember(dealId: string, userId: number): Promise<void>;
+  removeDealMember(dealId: string, userId: number, expectedRevision: number): Promise<void>;
   transferDealOwnership(
     dealId: string,
     input: { userId: number; expectedAccessRevision: number },
@@ -72,7 +72,7 @@ export interface DealMembershipApi {
     teamId: string,
     input: { name: string; expectedRevision: number },
   ): Promise<void>;
-  deleteDealTeam(dealId: string, teamId: string): Promise<void>;
+  deleteDealTeam(dealId: string, teamId: string, expectedRevision: number): Promise<void>;
   addDealTeamMember(
     dealId: string,
     teamId: string,

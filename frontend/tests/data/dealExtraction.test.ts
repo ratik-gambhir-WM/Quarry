@@ -23,7 +23,7 @@ const savedDeal: SavedDeal = testDeal({
   ],
 });
 
-const savedMetadata: SavedDealMetadata = {
+const savedMetadata: SavedDealMetadata = { revision: 1,
   dealId: savedDeal.dealId,
   factSheetLink: "https://example.com/fact-sheet",
   keyQuestionsJson: '["First question?","Second question?","Second question?"]',

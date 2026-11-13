@@ -76,7 +76,7 @@ export function DealMemberRow({ member, deal, teams, actorId, pending, mutate, o
               {canRemove ? <DropdownMenuItem variant="destructive" onSelect={() => confirm({
                 title: member.userId === actorId ? "Leave this deal?" : `Remove ${member.firstName}?`,
                 description: "Access and team assignments will be removed. Uploaded documents and activity will remain. Downloaded copies cannot be retracted.",
-                action: () => runtime.api.removeDealMember(deal.dealId, member.userId),
+                action: () => runtime.api.removeDealMember(deal.dealId, member.userId, member.revision),
               })}><UserMinus aria-hidden="true" />{member.userId === actorId ? "Leave deal" : "Remove member"}</DropdownMenuItem> : null}
             </DropdownMenuContent>
           </DropdownMenu>

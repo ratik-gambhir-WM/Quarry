@@ -246,7 +246,7 @@ describe("DealFieldsEditor", () => {
       } else {
         expect(api.updateCompany).toHaveBeenCalledExactlyOnceWith(
           company.companyId,
-          payload,
+          { ...payload, expectedRevision: company.revision },
         );
         expect(api.createCompany).not.toHaveBeenCalled();
       }
@@ -259,4 +259,20 @@ describe("DealFieldsEditor", () => {
       ).toBeTruthy();
     },
   );
+});
+
+it("retains company edits and the displayed revision after a stale-save conflict", async () => {
+  const company = { ...testCompany("Original"), revision: 7 };
+  api.listCompanies.mockResolvedValue({ companies: [company], hasMore: false });
+  api.updateCompany.mockRejectedValue(Object.assign(new Error("stale"), { status: 409 }));
+  const user = userEvent.setup();
+  render(<Editor />);
+  await user.click(await screen.findByRole("button", { name: "Edit shared company Original" }));
+  await user.clear(screen.getByLabelText("Company name"));
+  await user.type(screen.getByLabelText("Company name"), "My draft");
+  await user.click(screen.getByRole("button", { name: "Save company" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Your entries are kept");
+  expect((screen.getByLabelText("Company name") as HTMLInputElement).value).toBe("My draft");
+  expect(api.updateCompany).toHaveBeenCalledExactlyOnceWith(company.companyId, expect.objectContaining({ name: "My draft", expectedRevision: 7 }));
+  expect(api.createCompany).not.toHaveBeenCalled();
 });

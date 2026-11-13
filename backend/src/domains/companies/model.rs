@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Company {
     pub company_id: String,
+    pub revision: i64,
     pub user_id: i64,
     pub name: String,
     pub website: Option<String>,
@@ -26,4 +27,12 @@ pub struct CompanyInput {
 pub struct CompanyPage {
     pub companies: Vec<Company>,
     pub has_more: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanyUpdateInput {
+    #[serde(flatten)]
+    pub fields: CompanyInput,
+    pub expected_revision: i64,
 }

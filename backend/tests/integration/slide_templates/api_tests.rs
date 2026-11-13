@@ -664,7 +664,7 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
         .expect("grant seeded template to default app");
 
     let delete_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -693,7 +693,7 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
     assert_eq!(asset_count, 0);
 
     let repeated_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -829,11 +829,11 @@ async fn import_persists_preview_and_selected_kind() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
+        serde_json::from_slice::<Value>(&body).unwrap()["document"],
         serde_json::from_slice::<Value>(&imported_body).unwrap()
     );
     let body: Value = serde_json::from_slice(&body).unwrap();
-    assert!(body["presentation"]["slides"][0]["elements"]
+    assert!(body["document"]["presentation"]["slides"][0]["elements"]
         .as_array()
         .unwrap()
         .iter()

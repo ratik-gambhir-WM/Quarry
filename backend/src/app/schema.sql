@@ -38,7 +38,29 @@ CREATE TABLE reminders (
                 updated_at TEXT COLLATE "C" NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
             );
 
+-- Durable, resource-scoped lifecycle identity survives canonical deletion.
+CREATE TABLE deal_lifecycle_guards (
+    deal_id TEXT COLLATE "C" PRIMARY KEY,
+    state TEXT COLLATE "C" NOT NULL CHECK(state IN ('active','deleting','deleted'))
+);
+CREATE FUNCTION reserve_deal_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE current_state TEXT;
+BEGIN
+    INSERT INTO deal_lifecycle_guards VALUES(NEW.deal_id,'active') ON CONFLICT DO NOTHING;
+    SELECT state INTO current_state FROM deal_lifecycle_guards WHERE deal_id=NEW.deal_id FOR UPDATE;
+    IF current_state <> 'active' THEN
+        RAISE EXCEPTION 'deal identity is reserved' USING ERRCODE='23505';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE FUNCTION retire_deal_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE deal_lifecycle_guards SET state='deleted' WHERE deal_id=OLD.deal_id;
+    RETURN OLD;
+END $$;
+
 CREATE TABLE deals (
+    content_revision BIGINT NOT NULL DEFAULT 1 CHECK(content_revision BETWEEN 1 AND 9007199254740991),
                 deal_id TEXT COLLATE "C" PRIMARY KEY NOT NULL CHECK (length(trim(deal_id)) > 0),
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                 deal_name TEXT COLLATE "C" NOT NULL CHECK (length(trim(deal_name)) > 0),
@@ -56,6 +78,7 @@ CREATE TABLE deals (
             );
 
 CREATE TABLE companies (
+    revision BIGINT NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
                 company_id TEXT COLLATE "C" PRIMARY KEY NOT NULL,
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                 name TEXT COLLATE "C" NOT NULL CHECK (length(trim(name)) > 0),
@@ -82,6 +105,7 @@ CREATE TABLE deal_scopes (
             );
 
 CREATE TABLE deal_metadata (
+    metadata_revision BIGINT NOT NULL DEFAULT 1 CHECK(metadata_revision BETWEEN 1 AND 9007199254740991),
                 deal_id TEXT COLLATE "C" PRIMARY KEY NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
                 key_questions_json TEXT COLLATE "C" NOT NULL DEFAULT '[]'
                     CHECK ((key_questions_json IS JSON) AND json_typeof(key_questions_json::json) = 'array'),
@@ -312,6 +336,7 @@ CREATE TABLE notebook_cleanup (
 );
 
 CREATE TABLE templates (
+    revision BIGINT NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
  catalog_sequence BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
                  template_id TEXT COLLATE "C" PRIMARY KEY,
                  template_json TEXT COLLATE "C" NOT NULL CHECK ((template_json IS JSON))
@@ -490,23 +515,8 @@ CREATE TABLE template_lexical_terms (
 );
 CREATE INDEX template_lexical_terms_template ON template_lexical_terms(template_id);
 
--- Maintain FTS5-equivalent corpus statistics without scanning every lexical document per query.
-CREATE TABLE template_lexical_stats (
- singleton BIGINT PRIMARY KEY CHECK(singleton=1),
- document_count BIGINT NOT NULL CHECK(document_count>=0),
- total_tokens BIGINT NOT NULL CHECK(total_tokens>=0)
-);
-INSERT INTO template_lexical_stats VALUES(1,0,0);
-CREATE FUNCTION update_template_lexical_stats() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
- IF TG_OP='INSERT' THEN
-  UPDATE template_lexical_stats SET document_count=document_count+1,total_tokens=total_tokens+NEW.token_count WHERE singleton=1;
- ELSIF TG_OP='DELETE' THEN
-  UPDATE template_lexical_stats SET document_count=document_count-1,total_tokens=total_tokens-OLD.token_count WHERE singleton=1;
- ELSE
-  UPDATE template_lexical_stats SET total_tokens=total_tokens+NEW.token_count-OLD.token_count WHERE singleton=1;
- END IF;
- RETURN NULL;
-END $$;
-CREATE TRIGGER template_lexical_stats_update AFTER INSERT OR UPDATE OR DELETE ON slide_classifications_fts
- FOR EACH ROW EXECUTE FUNCTION update_template_lexical_stats();
+
+CREATE TRIGGER reserve_deal_identity BEFORE INSERT ON deals
+    FOR EACH ROW EXECUTE FUNCTION reserve_deal_identity();
+CREATE TRIGGER retire_deal_identity AFTER DELETE ON deals
+    FOR EACH ROW EXECUTE FUNCTION retire_deal_identity();

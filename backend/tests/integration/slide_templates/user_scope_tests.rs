@@ -66,9 +66,17 @@ async fn call(
     content_type: &str,
     body: Vec<u8>,
 ) -> (StatusCode, Vec<u8>) {
+    let path = if method == "DELETE" && !path.contains("expectedRevision") {
+        format!(
+            "{path}{}expectedRevision=1",
+            if path.contains('?') { "&" } else { "?" }
+        )
+    } else {
+        path.to_owned()
+    };
     let mut request = Request::builder()
         .method(method)
-        .uri(path)
+        .uri(&path)
         .header("content-type", content_type);
     if let Some(id) = user {
         request = request
@@ -410,7 +418,7 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
             .await
             .unwrap()
             .is_none());
-        assert!(!scoped.delete(&legacy.template_id).await.unwrap());
+        assert!(!scoped.delete(&legacy.template_id, 1).await.unwrap());
     }
     let owner = base.for_user(1).unwrap();
     assert!(owner.for_user(2).is_err());
@@ -430,7 +438,7 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
         .await
         .unwrap()
         .is_none());
-    assert!(!other.delete(&imported.template_id).await.unwrap());
+    assert!(!other.delete(&imported.template_id, 1).await.unwrap());
     assert!(owner
         .find_by_id(&imported.template_id)
         .await
@@ -467,7 +475,7 @@ async fn foreign_template_deletion_never_touches_its_graph_projection() {
     assert!(!studio
         .for_user(2)
         .unwrap()
-        .delete(imported.template_id.clone())
+        .delete(imported.template_id.clone(), 1)
         .await
         .unwrap());
     assert!(owner

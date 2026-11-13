@@ -115,6 +115,12 @@ impl AssistantChatRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 if let Some(deal) = &inserted_deal {
+                    crate::domains::deals::coordination::lock_authority(
+                        tx,
+                        deal,
+                        crate::adapters::postgres::query::RowLock::Share,
+                    )
+                    .await?;
                     crate::domains::memberships::require_deal(
                         tx,
                         deal,
@@ -276,7 +282,7 @@ impl AssistantChatRepository {
             .postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                ensure_thread_live(tx, &thread_id, Some(user_id)).await?;
+                ensure_thread_live(tx, &thread_id, Some(user_id), true).await?;
                 Ok::<_, RepositoryError>(tx.write(update).await?)
             })
             .await?;
@@ -296,7 +302,7 @@ impl AssistantChatRepository {
             .postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                ensure_thread_live(tx, &thread_id, Some(user_id)).await?;
+                ensure_thread_live(tx, &thread_id, Some(user_id), true).await?;
                 Ok::<_, RepositoryError>(tx.write(delete).await?)
             })
             .await?;
@@ -307,7 +313,7 @@ impl AssistantChatRepository {
         self.postgres
             .transaction_async(move |transaction| async move {
                 let transaction = &transaction;
-                ensure_thread_live(transaction, &input.thread_id, Some(input.user_id))
+                ensure_thread_live(transaction, &input.thread_id, Some(input.user_id), true)
                     .await
                     .map_err(|_| PostgresError::transaction_aborted("deal_deletion_in_progress"))?;
                 let owned_query = SqlBuilder::select("assistant_threads")
@@ -515,7 +521,7 @@ impl AssistantChatRepository {
                     )
                     .await?;
                 if let Some(thread) = thread {
-                    ensure_thread_live(tx, &thread, None).await?;
+                    ensure_thread_live(tx, &thread, None, status == "completed").await?;
                 }
                 Ok::<_, RepositoryError>(tx.write(update).await?)
             })
@@ -555,24 +561,48 @@ async fn ensure_thread_live(
     tx: &crate::adapters::postgres::client::PostgresTransaction,
     thread: &str,
     actor: Option<i64>,
+    authorize: bool,
 ) -> Result<(), RepositoryError> {
+    use crate::adapters::postgres::query::{LockWait, RowLock};
     let mut query = SqlBuilder::select("assistant_threads")
-        .columns(["deal_id"])
+        .columns(["deal_id", "user_id"])
         .and_where(Condition::equal("thread_id", thread));
     if let Some(actor) = actor {
         query = query.and_where(Condition::equal("user_id", actor));
     }
-    let deal = tx
-        .read_one_with(query.build(), |r| r.get::<_, Option<String>>(0))
+    let Some((deal, owner)) = tx
+        .read_one_with(query.clone().build(), |r| {
+            Ok((
+                r.get::<_, Option<String>>("deal_id")?,
+                r.get::<_, i64>("user_id")?,
+            ))
+        })
         .await?
-        .flatten();
-    if let Some(deal) = deal {
-        if crate::domains::deals::deletion::barrier(tx, &deal).await? {
+    else {
+        return Ok(());
+    };
+    if let Some(deal) = &deal {
+        crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Share).await?;
+        if crate::domains::deals::deletion::barrier(tx, deal).await? {
             return Err(RepositoryError::Conflict(
                 "deal_deletion_in_progress".into(),
             ));
         }
+        if authorize {
+            crate::domains::memberships::require_deal(
+                tx,
+                deal,
+                owner,
+                crate::domains::memberships::model::Capability::Read,
+            )
+            .await?;
+        }
     }
+    tx.lock_with(query.lock(RowLock::Update, LockWait::Wait).build(), |_| {
+        Ok(())
+    })
+    .await?;
+
     Ok(())
 }
 

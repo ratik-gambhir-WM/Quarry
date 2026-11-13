@@ -91,7 +91,7 @@ export function DealMembersPanel({ deal }: { deal: SavedDeal }) {
                 ? e.message
                 : "The change could not be saved. Try again.",
         });
-        if (status === 409) reload();
+        if (status === 409) { setConfirm(null); reload(); }
       } finally {
         inFlight.current = false;
         heading.current?.focus();

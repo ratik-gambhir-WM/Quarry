@@ -1,5 +1,5 @@
 import { acceptDealDeletion } from "../../data/dealDeletion/lifecycle";
-import type { DealFields } from "../../data/dealModel";
+import type { UpdateDealInput } from "../../data/dealModel";
 import type { DealDeletion, PersistedDeal, QuarryApi } from "../../contracts/quarryApi";
 import type {
   SaveDealInput,
@@ -15,8 +15,8 @@ function createDeal(input: SaveDealInput) {
   return post<SaveDealResponse, SaveDealInput>("/api/v1/deals", input);
 }
 
-function updateDeal(id: string, input: DealFields) {
-  return post<SaveDealResponse, DealFields>(
+function updateDeal(id: string, input: UpdateDealInput) {
+  return post<SaveDealResponse, UpdateDealInput>(
     `/api/v1/deals/${encodeURIComponent(id)}/update`,
     input,
   );
@@ -24,6 +24,7 @@ function updateDeal(id: string, input: DealFields) {
 
 function saveDealMetadata(dealId: string, input: SaveDealMetadataInput) {
   const form = new FormData();
+  form.append("expectedRevision", String(input.expectedRevision));
   appendFiles(form, input.files);
   appendDealMetadataLinks(form, input);
   return postForm<SaveDealMetadataResponse>(
@@ -71,6 +72,6 @@ export const httpDealsApi: Pick<
   listDeals,
   getDeal,
   archiveDeal,
-  deleteDeal: (id) => acceptDealDeletion(id, async () => (await requestJson<DealDeletion | undefined>(`/api/v1/deals/${encodeURIComponent(id)}`, { method: "DELETE" }, undefined, false, [202, 204])) ?? null),
+  deleteDeal: (id, expectedRevision) => acceptDealDeletion(id, async () => (await requestJson<DealDeletion | undefined>(`/api/v1/deals/${encodeURIComponent(id)}?expectedRevision=${expectedRevision}`, { method: "DELETE" }, undefined, false, [202, 204])) ?? null),
   getDealDeletion: (id) => requestJson<DealDeletion>(`/api/v1/deal-deletions/${encodeURIComponent(id)}`, { cache: "no-store" }, undefined, false, [200]),
 };

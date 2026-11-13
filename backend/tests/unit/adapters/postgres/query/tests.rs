@@ -68,6 +68,148 @@ fn builds_parameterized_selects() {
 }
 
 #[test]
+fn resource_and_queue_locks_are_distinct_from_ordinary_selects() {
+    for (mode, wait, suffix) in [
+        (RowLock::Share, LockWait::Wait, "FOR SHARE"),
+        (RowLock::Update, LockWait::Wait, "FOR UPDATE"),
+        (
+            RowLock::Update,
+            LockWait::SkipLocked,
+            "FOR UPDATE SKIP LOCKED",
+        ),
+    ] {
+        let query = SqlBuilder::select("jobs")
+            .and_where(Condition::equal("status", "queued"))
+            .order_by("id", SortDirection::Ascending)
+            .limit(1)
+            .lock(mode, wait)
+            .build()
+            .unwrap();
+        assert_eq!(query.kind(), QueryKind::LockingSelect);
+        assert!(!query.kind().is_read());
+        assert!(!query.kind().is_mutation());
+        assert!(query.sql().ends_with(&format!("LIMIT 1 {suffix}")));
+        assert_eq!(query.parameters(), &[SqlValue::from("queued")]);
+    }
+    for query in [
+        SqlBuilder::select("jobs")
+            .distinct()
+            .lock(RowLock::Update, LockWait::Wait),
+        SqlBuilder::select("jobs")
+            .count_rows()
+            .lock(RowLock::Share, LockWait::Wait),
+    ] {
+        assert_eq!(
+            build_error(query.build()),
+            SqlBuilderError::InvalidLockingSelect
+        );
+    }
+}
+
+#[test]
+fn conditional_mutations_return_quoted_columns_and_keep_values_bound() {
+    let query = SqlBuilder::update("notes")
+        .set("content", "' OR true --")
+        .increment("revision")
+        .and_where(Condition::equal("id", "note"))
+        .and_where(Condition::equal("revision", 3_i64))
+        .returning("revision")
+        .returning("odd\"name")
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"content\" = $1, \"revision\" = \"revision\" + 1 WHERE (\"id\" = $2) AND (\"revision\" = $3) RETURNING \"revision\", \"odd\"\"name\"");
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::from("' OR true --"),
+            SqlValue::from("note"),
+            SqlValue::from(3_i64)
+        ]
+    );
+    assert_eq!(query.kind(), QueryKind::UpdateReturning);
+    assert!(!query.kind().is_read());
+    assert!(query.kind().is_mutation());
+    assert!(query.kind().returns_mutation_rows());
+    let query = SqlBuilder::delete_from("notes")
+        .and_where(Condition::equal("revision", 3_i64))
+        .returning("id")
+        .build()
+        .unwrap();
+    assert_eq!(query.kind(), QueryKind::DeleteReturning);
+    assert!(query.sql().ends_with(" RETURNING \"id\""));
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("notes")
+                .set("content", "x")
+                .returning("id")
+                .build()
+        ),
+        SqlBuilderError::MissingCondition("UPDATE")
+    );
+    assert_eq!(
+        build_error(SqlBuilder::delete_from("notes").returning("id").build()),
+        SqlBuilderError::MissingCondition("DELETE")
+    );
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("notes")
+                .set("content", "x")
+                .allow_all_rows()
+                .returning("id")
+                .returning("id")
+                .build()
+        ),
+        SqlBuilderError::DuplicateColumn("id".into())
+    );
+}
+
+#[test]
+fn deadline_assignments_and_predicates_use_database_time() {
+    let query = SqlBuilder::update("jobs")
+        .set("token", "attempt")
+        .set_epoch_seconds_after("lease_until", 180)
+        .and_where(Condition::equal("id", "job"))
+        .and_where(Condition::unexpired("lease_until"))
+        .returning("lease_until")
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"jobs\" SET \"token\" = $1, \"lease_until\" = floor(extract(epoch FROM clock_timestamp()))::bigint + $2::bigint WHERE (\"id\" = $3) AND (\"lease_until\" > floor(extract(epoch FROM clock_timestamp()))::bigint) RETURNING \"lease_until\"");
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::from("attempt"),
+            SqlValue::from(180_i64),
+            SqlValue::from("job")
+        ]
+    );
+    let expired = SqlBuilder::select("jobs")
+        .and_where(Condition::expired("lease_until"))
+        .build()
+        .unwrap();
+    assert!(expired
+        .sql()
+        .contains("\"lease_until\" <= floor(extract(epoch FROM clock_timestamp()))::bigint"));
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("jobs")
+                .set("lease_until", 0_i64)
+                .set_epoch_seconds_after("lease_until", 1)
+                .allow_all_rows()
+                .build()
+        ),
+        SqlBuilderError::DuplicateColumn("lease_until".into())
+    );
+    assert_eq!(
+        SqlBuilder::insert_into("users")
+            .value("email", "test@example.invalid")
+            .build()
+            .unwrap()
+            .kind(),
+        QueryKind::InsertReturningId
+    );
+}
+
+#[test]
 fn keeps_untrusted_values_out_of_sql() {
     let untrusted = "' OR 1 = 1 --";
     let query = SqlBuilder::select("users")

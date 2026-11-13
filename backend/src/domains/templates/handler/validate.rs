@@ -41,3 +41,10 @@ pub(super) fn validate_pptx_template_filename(filename: &str) -> AppResult<()> {
     }
     Ok(())
 }
+
+pub(super) fn revision(value: i64) -> AppResult<()> {
+    if !(1..=crate::shared::revision::MAX_REVISION).contains(&value) {
+        return Err(AppError::bad_request("invalid expectedRevision"));
+    }
+    Ok(())
+}

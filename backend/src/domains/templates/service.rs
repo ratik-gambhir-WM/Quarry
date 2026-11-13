@@ -43,6 +43,7 @@ impl TemplateService {
                 .previews
                 .into_iter()
                 .map(|p| TemplatePreview {
+                    revision: p.revision,
                     template_id: p.template_id,
                     content_type: p.content_type,
                     data_url: p.data_url,
@@ -56,13 +57,13 @@ impl TemplateService {
         Ok(page)
     }
 
-    pub async fn delete(&self, template_id: &str) -> ServiceResult<()> {
+    pub async fn delete(&self, template_id: &str, expected_revision: i64) -> ServiceResult<()> {
         let studio = self
             .studio
             .as_ref()
             .ok_or_else(|| ServiceError::unavailable("template capability is not configured"))?;
         if studio
-            .delete(template_id.into())
+            .delete(template_id.into(), expected_revision)
             .await
             .map_err(map_embedded_error)?
         {

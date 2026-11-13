@@ -3,14 +3,37 @@ use super::SqlValue;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryKind {
     Select,
+    LockingSelect,
     Insert,
+    InsertReturningId,
     Update,
+    UpdateReturning,
     Delete,
+    DeleteReturning,
 }
 
 impl QueryKind {
     pub fn is_read(self) -> bool {
         matches!(self, Self::Select)
+    }
+
+    pub fn is_mutation(self) -> bool {
+        matches!(
+            self,
+            Self::Insert
+                | Self::InsertReturningId
+                | Self::Update
+                | Self::UpdateReturning
+                | Self::Delete
+                | Self::DeleteReturning
+        )
+    }
+
+    pub fn returns_mutation_rows(self) -> bool {
+        matches!(
+            self,
+            Self::InsertReturningId | Self::UpdateReturning | Self::DeleteReturning
+        )
     }
 }
 

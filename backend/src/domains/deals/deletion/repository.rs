@@ -90,10 +90,17 @@ impl DeletionRepository {
         &self,
         deal: String,
         actor: i64,
+        expected_revision: i64,
     ) -> Result<DealDeletion, RepositoryError> {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                crate::domains::deals::coordination::lock(
+                    tx,
+                    &deal,
+                    crate::adapters::postgres::query::RowLock::Update,
+                )
+                .await?;
                 if let Some(receipt) = find(tx, "deal_id", &deal).await? {
                     let op = owned(Some(receipt), actor)?;
                     if matches!(
@@ -115,6 +122,29 @@ impl DeletionRepository {
                     return Ok(op);
                 }
                 require_deal(tx, &deal, actor, Capability::Delete).await?;
+                let changed = tx
+                    .write(
+                        Q::update("deal_lifecycle_guards")
+                            .set("state", "deleting")
+                            .and_where(C::equal("deal_id", &deal))
+                            .and_where(C::equal("state", "active"))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
+                let actual = tx
+                    .read_one_with(
+                        Q::select("deals")
+                            .and_where(C::equal("deal_id", &deal))
+                            .build(),
+                        |r| r.get::<_, i64>("content_revision"),
+                    )
+                    .await?;
+                if actual != Some(expected_revision) {
+                    return Err(crate::shared::revision::conflict());
+                }
                 let id = uuid::Uuid::new_v4().to_string();
                 let time = now();
                 tx.write(
@@ -204,6 +234,27 @@ impl DeletionRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                crate::domains::deals::coordination::lock(
+                    tx,
+                    &op.deal_id,
+                    crate::adapters::postgres::query::RowLock::Update,
+                )
+                .await?;
+                tx.lock_with(
+                    Q::select("notebooks")
+                        .and_where(C::equal("deal_id", &op.deal_id))
+                        .order_by(
+                            "notebook_id",
+                            crate::adapters::postgres::query::SortDirection::Ascending,
+                        )
+                        .lock(
+                            crate::adapters::postgres::query::RowLock::Update,
+                            crate::adapters::postgres::query::LockWait::Wait,
+                        )
+                        .build(),
+                    |_| Ok(()),
+                )
+                .await?;
                 let (owner, saved) = find(tx, "deletion_id", &op.deletion_id)
                     .await?
                     .ok_or_else(|| RepositoryError::NotFound("deletion not found".into()))?;

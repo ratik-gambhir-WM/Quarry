@@ -45,18 +45,11 @@ impl PostgresTemplateRepository {
                     .await?
                     .is_none();
                 let mut conflict = ConflictUpdate::new(["app_id"]).set("last_seen_at", &now);
-                if registration.display_name.is_some() || registration.metadata.is_some() {
-                    conflict = conflict
-                        .set(
-                            "display_name",
-                            registration.display_name.as_deref().unwrap_or(id),
-                        )
-                        .set(
-                            "metadata_json",
-                            serde_json::to_string(
-                                &registration.metadata.clone().unwrap_or_default(),
-                            )?,
-                        );
+                if let Some(name) = &registration.display_name {
+                    conflict = conflict.set("display_name", name);
+                }
+                if let Some(metadata) = &registration.metadata {
+                    conflict = conflict.set("metadata_json", serde_json::to_string(metadata)?);
                 }
                 tx.write(
                     SqlBuilder::insert_into("apps")

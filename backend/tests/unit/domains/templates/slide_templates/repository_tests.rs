@@ -45,6 +45,7 @@ fn template_insert(template_id: &str) -> TemplateInsert {
     .expect("valid canvas document");
     TemplateInsert {
         template: StoredTemplate {
+            revision: 1,
             template_id: template_id.to_owned(),
             template_json,
         },

@@ -126,8 +126,11 @@ impl NotebookService {
         owner: i64,
         notebook: String,
         id: String,
+        expected_revision: i64,
     ) -> ServiceResult<()> {
-        self.repository.delete_note(owner, notebook, id).await?;
+        self.repository
+            .delete_note(owner, notebook, id, expected_revision)
+            .await?;
         self.wake.notify_one();
         Ok(())
     }

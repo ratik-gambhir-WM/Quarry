@@ -1,10 +1,10 @@
 # Deal, company, and chat model
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
-Current storage uses PostgreSQL schema 1, including the existing nine diligence stages and all
+Current storage uses PostgreSQL schema 2, including the existing nine diligence stages and all
 access/ownership constraints. The replacement starts fresh without importing prior records or
 converting statuses. See [storage setup and recovery](postgresql-storage.md).
 
@@ -69,3 +69,8 @@ There is no reset binary, historical data migration, distributed transaction or 
 reindex command. Back up PostgreSQL and Helix with the matching binary/configuration, and drain
 writers before a coordinated restore. A Helix failure preserves committed file identities and
 bytes; exact-content re-upload retries the projection. See [storage operations](postgresql-storage.md).
+
+Deal fields/parties/scopes and company replacements return bounded positive `revision` and require
+`expectedRevision` on update. Deal metadata has its own revision; multipart metadata updates require
+that displayed value. Authorized conflicts return 409 and roll back children/activity. Archive
+advances deal content revision only on a real transition. Clients preserve conflicting drafts.

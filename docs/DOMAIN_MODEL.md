@@ -1,6 +1,6 @@
 # Quarry domain and data model
 
-Current storage is fresh PostgreSQL schema 1 with retained Helix. See
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -139,10 +139,10 @@ when adding or reviewing a check rather than inferring its owner from a domain n
 
 ## 4. Canonical relational model
 
-PostgreSQL schema 1 is canonical and recreates the final former SQLite marker-18 layout directly.
+PostgreSQL schema 2 is canonical and recreates the final former SQLite marker-18 layout directly.
 It includes membership/activity, document identity/image checkpoints, private templates, notebooks
 and deletion receipts. There is no old-data migration. The table inventory is in
-[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-1).
+[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-2).
 
 ```mermaid
 erDiagram
@@ -204,7 +204,7 @@ working stages and Closed; Pipeline and Pencils Down permit incomplete parties. 
 stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
 independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
 
-PostgreSQL schema 1 enforces the stage codes; see [storage setup](postgresql-storage.md).
+PostgreSQL schema 2 enforces the stage codes; see [storage setup](postgresql-storage.md).
 
 ### 4.3 Logical file aggregate
 

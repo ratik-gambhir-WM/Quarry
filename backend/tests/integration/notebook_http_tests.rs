@@ -13,10 +13,15 @@ async fn call(
     body: Option<Value>,
     actor: i64,
 ) -> (StatusCode, axum::http::HeaderMap, Value) {
+    let path = if method == "DELETE" && path.contains("/notes/") && !path.contains('?') {
+        format!("{path}?expectedRevision=1")
+    } else {
+        path.to_owned()
+    };
     let token = if actor == 1 { "a" } else { "b" }.repeat(43);
     let mut request = Request::builder()
         .method(method)
-        .uri(path)
+        .uri(&path)
         .header("authorization", format!("Bearer {token}"))
         .header("x-user-id", actor.to_string());
     if body.is_some() {
@@ -190,7 +195,18 @@ async fn notebook_http_complete_resource_lifecycle_and_terminal_sse() {
             .0,
         204
     );
-    assert_eq!(call(&app, "DELETE", &path, None, 1).await.0, 204);
+    assert_eq!(
+        call(
+            &app,
+            "DELETE",
+            &format!("{path}?expectedRevision=2"),
+            None,
+            1
+        )
+        .await
+        .0,
+        204
+    );
     assert_eq!(call(&app, "GET", &path, None, 1).await.0, 404);
     let deleted = call(&app, "DELETE", &base, None, 1).await;
     assert_eq!(deleted.0, 204);

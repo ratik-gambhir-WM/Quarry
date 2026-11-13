@@ -1,10 +1,12 @@
 //! Fresh PostgreSQL schema ownership; old local SQLite stores are never opened.
-use crate::adapters::postgres::client::{PostgresClient, WRITE_LOCK};
+use crate::adapters::postgres::client::PostgresClient;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
+// Startup only. Runtime guards are retained separately until worker/remote cutover.
+const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error("PostgreSQL schema operation failed")]
@@ -15,7 +17,7 @@ pub enum MigrationError {
 pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationError> {
     let mut tx = client.pool().begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
-        .bind(WRITE_LOCK)
+        .bind(SCHEMA_INITIALIZATION_LOCK)
         .execute(&mut *tx)
         .await?;
     let tables: i64 = sqlx::query_scalar(

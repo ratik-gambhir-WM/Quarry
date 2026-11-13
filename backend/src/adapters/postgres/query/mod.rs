@@ -13,8 +13,8 @@ mod value;
 
 pub use builder::{
     ComparisonOperator, Condition, ConflictUpdate, DeleteBuilder, InsertBuilder, JoinClause,
-    JoinCondition, JoinType, SelectBuilder, SortDirection, SqlBuilder, SqlBuilderError,
-    UpdateBuilder,
+    JoinCondition, JoinType, LockWait, RowLock, SelectBuilder, SortDirection, SqlBuilder,
+    SqlBuilderError, UpdateBuilder,
 };
 pub use statement::{QueryKind, SqlQuery};
 pub use value::SqlValue;

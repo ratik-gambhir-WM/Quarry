@@ -317,7 +317,7 @@ async fn authentication_rejects_cross_owner_deals_companies_and_job_subscription
             &app.router,
             "POST",
             &update,
-            json!({"name":"Stolen", "website":null,"industry":null,"description":null}),
+            json!({"expectedRevision":1,"name":"Stolen", "website":null,"industry":null,"description":null}),
             Some(&other)
         )
         .await

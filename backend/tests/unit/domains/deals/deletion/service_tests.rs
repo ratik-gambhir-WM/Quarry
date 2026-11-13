@@ -63,7 +63,7 @@ async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
     );
     let op = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     worker.tick().await.unwrap();
@@ -111,7 +111,7 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
     first.graph.initialize().await.unwrap();
     let op = first
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     drop(first);
@@ -136,7 +136,12 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
         super::super::model::DeletionStatus::Completed
     );
     assert_eq!(
-        third.repository.accept(op.deal_id, 1).await.unwrap().status,
+        third
+            .repository
+            .accept(op.deal_id, 1, 1)
+            .await
+            .unwrap()
+            .status,
         super::super::model::DeletionStatus::Completed
     );
 }
@@ -183,7 +188,7 @@ async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
         let deal = format!("DELETE-BUSY-{index:02}");
         seed_deal(&postgres, &deal).await;
         active.push(worker.lifecycle.admit(&deal).await);
-        let op = worker.repository.accept(deal, 1).await.unwrap();
+        let op = worker.repository.accept(deal, 1, 1).await.unwrap();
         postgres
             .with_connection(async |c| {
                 c.execute(
@@ -197,7 +202,7 @@ async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
     }
     let ready = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     postgres
@@ -277,7 +282,7 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
     for index in 0..8 {
         let deal = format!("DELETE-CONCURRENT-{index}");
         seed_deal(&postgres, &deal).await;
-        worker.repository.accept(deal, 1).await.unwrap();
+        worker.repository.accept(deal, 1, 1).await.unwrap();
     }
     let task = tokio::spawn(async move { worker.tick().await });
     tokio::time::timeout(Duration::from_secs(3), requests.recv())
@@ -357,7 +362,7 @@ async fn acceptance_spawns_cleanup_without_startup_and_blocked_work_retires() {
     );
     assert_eq!(Arc::strong_count(&worker), 1, "construction must not spawn");
     let admission = worker.lifecycle.admit("DELETE-RESTART").await;
-    let receipt = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    let receipt = worker.accept("DELETE-RESTART".into(), 1, 1).await.unwrap();
     assert_eq!(receipt.phase, DeletionPhase::Draining);
     // Cleanup must survive the accepting request and wait for active work to drain.
     drop(admission);
@@ -395,7 +400,7 @@ async fn recovery_waits_for_a_future_retry_without_another_request() {
     );
     let receipt = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     worker
@@ -459,7 +464,7 @@ async fn cancelled_accepting_request_still_notifies_after_the_receipt_commits() 
     });
     ready.await.unwrap();
     {
-        let request = worker.accept("DELETE-RESTART".into(), 1);
+        let request = worker.accept("DELETE-RESTART".into(), 1, 1);
         tokio::pin!(request);
         assert!(futures_util::poll!(&mut request).is_pending());
         // Drop the HTTP-owned future while acceptance is waiting for storage.

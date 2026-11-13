@@ -413,7 +413,7 @@ async fn template_delete_route_degrades_when_unconfigured() {
     let response = test_router()
         .await
         .oneshot(
-            Request::delete("/api/v1/templates/example")
+            Request::delete("/api/v1/templates/example?expectedRevision=1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -713,7 +713,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
                     format!("multipart/form-data; boundary={BOUNDARY}"),
                 )
                 .body(Body::from(format!(
-                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointLink\"\r\n\r\n https://northwind.sharepoint.com/sites/acme \r\n\
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"expectedRevision\"\r\n\r\n1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointLink\"\r\n\r\n https://northwind.sharepoint.com/sites/acme \r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sowLink\"\r\n\r\n https://example.com/sow \r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"factSheetLink\"\r\n\r\nhttps://example.com/fact-sheet\r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"rlLink\"\r\n\r\nhttps://example.com/request-list\r\n\

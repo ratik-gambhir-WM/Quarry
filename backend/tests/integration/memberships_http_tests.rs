@@ -13,6 +13,18 @@ async fn call(
     path: &str,
     body: Value,
 ) -> (StatusCode, Value) {
+    let path = if method == "DELETE" && !path.contains('?') && path.split('/').count() == 7 {
+        format!("{path}?expectedRevision=1")
+    } else {
+        path.to_owned()
+    };
+    let mut body = body;
+    if path.ends_with("/update") {
+        body.as_object_mut()
+            .unwrap()
+            .entry("expectedRevision")
+            .or_insert(json!(1));
+    }
     let token = (char::from(b'a' + u8::try_from(actor - 1).unwrap()))
         .to_string()
         .repeat(43);
@@ -21,7 +33,7 @@ async fn call(
         .oneshot(
             Request::builder()
                 .method(method)
-                .uri(path)
+                .uri(&path)
                 .header("authorization", format!("Bearer {token}"))
                 .header("x-user-id", actor)
                 .header("content-type", "application/json")
@@ -356,7 +368,7 @@ async fn membership_http_validation_conflicts_and_team_lifecycle() {
             &app.router,
             2,
             "DELETE",
-            &format!("{root}/teams/{team}"),
+            &format!("{root}/teams/{team}?expectedRevision=2"),
             Value::Null
         )
         .await
@@ -435,7 +447,7 @@ async fn transfer_removal_archive_and_private_resources_stay_isolated() {
             &app.router,
             2,
             "DELETE",
-            &format!("{root}/members/1"),
+            &format!("{root}/members/1?expectedRevision=2"),
             Value::Null
         )
         .await

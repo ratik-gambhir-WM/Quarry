@@ -35,7 +35,12 @@ async fn request(
     path: &str,
     actor: Option<i64>,
 ) -> (StatusCode, axum::http::HeaderMap, Value) {
-    let mut request = Request::builder().method(method).uri(path);
+    let path = if method == "DELETE" && !path.contains('?') {
+        format!("{path}?expectedRevision=1")
+    } else {
+        path.to_owned()
+    };
+    let mut request = Request::builder().method(method).uri(&path);
     if let Some(actor) = actor {
         request = request
             .header(

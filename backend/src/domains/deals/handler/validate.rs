@@ -161,3 +161,10 @@ pub(crate) fn trim_optional(value: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 #[path = "../../../../tests/unit/domains/deals/handler/validate_tests.rs"]
 mod tests;
+
+pub(crate) fn revision(value: i64) -> AppResult<()> {
+    if !(1..=crate::shared::revision::MAX_REVISION).contains(&value) {
+        return Err(AppError::bad_request("invalid expectedRevision"));
+    }
+    Ok(())
+}

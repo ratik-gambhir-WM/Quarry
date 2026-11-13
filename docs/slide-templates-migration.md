@@ -7,7 +7,7 @@ reset and verification records below describe the earlier implementation, not cu
 ## Current implementation
 
 The maintained launcher uses embedded Axum templates and does not start the Node service.
-Fresh PostgreSQL schema 1 owns private templates, assets, previews, classification/embedding
+Fresh PostgreSQL schema 2 owns private templates, assets, previews, classification/embedding
 artifacts and durable jobs through the same asynchronous pool as other product records. Helix
 remains the metadata/dual-vector projection; imports commit canonical content before indexing.
 Startup reconciles templates from PostgreSQL. There is no SQLite driver, profile import, marker

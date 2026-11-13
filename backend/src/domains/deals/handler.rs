@@ -84,15 +84,22 @@ pub(super) async fn update_deal_handler(
     Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<DealsHttpState>,
     Path(id): Path<String>,
-    fields: Result<Json<DealFields>, axum::extract::rejection::JsonRejection>,
+    fields: Result<Json<super::model::UpdateDealInput>, axum::extract::rejection::JsonRejection>,
 ) -> AppResult<Response> {
     validate_deal_id(&id)?;
     let fields = match fields {
         Ok(Json(fields)) => fields,
         Err(rejection) => return Ok(deal_json_rejection(rejection)),
     };
-    validate_fields(&fields)?;
-    Ok(Json(state.deals.update(&id, actor.user.id, fields).await?).into_response())
+    validate::revision(fields.expected_revision)?;
+    validate_fields(&fields.fields)?;
+    Ok(Json(
+        state
+            .deals
+            .update(&id, actor.user.id, fields.fields, fields.expected_revision)
+            .await?,
+    )
+    .into_response())
 }
 
 pub(super) async fn archive_deal_handler(

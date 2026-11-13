@@ -13,35 +13,35 @@ describe("permanent deletion transport and lifecycle", () => {
   it("encodes DELETE, preserves pending status, and invalidates after acceptance", async () => {
     const listener = vi.fn(); const stop = subscribeDealDeletion(listener);
     const fetchMock = vi.fn().mockResolvedValue(Response.json(receipt(), { status: 202 })); vi.stubGlobal("fetch", fetchMock);
-    await expect(httpQuarryApi.deleteDeal("deal/one")).resolves.toEqual(receipt());
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals/deal%2Fone", expect.objectContaining({ method: "DELETE" }));
+    await expect(httpQuarryApi.deleteDeal("deal/one", 1)).resolves.toEqual(receipt());
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/deals/deal%2Fone?expectedRevision=1", expect.objectContaining({ method: "DELETE" }));
     expect(isDealDeleted("deal/one")).toBe(true); expect(listener).toHaveBeenCalledWith("deal/one"); stop();
   });
   it("treats 204 as completed without parsing JSON", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
-    await expect(httpQuarryApi.deleteDeal("finished")).resolves.toBeNull();
+    await expect(httpQuarryApi.deleteDeal("finished", 1)).resolves.toBeNull();
   });
   it.each([200, 409, 503])("rejects status %s without invalidating local data", async (status) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "cleanup unavailable" }, { status })));
-    await expect(httpQuarryApi.deleteDeal("unchanged")).rejects.toThrow();
+    await expect(httpQuarryApi.deleteDeal("unchanged", 1)).rejects.toThrow();
     expect(isDealDeleted("unchanged")).toBe(false);
   });
   it("rejects empty 202 instead of claiming completion", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 202 })));
-    await expect(httpQuarryApi.deleteDeal("unchanged")).rejects.toThrow();
+    await expect(httpQuarryApi.deleteDeal("unchanged", 1)).rejects.toThrow();
     expect(isDealDeleted("unchanged")).toBe(false);
   });
   it("uses a separate typed desktop DELETE without changing void deletes", async () => {
     const deleteJson = vi.fn().mockResolvedValue(receipt()); const remove = vi.fn().mockResolvedValue(undefined);
     const api = createTauriQuarryApi({ delete: remove, deleteJson, get: vi.fn(), getPdf: vi.fn(), post: vi.fn(), postMultipart: vi.fn(), postPowerPoint: vi.fn(), subscribeJob: vi.fn() });
-    await expect(api.deleteDeal("deal/one")).resolves.toEqual(receipt());
-    expect(deleteJson).toHaveBeenCalledWith("/api/v1/deals/deal%2Fone"); expect(remove).not.toHaveBeenCalled();
-    deleteJson.mockResolvedValue(null); await expect(api.deleteDeal("deal/one")).resolves.toBeNull();
+    await expect(api.deleteDeal("deal/one", 1)).resolves.toEqual(receipt());
+    expect(deleteJson).toHaveBeenCalledWith("/api/v1/deals/deal%2Fone?expectedRevision=1"); expect(remove).not.toHaveBeenCalled();
+    deleteJson.mockResolvedValue(null); await expect(api.deleteDeal("deal/one", 1)).resolves.toBeNull();
   });
   it("ignores acceptance from an obsolete session", async () => {
     let resolve!: (response: Response) => void;
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
-    const pending = httpQuarryApi.deleteDeal("stale"); sessionStore.set(null); resolve(Response.json(receipt("stale"), { status: 202 }));
+    const pending = httpQuarryApi.deleteDeal("stale", 1); sessionStore.set(null); resolve(Response.json(receipt("stale"), { status: 202 }));
     await expect(pending).rejects.toThrow(); expect(isDealDeleted("stale")).toBe(false);
   });
   it("cancels local polling without another DELETE or status request", async () => {

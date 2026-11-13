@@ -110,7 +110,7 @@ export interface NotebookApi {
     noteId: string,
     input: PatchNote,
   ): Promise<NotebookSaveJob>;
-  deleteNotebookNote(notebookId: string, noteId: string): Promise<void>;
+  deleteNotebookNote(notebookId: string, noteId: string, expectedRevision: number): Promise<void>;
   getNotebookSaveJob(
     notebookId: string,
     jobId: string,

@@ -45,38 +45,54 @@ impl CompanyRepository {
         user_id: i64,
         company_id: Option<String>,
         input: CompanyInput,
+        expected_revision: Option<i64>,
     ) -> Result<Company, RepositoryError> {
         self.postgres
-            .transaction_async(move |tx| async move {
+            .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let now = chrono::Utc::now().to_rfc3339();
                 let id = company_id
                     .clone()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 if company_id.is_some() {
-                    let existing = tx
-                        .read(
-                            SqlBuilder::select("companies")
+                    let expected =
+                        expected_revision.ok_or_else(crate::shared::revision::conflict)?;
+                    let changed = tx
+                        .write(
+                            SqlBuilder::update("companies")
+                                .set("name", input.name.trim())
+                                .set("website", input.website.as_deref())
+                                .set("industry", input.industry.as_deref())
+                                .set("description", input.description.as_deref())
+                                .set("updated_at", &now)
+                                .increment("revision")
                                 .and_where(Condition::equal("company_id", &id))
                                 .and_where(Condition::equal("user_id", user_id))
+                                .and_where(Condition::equal("revision", expected))
+                                .and_where(Condition::compare(
+                                    "revision",
+                                    ComparisonOperator::LessThan,
+                                    crate::shared::revision::MAX_REVISION,
+                                ))
                                 .build(),
                         )
                         .await?;
-                    if existing.is_empty() {
-                        return Ok(None);
+                    if changed.rows_affected != 1 {
+                        let exists = tx
+                            .read_one(
+                                SqlBuilder::select("companies")
+                                    .and_where(Condition::equal("company_id", &id))
+                                    .and_where(Condition::equal("user_id", user_id))
+                                    .build(),
+                            )
+                            .await?
+                            .is_some();
+                        return Err(if exists {
+                            crate::shared::revision::conflict()
+                        } else {
+                            RepositoryError::NotFound("company not found".into())
+                        });
                     }
-                    tx.write(
-                        SqlBuilder::update("companies")
-                            .set("name", input.name.trim())
-                            .set("website", input.website.as_deref())
-                            .set("industry", input.industry.as_deref())
-                            .set("description", input.description.as_deref())
-                            .set("updated_at", &now)
-                            .and_where(Condition::equal("company_id", &id))
-                            .and_where(Condition::equal("user_id", user_id))
-                            .build(),
-                    )
-                    .await?;
                 } else {
                     tx.write(
                         SqlBuilder::insert_into("companies")
@@ -102,8 +118,7 @@ impl CompanyRepository {
                     .await?
                     .pop())
             })
-            .await
-            .map_err(storage)?
+            .await?
             .ok_or_else(|| RepositoryError::NotFound("company not found".into()))
     }
 }
@@ -115,6 +130,7 @@ pub(crate) fn company_from_row(
 ) -> RowResult<Company> {
     Ok(Company {
         company_id: row.get("company_id")?,
+        revision: row.get("revision")?,
         user_id: row.get("user_id")?,
         name: row.get("name")?,
         website: row.get("website")?,

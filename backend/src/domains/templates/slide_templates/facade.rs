@@ -366,7 +366,7 @@ impl SlideTemplates {
         }
         Ok(result)
     }
-    pub async fn delete(&self, id: String) -> SlideResult<bool> {
+    pub async fn delete(&self, id: String, expected_revision: i64) -> SlideResult<bool> {
         let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
             unavailable(
                 "template_busy",
@@ -375,7 +375,7 @@ impl SlideTemplates {
         })?;
         let key = id.clone();
         let removed = self
-            .run(move |i, _, _| async move { i.delete(&key).await })
+            .run(move |i, _, _| async move { i.delete(&key, expected_revision).await })
             .await?;
         // An inaccessible ID must never delete another owner's graph projection.
         if removed {

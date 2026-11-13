@@ -55,13 +55,17 @@ reindex command is provided. Never use `clear_helix` to resolve a dimension conf
 
 ## Schema and adapter
 
-`backend/src/app/schema.sql` creates the final relational equivalent of SQLite marker 18 directly.
-PostgreSQL schema version **1**, its source checksum and a live catalog fingerprint are recorded
+`backend/src/app/schema.sql` creates schema 2: the former marker-18 layout plus bounded deal,
+metadata, company and template revisions and retained deal lifecycle guards.
+PostgreSQL schema version **2**, its source checksum and a live catalog fingerprint are recorded
 in `quarry_schema_version`. Startup serializes schema inspection/creation, initializes an empty
-selected schema transactionally, or validates and reuses version 1. Unknown nonempty layouts,
+selected schema transactionally, or validates and reuses version 2. Unknown nonempty layouts,
 changed DDL/checks/indexes and unsupported versions fail without deleting records. There is no
 SQLite upgrade chain, reset binary, data backfill, standalone template database or dual write.
-Exactly-one-owner and document identity/graph readiness checks still run before serving traffic.
+Version 1 is intentionally unsupported; select a fresh empty database or explicitly recreate a
+disposable database. Startup never deletes data. Exactly-one-owner and document identity/graph
+readiness checks still run before serving traffic. Schema initialization uses a dedicated startup-only
+advisory transaction lock, separate from runtime mutation locking.
 
 `adapters/postgres` owns SQLx 0.8.6 pooling, typed values/rows, parameterized queries and transactions.
 Bootstrap injects one pool into all repositories. Generated numeric identities use `RETURNING` and
@@ -80,7 +84,7 @@ Database I/O is asynchronous. After transactional schema initialization/validati
 a pooled connection for a session advisory writer lease on the selected schema. All router and
 detached-worker clones retain it; another application writer is rejected. The connection closes
 on drop rather than returning a session
-lock to the pool. Operations check the dedicated session and fail closed on ownership loss until
+lock to the pool. Writes check the dedicated session and fail closed on ownership loss until
 restart. This retains the single active Axum writer boundary, rather than enabling a distributed
 application deployment. A write transaction takes a PostgreSQL advisory lock scoped to the
 selected schema, then runs at READ COMMITTED on one connection. All application mutations share
@@ -97,9 +101,24 @@ lock on that generation, rejecting a missing or replaced value. Takeover updates
 without waiting for the aggregate advisory lock, so an older in-flight transaction cannot publish
 after replacement ownership is established. If a transaction has already locked its matching
 generation for commit, takeover waits for that transaction to finish before returning ownership.
-This row lock closes the check-to-commit race; a session ping alone cannot do so. Aggregate reads
-recheck the live lease before returning their snapshot, without taking write locks. No schema DDL,
-stored document format, API contract or PostgreSQL schema-version change is required.
+This row lock closes the check-to-commit race; a session ping alone cannot do so. Single-query and
+aggregate reads no longer check the writer session, its health flag or generation. Snapshot commit
+also has no writer dependency. Reads retain MVCC/REPEATABLE READ, READ ONLY, pool/statement bounds
+and current authorization checks; losing writer ownership does not itself make reads unavailable.
+Closing that reader's pool still returns the normal pool-closed error.
+
+The query layer now has typed resource locks (FOR SHARE/FOR UPDATE), SKIP LOCKED selection,
+UPDATE/DELETE RETURNING and database-clock integer deadlines. Locking SELECT is distinct from an
+ordinary read: read runners reject it, and explicit transaction locking/returning APIs reject
+READ ONLY transactions. Independent-pool tests exercise those primitives without the global write
+guard in a test-only harness. Production still retains the writer lease/generation and global
+mutation advisory lock. Public revision APIs and resource lifecycle/parent coordination now use
+these primitives. Deal guards use shared mutation locks and exclusive authority locks; notebooks,
+threads and templates lock their specific parents where multi-row invariants require it. Revisions
+are conditional and bounded; client drafts retain their submitted revision after conflict. Lexical
+corpus statistics are exact snapshot aggregates, eliminating the singleton mutation hotspot. Durable
+distributed work and remote publication fencing remain pending. This is an intermediate
+concurrency rollout, not authorization to run multiple application instances.
 
 ## Search and partial failure
 

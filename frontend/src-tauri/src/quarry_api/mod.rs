@@ -3,6 +3,7 @@ mod commands;
 mod models;
 mod notebooks;
 mod query_stream;
+mod revisions;
 mod service;
 mod templates;
 

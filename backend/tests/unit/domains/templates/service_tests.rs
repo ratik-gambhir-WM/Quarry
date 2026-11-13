@@ -15,7 +15,7 @@ async fn unconfigured_delete_returns_a_sanitized_unavailable_error() {
     let service = TemplateService::new(None);
 
     assert_eq!(
-        service.delete("example").await.unwrap_err(),
+        service.delete("example", 1).await.unwrap_err(),
         ServiceError::Unavailable("template capability is not configured".to_string())
     );
 }
@@ -106,6 +106,7 @@ fn preview_response_preserves_the_camel_case_product_contract() {
             has_previous_page: false,
         },
         previews: vec![TemplatePreview {
+            revision: 1,
             template_id: "example".to_string(),
             content_type: "image/png".to_string(),
             data_url: "data:image/png;base64,example".to_string(),

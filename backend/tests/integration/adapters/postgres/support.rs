@@ -100,12 +100,25 @@ impl PostgresClient {
         .await?;
         let mut scoped = config.clone();
         let mut url = url::Url::parse(config.url.expose()).unwrap();
-        url.query_pairs_mut()
-            .append_pair("options", &format!("-c search_path={}", namespace.name));
+        url.query_pairs_mut().append_pair(
+            "options",
+            &format!("-c search_path={},pg_catalog", namespace.name),
+        );
         scoped.url = SecretString::new(url.as_str());
         let client = Self::connect(&scoped).await?;
         admin.close().await;
         Ok(client)
+    }
+    /// Two isolated pools with only the legacy runtime advisory function shadowed.
+    /// Resource row locks/constraints are real. The override cannot exist in production.
+    pub(crate) async fn concurrent_test_clients() -> (Self, Self) {
+        let path = format!("resource-races-{}", uuid::Uuid::new_v4());
+        let a = Self::test_database_at(&path).await.unwrap();
+        crate::app::migrations::migrate(&a).await.unwrap();
+        let b = Self::test_database_at(&path).await.unwrap();
+        sqlx::raw_sql("CREATE FUNCTION pg_advisory_xact_lock(bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$")
+            .execute(a.pool()).await.unwrap();
+        (a, b)
     }
     pub(crate) async fn with_connection<T, F, Fut>(&self, operation: F) -> Result<T, PostgresError>
     where

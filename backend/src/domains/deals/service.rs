@@ -39,6 +39,7 @@ pub struct UploadedDealFile {
 
 #[derive(Debug, Clone, Default)]
 pub struct SaveDealMetadataInput {
+    pub expected_revision: i64,
     pub uploaded_files: Vec<UploadedDealFile>,
     pub sharepoint_link: Option<String>,
     pub sow_link: Option<String>,
@@ -170,8 +171,12 @@ impl DealService {
         id: &str,
         actor: i64,
         fields: DealFields,
+        expected_revision: i64,
     ) -> ServiceResult<SaveDealResponse> {
-        let mut aggregate = self.deals.update(id.to_string(), actor, fields).await?;
+        let mut aggregate = self
+            .deals
+            .update(id.to_string(), actor, fields, expected_revision)
+            .await?;
         self.attach_access(&mut aggregate, actor).await?;
         let metadata = aggregate
             .metadata
@@ -211,6 +216,7 @@ impl DealService {
             .deals
             .upsert_metadata(
                 UpsertDealMetadataRecord {
+                    expected_revision: input.expected_revision,
                     deal_id: deal.deal_id.clone(),
                     key_questions_json: existing_metadata.key_questions_json,
                     local_path: existing_metadata.local_path,
@@ -262,6 +268,7 @@ impl DealService {
             .deals
             .upsert_metadata(
                 UpsertDealMetadataRecord {
+                    expected_revision: metadata.revision,
                     deal_id: deal.deal_id.clone(),
                     key_questions_json,
                     local_path: metadata.local_path,

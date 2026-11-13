@@ -1,3 +1,4 @@
+pub(crate) mod coordination;
 pub(crate) mod deletion;
 pub(crate) mod extraction_handler;
 pub(crate) mod handler;

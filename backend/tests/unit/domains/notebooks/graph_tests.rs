@@ -212,7 +212,7 @@ async fn postgres_notebook_commit_retry_and_cleanup_use_the_retained_helix_proje
         .await
         .is_err());
     service
-        .delete_note(1, book, job.note_id.clone())
+        .delete_note(1, book, job.note_id.clone(), 1)
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {

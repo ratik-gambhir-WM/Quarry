@@ -70,7 +70,7 @@ not exist.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
 - `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 1, checksums and catalog fingerprints.
+  `app/migrations.rs` initializes/validates version 2, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
   schemas. Old SQLite files and Helix stores remain untouched; no import, fallback or reset exists.
@@ -149,14 +149,21 @@ request -> router -> handler -> service -> repository/client
   PostgreSQL before indexing; graph failure preserves canonical records and exact-content retry
   reuses the same identity and accepted image text. There is no distributed transaction or general
   bulk reindex tool. Never delete canonical rows to conceal a graph failure.
-- PostgreSQL schema version 1 creates the final former SQLite marker-18 layout directly. Startup
+- PostgreSQL schema version 2 adds bounded resource revisions and retained deal lifecycle guards
+  to the former marker-18 layout. Version 1 is intentionally unsupported; select an empty database. Startup
   initializes an empty selected schema or validates its version, checksum, live catalog and owner/
   document readiness invariants. Incompatible nonempty layouts fail without deletion. No old-data
   migration, SQLite fallback or destructive relational reset is supported. Leave old stores alone.
 - One application writer lease is retained by the pool's dedicated session through router and
-  detached-worker clones. Operations fail closed on ownership loss. Aggregate writes additionally
+  detached-worker clones. Writes fail closed on ownership loss. Reads use ordinary pooled
+  connections with no writer-session ping, ownership/generation check or explicit row lock,
+  including at snapshot commit. Aggregate writes additionally
   use a schema-scoped transaction advisory lock and retained revision/lease guards; read aggregates
   use a repeatable-read snapshot. Keep helpers on the same transaction/connection.
+  Typed resource locks, mutation RETURNING and database-clock deadlines are available in the query
+  layer; read-only runners reject locking SELECT and mutations. Global write controls remain until
+  durable worker claims/recovery and remote-publication safeguards are implemented and verified. Do not infer
+  multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
   BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
   document and template Helix projection/search contracts remain unchanged.

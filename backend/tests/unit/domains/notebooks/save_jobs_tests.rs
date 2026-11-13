@@ -207,7 +207,7 @@ async fn notebook_folder_relocation_and_delete_fence_stale_worker_without_resurr
         2
     );
     app.service
-        .delete_note(1, book.clone(), job.note_id.clone())
+        .delete_note(1, book.clone(), job.note_id.clone(), 2)
         .await
         .unwrap();
     assert!(app
@@ -270,7 +270,7 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     .await
     .unwrap();
     recovered
-        .delete_note(1, book.clone(), queued.note_id.clone())
+        .delete_note(1, book.clone(), queued.note_id.clone(), 1)
         .await
         .unwrap();
     pipeline.gate.notify_one();
@@ -288,4 +288,59 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     .await
     .unwrap();
     assert!(recovered.get_note(1, book, queued.note_id).await.is_err());
+}
+
+#[tokio::test]
+async fn notebook_parent_delete_waits_for_admitted_child_and_other_parent_remains_independent() {
+    use crate::adapters::postgres::client::PostgresClient;
+    let (a, b) = PostgresClient::concurrent_test_clients().await;
+    crate::integration_support::seed_identity(&a, "book-lock@example.invalid", 'a').await;
+    let ra = NotebookRepository::new(a.clone());
+    let rb = NotebookRepository::new(b.clone());
+    let book = ra.create(1, "Book".into(), None).await.unwrap().notebook_id;
+    let other = rb
+        .create(1, "Other".into(), None)
+        .await
+        .unwrap()
+        .notebook_id;
+    let mut held = a.pool().begin().await.unwrap();
+    sqlx::query("SELECT notebook_id FROM notebooks WHERE notebook_id=$1 FOR SHARE")
+        .bind(&book)
+        .fetch_one(&mut *held)
+        .await
+        .unwrap();
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *held)
+        .await
+        .unwrap();
+    let waiting = tokio::spawn(async move { ra.delete(1, book).await });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))",
+            )
+            .bind(pid)
+            .fetch_one(b.pool())
+            .await
+            .unwrap();
+            if blocked {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        rb.create_folder(1, other, "Folder".into()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!waiting.is_finished());
+    held.commit().await.unwrap();
+    waiting.await.unwrap().unwrap();
+    a.close().await;
+    b.close().await;
 }

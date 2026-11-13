@@ -217,7 +217,10 @@ Before handoff:
 Never claim a check passed when it was skipped, unavailable, timed out, or only partially ran.
 
 For PostgreSQL changes, include actual constraints/rollback, read snapshots, bounded pool failures,
-writer lease lifetime/loss, concurrent claims and captured template lexical parity. Run retained
+write-lease lifetime/loss, read independence before/during/after writer loss, concurrent resource
+lock/CAS primitives and captured template lexical parity. The global production write guard remains;
+test-only unguarded transactions prove primitives, not completed multi-instance domain safety.
+Domain claims/recovery and remote fencing still need their own integration evidence. Run retained
 cross-store compatibility tests only against an explicitly selected fresh Helix instance. Preserve
 and report ownership of validation processes/ports, containers, volumes and schemas; clean only
 those created by the current task. See `docs/postgresql-storage.md`.

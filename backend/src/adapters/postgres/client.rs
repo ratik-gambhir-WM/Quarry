@@ -1,7 +1,8 @@
 //! Bounded asynchronous PostgreSQL I/O. All aggregate writes share a database-scoped
 //! transaction advisory lock; readers use repeatable-read, read-only snapshots.
 //! The conservative write ordering preserves the old aggregate invariants across
-//! processes without assuming that a connection pool serializes writers.
+//! processes without assuming that a connection pool serializes writers. Reads
+//! depend only on their pooled connection, never on application writer ownership.
 use super::query::{QueryKind, SqlBuilderError, SqlQuery};
 pub use super::row::{Row, SqlRow};
 pub type RowResult<T> = Result<T, PostgresError>;
@@ -194,10 +195,9 @@ impl PostgresClient {
     async fn fence_commit(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
-        read_only: bool,
     ) -> Result<(), PostgresError> {
         self.ensure_writer_lease().await?;
-        if let Some(lease) = self.writer_lease.as_ref().filter(|_| !read_only) {
+        if let Some(lease) = &self.writer_lease {
             // READ COMMITTED sees a replacement owner's generation, even if this
             // transaction started earlier. Keep the row locked through commit to
             // close the gap between checking ownership and publishing the write.
@@ -224,28 +224,17 @@ impl PostgresClient {
         }
         self.pool.close().await;
     }
-    async fn scoped<T, E, F, Fut>(&self, read_only: bool, operation: F) -> Result<T, E>
+    async fn execute_transaction<T, E, F, Fut>(
+        &self,
+        transaction: Transaction<'static, Postgres>,
+        read_only: bool,
+        operation: F,
+    ) -> Result<T, E>
     where
         E: From<PostgresError>,
         F: FnOnce(PostgresTransaction) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        self.ensure_writer_lease().await?;
-        let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
-        if read_only {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-                .execute(&mut *transaction)
-                .await
-                .map_err(PostgresError::from)?;
-        } else {
-            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
-                .bind(WRITE_LOCK)
-                .execute(&mut *transaction)
-                .await
-                .map_err(PostgresError::from)?;
-        }
-        // Pool acquisition and the aggregate lock may have waited through takeover.
-        self.ensure_writer_lease().await?;
         let connection = Arc::new(Mutex::new(Some(transaction)));
         let result = operation(PostgresTransaction {
             connection: connection.clone(),
@@ -257,11 +246,12 @@ impl PostgresClient {
                 PostgresError::transaction_aborted("transaction already finished")
             })?;
         let result = match result {
-            Ok(result) => self
-                .fence_commit(&mut transaction, read_only)
+            Ok(result) if !read_only => self
+                .fence_commit(&mut transaction)
                 .await
                 .map(|()| result)
                 .map_err(E::from),
+            Ok(result) => Ok(result),
             Err(error) => Err(error),
         };
         match result {
@@ -283,14 +273,23 @@ impl PostgresClient {
         F: FnOnce(PostgresTransaction) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        self.scoped(false, op).await
+        self.ensure_writer_lease().await?;
+        let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
+            .bind(WRITE_LOCK)
+            .execute(&mut *transaction)
+            .await
+            .map_err(PostgresError::from)?;
+        // Pool acquisition and the aggregate lock may have waited through takeover.
+        self.ensure_writer_lease().await?;
+        self.execute_transaction(transaction, false, op).await
     }
     pub async fn transaction_async<T, F, Fut>(&self, op: F) -> Result<T, PostgresError>
     where
         F: FnOnce(PostgresTransaction) -> Fut,
         Fut: Future<Output = Result<T, PostgresError>>,
     {
-        self.scoped(false, op).await
+        self.transaction_result_async(op).await
     }
     pub async fn read_transaction_result_async<T, E, F, Fut>(&self, op: F) -> Result<T, E>
     where
@@ -298,14 +297,19 @@ impl PostgresClient {
         F: FnOnce(PostgresTransaction) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        self.scoped(true, op).await
+        let mut transaction = self.pool.begin().await.map_err(PostgresError::from)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            .execute(&mut *transaction)
+            .await
+            .map_err(PostgresError::from)?;
+        self.execute_transaction(transaction, true, op).await
     }
     pub async fn read_transaction_async<T, F, Fut>(&self, op: F) -> Result<T, PostgresError>
     where
         F: FnOnce(PostgresTransaction) -> Fut,
         Fut: Future<Output = Result<T, PostgresError>>,
     {
-        self.scoped(true, op).await
+        self.read_transaction_result_async(op).await
     }
     pub async fn read_with_async<T>(
         &self,
@@ -314,11 +318,10 @@ impl PostgresClient {
     ) -> Result<Vec<T>, PostgresError> {
         let query = query?;
         ensure(&query, true)?;
-        self.ensure_writer_lease().await?;
         let rows = bind(&query).fetch_all(&self.pool).await?;
-        self.ensure_writer_lease().await?;
         rows.iter().map(|r| mapper(&Row(r))).collect()
     }
+
     pub async fn read_one_with_async<T>(
         &self,
         query: Result<SqlQuery, PostgresError>,
@@ -326,9 +329,7 @@ impl PostgresClient {
     ) -> Result<Option<T>, PostgresError> {
         let query = query?;
         ensure(&query, true)?;
-        self.ensure_writer_lease().await?;
         let row = bind(&query).fetch_optional(&self.pool).await?;
-        self.ensure_writer_lease().await?;
         row.as_ref().map(|r| mapper(&Row(r))).transpose()
     }
     pub async fn read_async(
@@ -357,13 +358,68 @@ impl PostgresTransaction {
     pub async fn read_result_with<T, E>(
         &self,
         query: Result<SqlQuery, PostgresError>,
-        mut mapper: impl FnMut(&Row<'_>) -> Result<T, E>,
+        mapper: impl FnMut(&Row<'_>) -> Result<T, E>,
     ) -> Result<Vec<T>, E>
     where
         E: From<PostgresError>,
     {
         let query = query?;
         ensure(&query, true)?;
+        self.rows_with(query, mapper).await
+    }
+
+    /// Lock only the resources selected by a typed locking query in this transaction.
+    /// Read-only transactions reject this operation before executing SQL.
+    ///
+    /// # Errors
+    /// Returns an error for a nonlocking query, a read-only transaction, or a
+    /// database/row-mapping failure. Lock waits retain the configured timeout.
+    pub async fn lock_with<T>(
+        &self,
+        query: Result<SqlQuery, PostgresError>,
+        mapper: impl FnMut(&Row<'_>) -> Result<T, PostgresError>,
+    ) -> Result<Vec<T>, PostgresError> {
+        let query = query?;
+        if query.kind() != QueryKind::LockingSelect {
+            return Err(PostgresError::InvalidOperation {
+                operation: "row lock",
+                kind: query.kind(),
+            });
+        }
+        self.ensure_writable()?;
+        self.rows_with(query, mapper).await
+    }
+
+    /// Return rows from an INSERT or an atomic UPDATE/DELETE predicate.
+    /// An empty result is a failed predicate, never an implicit successful edit.
+    ///
+    /// # Errors
+    /// Returns an error for a query without mutation RETURNING metadata, a
+    /// read-only transaction, or a database/row-mapping failure.
+    pub async fn write_returning_with<T>(
+        &self,
+        query: Result<SqlQuery, PostgresError>,
+        mapper: impl FnMut(&Row<'_>) -> Result<T, PostgresError>,
+    ) -> Result<Vec<T>, PostgresError> {
+        let query = query?;
+        if !query.kind().returns_mutation_rows() {
+            return Err(PostgresError::InvalidOperation {
+                operation: "returning mutation",
+                kind: query.kind(),
+            });
+        }
+        self.ensure_writable()?;
+        self.rows_with(query, mapper).await
+    }
+
+    async fn rows_with<T, E>(
+        &self,
+        query: SqlQuery,
+        mut mapper: impl FnMut(&Row<'_>) -> Result<T, E>,
+    ) -> Result<Vec<T>, E>
+    where
+        E: From<PostgresError>,
+    {
         let mut guard = self.connection.lock().await;
         let tx = guard
             .as_mut()
@@ -417,14 +473,12 @@ impl PostgresTransaction {
     ) -> Result<WriteResult, PostgresError> {
         let query = query?;
         ensure(&query, false)?;
-        if self.read_only {
-            return Err(PostgresError::transaction_aborted("read-only transaction"));
-        }
+        self.ensure_writable()?;
         let mut guard = self.connection.lock().await;
         let tx = guard
             .as_mut()
             .ok_or_else(|| PostgresError::transaction_aborted("transaction finished"))?;
-        if query.sql().ends_with(" RETURNING id") {
+        if query.kind() == QueryKind::InsertReturningId {
             let row = bind(&query).fetch_optional(&mut **tx).await?;
             Ok(WriteResult {
                 rows_affected: usize::from(row.is_some()),
@@ -443,9 +497,21 @@ impl PostgresTransaction {
             })
         }
     }
+
+    fn ensure_writable(&self) -> Result<(), PostgresError> {
+        if self.read_only {
+            return Err(PostgresError::transaction_aborted("read-only transaction"));
+        }
+        Ok(())
+    }
 }
 fn ensure(query: &SqlQuery, read: bool) -> Result<(), PostgresError> {
-    if query.kind().is_read() != read {
+    let allowed = if read {
+        query.kind().is_read()
+    } else {
+        query.kind().is_mutation()
+    };
+    if !allowed {
         return Err(PostgresError::InvalidOperation {
             operation: if read { "read" } else { "write" },
             kind: query.kind(),
@@ -454,6 +520,12 @@ fn ensure(query: &SqlQuery, read: bool) -> Result<(), PostgresError> {
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "../../../tests/integration/adapters/postgres/concurrency_tests.rs"]
+mod concurrency_tests;
+#[cfg(test)]
+#[path = "../../../tests/integration/adapters/postgres/read_tests.rs"]
+mod read_tests;
 #[cfg(test)]
 #[path = "../../../tests/integration/adapters/postgres/support.rs"]
 pub(crate) mod test_support;

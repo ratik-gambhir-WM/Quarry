@@ -785,7 +785,10 @@ async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry(
         store.persist(prepared).await,
         Err(RepositoryError::Forbidden)
     ));
-    members.remove_member(DEAL_ID.into(), 1, 2).await.unwrap();
+    members
+        .remove_member(DEAL_ID.into(), 1, 2, 2)
+        .await
+        .unwrap();
     assert!(matches!(
         store.persist(input(2)).await,
         Err(RepositoryError::NotFound(_))

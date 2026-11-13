@@ -1318,7 +1318,7 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 PostgreSQL is canonical; see [PostgreSQL storage and Helix](postgresql-storage.md).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
 fresh final schema, equivalent to former SQLite marker 18; `app/migrations.rs` initializes or
-validates PostgreSQL schema version 1 with checksums and catalog fingerprints. There is no data
+validates PostgreSQL schema version 2 with checksums and catalog fingerprints. There is no data
 migration or startup reset. Unknown or damaged layouts fail without deletion. Templates, image
 bytes, previews, metadata, memberships, classification and both embedding artifacts remain
 transactional. Indexed lexical term frequencies preserve the previous FTS5 weighted BM25 path;
@@ -1676,8 +1676,8 @@ repositories map the resulting client error to their storage error at the reposi
 - Bootstrap reserves one pooled connection for a session advisory writer lease scoped to the
   selected schema. Router and detached-worker client clones retain it; another Axum instance is
   rejected. Its connection closes rather than returning a session lock to the pool. Database
-  operations check that session and fail closed after ownership loss until restart. Schema
-  initialization/validation runs under the aggregate advisory lock before lease registration.
+  writes check that session and fail closed after ownership loss until restart. Schema
+  initialization/validation runs under its dedicated startup-only advisory lock before lease registration.
   Each lease registers a fresh `postgres_writer_generation` in `app_metadata`; write transactions
   lock and verify it immediately before commit. Takeover updates that row outside the aggregate
   lock, fencing older in-flight writes, and waits for any transaction already at its commit fence.
@@ -1686,7 +1686,20 @@ repositories map the resulting client error to their storage error at the reposi
   revisions, activity, file claims, leases and deletion checkpoints share the same connection and
   transaction. Independent-deal parallel writers remain a future optimization.
 - Aggregate reads use REPEATABLE READ, READ ONLY on one pooled connection; the wrapper rejects
-  mutation attempts. Single-query reads can run concurrently with aggregate writes.
+  mutation attempts. Both single-query and aggregate reads use the ordinary pool without writer
+  session pings, ownership/generation checks or explicit row locks, including at snapshot commit.
+  They remain available after writer-session loss or replacement when their own connections are
+  usable; closing a pool still closes its readers. Current authorization, final-result checks and
+  periodic stream session verification remain domain/HTTP responsibilities.
+- The SQL builder distinguishes ordinary SELECT, locking SELECT and mutation RETURNING queries.
+  Explicit write-transaction APIs support FOR SHARE, FOR UPDATE, SKIP LOCKED, atomic UPDATE/DELETE
+  RETURNING and integer lease deadlines evaluated against the database clock. All read APIs reject
+  locking queries and mutations before executing them; READ ONLY transactions also reject the
+  explicit lock/returning APIs. Generated numeric INSERT IDs use query metadata rather than SQL
+  suffix inspection. Production mutations still take the global advisory lock and writer fence
+  above. Resource revisions and domain coordination are implemented as described below; durable
+  distributed claims/publication and removal of global write controls remain pending. Multiple
+  application instances are not enabled.
 - Database calls never block on an async runtime from synchronous wrappers. Template preparation,
   native previews, Office, filesystem and expensive parsing/rendering retain blocking-pool offload.
   Template JSON parsing and bounded response serialization also run on the blocking pool, retaining
@@ -1722,7 +1735,7 @@ Use a fresh PostgreSQL database and separate isolated Helix store; leave old SQL
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
 [fresh storage and recovery](postgresql-storage.md).
 
-### 9.1 Shared PostgreSQL schema version 1
+### 9.1 Shared PostgreSQL schema version 2
 
 PostgreSQL enforces foreign keys and parameterized queries through the shared asynchronous pool. The
 schema currently contains:
@@ -1741,6 +1754,7 @@ schema currently contains:
 | `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Engagement/transaction/status codes, optional deal code/dates, immutable creator and audit/archive timestamps | Used |
+| `deal_lifecycle_guards` | Active/deleting/deleted identity reservation retained after purge | Shared mutation/exclusive authority coordination |
 | `deal_deletions`, `deal_deletion_files`, `deal_deletion_threads` | Independent durable receipts/barriers and temporary cleanup targets | Owner-only permanent-deletion API and on-demand recovery tasks |
 | `deal_memberships`, `deal_access_revisions` | One owner, actor roles and monotonic access revision | Canonical authorization |
 | `deal_teams`, `deal_team_memberships` | Same-deal team organization and cascading assignments | API and Settings |
@@ -1761,8 +1775,7 @@ schema currently contains:
 | `template_classification_status` | Classification/embedding progress, attempts, retry times, errors, leases, metadata, fingerprints, subject/capability vectors and model/dimensions | Durable embedded classification worker/retrieval |
 | `slide_classifications_fts` | Lexical fields and token lengths | Embedded keyword retrieval |
 | `template_lexical_terms` | Indexed Unicode 6.1 field frequencies | Compatible weighted BM25/prefix retrieval |
-| `template_lexical_stats` | Transactionally maintained corpus counts | Constant-size corpus statistics |
-| `quarry_schema_version` | Source checksum and catalog fingerprint | Schema version 1 validation |
+| `quarry_schema_version` | Source checksum and catalog fingerprint | Schema version 2 validation |
 
 Key invariants include:
 
@@ -1789,21 +1802,55 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 1 recreates the final former SQLite marker-18 tables directly, with
+PostgreSQL schema version 2 creates the former marker-18 layout plus bounded content revisions
+and durable deal lifecycle guards, with
 `bytea` assets, generated numeric IDs and safe-integer checks, C-collated text, preserved serialized
 JSON/timestamps, all existing checks, same-deal composite foreign keys and partial unique indexes.
 `slide_classifications_fts` stores lexical documents/lengths and `template_lexical_terms` indexes
-field frequencies. Template insertion order uses an explicit generated `catalog_sequence`.
+field frequencies. Corpus count and token totals are computed in the search snapshot, with no
+shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates only an empty selected schema inside one transaction, or validates version 1,
+Startup creates only an empty selected schema inside one transaction, or validates version 2,
 its checksum/catalog, exactly-one-owner invariants and document readiness. Unknown nonempty or
 modified layouts fail without deletion. There is no SQLite export, upgrade chain, backfill,
-automatic reset, fallback or destructive relational utility. Historical files remain untouched.
+automatic reset, fallback or destructive relational utility. Version 1 databases are deliberately
+unsupported by this fresh-schema change and fail without mutation. Recreate a disposable database
+explicitly or select a new empty database; startup never discards data. Historical files remain untouched.
 
 Aggregate reads retain one consistent snapshot; related batches run sequentially on its connection
 without N+1 child reads or multiplying parties by scopes. Mutation authorization, activity and
 all child rows remain atomic. See [PostgreSQL setup, concurrency and recovery](postgresql-storage.md).
+
+### Resource revisions and canonical coordination
+
+Deal fields/parties/scopes, separate deal metadata, companies and templates return positive
+JavaScript-safe `revision` values (maximum 9,007,199,254,740,991). Replacement requests carry
+`expectedRevision`; metadata multipart saves require the same field. Member removal, team deletion,
+note deletion, template deletion and permanent-deal-deletion acceptance require it in the query.
+Missing/malformed/out-of-range values fail at the HTTP boundary. Authorized stale edits return 409;
+inaccessible resources retain their disclosure policy. Conditional mutations and affected-row checks
+commit revisions, children and activity atomically. Exhaustion conflicts rather than wrapping.
+Archive increments the deal revision only on a real transition; membership no-ops still check the
+submitted revision and emit no activity. Notebook saves retain asynchronous 202 admission and durable
+job conflict reporting. Native template document GET returns `{revision, document}`; web/desktop
+adapters unwrap the canvas while catalog previews retain their displayed revision for deletion.
+
+Protected deal writes lock their lifecycle row FOR SHARE before checking current policy. Membership,
+ownership, archive and deletion changes use FOR UPDATE. Guard states survive purge, permanently
+reserve deleted IDs, and prevent later commits. Ordinary reads use MVCC without these locks. Notebook
+child writes lock their parent FOR SHARE, whole-notebook deletion uses FOR UPDATE, and folder and
+note operations retain parent-before-folder-before-note ordering. Assistant sequence allocation locks
+the thread after its deal guard; terminal publication retains revocation/deletion checks. Template
+refresh, classification SQL updates and deletion lock the canonical template parent; standalone
+content replacements use revision CAS. No provider or graph call runs inside these transactions.
+
+Clients capture the revision of the loaded/submitted content, preserve drafts after conflicts, and
+never silently replay against a newer revision. Destructive confirmations retain the displayed target
+revision and require a fresh review after conflict. The desktop gateway validates the revision shape
+as well as Axum. Independent-pool integration tests disable only the global advisory function in their
+isolated test schema to exercise row coordination and CAS. These tests do not establish distributed
+worker or remote publication safety; the production global write controls remain necessary.
 
 ### 9.2 Helix versioned file graph
 
@@ -1888,7 +1935,7 @@ accepted document/chunk snapshot from `document_image_recovery` before parsing o
 then embed that exact text and enforce the existing immutable manifest. The checkpoint commits
 with the file/version/blob and contains no vectors; changed descriptions cannot replace it.
 The former SQLite schema-15 rollout introduced image checkpoints. Those old stores are not
-imported by this runtime; fresh PostgreSQL schema 1 includes the checkpoint table from creation.
+imported by this runtime; fresh PostgreSQL schema 2 includes the checkpoint table from creation.
 A new AI description cannot recover a lost original checkpoint. General recovery from
 PostgreSQL without the original bytes remains an operational design, not implemented tooling; deleting
 the PostgreSQL record to conceal a Helix failure would violate source ownership. A single oversized
@@ -2604,7 +2651,7 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 1, equivalent to former SQLite marker 18; no old-data migration or reset | No old SQLite data import, profile conversion or automatic cross-catalog transfer |
+| Persistence | Fresh PostgreSQL schema 2, equivalent to former SQLite marker 18; no old-data migration or reset | No old SQLite data import, profile conversion or automatic cross-catalog transfer |
 | Search | Helix required; non-atomic with PostgreSQL | Exact-content re-upload can retry a partial failure |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

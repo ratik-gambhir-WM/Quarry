@@ -54,6 +54,7 @@ pub struct TemplatePreviewPagination {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplatePreview {
+    pub revision: i64,
     pub template_id: String,
     pub content_type: String,
     pub data_url: String,

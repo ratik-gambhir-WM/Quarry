@@ -4,7 +4,7 @@ use crate::adapters::postgres::client::RowResult;
 use crate::{
     adapters::postgres::{
         client::{PostgresClient, PostgresError, PostgresTransaction},
-        query::{ComparisonOperator, Condition, SortDirection, SqlBuilder},
+        query::{ComparisonOperator, Condition, RowLock, SortDirection, SqlBuilder},
     },
     shared::error::RepositoryError,
 };
@@ -264,6 +264,8 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 let access = require(tx, deal, actor, Capability::ManageMembers).await?;
                 if role == DealRole::Owner {
                     return Err(RepositoryError::invalid("use ownership transfer"));
@@ -341,6 +343,8 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 let access = require(tx, deal, actor, Capability::ManageMembers).await?;
                 let (old, actual) = member_role(tx, deal, user_id).await?;
                 if old == DealRole::Owner || role == DealRole::Owner {
@@ -374,11 +378,14 @@ impl MembershipRepository {
         deal: String,
         actor: i64,
         user_id: i64,
+        revision: i64,
     ) -> Result<(), RepositoryError> {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 let access = require(
                     tx,
                     deal,
@@ -390,16 +397,25 @@ impl MembershipRepository {
                     },
                 )
                 .await?;
-                if member_role(tx, deal, user_id).await?.0 == DealRole::Owner {
+                let (role, actual) = member_role(tx, deal, user_id).await?;
+                if role == DealRole::Owner {
                     return Err(RepositoryError::Forbidden);
                 }
-                tx.write(
-                    SqlBuilder::delete_from("deal_memberships")
-                        .and_where(Condition::equal("deal_id", deal))
-                        .and_where(Condition::equal("user_id", user_id))
-                        .build(),
-                )
-                .await?;
+                if actual != revision {
+                    return Err(crate::shared::revision::conflict());
+                }
+                let changed = tx
+                    .write(
+                        SqlBuilder::delete_from("deal_memberships")
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("user_id", user_id))
+                            .and_where(Condition::equal("revision", revision))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
                 bump(tx, deal, access.access_revision).await?;
                 event(
                     tx,
@@ -425,6 +441,8 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 let access = require(tx, deal, actor, Capability::Transfer).await?;
                 if revision != access.access_revision {
                     return Err(RepositoryError::Conflict(
@@ -462,6 +480,8 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 require(tx, deal, actor, Capability::ManageTeams).await?;
                 unique_name(tx, deal, &name, "").await?;
                 let count = tx
@@ -511,8 +531,25 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 require(tx, deal, actor, Capability::ManageTeams).await?;
-                team_exists(tx, deal, &team_id).await?;
+                let (old_name, actual) = tx
+                    .read_one_with(
+                        SqlBuilder::select("deal_teams")
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("team_id", &team_id))
+                            .build(),
+                        |r| Ok((r.get::<_, String>("name")?, r.get::<_, i64>("revision")?)),
+                    )
+                    .await?
+                    .ok_or_else(|| RepositoryError::NotFound("team not found".into()))?;
+                if actual != revision {
+                    return Err(crate::shared::revision::conflict());
+                }
+                if old_name == name {
+                    return Ok(());
+                }
                 unique_name(tx, deal, &name, &team_id).await?;
                 if revision >= 9_007_199_254_740_991 {
                     return Err(RepositoryError::Conflict("team revision exhausted".into()));
@@ -546,20 +583,28 @@ impl MembershipRepository {
         deal: String,
         actor: i64,
         team_id: String,
+        revision: i64,
     ) -> Result<(), RepositoryError> {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 require(tx, deal, actor, Capability::ManageTeams).await?;
                 team_exists(tx, deal, &team_id).await?;
-                tx.write(
-                    SqlBuilder::delete_from("deal_teams")
-                        .and_where(Condition::equal("deal_id", deal))
-                        .and_where(Condition::equal("team_id", &team_id))
-                        .build(),
-                )
-                .await?;
+                let changed = tx
+                    .write(
+                        SqlBuilder::delete_from("deal_teams")
+                            .and_where(Condition::equal("deal_id", deal))
+                            .and_where(Condition::equal("team_id", &team_id))
+                            .and_where(Condition::equal("revision", revision))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
                 event(tx, deal, Some(actor), "team_deleted", Some(&team_id)).await?;
                 Ok(())
             })
@@ -578,6 +623,8 @@ impl MembershipRepository {
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
                 let deal = deal.as_str();
+                crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Update)
+                    .await?;
                 require(tx, deal, actor, Capability::ManageTeams).await?;
                 team_exists(tx, deal, &team_id).await?;
                 member_role(tx, deal, user_id).await?;
@@ -664,7 +711,18 @@ pub(crate) async fn require(
         )
         .await?
         .ok_or_else(|| RepositoryError::NotFound("resource not found".into()))?;
-    if crate::domains::deals::deletion::barrier(tx, deal).await? {
+    let lifecycle = tx
+        .read_one_with(
+            SqlBuilder::select("deal_lifecycle_guards")
+                .columns(["state"])
+                .and_where(Condition::equal("deal_id", deal))
+                .build(),
+            |r| r.get::<_, String>(0),
+        )
+        .await?;
+    if lifecycle.as_deref() != Some("active")
+        || crate::domains::deals::deletion::barrier(tx, deal).await?
+    {
         return Err(match capability {
             Capability::Read | Capability::LocalSource => {
                 RepositoryError::NotFound("resource not found".into())
@@ -745,13 +803,18 @@ async fn bump(tx: &PostgresTransaction, deal: &str, current: i64) -> Result<(), 
         .checked_add(1)
         .filter(|v| *v <= 9_007_199_254_740_991)
         .ok_or_else(|| RepositoryError::Conflict("access revision exhausted".into()))?;
-    tx.write(
-        SqlBuilder::update("deal_access_revisions")
-            .set("revision", next)
-            .and_where(Condition::equal("deal_id", deal))
-            .build(),
-    )
-    .await?;
+    let changed = tx
+        .write(
+            SqlBuilder::update("deal_access_revisions")
+                .set("revision", next)
+                .and_where(Condition::equal("deal_id", deal))
+                .and_where(Condition::equal("revision", current))
+                .build(),
+        )
+        .await?;
+    if changed.rows_affected != 1 {
+        return Err(crate::shared::revision::conflict());
+    }
     Ok(())
 }
 async fn set_role(
@@ -766,16 +829,21 @@ async fn set_role(
             "member revision exhausted".into(),
         ));
     }
-    tx.write(
-        SqlBuilder::update("deal_memberships")
-            .set("role", role.code())
-            .set("revision", revision + 1)
-            .set("updated_at", chrono::Utc::now().to_rfc3339())
-            .and_where(Condition::equal("deal_id", deal))
-            .and_where(Condition::equal("user_id", user))
-            .build(),
-    )
-    .await?;
+    let changed = tx
+        .write(
+            SqlBuilder::update("deal_memberships")
+                .set("role", role.code())
+                .set("revision", revision + 1)
+                .set("updated_at", chrono::Utc::now().to_rfc3339())
+                .and_where(Condition::equal("deal_id", deal))
+                .and_where(Condition::equal("user_id", user))
+                .and_where(Condition::equal("revision", revision))
+                .build(),
+        )
+        .await?;
+    if changed.rows_affected != 1 {
+        return Err(crate::shared::revision::conflict());
+    }
     Ok(())
 }
 async fn team_exists(

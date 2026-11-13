@@ -254,6 +254,26 @@ async fn load(tx: &PostgresTransaction, id: &str) -> anyhow::Result<Option<Row>>
         .await?
         .pop())
 }
+// Canonical parent first: refresh, delete, publication and claims share this order.
+async fn lock_template(tx: &PostgresTransaction, id: &str) -> anyhow::Result<bool> {
+    Ok(!tx
+        .lock_with(
+            SqlBuilder::select("templates")
+                .columns(["template_id"])
+                .and_where(Condition::equal("template_id", id))
+                .lock(RowLock::Update, LockWait::Wait)
+                .build(),
+            |_| Ok(()),
+        )
+        .await?
+        .is_empty())
+}
+async fn load_for_mutation(tx: &PostgresTransaction, id: &str) -> anyhow::Result<Option<Row>> {
+    if !lock_template(tx, id).await? {
+        return Ok(None);
+    }
+    load(tx, id).await
+}
 // Claims and idle detection must apply identical ownership and stage prerequisites.
 fn stage_jobs(
     scope: &PostgresTemplateRepository,
@@ -323,6 +343,7 @@ async fn next_job_row(
         if let Some(row) = tx
             .read_result_with(
                 query
+                    .clone()
                     .order_by(order, SortDirection::Ascending)
                     .order_by(
                         "template_classification_status.template_id",
@@ -335,7 +356,24 @@ async fn next_job_row(
             .await?
             .pop()
         {
-            return Ok(Some(row));
+            let id = &row.state.template_id;
+            if lock_template(tx, id).await? {
+                if let Some(current) = tx
+                    .read_result_with(
+                        query
+                            .and_where(Condition::equal(
+                                "template_classification_status.template_id",
+                                id,
+                            ))
+                            .build(),
+                        map_row,
+                    )
+                    .await?
+                    .pop()
+                {
+                    return Ok(Some(current));
+                }
+            }
         }
     }
     Ok(None)
@@ -381,7 +419,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                let mut row = load(tx, &result.template_id)
+                let mut row = load_for_mutation(tx, &result.template_id)
                     .await?
                     .context("classification no longer exists")?;
                 ensure!(
@@ -446,7 +484,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |c| async move {
                 let c = &c;
-                let mut row = load(c, &result.template_id)
+                let mut row = load_for_mutation(c, &result.template_id)
                     .await?
                     .context("embedding no longer exists")?;
                 ensure!(
@@ -485,7 +523,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |c| async move {
                 let c = &c;
-                if let Some(mut row) = load(c, id)
+                if let Some(mut row) = load_for_mutation(c, id)
                     .await?
                     .filter(|r| r.state.status == "processing")
                 {
@@ -508,7 +546,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |c| async move {
                 let c = &c;
-                if let Some(mut row) = load(c, id)
+                if let Some(mut row) = load_for_mutation(c, id)
                     .await?
                     .filter(|r| r.state.embedding_status == "processing")
                 {
@@ -533,7 +571,7 @@ impl PostgresTemplateRepository {
                 if !self.visible(tx, id).await? {
                     return Ok(RetrySlideProcessingOutcome::NotFound);
                 }
-                let Some(mut row) = load(tx, id).await? else {
+                let Some(mut row) = load_for_mutation(tx, id).await? else {
                     return Ok(RetrySlideProcessingOutcome::NotFailed);
                 };
                 // A duplicate request or an active worker must never reset an in-flight lease.
@@ -585,7 +623,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |c| async move {
                 let c = &c;
-                let Some(mut row) = load(c, id).await? else {
+                let Some(mut row) = load_for_mutation(c, id).await? else {
                     return Ok(false);
                 };
                 if row.state.input_fingerprint == pending.input_fingerprint {
@@ -615,7 +653,7 @@ impl PostgresTemplateRepository {
         self.client
             .transaction_result_async(move |c| async move {
                 let c = &c;
-                let Some(mut row) = load(c, id).await? else {
+                let Some(mut row) = load_for_mutation(c, id).await? else {
                     return Ok(false);
                 };
                 if row.state.metadata.is_none()
@@ -733,13 +771,13 @@ impl PostgresTemplateRepository {
                 row.state.next_attempt_at = None;
                 row.state.last_error_code = None;
                 save(tx, &row).await?;
-                let json = tx
+                let (json, revision) = tx
                     .read_one_with(
                         SqlBuilder::select("templates")
-                            .columns(["template_json"])
+                            .columns(["template_json", "revision"])
                             .and_where(Condition::equal("template_id", &row.state.template_id))
                             .build(),
-                        |r| r.get::<_, String>(0),
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
                     )
                     .await?
                     .context("missing template")?;
@@ -753,7 +791,16 @@ impl PostgresTemplateRepository {
                 let preview = tx
                     .read_one_with(
                         SqlBuilder::select("template_previews")
-                            .and_where(Condition::equal("template_id", &row.state.template_id))
+                            .columns(["template_previews.*", "templates.revision"])
+                            .inner_join(
+                                "templates",
+                                "templates.template_id",
+                                "template_previews.template_id",
+                            )
+                            .and_where(Condition::equal(
+                                "template_previews.template_id",
+                                &row.state.template_id,
+                            ))
                             .build(),
                         map_preview,
                     )
@@ -769,6 +816,7 @@ impl PostgresTemplateRepository {
                     preview,
                     title: document.presentation.title.clone(),
                     template: StoredTemplate {
+                        revision,
                         template_id: row.state.template_id,
                         template_json: document,
                     },

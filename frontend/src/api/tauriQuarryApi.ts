@@ -1,3 +1,4 @@
+import { parseTemplateResponse } from "./templateResponse";
 import { acceptDealDeletion } from "../data/dealDeletion/lifecycle";
 import {
   classifiedTemplateImportPath,
@@ -50,7 +51,6 @@ import type {
   DealDataRoom,
   DocumentPreviewResponse,
 } from "../data/dataRoomPreview";
-import { parseDiligenceCanvasDocument } from "../contracts/diligenceCanvas";
 
 export type TauriMultipartRequest = {
   sessionGeneration?: number;
@@ -241,10 +241,10 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}/archive`,
         {},
       ),
-    deleteDeal: (id) => {
+    deleteDeal: (id, expectedRevision) => {
       if (!transport.deleteJson) return Promise.reject(new Error("Permanent deletion is unavailable in this desktop runtime."));
       const deleteJson = transport.deleteJson;
-      return acceptDealDeletion(id, () => deleteJson<DealDeletion>(`/api/v1/deals/${encodeURIComponent(id)}`));
+      return acceptDealDeletion(id, () => deleteJson<DealDeletion>(`/api/v1/deals/${encodeURIComponent(id)}?expectedRevision=${expectedRevision}`));
     },
     getDealDeletion: (id) => transport.get<DealDeletion>(`/api/v1/deal-deletions/${encodeURIComponent(id)}`),
     archiveDeal: (dealId) =>
@@ -290,8 +290,8 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
       transport.delete(
         `/api/v1/assistant/threads/${encodeURIComponent(threadId)}`,
       ),
-    deleteTemplate: (templateId) =>
-      transport.delete(`/api/v1/templates/${encodeURIComponent(templateId)}`),
+    deleteTemplate: (templateId, expectedRevision) =>
+      transport.delete(`/api/v1/templates/${encodeURIComponent(templateId)}?expectedRevision=${expectedRevision}`),
     exportPowerPoint: (document) =>
       transport.postPowerPoint("/api/v1/templates/export", document),
     getDeal: (dealId) =>
@@ -313,7 +313,7 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/text`,
       ),
     getTemplate: async (templateId) =>
-      parseDiligenceCanvasDocument(
+      parseTemplateResponse(
         await transport.get<unknown>(
           `/api/v1/templates/${encodeURIComponent(templateId)}`,
         ),
@@ -479,6 +479,7 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
           `/api/v1/deals/${encodeURIComponent(dealId)}/metadata`,
           input.files,
           [
+            { name: "expectedRevision", value: String(input.expectedRevision) },
             { name: "sharepointLink", value: input.sharepointLink ?? "" },
             { name: "sowLink", value: input.sowLink ?? "" },
             { name: "factSheetLink", value: input.factSheetLink ?? "" },

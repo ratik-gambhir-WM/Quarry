@@ -5,7 +5,10 @@ use super::{compact_document, models::*, normalized_document, retrieval::*};
 use crate::adapters::postgres::client::RowResult;
 use crate::adapters::postgres::{
     client::{PostgresClient, PostgresTransaction},
-    query::{Condition, ConflictUpdate, JoinClause, JoinCondition, SortDirection, SqlBuilder},
+    query::{
+        Condition, ConflictUpdate, JoinClause, JoinCondition, LockWait, RowLock, SortDirection,
+        SqlBuilder,
+    },
 };
 use crate::shared::error::RepositoryError;
 use anyhow::{ensure, Context};
@@ -193,7 +196,7 @@ pub trait TemplateRepository: Send + Sync {
         kind: Option<TemplateKind>,
     ) -> RepositoryResult<Vec<StoredTemplateCatalogItem>>;
     /// Deletes a template and its associated records, returning whether it existed.
-    async fn delete(&self, template_id: &str) -> RepositoryResult<bool>;
+    async fn delete(&self, template_id: &str, expected_revision: i64) -> RepositoryResult<bool>;
     /// Finds a template and all of its joined image BLOBs.
     async fn find_by_id_with_assets(
         &self,
@@ -514,13 +517,22 @@ impl TemplateRepository for PostgresTemplateRepository {
                     } else {
                         compact_document(&template.template_json)
                     })?;
-                    tx.write(
-                        SqlBuilder::update("templates")
-                            .set("template_json", json)
-                            .and_where(Condition::equal("template_id", &template.template_id))
-                            .build(),
-                    )
-                    .await?;
+                    let changed = tx
+                        .write(
+                            SqlBuilder::update("templates")
+                                .set("template_json", json)
+                                .set(
+                                    "revision",
+                                    crate::shared::revision::next(template.revision)?,
+                                )
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .and_where(Condition::equal("revision", template.revision))
+                                .build(),
+                        )
+                        .await?;
+                    if changed.rows_affected != 1 {
+                        return Err(crate::shared::revision::conflict().into());
+                    }
                     insert_assets(tx, assets).await?;
                     Ok(())
                 })
@@ -540,6 +552,29 @@ impl TemplateRepository for PostgresTemplateRepository {
             self.client
                 .transaction_result_async(move |tx| async move {
                     let tx = &tx;
+                    let initial_json =
+                        serde_json::to_string(&normalized_document(&template.template_json))?;
+                    tx.write(
+                        SqlBuilder::insert_into("templates")
+                            .value("template_id", &template.template_id)
+                            .value("template_json", initial_json)
+                            .value("owner_user_id", self.owner_user_id)
+                            .on_conflict_do_nothing(["template_id"])
+                            .build(),
+                    )
+                    .await?;
+                    let current = tx
+                        .lock_with(
+                            SqlBuilder::select("templates")
+                                .columns(["revision"])
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .lock(RowLock::Update, LockWait::Wait)
+                                .build(),
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .await?
+                        .pop()
+                        .context("missing builtin template")?;
                     let existing = tx
                         .read_one_with(
                             SqlBuilder::select("template_metadata")
@@ -549,6 +584,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                             |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
                         )
                         .await?;
+                    let refreshing = existing.is_some();
                     if existing
                         .is_some_and(|(s, c)| s == "import" || c == metadata.catalog_checksum)
                     {
@@ -567,6 +603,16 @@ impl TemplateRepository for PostgresTemplateRepository {
                             .build(),
                     )
                     .await?;
+                    if refreshing {
+                        tx.write(
+                            SqlBuilder::update("templates")
+                                .set("revision", crate::shared::revision::next(current)?)
+                                .and_where(Condition::equal("template_id", &template.template_id))
+                                .and_where(Condition::equal("revision", current))
+                                .build(),
+                        )
+                        .await?;
+                    }
                     for table in ["template_assets", "template_previews"] {
                         tx.write(
                             SqlBuilder::delete_from(table)
@@ -604,14 +650,15 @@ impl TemplateRepository for PostgresTemplateRepository {
                     let json = tx
                         .read_one_with(
                             SqlBuilder::select("templates")
-                                .columns(["template_json"])
+                                .columns(["template_json", "revision"])
                                 .and_where(Condition::equal("template_id", id))
                                 .build(),
-                            |r| r.get::<_, String>(0),
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>("revision")?)),
                         )
                         .await?;
-                    json.map(|json| {
+                    json.map(|(json, revision)| {
                         Ok(StoredTemplate {
+                            revision,
                             template_id: id.into(),
                             template_json: decode_document(&json)?,
                         })
@@ -647,7 +694,13 @@ impl TemplateRepository for PostgresTemplateRepository {
                     Ok(tx
                         .read_one_with(
                             SqlBuilder::select("template_previews")
-                                .and_where(Condition::equal("template_id", id))
+                                .columns(["template_previews.*", "templates.revision"])
+                                .inner_join(
+                                    "templates",
+                                    "templates.template_id",
+                                    "template_previews.template_id",
+                                )
+                                .and_where(Condition::equal("template_previews.template_id", id))
                                 .build(),
                             map_preview,
                         )
@@ -667,7 +720,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                 .read_transaction_result_async(move |tx| async move {
                     let tx = &tx;
                     let query = SqlBuilder::select("template_previews")
-                        .columns(["template_previews.*"])
+                        .columns(["template_previews.*", "templates.revision"])
                         .join(JoinClause::inner("app_templates").on(JoinCondition::equal(
                             "app_templates.template_id",
                             "template_previews.template_id",
@@ -717,7 +770,11 @@ impl TemplateRepository for PostgresTemplateRepository {
                 .read_transaction_result_async(move |tx| async move {
                     let tx = &tx;
                     let mut query = SqlBuilder::select("templates")
-                        .columns(["templates.template_id", "templates.template_json"])
+                        .columns([
+                            "templates.template_id",
+                            "templates.template_json",
+                            "templates.revision",
+                        ])
                         .join(
                             JoinClause::inner("template_metadata").on(JoinCondition::equal(
                                 "template_metadata.template_id",
@@ -738,11 +795,15 @@ impl TemplateRepository for PostgresTemplateRepository {
                     }
                     let rows = tx
                         .read_with(query.build(), |r| {
-                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, i64>("revision")?,
+                            ))
                         })
                         .await?;
                     let mut items = Vec::with_capacity(rows.len());
-                    for (id, json) in rows {
+                    for (id, json, revision) in rows {
                         let metadata = metadata_in(tx, &id)
                             .await?
                             .context("missing template metadata")?;
@@ -757,6 +818,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                             .is_some();
                         items.push(StoredTemplateCatalogItem {
                             template: StoredTemplate {
+                                revision,
                                 template_id: id,
                                 template_json: decode_document(&json)?,
                             },
@@ -770,13 +832,26 @@ impl TemplateRepository for PostgresTemplateRepository {
         })
         .await
     }
-    async fn delete(&self, id: &str) -> RepositoryResult<bool> {
+    async fn delete(&self, id: &str, expected_revision: i64) -> RepositoryResult<bool> {
         repository_boundary(async {
             self.client
                 .transaction_result_async(move |tx| async move {
                     let tx = &tx;
+                    let revisions = tx
+                        .lock_with(
+                            SqlBuilder::select("templates")
+                                .columns(["revision"])
+                                .and_where(Condition::equal("template_id", id))
+                                .lock(RowLock::Update, LockWait::Wait)
+                                .build(),
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .await?;
                     if !self.visible(tx, id).await? {
                         return Ok(false);
+                    }
+                    if revisions.first().copied() != Some(expected_revision) {
+                        return Err(crate::shared::revision::conflict().into());
                     }
                     let changed = tx
                         .write(
@@ -829,13 +904,13 @@ impl TemplateRepository for PostgresTemplateRepository {
                     if !self.visible(tx, id).await? {
                         return Ok(None);
                     }
-                    let json = tx
+                    let (json, revision) = tx
                         .read_one_with(
                             SqlBuilder::select("templates")
-                                .columns(["template_json"])
+                                .columns(["template_json", "revision"])
                                 .and_where(Condition::equal("template_id", id))
                                 .build(),
-                            |r| r.get::<_, String>(0),
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>("revision")?)),
                         )
                         .await?
                         .context("missing template")?;
@@ -849,6 +924,7 @@ impl TemplateRepository for PostgresTemplateRepository {
                         )
                         .await?;
                     Ok(Some(StoredTemplateWithAssets {
+                        revision,
                         template_id: id.into(),
                         template_json: decode_document(&json)?,
                         assets,
@@ -1116,6 +1192,7 @@ fn map_asset(r: &crate::adapters::postgres::client::Row<'_>) -> RowResult<Templa
 }
 fn map_preview(r: &crate::adapters::postgres::client::Row<'_>) -> RowResult<StoredTemplatePreview> {
     Ok(StoredTemplatePreview {
+        revision: r.get("revision")?,
         template_id: r.get("template_id")?,
         content_type: r.get("content_type")?,
         bytes: r.get("preview_data")?,
@@ -1186,5 +1263,10 @@ fn check_publication(c: Option<&super::RequestCancellation>) -> anyhow::Result<(
 async fn repository_boundary<T>(
     operation: impl std::future::Future<Output = anyhow::Result<T>>,
 ) -> RepositoryResult<T> {
-    operation.await.map_err(RepositoryError::from)
+    operation
+        .await
+        .map_err(|error| match error.downcast::<RepositoryError>() {
+            Ok(error) => error,
+            Err(error) => RepositoryError::from(error),
+        })
 }

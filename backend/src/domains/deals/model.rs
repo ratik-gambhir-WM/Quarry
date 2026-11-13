@@ -218,6 +218,7 @@ pub struct DealParty {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deal {
+    pub revision: i64,
     #[serde(flatten)]
     pub access: Option<crate::domains::memberships::model::DealAccess>,
     pub deal_id: String,
@@ -242,4 +243,12 @@ fn required_nullable<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
     Option::<String>::deserialize(deserializer)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDealInput {
+    #[serde(flatten)]
+    pub fields: DealFields,
+    pub expected_revision: i64,
 }

@@ -46,10 +46,10 @@ The following paths are relative to `/api/v1`; the compatibility `/api` mount ha
 | --- | --- | --- |
 | GET | `/deals`, `/deals/{deal_id}` | Accessible aggregates; actor role, capabilities, access revision and creator ID |
 | GET, POST | `/deals/{deal_id}/members` | Cursor roster; add registered `email` and non-owner role |
-| PATCH, DELETE | `/deals/{deal_id}/members/{user_id}` | Expected member revision for role change; owner removal or self-leave |
+| PATCH, DELETE | `/deals/{deal_id}/members/{user_id}` | Expected member revision for role change and removal; owner removal or self-leave |
 | POST | `/deals/{deal_id}/ownership-transfer` | Active target member and expected access revision |
 | GET, POST | `/deals/{deal_id}/teams` | Cursor roster; create named team |
-| PATCH, DELETE | `/deals/{deal_id}/teams/{team_id}` | Rename with expected revision; delete team only |
+| PATCH, DELETE | `/deals/{deal_id}/teams/{team_id}` | Rename/delete with expected revision; delete team only |
 | POST | `/deals/{deal_id}/teams/{team_id}/members` | Idempotent assignment of an existing deal member |
 | DELETE | `/deals/{deal_id}/teams/{team_id}/members/{user_id}` | Remove team assignment only |
 | GET | `/deals/{deal_id}/activity` | Stable cursor history; default 30/max 100 events |
@@ -119,7 +119,7 @@ data room. Exact cross-document page activation and persistent PDF annotations r
 
 ## Current PostgreSQL deployment and recovery
 
-Fresh PostgreSQL schema 1 includes memberships, teams, activity, uploader attribution, immutable
+Fresh PostgreSQL schema 2 includes memberships, teams, activity, uploader attribution, immutable
 identity manifests and image recovery checkpoints. Startup initializes an empty selected schema
 or validates its recorded checksum, live catalog, ownership and document-readiness invariants.
 It does not upgrade or import former SQLite profiles. All aggregate writes retain the shared
@@ -134,7 +134,7 @@ general reindex tool. See [storage and recovery](postgresql-storage.md) and the
 ## Historical SQLite schema 14 rollout and recovery
 
 The following sections record the earlier SQLite rollout only. They are not deployment or
-rollback procedures for PostgreSQL schema 1; no retained maintenance artifact is invoked by the
+rollback procedures for PostgreSQL schema 2; no retained maintenance artifact is invoked by the
 current runtime.
 
 
@@ -205,3 +205,9 @@ Existing images have no automatic checkpoint backfill. Published versions contin
 exact-byte upload. If an older image's graph is missing or partial, retain SQLite and recover the
 original accepted description/chunk text through reviewed offline maintenance; a fresh AI
 paraphrase cannot reproduce an immutable chunk hash. Missing checkpoints fail explicitly.
+
+Member removal and team deletion require `?expectedRevision=` from the displayed target. Role
+and team-name no-ops validate their expected revision before returning without activity. The retained
+deal lifecycle guard is locked exclusively for roster/authority changes and shared for protected
+canonical edits; unrelated deals have distinct guards. Global write controls still remain for the
+separate worker recovery and remote-publication transition.

@@ -161,3 +161,26 @@ async fn query_plans_use_indexes_for_scoped_access_claims_jobs_and_activity() {
         assert!(plan.contains(index), "{name} did not use {index}:\n{plan}");
     }
 }
+
+#[tokio::test]
+async fn previous_schema_version_is_rejected_without_resetting_records() {
+    let client = empty().await;
+    migrate(&client).await.unwrap();
+    sqlx::query("INSERT INTO app_metadata VALUES ('preserved','value')")
+        .execute(client.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE quarry_schema_version SET version=1")
+        .execute(client.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        migrate(&client).await,
+        Err(MigrationError::Incompatible)
+    ));
+    let value: String = sqlx::query_scalar("SELECT value FROM app_metadata WHERE key='preserved'")
+        .fetch_one(client.pool())
+        .await
+        .unwrap();
+    assert_eq!(value, "value");
+}

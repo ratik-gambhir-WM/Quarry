@@ -125,7 +125,7 @@ pub(crate) fn search_query(
     let sql = format!(
         r#"
         WITH prefixes(ordinal,term,upper_bound,is_prefix) AS (VALUES {}),
-        corpus AS (SELECT document_count::float8 AS n, total_tokens::float8 / greatest(document_count,1) AS avdl FROM template_lexical_stats WHERE singleton=1),
+        corpus AS (SELECT count(*)::float8 AS n, coalesce(sum(token_count),0)::float8 / greatest(count(*),1) AS avdl FROM slide_classifications_fts),
         hits AS MATERIALIZED (
             SELECT p.ordinal,t.template_id,sum(t.frequency* (ARRAY[{}]::float8[])[t.field_index+1]) AS frequency
             FROM prefixes p JOIN template_lexical_terms t ON ((p.is_prefix AND t.term>=p.term AND t.term<p.upper_bound) OR (NOT p.is_prefix AND t.term=p.term))
