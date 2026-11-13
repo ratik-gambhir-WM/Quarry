@@ -1,6 +1,21 @@
 # Concurrent writers continuation: durable claims, remote fencing and recovery
 
 Date: 2026-11-12. Status: proposed implementation for a separate follow-up PR.
+
+Storage direction update, 2026-11-12: the user has selected complete Helix removal in favor of
+PostgreSQL/pgvector. Follow the [document](documents-postgres-pgvector-migration-plan.md),
+[notebook](notebooks-postgres-pgvector-migration-plan.md) and
+[template/retirement](templates-postgres-pgvector-migration-plan.md) plans for that work.
+They supersede this file's proposed Helix projection intent, remote generation/delete fencing,
+cross-store cleanup/reconciliation and remote-index recovery once each domain becomes SQL-only.
+Do not build new Helix fencing for a dependency being removed. Their per-document/per-note atomic
+commit boundaries also replace the older canonical-commit-then-remote-publication stages below.
+The shared lock order in document Plan 1 supersedes this file's slot-before-parent ordering;
+use one protocol across admission, parent deletion, final commit and slot release.
+Durable admission/attempts, capacity and replica limits, streaming/provider recovery, two-process
+tests and the final global writer-control removal gate remain applicable. The body below records
+the earlier design; reconcile its affected tasks with the three newer plans before implementation.
+
 This replaces the earlier optimistic-concurrency refactoring plan. It continues the
 schema/revision/resource-coordination work currently in the working tree; it does not
 claim that work is committed or merged. Start the follow-up branch from that PR's merged
