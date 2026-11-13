@@ -48,6 +48,7 @@ export type ReadDealSourceFilesInput = {
 export type SavedDeal = Omit<DealFields, "parties"> &
   Partial<import("../contracts/dealMemberships").DealAccess> & {
     dealId: string;
+    revision: number;
     userId: number;
     archivedAt: string | null;
     createdAt: string;
@@ -56,6 +57,7 @@ export type SavedDeal = Omit<DealFields, "parties"> &
   };
 
 export type SavedDealMetadata = {
+  revision: number;
   dealId: string;
   factSheetLink: string | null;
   keyQuestionsJson: string;
@@ -66,6 +68,7 @@ export type SavedDealMetadata = {
 };
 
 export type SaveDealMetadataInput = {
+  expectedRevision: number;
   factSheetLink: string | null;
   files: File[];
   rlLink: string | null;

@@ -1,7 +1,11 @@
 # Hybrid document search
 
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 Updated 2026-11-06. The initial bounded-scan implementation is available behind
-`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It does not change SQLite schema 17,
+`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It requires no additional change to PostgreSQL schema 2,
 Helix publication, stored embeddings, or the model used for ingestion.
 
 ## Request and result contract
@@ -36,8 +40,8 @@ futures own all orchestration; error, disconnect/drop or timeout stops further s
 Already accepted remote reads and blocking lexical ranking can finish after cancellation.
 
 Vector retrieval preserves Helix-normalized cosine distance until the service applies a relevance floor:
-`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` defaults to 0.4 (finite 0–1); the selected large/3072
-local profile uses the measured 0.26 override described below. The floor admits distances
+`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` defaults to 0.4 (finite 0–1); the historical large/3072
+local trial used the measured 0.26 override described below. The floor admits distances
 in `0..=(1 - minimumSimilarity) / 2`. The pinned server normalizes cosine distance:
 `distance = (1 - cosineSimilarity) / 2`, so similarity is `1 - 2 × distance`. Identical vectors
 return 0, orthogonal vectors 0.5, and opposite vectors 1. The old `1 - distance` interpretation
@@ -60,7 +64,7 @@ revocation can reduce the response without refill. No results or permissions are
 The private OpenAI path uses the ingestion model and the same `HELIX_VECTOR_DIMENSION`
 injected into index initialization and document graph writes. The OpenAI adapter validates every
 response against its requested dimension and finite f64/f32 representation; the graph writer
-independently rejects dimension mismatch before the canonical SQLite commit. Stored vectors are
+independently rejects dimension mismatch before the canonical PostgreSQL commit. Stored vectors are
 copied into typed f32 array properties without truncation/padding. Configuration tests cover both
 the default 1536 and an alternate dimension; disposable Helix tests read synthetic embeddings back
 and verify exact values/dimensions before querying them. It rejects multiple/empty vectors, dimensional mismatch, nonfinite f64 values
@@ -123,7 +127,8 @@ This source inspection is not a client/server capability spike or performance pr
 indexed milestone still requires an explicitly selected disposable Helix instance, eligible
 matches below historical/deleted/unpublished distractors, analyzer parity (including C++/C#),
 query-plan/index-readiness evidence and bounded text transfer. If unavailable, separately
-review a narrow upstream extension or a SQLite FTS5 durability/backfill/recovery decision.
+review a narrow upstream extension or a separately designed PostgreSQL document lexical index with durability/backfill/recovery guarantees.
+Template lexical parity already uses PostgreSQL; it does not provide a document lexical index.
 The 5,000-current-document, 10,000-canonical-chunk and 200-deal ceilings remain explicit.
 Large-deal indexed preparation/publication verification is a separate design milestone.
 
@@ -154,6 +159,12 @@ Frontend tests cover HTTP/Tauri mapping, explicit submission, stale responses, a
 reset, source labels, literal highlights, unavailable fallback and page activation. Native
 relay code/capabilities are unchanged: its existing validated `/api/v1/` JSON transport carries
 the additive routes. Use the existing frontend and backend gates from the architecture.
+
+## Historical verification records
+
+The dated November 6 records below describe the former SQLite deployment and its local model
+trial. They do not describe the current PostgreSQL database or authorize repeating any cleanup.
+Use [PostgreSQL storage and Helix](postgresql-storage.md) for the current deployment and recovery.
 
 ## Implementation verification — 2026-11-06
 

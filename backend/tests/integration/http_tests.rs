@@ -10,13 +10,13 @@ use tower::ServiceExt;
 
 use crate::integration_support::authenticated_test_application as test_application;
 
-fn test_router() -> axum::Router {
-    test_application().unwrap().router
+async fn test_router() -> axum::Router {
+    test_application().await.unwrap().router
 }
 
 #[tokio::test]
 async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
-    let application = test_application().unwrap();
+    let application = test_application().await.unwrap();
     let app = application.router;
     let create = app
         .clone()
@@ -81,7 +81,7 @@ async fn assistant_threads_create_list_and_enforce_the_resolved_owner() {
 
 #[tokio::test]
 async fn handlers_reject_transport_validation_failures_before_service_calls() {
-    let app = test_router();
+    let app = test_router().await;
 
     let invalid_deal = app
         .clone()
@@ -121,7 +121,7 @@ async fn handlers_reject_transport_validation_failures_before_service_calls() {
 
 #[tokio::test]
 async fn health_route_is_available_under_api_prefix() {
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
@@ -134,7 +134,7 @@ async fn health_route_is_available_under_api_prefix() {
 
 #[tokio::test]
 async fn versioned_health_and_capabilities_routes_are_available() {
-    let app = test_router();
+    let app = test_router().await;
 
     let health = app
         .clone()
@@ -158,7 +158,7 @@ async fn versioned_health_and_capabilities_routes_are_available() {
 
 #[tokio::test]
 async fn temporary_chat_routes_are_removed() {
-    let app = test_router();
+    let app = test_router().await;
     for path in ["/api/v1/query_model", "/api/query_model"] {
         let response = app
             .clone()
@@ -171,7 +171,7 @@ async fn temporary_chat_routes_are_removed() {
 
 #[tokio::test]
 async fn saved_chat_fails_explicitly_when_provider_is_unconfigured() {
-    let app = test_router();
+    let app = test_router().await;
     let create = app
         .clone()
         .oneshot(
@@ -198,7 +198,7 @@ async fn saved_chat_fails_explicitly_when_provider_is_unconfigured() {
 
 #[tokio::test]
 async fn saved_chat_rejects_client_context_before_starting_a_run() {
-    let app = test_router();
+    let app = test_router().await;
     for context in [
         r#"[{"role":"user","content":"unpaired"}]"#,
         r#"[{"role":"assistant","content":"wrong"},{"role":"user","content":"order"}]"#,
@@ -253,7 +253,7 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         crate::integration_support::prompt_catalog(),
     );
     use crate::{
-        adapters::sqlite::client::SqliteClient,
+        adapters::postgres::client::PostgresClient,
         domains::{
             assistant::chat::repository::{AssistantChatRepository, StartRunInput},
             users::{
@@ -262,9 +262,9 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
             },
         },
     };
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    crate::app::migrations::migrate(&sqlite).unwrap();
-    let users = UserRepository::new(sqlite.clone());
+    let postgres = PostgresClient::test_database().await.unwrap();
+    crate::app::migrations::migrate(&postgres).await.unwrap();
+    let users = UserRepository::new(postgres.clone());
     let user = users
         .create(AddUserInput {
             first_name: "Test".into(),
@@ -274,7 +274,7 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         })
         .await
         .unwrap();
-    let repository = AssistantChatRepository::new(sqlite);
+    let repository = AssistantChatRepository::new(postgres);
     repository
         .create_thread(user.id, "thread-1".into(), None)
         .await
@@ -371,7 +371,7 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
 
 #[tokio::test]
 async fn routes_outside_api_prefix_are_not_found() {
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
@@ -383,7 +383,7 @@ async fn routes_outside_api_prefix_are_not_found() {
 
 #[tokio::test]
 async fn template_preview_route_validates_page_and_degrades_when_unconfigured() {
-    let app = test_router();
+    let app = test_router().await;
     let unavailable = app
         .clone()
         .oneshot(
@@ -411,8 +411,9 @@ async fn template_preview_route_validates_page_and_degrades_when_unconfigured() 
 #[tokio::test]
 async fn template_delete_route_degrades_when_unconfigured() {
     let response = test_router()
+        .await
         .oneshot(
-            Request::delete("/api/v1/templates/example")
+            Request::delete("/api/v1/templates/example?expectedRevision=1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -424,7 +425,7 @@ async fn template_delete_route_degrades_when_unconfigured() {
 
 #[tokio::test]
 async fn template_document_route_validates_ids_and_degrades_when_unconfigured() {
-    let app = test_router();
+    let app = test_router().await;
     let unavailable = app
         .clone()
         .oneshot(
@@ -449,7 +450,7 @@ async fn template_document_route_validates_ids_and_degrades_when_unconfigured() 
 
 #[tokio::test]
 async fn template_export_route_validates_json_before_capability_lookup() {
-    let app = test_router();
+    let app = test_router().await;
     let invalid = app
         .clone()
         .oneshot(
@@ -476,7 +477,7 @@ async fn template_export_route_validates_json_before_capability_lookup() {
 
 #[tokio::test]
 async fn template_import_route_validates_mode_and_upload_before_capability_lookup() {
-    let app = test_router();
+    let app = test_router().await;
     for path in [
         "/api/v1/templates/import?mode=single",
         "/api/templates/import?mode=batch",
@@ -545,6 +546,7 @@ async fn template_import_route_accepts_a_file_above_the_default_body_limit() {
     let bytes = vec![1; 2 * 1024 * 1024 + 1];
     let (content_type, body) = template_multipart(&[("files", "template.pptx", &bytes)]);
     let response = test_router()
+        .await
         .oneshot(
             Request::post("/api/v1/templates/import?mode=batch")
                 .header("content-type", content_type)
@@ -608,7 +610,7 @@ fn thread_run_multipart(
 
 #[tokio::test]
 async fn legacy_command_routes_are_not_exposed() {
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -626,7 +628,7 @@ async fn legacy_command_routes_are_not_exposed() {
 #[tokio::test]
 async fn deal_flow_saves_core_fields_then_optional_metadata() {
     const BOUNDARY: &str = "quarry-empty-deal-metadata";
-    let app = test_router();
+    let app = test_router().await;
     let user_id = 1;
 
     let create_deal = app
@@ -711,7 +713,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
                     format!("multipart/form-data; boundary={BOUNDARY}"),
                 )
                 .body(Body::from(format!(
-                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointLink\"\r\n\r\n https://northwind.sharepoint.com/sites/acme \r\n\
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"expectedRevision\"\r\n\r\n1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sharepointLink\"\r\n\r\n https://northwind.sharepoint.com/sites/acme \r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"sowLink\"\r\n\r\n https://example.com/sow \r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"factSheetLink\"\r\n\r\nhttps://example.com/fact-sheet\r\n\
                      --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"rlLink\"\r\n\r\nhttps://example.com/request-list\r\n\
@@ -819,7 +821,7 @@ async fn deal_flow_saves_core_fields_then_optional_metadata() {
 
 #[tokio::test]
 async fn redundant_user_exists_route_is_not_exposed() {
-    let app = test_router();
+    let app = test_router().await;
     let response = app
         .oneshot(
             Request::get("/api/users/exists?email=ada%40example.com")
@@ -834,7 +836,7 @@ async fn redundant_user_exists_route_is_not_exposed() {
 
 #[tokio::test]
 async fn helix_user_routes_are_not_exposed() {
-    let app = test_router();
+    let app = test_router().await;
     let get_response = app
         .clone()
         .oneshot(
@@ -860,7 +862,7 @@ async fn helix_user_routes_are_not_exposed() {
 
 #[tokio::test]
 async fn document_search_validates_input_before_calling_helix() {
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -896,7 +898,7 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
     multipart.resize(multipart.len() + FILE_BYTES, b'x');
     multipart.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
 
-    let app = test_router();
+    let app = test_router().await;
     let response = app
         .oneshot(
             Request::post("/api/deals/DEAL-LARGE/documents/process_file")
@@ -919,7 +921,7 @@ async fn process_file_rejects_a_competing_multipart_deal_id() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"dealId\"\r\n\r\nDEAL-OTHER\r\n--{BOUNDARY}--\r\n"
     );
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -943,7 +945,7 @@ async fn process_file_rejects_unsupported_uploads_at_the_handler_boundary() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"notes.txt\"\r\nContent-Type: text/plain\r\n\r\nnotes\r\n--{BOUNDARY}--\r\n"
     );
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -967,7 +969,7 @@ async fn process_file_accepts_image_uploads_at_the_handler_boundary() {
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"evidence.png\"\r\nContent-Type: image/png\r\n\r\nimage-bytes\r\n--{BOUNDARY}--\r\n"
     );
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -999,6 +1001,7 @@ async fn process_file_accepts_modern_office_extensions_on_both_api_mounts() {
             "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\nbytes\r\n--{BOUNDARY}--\r\n"
         );
         let response = test_router()
+            .await
             .oneshot(
                 Request::post(path)
                     .header(
@@ -1022,6 +1025,7 @@ async fn process_file_rejects_legacy_office_extensions_at_the_handler_boundary()
             "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\nuser-1\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\n\r\nbytes\r\n--{BOUNDARY}--\r\n"
         );
         let response = test_router()
+            .await
             .oneshot(
                 Request::post("/api/v1/deals/DEAL-PATH/documents/process_file")
                     .header(
@@ -1043,7 +1047,7 @@ async fn process_file_uses_authenticated_identity_instead_of_blank_legacy_user_i
     let multipart = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"userId\"\r\n\r\n   \r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"report.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\r\n--{BOUNDARY}--\r\n"
     );
-    let app = test_router();
+    let app = test_router().await;
 
     let response = app
         .oneshot(
@@ -1067,14 +1071,13 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     docx.document
         .push(Paragraph::default().push_text("Raw route text from DOCX."));
     let docx_bytes = docx.write(Cursor::new(Vec::new())).unwrap().into_inner();
-    let application = test_application().unwrap();
+    let application = test_application().await.unwrap();
     application
-        .sqlite
-        .with_connection(|connection| {
+        .postgres
+        .with_connection(async |connection| {
             connection.execute(
-                "UPDATE users SET first_name='Avery' WHERE id=1",
-                [],
-            )?;
+                "UPDATE users SET first_name='Avery' WHERE id=1", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            ).await?;
             let user_id = 1;
             for deal_id in ["DEAL-DOCUMENTS", "DEAL-OTHER"] {
                 connection.execute(
@@ -1084,49 +1087,49 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
                     ) VALUES (?1, ?2, 'Project Test', 'prepare', '2026-01-01', '2026-02-01',
                               'buy_side', 'unknown')
                     "#,
-                    rusqlite::params![deal_id, user_id],
-                )?;
-                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",rusqlite::params![deal_id,user_id])?;
-                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id])?;
+                    crate::pg_params![deal_id, user_id],
+                ).await?;
+                connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,?2,'owner','now','now')",crate::pg_params![deal_id,user_id]).await?;
+                connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)",[deal_id]).await?;
             }
             insert_stored_document(
-                connection,
+                &connection,
                 "DEAL-DOCUMENTS",
                 "file-zulu",
                 "version-zulu",
                 "Zulu.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nzulu",
-            )?;
+            ).await?;
             insert_stored_document(
-                connection,
+                &connection,
                 "DEAL-DOCUMENTS",
                 "file-alpha",
                 "version-alpha",
                 "Alpha.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nalpha",
-            )?;
+            ).await?;
             insert_stored_document(
-                connection,
+                &connection,
                 "DEAL-DOCUMENTS",
                 "file-raw",
                 "version-raw",
                 "Raw.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 &docx_bytes,
-            )?;
+            ).await?;
             insert_stored_document(
-                connection,
+                &connection,
                 "DEAL-OTHER",
                 "file-other",
                 "version-other",
                 "Other.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nother",
-            )?;
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
     let app = application.router;
 
@@ -1212,49 +1215,55 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     assert_eq!(cross_deal_response.status(), StatusCode::NOT_FOUND);
 }
 
-fn insert_stored_document(
-    connection: &rusqlite::Connection,
+async fn insert_stored_document(
+    connection: &crate::adapters::postgres::client::test_support::TestConnection,
     deal_id: &str,
     file_id: &str,
     version_id: &str,
     display_name: &str,
     mime_type: &str,
     bytes: &[u8],
-) -> rusqlite::Result<()> {
-    connection.execute(
-        r#"
+) -> crate::adapters::postgres::client::test_support::TestResult<()> {
+    connection
+        .execute(
+            r#"
         INSERT INTO quarry_files (
             file_id, deal_id, display_name, metadata_json, created_at, updated_at
         ) VALUES (?1, ?2, ?3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
         "#,
-        rusqlite::params![file_id, deal_id, display_name],
-    )?;
-    connection.execute(
-        r#"
+            crate::pg_params![file_id, deal_id, display_name],
+        )
+        .await?;
+    connection
+        .execute(
+            r#"
         INSERT INTO quarry_file_versions (
             version_id, file_id, version_number, original_filename, mime_type,
             content_sha256, byte_size, is_current, created_at
         ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, 1, '2026-01-01T00:00:00Z')
         "#,
-        rusqlite::params![
-            version_id,
-            file_id,
-            display_name,
-            mime_type,
-            "a".repeat(64),
-            bytes.len() as i64
-        ],
-    )?;
-    connection.execute(
-        "INSERT INTO quarry_file_blobs (version_id, file_bytes) VALUES (?1, ?2)",
-        rusqlite::params![version_id, bytes],
-    )?;
+            crate::pg_params![
+                version_id,
+                file_id,
+                display_name,
+                mime_type,
+                "a".repeat(64),
+                bytes.len() as i64
+            ],
+        )
+        .await?;
+    connection
+        .execute(
+            "INSERT INTO quarry_file_blobs (version_id, file_bytes) VALUES (?1, ?2)",
+            crate::pg_params![version_id, bytes],
+        )
+        .await?;
     Ok(())
 }
 
 #[tokio::test]
 async fn research_request_checks_run_before_unconfigured_provider_lookup() {
-    let app = test_router();
+    let app = test_router().await;
     for (method, path, body, expected) in [
         (
             "POST",
@@ -1327,6 +1336,7 @@ async fn assistant_reference_scope_is_rejected_before_storage_or_provider_lookup
     let boundary = "assistant-reference-boundary";
     let body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nQuestion\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileScopeDealId\"\r\n\r\nDEAL-A\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"fileReferences\"\r\n\r\n[{{\"dealId\":\"DEAL-B\",\"fileId\":\"file-1\",\"name\":\"Document.pdf\"}}]\r\n--{boundary}--\r\n");
     let response = test_router()
+        .await
         .oneshot(
             Request::post("/api/v1/assistant/threads/thread-1/runs")
                 .header(
@@ -1348,7 +1358,7 @@ async fn assistant_reference_scope_is_rejected_before_storage_or_provider_lookup
 
 #[tokio::test]
 async fn data_room_relative_paths_are_checked_before_loading_the_configured_source() {
-    let app = test_router();
+    let app = test_router().await;
     for path in ["", "../outside.pdf", "/absolute.pdf", "./document.pdf"] {
         let response = app
             .clone()

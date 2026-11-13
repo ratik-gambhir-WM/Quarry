@@ -4,6 +4,7 @@ export const MAX_TEMPLATE_CATALOG_ITEMS = 1_000;
 export const MAX_TEMPLATE_PREVIEW_PAGES = 100;
 
 export type DeliverableSlide = {
+  revision: number;
   id: string;
   thumbnailAlt: string;
   thumbnailHeight: number;
@@ -21,6 +22,7 @@ export function previewToDeliverableSlide(
   const displayName = templateDisplayName(preview.templateId);
   return {
     id: preview.templateId,
+    revision: preview.revision,
     thumbnailAlt: `Template preview: ${displayName}`,
     thumbnailHeight: preview.height,
     thumbnailSrc: preview.dataUrl,

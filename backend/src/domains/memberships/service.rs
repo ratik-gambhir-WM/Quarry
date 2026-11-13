@@ -70,8 +70,10 @@ impl DealAccessService {
                     .change_role(deal, actor, user_id, role, revision)
                     .await?
             }
-            Mutation::RemoveMember { user_id } => {
-                self.repository.remove_member(deal, actor, user_id).await?
+            Mutation::RemoveMember { user_id, revision } => {
+                self.repository
+                    .remove_member(deal, actor, user_id, revision)
+                    .await?
             }
             Mutation::Transfer { user_id, revision } => {
                 self.repository
@@ -88,8 +90,10 @@ impl DealAccessService {
                     .rename_team(deal, actor, team_id, name, revision)
                     .await?
             }
-            Mutation::DeleteTeam { team_id } => {
-                self.repository.delete_team(deal, actor, team_id).await?
+            Mutation::DeleteTeam { team_id, revision } => {
+                self.repository
+                    .delete_team(deal, actor, team_id, revision)
+                    .await?
             }
             Mutation::Assign {
                 team_id,

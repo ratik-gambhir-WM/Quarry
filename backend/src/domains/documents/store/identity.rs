@@ -1,7 +1,7 @@
 //! Immutable chunk identity, retained independently of the recoverable graph projection.
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, PostgresTransaction},
         query::{Condition, SqlBuilder},
     },
     shared::error::RepositoryError,
@@ -47,49 +47,53 @@ impl IdentityManifest {
         Ok(())
     }
 }
-pub(crate) fn read(
-    tx: &SqliteTransaction<'_>,
+pub(crate) async fn read(
+    tx: &PostgresTransaction,
     version: &str,
-) -> Result<Option<IdentityManifest>, SqliteClientError> {
-    let head = tx.read_one_with(
-        SqlBuilder::select("document_identity_manifests")
-            .and_where(Condition::equal("version_id", version))
-            .build(),
-        |r| {
-            Ok((
-                r.get("derivation_version")?,
-                r.get::<_, String>("document_id")?,
-                r.get::<_, i64>("chunk_count")?,
-                r.get::<_, String>("active_generation")?,
-            ))
-        },
-    )?;
+) -> Result<Option<IdentityManifest>, PostgresError> {
+    let head = tx
+        .read_one_with(
+            SqlBuilder::select("document_identity_manifests")
+                .and_where(Condition::equal("version_id", version))
+                .build(),
+            |r| {
+                Ok((
+                    r.get("derivation_version")?,
+                    r.get::<_, String>("document_id")?,
+                    r.get::<_, i64>("chunk_count")?,
+                    r.get::<_, String>("active_generation")?,
+                ))
+            },
+        )
+        .await?;
     let Some((derivation_version, document_id, count, active_generation)) = head else {
         return Ok(None);
     };
-    let chunks = tx.read_with(
-        SqlBuilder::select("document_chunk_identities")
-            .and_where(Condition::equal("version_id", version))
-            .order_by(
-                "index_generation",
-                crate::adapters::sqlite::query::SortDirection::Ascending,
-            )
-            .order_by(
-                "chunk_index",
-                crate::adapters::sqlite::query::SortDirection::Ascending,
-            )
-            .build(),
-        |r| {
-            Ok(ChunkIdentity {
-                chunk_id: r.get("chunk_id")?,
-                index_generation: r.get("index_generation")?,
-                chunk_index: r.get("chunk_index")?,
-                chunk_sha256: r.get("chunk_sha256")?,
-            })
-        },
-    )?;
+    let chunks = tx
+        .read_with(
+            SqlBuilder::select("document_chunk_identities")
+                .and_where(Condition::equal("version_id", version))
+                .order_by(
+                    "index_generation",
+                    crate::adapters::postgres::query::SortDirection::Ascending,
+                )
+                .order_by(
+                    "chunk_index",
+                    crate::adapters::postgres::query::SortDirection::Ascending,
+                )
+                .build(),
+            |r| {
+                Ok(ChunkIdentity {
+                    chunk_id: r.get("chunk_id")?,
+                    index_generation: r.get("index_generation")?,
+                    chunk_index: r.get("chunk_index")?,
+                    chunk_sha256: r.get("chunk_sha256")?,
+                })
+            },
+        )
+        .await?;
     if i64::try_from(chunks.len()).ok() != Some(count) {
-        return Err(SqliteClientError::transaction_aborted(
+        return Err(PostgresError::transaction_aborted(
             "incomplete identity manifest",
         ));
     }
@@ -100,14 +104,14 @@ pub(crate) fn read(
         chunks,
     }))
 }
-pub(crate) fn save(
-    tx: &SqliteTransaction<'_>,
+pub(crate) async fn save(
+    tx: &PostgresTransaction,
     version: &str,
     manifest: &IdentityManifest,
     migrated: bool,
 ) -> Result<(), RepositoryError> {
     manifest.validate()?;
-    if let Some(existing) = read(tx, version)? {
+    if let Some(existing) = read(tx, version).await? {
         let mut incoming = manifest.clone();
         incoming.chunks.sort_by(|a, b| {
             (&a.index_generation, a.chunk_index).cmp(&(&b.index_generation, b.chunk_index))
@@ -132,7 +136,8 @@ pub(crate) fn save(
             )
             .value("graph_migrated", migrated)
             .build(),
-    )?;
+    )
+    .await?;
     for c in &manifest.chunks {
         tx.write(
             SqlBuilder::insert_into("document_chunk_identities")
@@ -142,20 +147,24 @@ pub(crate) fn save(
                 .value("chunk_index", c.chunk_index)
                 .value("chunk_sha256", &c.chunk_sha256)
                 .build(),
-        )?;
+        )
+        .await?;
     }
     Ok(())
 }
 pub async fn manifest(
-    sqlite: &SqliteClient,
+    postgres: &PostgresClient,
     version: String,
 ) -> Result<Option<IdentityManifest>, RepositoryError> {
-    Ok(sqlite
-        .read_transaction_async(move |tx| read(tx, &version))
+    Ok(postgres
+        .read_transaction_async(move |tx| async move {
+            let tx = &tx;
+            read(tx, &version).await
+        })
         .await?)
 }
-pub async fn ready(sqlite: &SqliteClient) -> Result<bool, RepositoryError> {
-    let missing = sqlite
+pub async fn ready(postgres: &PostgresClient) -> Result<bool, RepositoryError> {
+    let missing = postgres
         .read_one_with_async(
             SqlBuilder::select("quarry_file_versions")
                 .columns(["quarry_file_versions.version_id"])
@@ -170,7 +179,7 @@ pub async fn ready(sqlite: &SqliteClient) -> Result<bool, RepositoryError> {
             |_| Ok(()),
         )
         .await?;
-    let pending = sqlite
+    let pending = postgres
         .read_one_with_async(
             SqlBuilder::select("document_identity_manifests")
                 .and_where(Condition::equal("graph_migrated", false))
@@ -179,7 +188,7 @@ pub async fn ready(sqlite: &SqliteClient) -> Result<bool, RepositoryError> {
             |_| Ok(()),
         )
         .await?;
-    let legacy = sqlite
+    let legacy = postgres
         .read_one_with_async(
             SqlBuilder::select("document_identity_manifests")
                 .and_where(Condition::equal("derivation_version", 1))
@@ -188,7 +197,7 @@ pub async fn ready(sqlite: &SqliteClient) -> Result<bool, RepositoryError> {
             |_| Ok(()),
         )
         .await?;
-    let indexes = sqlite
+    let indexes = postgres
         .read_one_with_async(
             SqlBuilder::select("app_metadata")
                 .and_where(Condition::equal("key", "document_deal_scope_indexes"))

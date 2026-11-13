@@ -251,7 +251,7 @@ export function DealCompanyRolesEditor({
         <CompanyForm
           key={companyForm === "new" ? "new" : companyForm.companyId}
           company={companyForm === "new" ? undefined : companyForm}
-          onCancel={() => editCompany(null)}
+          onCancel={() => { editCompany(null); setAttempt((n) => n + 1); }}
           onSaved={(company, created) => {
             setCompanies((current) =>
               new Map(current).set(company.companyId, company),
@@ -416,22 +416,27 @@ function CompanyForm({
     description: company?.description ?? null,
   }));
   const [pending, setPending] = useState(false);
+  const saving = useRef(false);
   const [error, setError] = useState("");
   async function save() {
+    if (saving.current) return;
     if (!input.name.trim()) {
       setError("Company name is required.");
       return;
     }
+    saving.current = true;
     setPending(true);
     setError("");
     try {
       const saved = company
-        ? await runtime.api.updateCompany(company.companyId, input)
+        ? await runtime.api.updateCompany(company.companyId, { ...input, expectedRevision: company.revision })
         : await runtime.api.createCompany(input);
       onSaved(saved, !company);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      const conflict = typeof error === "object" && error !== null && "status" in error && error.status === 409;
+      setError(conflict ? "This company changed. Your entries are kept. Cancel to refresh company details before editing again." : error instanceof Error ? error.message : String(error));
     } finally {
+      saving.current = false;
       setPending(false);
     }
   }

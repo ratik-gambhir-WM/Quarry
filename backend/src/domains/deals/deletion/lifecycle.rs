@@ -1,4 +1,4 @@
-//! Process-local task lifetime tracking; SQLite barriers and remote fences remain authoritative.
+//! Process-local task lifetime tracking; PostgreSQL barriers and remote fences remain authoritative.
 use std::{
     collections::HashMap,
     sync::{Arc, Weak},

@@ -12,8 +12,8 @@ use axum::http::HeaderValue;
 const DEFAULT_API_PORT: u16 = 3001;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_CORS_ORIGINS: &str = "http://127.0.0.1:1420,http://localhost:1420";
-const DEFAULT_DATABASE_FILE_NAME: &str = "quarry.sqlite3";
-const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6969";
+
+const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6970";
 const DEFAULT_HELIX_VECTOR_DIMENSION: usize = 1536;
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -50,8 +50,11 @@ pub struct HttpConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct SqliteConfig {
-    pub path: PathBuf,
+pub struct PostgresConfig {
+    pub url: SecretString,
+    pub max_connections: u32,
+    pub acquire_timeout: Duration,
+    pub statement_timeout: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -102,11 +105,6 @@ pub struct DocumentConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct DiligenceStudioConfig {
-    pub base_url: reqwest::Url,
-}
-
-#[derive(Clone, Debug)]
 pub struct PromptConfig {
     pub directory: PathBuf,
 }
@@ -114,14 +112,13 @@ pub struct PromptConfig {
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub http: HttpConfig,
-    pub sqlite: SqliteConfig,
+    pub postgres: PostgresConfig,
     pub helix: HelixConfig,
     pub openai: Option<OpenAiConfig>,
     pub wm_ai: Option<WmAiConfig>,
     pub data_room: DataRoomConfig,
     pub documents: DocumentConfig,
     pub search: SearchConfig,
-    pub diligence_studio: Option<DiligenceStudioConfig>,
     pub slide_templates: SlideTemplatesConfig,
     pub prompts: PromptConfig,
 }
@@ -150,14 +147,13 @@ impl AppConfig {
 
         Ok(Self {
             http: parse_http_config(&values)?,
-            sqlite: parse_sqlite_config(&values),
+            postgres: parse_postgres_config(&values)?,
             helix,
             openai,
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
             documents: parse_document_config(&values)?,
             search: parse_search_config(&values)?,
-            diligence_studio: parse_diligence_studio_config(&values)?,
             slide_templates: parse_slide_templates_config(&values)?,
             prompts: parse_prompt_config(&values)?,
         })
@@ -177,8 +173,11 @@ impl Default for AppConfig {
                     .collect(),
                 request_timeout: Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECONDS),
             },
-            sqlite: SqliteConfig {
-                path: PathBuf::from("data").join(DEFAULT_DATABASE_FILE_NAME),
+            postgres: PostgresConfig {
+                url: SecretString::new("postgresql://localhost/Quarry"),
+                max_connections: 16,
+                acquire_timeout: Duration::from_secs(5),
+                statement_timeout: Duration::from_secs(30),
             },
             helix: HelixConfig {
                 url: DEFAULT_HELIX_URL.to_string(),
@@ -196,7 +195,6 @@ impl Default for AppConfig {
                     DEFAULT_COMPLETED_JOB_RETENTION_SECONDS,
                 ),
             },
-            diligence_studio: None,
             slide_templates: parse_slide_templates_config(&HashMap::new())
                 .expect("default slide configuration is valid"),
             prompts: PromptConfig {
@@ -215,40 +213,6 @@ fn parse_prompt_config(values: &HashMap<String, String>) -> Result<PromptConfig,
         None => PathBuf::from("prompts"),
     };
     Ok(PromptConfig { directory })
-}
-
-fn parse_diligence_studio_config(
-    values: &HashMap<String, String>,
-) -> Result<Option<DiligenceStudioConfig>, String> {
-    let Some(value) = value(values, "DILIGENCE_STUDIO_API_BASE_URL") else {
-        return Ok(None);
-    };
-    let mut base_url = reqwest::Url::parse(value)
-        .map_err(|error| format!("invalid DILIGENCE_STUDIO_API_BASE_URL: {error}"))?;
-    let is_loopback_http = base_url.scheme() == "http"
-        && (base_url.host_str() == Some("localhost")
-            || base_url
-                .host_str()
-                .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
-                .is_some_and(|address| address.is_loopback()));
-    if base_url.scheme() != "https" && !is_loopback_http {
-        return Err("DILIGENCE_STUDIO_API_BASE_URL must use HTTPS or loopback HTTP".to_string());
-    }
-    if !base_url.username().is_empty()
-        || base_url.password().is_some()
-        || base_url.query().is_some()
-        || base_url.fragment().is_some()
-    {
-        return Err(
-            "DILIGENCE_STUDIO_API_BASE_URL must not contain credentials, a query, or a fragment"
-                .to_string(),
-        );
-    }
-    if base_url.path().trim_end_matches('/') != "/api/v1" {
-        return Err("DILIGENCE_STUDIO_API_BASE_URL must end with /api/v1".to_string());
-    }
-    base_url.set_path("/api/v1/");
-    Ok(Some(DiligenceStudioConfig { base_url }))
 }
 
 fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, String> {
@@ -287,15 +251,54 @@ fn parse_http_config(values: &HashMap<String, String>) -> Result<HttpConfig, Str
     })
 }
 
-fn parse_sqlite_config(values: &HashMap<String, String>) -> SqliteConfig {
-    let path = value(values, "QUARRY_DATABASE_PATH")
-        .map(PathBuf::from)
-        .or_else(|| {
-            value(values, "QUARRY_DATA_DIR")
-                .map(|directory| PathBuf::from(directory).join(DEFAULT_DATABASE_FILE_NAME))
-        })
-        .unwrap_or_else(|| PathBuf::from("data").join(DEFAULT_DATABASE_FILE_NAME));
-    SqliteConfig { path }
+fn parse_postgres_config(values: &HashMap<String, String>) -> Result<PostgresConfig, String> {
+    let url = value(values, "QUARRY_DATABASE_URL").ok_or("QUARRY_DATABASE_URL is required")?;
+    let parsed =
+        url::Url::parse(url).map_err(|_| "QUARRY_DATABASE_URL must be a valid PostgreSQL URL")?;
+    if !matches!(parsed.scheme(), "postgres" | "postgresql")
+        || parsed.host_str().is_none()
+        || parsed.path().trim_matches('/').is_empty()
+        || parsed.fragment().is_some()
+    {
+        return Err("QUARRY_DATABASE_URL must select a PostgreSQL host and database".into());
+    }
+    fn bounded(
+        values: &HashMap<String, String>,
+        key: &str,
+        default: u32,
+        max: u32,
+    ) -> Result<u32, String> {
+        let n = match value(values, key) {
+            Some(v) => v
+                .parse::<u32>()
+                .map_err(|_| format!("{key} must be a positive integer"))?,
+            None => default,
+        };
+        if n == 0 || n > max {
+            return Err(format!("{key} must be between 1 and {max}"));
+        }
+        Ok(n)
+    }
+    let max_connections = bounded(values, "QUARRY_DATABASE_MAX_CONNECTIONS", 16, 128)?;
+    if max_connections < 2 {
+        return Err("QUARRY_DATABASE_MAX_CONNECTIONS must be between 2 and 128 (one connection retains writer ownership)".into());
+    }
+    Ok(PostgresConfig {
+        url: SecretString::new(url),
+        max_connections,
+        acquire_timeout: Duration::from_secs(u64::from(bounded(
+            values,
+            "QUARRY_DATABASE_ACQUIRE_TIMEOUT_SECONDS",
+            5,
+            60,
+        )?)),
+        statement_timeout: Duration::from_secs(u64::from(bounded(
+            values,
+            "QUARRY_DATABASE_STATEMENT_TIMEOUT_SECONDS",
+            30,
+            300,
+        )?)),
+    })
 }
 
 fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, String> {
@@ -528,15 +531,8 @@ fn normalize_deal_config_key(deal_id: &str) -> String {
 #[path = "../../tests/unit/app/config_tests.rs"]
 mod tests;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TemplateBackend {
-    DiligenceStudio,
-    #[default]
-    Embedded,
-}
 #[derive(Clone, Debug)]
 pub struct SlideTemplatesConfig {
-    pub backend: TemplateBackend,
     pub embedding_dimensions: NonZeroUsize,
     pub chromium_path: Option<PathBuf>,
     pub render_url: String,
@@ -559,11 +555,6 @@ pub struct SlideClassificationConfig {
 fn parse_slide_templates_config(
     values: &HashMap<String, String>,
 ) -> Result<SlideTemplatesConfig, String> {
-    let backend = match value(values, "QUARRY_TEMPLATE_BACKEND").unwrap_or("embedded") {
-        "diligence-studio" => TemplateBackend::DiligenceStudio,
-        "embedded" => TemplateBackend::Embedded,
-        _ => return Err("QUARRY_TEMPLATE_BACKEND must be diligence-studio or embedded".into()),
-    };
     let render_url = value(values, "QUARRY_TEMPLATE_PREVIEW_RENDER_URL")
         .unwrap_or("http://localhost:1420/_internal/template-preview")
         .to_owned();
@@ -646,7 +637,6 @@ fn parse_slide_templates_config(
             }
         };
     Ok(SlideTemplatesConfig {
-        backend,
         embedding_dimensions,
         chromium_path,
         render_url,

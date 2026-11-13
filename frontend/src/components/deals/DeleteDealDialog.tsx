@@ -62,7 +62,7 @@ export function DeleteDealDialog({
     try {
       const receipt = previous
         ? await runtime.api.getDealDeletion(previous.deletionId)
-        : await runtime.api.deleteDeal(deal.id);
+        : await runtime.api.deleteDeal(deal.id, deal.revision);
       if (controller.signal.aborted) return;
       if (!receipt) {
         setState({ status: "completed" });
@@ -75,13 +75,15 @@ export function DeleteDealDialog({
       setState(result.status === "blocked"
         ? { status: "blocked", operation: result }
         : { status: "completed" });
-    } catch {
+    } catch (cause) {
       if (controller.signal.aborted) return;
+      const stale = typeof cause === "object" && cause !== null && "status" in cause && cause.status === 409;
+      if (stale) setPhrase("");
       setState(operation
         ? { status: "status-error", operation }
         : {
             status: "confirm",
-            error: "Deletion could not be confirmed. Try again. If the request reached the server, cleanup may already be running.",
+            error: stale ? "This deal changed. Cancel and reload the deal, then review and confirm deletion again." : "Deletion could not be confirmed. Try again. If the request reached the server, cleanup may already be running.",
           });
     } finally {
       if (request.current === controller) request.current = null;

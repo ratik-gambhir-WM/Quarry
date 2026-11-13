@@ -40,7 +40,7 @@ describe("httpQuarryApi", () => {
       const api = httpQuarryApi;
       expect((await api.createDeal(input)).deal.status).toBe(status);
       expect(input).not.toHaveProperty("dealId");
-      expect((await api.updateDeal(response.deal.dealId, input)).deal.status).toBe(
+      expect((await api.updateDeal(response.deal.dealId, { ...input, expectedRevision: response.deal.revision })).deal.status).toBe(
         status,
       );
       fetchMock.mockResolvedValue(
@@ -132,9 +132,9 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      httpQuarryApi.deleteTemplate("template/one"),
+      httpQuarryApi.deleteTemplate("template/one", 1),
     ).resolves.toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/templates/template%2Fone?expectedRevision=1", {
       method: "DELETE",
       headers: expect.any(Headers),
       redirect: "error",
@@ -159,7 +159,7 @@ describe("httpQuarryApi", () => {
 
   it("loads and validates an encoded template document", async () => {
     const payload = templateDocument();
-    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ revision: 1, document: payload }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(httpQuarryApi.getTemplate("template/one")).resolves.toEqual(
@@ -226,7 +226,7 @@ describe("httpQuarryApi", () => {
   it("rejects malformed template documents at the browser adapter boundary", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(Response.json({ presentation: {} })),
+      vi.fn().mockResolvedValue(Response.json({ revision: 1, document: { presentation: {} } })),
     );
 
     await expect(httpQuarryApi.getTemplate("example")).rejects.toThrow(
@@ -280,7 +280,7 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const created = await httpQuarryApi.createDeal(input);
-    await httpQuarryApi.saveDealMetadata(created.deal.dealId, {
+    await httpQuarryApi.saveDealMetadata(created.deal.dealId, { expectedRevision: 1,
       factSheetLink: "https://example.com/fact-sheet",
       files: [],
       rlLink: "https://example.com/request-list",
@@ -300,6 +300,7 @@ describe("httpQuarryApi", () => {
     );
     const metadataForm = fetchMock.mock.calls[1][1]?.body as FormData;
     expect(Object.fromEntries(metadataForm.entries())).toEqual({
+      expectedRevision: "1",
       factSheetLink: "https://example.com/fact-sheet",
       rlLink: "https://example.com/request-list",
       sharepointLink: "https://northwind.sharepoint.com/sites/acme",
@@ -566,14 +567,14 @@ it("maps company lookup, complete deal replacement, and nullable chat scopes thr
       "/api/v1/companies?query=A+%26+B&limit=30&offset=30",
       expect.objectContaining({ redirect: "error" }),
     );
-    await httpQuarryApi.updateDeal("DEAL/A", {
+    await httpQuarryApi.updateDeal("DEAL/A", { expectedRevision: 1,
       ...input,
       parties: [],
       scopes: [],
     });
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/v1/deals/DEAL%2FA/update",
-      expect.objectContaining({ method: "POST", body: JSON.stringify(input) }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ expectedRevision: 1, ...input }) }),
     );
     await httpQuarryApi.createAssistantThread("linked", "DEAL/A");
     expect(fetchMock).toHaveBeenLastCalledWith(

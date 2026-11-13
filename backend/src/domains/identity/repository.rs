@@ -1,7 +1,7 @@
 use super::model::RegisterInput;
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError},
         query::{ComparisonOperator, Condition, SqlBuilder},
     },
     domains::users::{User, UserRepository},
@@ -10,12 +10,12 @@ use crate::{
 
 #[derive(Clone)]
 pub struct IdentityRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
     users: UserRepository,
 }
 impl IdentityRepository {
-    pub fn new(sqlite: SqliteClient, users: UserRepository) -> Self {
-        Self { users, sqlite }
+    pub fn new(postgres: PostgresClient, users: UserRepository) -> Self {
+        Self { users, postgres }
     }
     pub async fn credentials(
         &self,
@@ -26,7 +26,7 @@ impl IdentityRepository {
         } else {
             "username"
         };
-        self.sqlite
+        self.postgres
             .read_one_with_async(
                 SqlBuilder::select("users")
                     .columns(["id", "password_hash"])
@@ -47,25 +47,29 @@ impl IdentityRepository {
     ) -> Result<User, RepositoryError> {
         self.cleanup(now).await?;
         let id = self
-            .sqlite
-            .transaction_async(move |tx| {
-                let inserted = tx.write(
-                    SqlBuilder::insert_into("users")
-                        .value("username", input.username)
-                        .value("email", input.email)
-                        .value("first_name", input.first_name)
-                        .value("last_name", input.last_name)
-                        .value("job_title", input.job_title)
-                        .value("password_hash", password_hash)
-                        .build(),
-                )?;
+            .postgres
+            .transaction_async(move |tx| async move {
+                let tx = &tx;
+                let inserted = tx
+                    .write(
+                        SqlBuilder::insert_into("users")
+                            .value("username", input.username)
+                            .value("email", input.email)
+                            .value("first_name", input.first_name)
+                            .value("last_name", input.last_name)
+                            .value("job_title", input.job_title)
+                            .value("password_hash", password_hash)
+                            .build(),
+                    )
+                    .await?;
                 tx.write(session_insert(
                     token_hash,
-                    inserted.last_insert_row_id,
+                    inserted.inserted_id,
                     now,
                     expires,
-                ))?;
-                Ok(inserted.last_insert_row_id)
+                ))
+                .await?;
+                Ok(inserted.inserted_id)
             })
             .await
             .map_err(map_write_error)?;
@@ -73,26 +77,30 @@ impl IdentityRepository {
     }
     /// Bound maintenance work independently of authorization; expired rows are never accepted.
     async fn cleanup(&self, now: i64) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_async(move |tx| {
-                let hashes = tx.read_with(
-                    SqlBuilder::select("auth_sessions")
-                        .columns(["token_hash"])
-                        .and_where(Condition::compare(
-                            "expires_at",
-                            ComparisonOperator::LessThanOrEqual,
-                            now,
-                        ))
-                        .limit(100)
-                        .build(),
-                    |row| row.get::<_, String>(0),
-                )?;
+        self.postgres
+            .transaction_async(move |tx| async move {
+                let tx = &tx;
+                let hashes = tx
+                    .read_with(
+                        SqlBuilder::select("auth_sessions")
+                            .columns(["token_hash"])
+                            .and_where(Condition::compare(
+                                "expires_at",
+                                ComparisonOperator::LessThanOrEqual,
+                                now,
+                            ))
+                            .limit(100)
+                            .build(),
+                        |row| row.get::<_, String>(0),
+                    )
+                    .await?;
                 if !hashes.is_empty() {
                     tx.write(
                         SqlBuilder::delete_from("auth_sessions")
                             .and_where(Condition::in_values("token_hash", hashes))
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 }
                 Ok(())
             })
@@ -113,14 +121,14 @@ impl IdentityRepository {
         expires: i64,
     ) -> Result<(), RepositoryError> {
         self.cleanup(now).await?;
-        self.sqlite
+        self.postgres
             .write_async(session_insert(token_hash, id, now, expires))
             .await
             .map_err(map_write_error)?;
         Ok(())
     }
     pub async fn session(&self, hash: String) -> Result<Option<(i64, i64)>, RepositoryError> {
-        self.sqlite
+        self.postgres
             .read_one_with_async(
                 SqlBuilder::select("auth_sessions")
                     .columns(["user_id", "expires_at"])
@@ -133,7 +141,7 @@ impl IdentityRepository {
             .map_err(Into::into)
     }
     pub async fn revoke(&self, hash: String, now: i64) -> Result<(), RepositoryError> {
-        self.sqlite
+        self.postgres
             .write_async(
                 SqlBuilder::update("auth_sessions")
                     .set("revoked_at", now)
@@ -150,7 +158,7 @@ fn session_insert(
     id: i64,
     now: i64,
     expires: i64,
-) -> Result<crate::adapters::sqlite::query::SqlQuery, SqliteClientError> {
+) -> Result<crate::adapters::postgres::query::SqlQuery, PostgresError> {
     SqlBuilder::insert_into("auth_sessions")
         .value("token_hash", hash)
         .value("user_id", id)
@@ -158,9 +166,8 @@ fn session_insert(
         .value("expires_at", expires)
         .build()
 }
-fn map_write_error(error: SqliteClientError) -> RepositoryError {
-    if matches!(&error, SqliteClientError::Database(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation)
-    {
+fn map_write_error(error: PostgresError) -> RepositoryError {
+    if error.is_unique_violation() {
         RepositoryError::Conflict("username or email is already registered".into())
     } else {
         RepositoryError::storage("identity storage operation failed")

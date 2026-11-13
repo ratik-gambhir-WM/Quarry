@@ -52,7 +52,7 @@ describe("createTauriQuarryApi", () => {
       });
       expect((await api.createDeal(input)).deal.status).toBe(status);
       expect(input).not.toHaveProperty("dealId");
-      expect((await api.updateDeal(response.deal.dealId, input)).deal.status).toBe(
+      expect((await api.updateDeal(response.deal.dealId, { ...input, expectedRevision: response.deal.revision })).deal.status).toBe(
         status,
       );
       get.mockResolvedValue({ ...response.deal, metadata: response.metadata });
@@ -61,7 +61,7 @@ describe("createTauriQuarryApi", () => {
       expect(post).toHaveBeenNthCalledWith(
         2,
         `/api/v1/deals/${response.deal.dealId}/update`,
-        input,
+        { ...input, expectedRevision: response.deal.revision },
       );
     },
   );
@@ -142,9 +142,9 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    await expect(api.deleteTemplate("template/one")).resolves.toBeUndefined();
+    await expect(api.deleteTemplate("template/one", 1)).resolves.toBeUndefined();
     expect(deleteRequest).toHaveBeenCalledWith(
-      "/api/v1/templates/template%2Fone",
+      "/api/v1/templates/template%2Fone?expectedRevision=1",
     );
   });
 
@@ -170,7 +170,7 @@ describe("createTauriQuarryApi", () => {
 
   it("loads and validates an encoded template through the desktop relay", async () => {
     const payload = templateDocument();
-    const get = vi.fn().mockResolvedValue(payload);
+    const get = vi.fn().mockResolvedValue({ revision: 1, document: payload });
     const api = createTauriQuarryApi({
       delete: vi.fn(),
       get,
@@ -215,7 +215,7 @@ describe("createTauriQuarryApi", () => {
   it("rejects malformed template documents returned by the desktop relay", async () => {
     const api = createTauriQuarryApi({
       delete: vi.fn(),
-      get: vi.fn().mockResolvedValue({ presentation: {} }),
+      get: vi.fn().mockResolvedValue({ revision: 1, document: { presentation: {} } }),
       getPdf: vi.fn(),
       post: vi.fn(),
       postPowerPoint: vi.fn(),
@@ -362,7 +362,7 @@ describe("createTauriQuarryApi", () => {
       subscribeJob: vi.fn(),
     });
 
-    await api.saveDealMetadata("DEAL / 1", {
+    await api.saveDealMetadata("DEAL / 1", { expectedRevision: 1,
       factSheetLink: "https://example.com/fact-sheet",
       files: [],
       rlLink: "https://example.com/request-list",
@@ -373,6 +373,7 @@ describe("createTauriQuarryApi", () => {
     expect(postMultipart).toHaveBeenCalledWith({
       sessionGeneration: expect.any(Number),
       fields: [
+        { name: "expectedRevision", value: "1" },
         { name: "sharepointLink", value: "" },
         { name: "sowLink", value: "https://example.com/sow" },
         { name: "factSheetLink", value: "https://example.com/fact-sheet" },
@@ -641,6 +642,7 @@ it("relays company, aggregate updates and nullable/scoped chats with encoded pat
     subscribeJob: vi.fn(),
   });
   const fields = {
+    expectedRevision: 1,
     dealName: "Draft",
     dealCode: null,
     engagementType: "sell_side" as const,

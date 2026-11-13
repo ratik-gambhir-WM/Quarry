@@ -39,8 +39,8 @@ use synthetic equivalent examples in committed tests and do not copy its deal-sp
   membership/capability checks, including write-time authorization in the repository.
 - `backend/src/app/migrations.rs` currently uses schema marker 14, supports validated marker-12/13
   upgrades, validates owned DDL and foreign keys, and protects existing data. Reconfirm the live
-  marker and current migration paths before implementation. Helix and the separate Diligence Studio
-  server are not involved in this feature.
+  marker and current migration paths before implementation. Helix and template processing
+  are not involved in this feature.
 
 ## Proposed contract and behavior
 

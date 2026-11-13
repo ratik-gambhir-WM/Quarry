@@ -188,14 +188,14 @@ impl SlideClassificationService {
     pub async fn process_and_persist(&self, job: &SlideClassificationJob) -> anyhow::Result<()> {
         let result = self.process(job).await?;
         let repository = self.options.repository.clone();
-        tokio::task::spawn_blocking(move || repository.complete_slide_processing(&result))
+        tokio::spawn(async move { repository.complete_slide_processing(&result).await })
             .await?
             .map_err(Into::into)
     }
     pub async fn classify(&self, job: SlideClassificationJob) -> anyhow::Result<()> {
         let result = self.prepare_classification(job).await?;
         let repository = self.options.repository.clone();
-        tokio::task::spawn_blocking(move || repository.complete_slide_classification(&result))
+        tokio::spawn(async move { repository.complete_slide_classification(&result).await })
             .await?
             .map_err(Into::into)
     }
@@ -217,7 +217,7 @@ impl SlideClassificationService {
             template_id: job.template_id.clone(),
         };
         let repository = self.options.repository.clone();
-        tokio::task::spawn_blocking(move || repository.complete_slide_embedding(&result))
+        tokio::spawn(async move { repository.complete_slide_embedding(&result).await })
             .await?
             .map_err(Into::into)
     }
@@ -303,7 +303,7 @@ impl SlideClassificationService {
 #[path = "../../../../tests/unit/domains/templates/slide_templates/providers_tests.rs"]
 mod tests;
 
-// The provider schema uses snake_case; canonical metadata/SQLite JSON uses camelCase.
+// The provider schema uses snake_case; canonical metadata/PostgreSQL JSON uses camelCase.
 fn provider_metadata_fields(value: Value) -> Result<Value, SlideProviderError> {
     Ok(match value {
         Value::Array(values) => Value::Array(

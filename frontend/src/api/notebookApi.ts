@@ -53,7 +53,7 @@ export function createNotebookApi(transport: NotebookTransport): NotebookApi {
       send("GET", `${root(n)}/notes${query(options)}`),
     getNotebookNote: (n, v) => send("GET", note(n, v)),
     updateNotebookNote: (n, v, input) => send("PATCH", note(n, v), input),
-    deleteNotebookNote: (n, v) => send("DELETE", note(n, v)),
+    deleteNotebookNote: (n, v, revision) => send("DELETE", `${note(n, v)}?expectedRevision=${revision}`),
     getNotebookSaveJob: (n, j) => send("GET", notebookJobPath(n, j)),
     retryNotebookSaveJob: (n, j) =>
       send("POST", `${notebookJobPath(n, j)}/retry`, {}),

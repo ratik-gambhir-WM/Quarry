@@ -1,827 +1,118 @@
-//! Shared SQLite schema ownership, for authenticated Quarry accounts.
-use crate::adapters::sqlite::client::{SqliteClient, SqliteClientError};
-use rusqlite::{Connection, TransactionBehavior};
+//! Fresh PostgreSQL schema ownership; old local SQLite stores are never opened.
+use crate::adapters::postgres::client::PostgresClient;
+use sha2::{Digest, Sha256};
+use sqlx::Row;
 use thiserror::Error;
-const LATEST_SCHEMA_VERSION: i64 = 18;
+const SCHEMA: &str = include_str!("schema.sql");
+const VERSION: i64 = 2;
+// Startup only. Runtime guards are retained separately until worker/remote cutover.
+const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 #[derive(Debug, Error)]
 pub enum MigrationError {
-    #[error(transparent)]
-    Database(#[from] rusqlite::Error),
-    #[error(transparent)]
-    Client(#[from] SqliteClientError),
-    #[error("incompatible database schema {found}; expected {supported}; explicitly reset the disposable development database")]
-    UnsupportedSchemaVersion { found: i64, supported: i64 },
+    #[error("PostgreSQL schema operation failed")]
+    Database(#[from] sqlx::Error),
+    #[error("incompatible PostgreSQL schema; use a fresh dedicated Quarry database")]
+    Incompatible,
 }
-pub(crate) fn migrate(sqlite: &SqliteClient) -> Result<(), MigrationError> {
-    sqlite.with_connection_result(run_migrations)
-}
-pub(crate) fn run_migrations(connection: &mut Connection) -> Result<(), MigrationError> {
-    connection.pragma_update(None, "foreign_keys", "OFF")?;
-    let result = run_migrations_inner(connection);
-    let restore = connection.pragma_update(None, "foreign_keys", "ON");
-    result?;
-    restore?;
-    Ok(())
-}
-fn run_migrations_inner(connection: &mut Connection) -> Result<(), MigrationError> {
-    // Serialize inspection and DDL so concurrent startup cannot race schema creation.
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let version: i64 = transaction.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    let tables: i64 = transaction.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-        [],
-        |r| r.get(0),
-    )?;
-    if version == 0 && tables == 0 {
-        transaction.execute_batch(SCHEMA)?;
-        transaction.execute_batch(TEMPLATE_SCHEMA)?;
-        transaction.execute_batch(NOTEBOOK_SCHEMA)?;
+pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationError> {
+    let mut tx = client.pool().begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
+        .bind(SCHEMA_INITIALIZATION_LOCK)
+        .execute(&mut *tx)
+        .await?;
+    let tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class
+         WHERE relnamespace = current_schema()::regnamespace
+           AND relkind IN ('r','p','v','m','S','f')",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let checksum = format!("{:x}", Sha256::digest(SCHEMA.as_bytes()));
+    if tables == 0 {
+        sqlx::raw_sql(SCHEMA).execute(&mut *tx).await?;
+        sqlx::raw_sql("CREATE TABLE quarry_schema_version (version BIGINT PRIMARY KEY, checksum TEXT NOT NULL, catalog_fingerprint TEXT NOT NULL)")
+            .execute(&mut *tx).await?;
+        let fingerprint = catalog(&mut tx).await?;
+        sqlx::query("INSERT INTO quarry_schema_version VALUES ($1,$2,$3)")
+            .bind(VERSION)
+            .bind(&checksum)
+            .bind(fingerprint)
+            .execute(&mut *tx)
+            .await?;
     } else {
-        if ![12, 13, 14, 15, 16, 17, LATEST_SCHEMA_VERSION].contains(&version) {
-            return Err(MigrationError::UnsupportedSchemaVersion {
-                found: version,
-                supported: LATEST_SCHEMA_VERSION,
-            });
+        let exists: bool = sqlx::query_scalar(
+            "SELECT to_regclass(current_schema() || '.quarry_schema_version') IS NOT NULL",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(MigrationError::Incompatible);
         }
-        if version < 14 {
-            validate_product_schema(&transaction)?;
-            validate_template_schema(&transaction, true)?;
-            validate_owned_schema(&transaction, &[SCHEMA, TEMPLATE_SCHEMA])?;
+        let rows =
+            sqlx::query("SELECT version,checksum,catalog_fingerprint FROM quarry_schema_version")
+                .fetch_all(&mut *tx)
+                .await?;
+        if rows.len() != 1
+            || rows[0].try_get::<i64, _>(0)? != VERSION
+            || rows[0].try_get::<String, _>(1)? != checksum
+            || rows[0].try_get::<String, _>(2)? != catalog(&mut tx).await?
+        {
+            return Err(MigrationError::Incompatible);
         }
-        check_foreign_keys(&transaction)?;
-        if version == 12 {
-            transaction.execute_batch(NOTEBOOK_SCHEMA)?;
-        }
     }
-    if version < 14 {
-        transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
-        transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
-        transaction.execute_batch("INSERT INTO deal_memberships(deal_id,user_id,role,added_by_user_id,joined_at,updated_at) SELECT deal_id,user_id,'owner',NULL,created_at,updated_at FROM deals;
-            INSERT INTO deal_access_revisions(deal_id) SELECT deal_id FROM deals;
-            INSERT INTO deal_activity_events(event_id,deal_id,kind,created_at) SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now') || '_backfill-' || deal_id,deal_id,'membership_backfilled',strftime('%Y-%m-%dT%H:%M:%f000Z','now') FROM deals;")?;
+    // Exactly one owner is a transactional workflow invariant beyond the partial unique index.
+    let invalid: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM deals d
+            WHERE (SELECT count(*) FROM deal_memberships m
+                   WHERE m.deal_id=d.deal_id AND m.role='owner')<>1
+               OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)
+         )",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if invalid {
+        return Err(MigrationError::Incompatible);
     }
-    // Validate the previous complete layout before accepting the additive upgrade.
-    if version == 14 {
-        validate_owned_schema(
-            &transaction,
-            &[
-                SCHEMA,
-                TEMPLATE_SCHEMA,
-                NOTEBOOK_SCHEMA,
-                MEMBERSHIP_SCHEMA,
-                DOCUMENT_SCOPE_UPGRADE,
-            ],
-        )?;
-    }
-    if version < 15 {
-        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
-    }
-    if version < 16 {
-        // Validate marker 15 in full before renaming its canonical classification table.
-        validate_owned_schema(
-            &transaction,
-            &[
-                SCHEMA,
-                TEMPLATE_SCHEMA,
-                NOTEBOOK_SCHEMA,
-                MEMBERSHIP_SCHEMA,
-                DOCUMENT_SCOPE_UPGRADE,
-                IMAGE_RECOVERY_SCHEMA,
-            ],
-        )?;
-        transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
-    }
-    if version < 17 {
-        validate_owned_schema(
-            &transaction,
-            &[
-                SCHEMA,
-                TEMPLATE_SCHEMA,
-                NOTEBOOK_SCHEMA,
-                MEMBERSHIP_SCHEMA,
-                DOCUMENT_SCOPE_UPGRADE,
-                IMAGE_RECOVERY_SCHEMA,
-                CLASSIFICATION_STATUS_UPGRADE,
-            ],
-        )?;
-        transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
-    }
-    if version < 18 {
-        validate_owned_schema(
-            &transaction,
-            &[
-                SCHEMA,
-                TEMPLATE_SCHEMA,
-                NOTEBOOK_SCHEMA,
-                MEMBERSHIP_SCHEMA,
-                DOCUMENT_SCOPE_UPGRADE,
-                IMAGE_RECOVERY_SCHEMA,
-                CLASSIFICATION_STATUS_UPGRADE,
-                TEMPLATE_OWNERSHIP_UPGRADE,
-            ],
-        )?;
-        transaction.execute_batch(DELETION_SCHEMA)?;
-    }
-    validate_template_schema(&transaction, false)?;
-    validate_owned_schema(
-        &transaction,
-        &[
-            SCHEMA,
-            TEMPLATE_SCHEMA,
-            NOTEBOOK_SCHEMA,
-            MEMBERSHIP_SCHEMA,
-            DOCUMENT_SCOPE_UPGRADE,
-            IMAGE_RECOVERY_SCHEMA,
-            CLASSIFICATION_STATUS_UPGRADE,
-            TEMPLATE_OWNERSHIP_UPGRADE,
-            DELETION_SCHEMA,
-        ],
-    )?;
-    let invalid_owners: i64 = transaction.query_row("SELECT count(*) FROM deals d WHERE (SELECT count(*) FROM deal_memberships m WHERE m.deal_id=d.deal_id AND m.role='owner') != 1 OR NOT EXISTS(SELECT 1 FROM deal_access_revisions r WHERE r.deal_id=d.deal_id)", [], |r| r.get(0))?;
-    if invalid_owners != 0 {
-        return Err(rusqlite::Error::InvalidQuery.into());
-    }
-    check_foreign_keys(&transaction)?;
-    transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
-    transaction.commit()?;
+    tx.commit().await?;
     Ok(())
 }
-
-fn validate_product_schema(connection: &Connection) -> rusqlite::Result<()> {
-    let deals_ddl: String = connection.query_row(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'deals'",
-        [],
-        |row| row.get(0),
-    )?;
-    let status_constraint = SCHEMA
-        .lines()
-        .find(|line| line.contains("status TEXT NOT NULL CHECK"))
-        .ok_or(rusqlite::Error::InvalidQuery)?;
-    if !deals_ddl.contains(status_constraint.trim().trim_end_matches(',')) {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
-    // Detect a forged/stale marker as well as foreign-key damage before accepting a database.
-    for sql in [
-        "SELECT token_hash, user_id, expires_at, revoked_at FROM auth_sessions LIMIT 0",
-        "SELECT key, value FROM app_metadata LIMIT 0",
-        "SELECT id, first_name, last_name, email, username, password_hash, job_title, created_at, updated_at FROM users LIMIT 0",
-        "SELECT id, reminder, notes, date, link, time, deal, tag, created_at, updated_at FROM reminders LIMIT 0",
-        "SELECT deal_id, user_id, deal_name, deal_code, engagement_type, transaction_type, status, start_date, expected_close_date, actual_close_date, engagement_completed_date, archived_at, created_at, updated_at FROM deals LIMIT 0",
-        "SELECT company_id, user_id, name, website, industry, description, created_at, updated_at FROM companies LIMIT 0",
-        "SELECT deal_party_id, deal_id, company_id, role, notes FROM deal_parties LIMIT 0",
-        "SELECT deal_id, scope FROM deal_scopes LIMIT 0",
-        "SELECT deal_id, key_questions_json, local_path, sharepoint_link, sow_link, fact_sheet_link, rl_link FROM deal_metadata LIMIT 0",
-        "SELECT thread_id, user_id, deal_id, title, status, metadata_json, created_at, updated_at, last_message_at FROM assistant_threads LIMIT 0",
-        "SELECT message_id, thread_id, parent_message_id, sequence, role, content, status, model, request_id, error_code, metadata_json, created_at, completed_at FROM assistant_messages LIMIT 0",
-        "SELECT file_id, deal_id, workspace_id, display_name, source_uri, metadata_json, created_at, updated_at, deleted_at FROM quarry_files LIMIT 0",
-        "SELECT version_id, file_id, version_number, original_filename, mime_type, content_sha256, byte_size, is_current, created_at FROM quarry_file_versions LIMIT 0",
-        "SELECT version_id, file_bytes FROM quarry_file_blobs LIMIT 0",
-    ] { connection.prepare(sql)?; }
-    Ok(())
+async fn catalog(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> Result<String, sqlx::Error> {
+    // Include column types/defaults/nullability, constraints, indexes, sequences and functions.
+    // Exclude row data and normalize the selected schema name for isolated test namespaces.
+    let entries: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT entry FROM (
+        SELECT 'relation:' || c.relname || ':' || c.relkind::text AS entry FROM pg_class c
+          WHERE c.relnamespace=current_schema()::regnamespace AND c.relkind IN ('r','p','v','m','S','f')
+        UNION ALL
+        SELECT 'column:' || c.relname || ':' || a.attnum || ':' || a.attname || ':' || format_type(a.atttypid,a.atttypmod) || ':' || a.attnotnull || ':' || a.attidentity::text || ':' || COALESCE(pg_get_expr(d.adbin,d.adrelid),'') || ':' || COALESCE(coll.collname,'')
+          FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+          LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+          LEFT JOIN pg_collation coll ON coll.oid=a.attcollation
+          WHERE c.relnamespace=current_schema()::regnamespace AND a.attnum>0 AND NOT a.attisdropped
+        UNION ALL
+        SELECT 'constraint:' || c.relname || ':' || con.conname || ':' || pg_get_constraintdef(con.oid,true)
+          FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid WHERE c.relnamespace=current_schema()::regnamespace
+        UNION ALL
+        SELECT 'index:' || indexname || ':' || indexdef FROM pg_indexes WHERE schemaname=current_schema()
+        UNION ALL
+        SELECT 'function:' || p.proname || ':' || pg_get_functiondef(p.oid) FROM pg_proc p WHERE p.pronamespace=current_schema()::regnamespace
+        UNION ALL
+        SELECT 'trigger:' || t.tgname || ':' || pg_get_triggerdef(t.oid,true) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace=current_schema()::regnamespace AND NOT t.tgisinternal
+        ) definitions ORDER BY entry COLLATE "C"
+    "#,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    let schema: String = sqlx::query_scalar("SELECT current_schema()")
+        .fetch_one(&mut **tx)
+        .await?;
+    let normalized = entries
+        .join("\n")
+        .replace(&format!("{schema}."), "quarry_schema.");
+    Ok(format!("{:x}", Sha256::digest(normalized.as_bytes())))
 }
-fn validate_template_schema(connection: &Connection, legacy: bool) -> rusqlite::Result<()> {
-    for sql in [
-        "SELECT template_id, template_json FROM templates LIMIT 0",
-        "SELECT asset_id, template_id, content_type, asset_data FROM template_assets LIMIT 0",
-        "SELECT template_id, kind, description, source, checksum, created_at FROM template_metadata LIMIT 0",
-        "SELECT template_id, content_type, preview_data, width, height FROM template_previews LIMIT 0",
-        "SELECT app_id, display_name, metadata_json, created_at, last_seen_at FROM apps LIMIT 0",
-        "SELECT app_id, template_id, created_at FROM app_templates LIMIT 0",
-        "SELECT template_id, status, metadata_json, archetype, layout_type, content_density, embedding_status,
-                subject_embedding_document, subject_embedding, subject_embedding_fingerprint,
-                capability_embedding_document, capability_embedding, capability_embedding_fingerprint,
-                embedding_model, embedding_dimensions, embedding_attempt_count, embedding_next_attempt_at,
-                embedding_lease_expires_at, embedding_last_error_code, input_fingerprint, classified_fingerprint,
-                schema_version, prompt_version, model, attempt_count, next_attempt_at, lease_expires_at,
-                classified_at, last_error_code FROM slide_classifications LIMIT 0",
-        "SELECT template_id, title, subject_summary, domains, topics, technologies, entities, claims, synonyms,
-                intents, information_types, audience, archetype, content_slots, visual_structure, retrieval_keywords
-                FROM slide_classifications_fts WHERE slide_classifications_fts MATCH 'schema' LIMIT 0",
-    ] {
-        let sql = if legacy { sql.to_owned() } else { sql.replace("FROM slide_classifications LIMIT", "FROM template_classification_status LIMIT") };
-        connection.prepare(&sql)?;
-    }
-    Ok(())
-}
-
-/// Explicitly discard all development records. The caller must select and drain the database.
-pub fn reset_development(sqlite: &SqliteClient) -> Result<(), MigrationError> {
-    sqlite.with_connection_result(reset_connection)
-}
-fn check_foreign_keys(connection: &Connection) -> rusqlite::Result<()> {
-    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
-    if statement.query([])?.next()?.is_some() {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
-    Ok(())
-}
-fn reset_connection(connection: &mut Connection) -> Result<(), MigrationError> {
-    connection.pragma_update(None, "foreign_keys", "OFF")?;
-    let result = (|| -> Result<(), MigrationError> {
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            "DROP TABLE IF EXISTS document_image_recovery;
-             DROP TABLE IF EXISTS quarry_current_content;
-             DROP TABLE IF EXISTS document_chunk_identities;
-             DROP TABLE IF EXISTS document_identity_manifests;
-             DROP TABLE IF EXISTS deal_team_memberships;
-             DROP TABLE IF EXISTS deal_teams;
-             DROP TABLE IF EXISTS deal_activity_events;
-             DROP TABLE IF EXISTS deal_memberships;
-             DROP TABLE IF EXISTS deal_access_revisions;
-             DROP TABLE IF EXISTS notebook_cleanup;
-             DROP TABLE IF EXISTS notebook_save_jobs;
-             DROP TABLE IF EXISTS notebook_notes;
-             DROP TABLE IF EXISTS notebook_folders;
-             DROP TABLE IF EXISTS notebooks;
-             DROP TABLE IF EXISTS slide_classifications_fts;
-             DROP TABLE IF EXISTS slide_classifications;
-             DROP TABLE IF EXISTS template_classification_status;
-             DROP TABLE IF EXISTS app_templates;
-             DROP TABLE IF EXISTS apps;
-             DROP TABLE IF EXISTS template_assets;
-             DROP TABLE IF EXISTS template_previews;
-             DROP TABLE IF EXISTS template_metadata;
-             DROP TABLE IF EXISTS templates;
-             DROP TABLE IF EXISTS deal_deletion_threads;
-             DROP TABLE IF EXISTS deal_deletion_files;
-             DROP TABLE IF EXISTS deal_deletions;
-             DROP TABLE IF EXISTS assistant_messages;
-             DROP TABLE IF EXISTS assistant_threads;
-             DROP TABLE IF EXISTS quarry_file_blobs;
-             DROP TABLE IF EXISTS quarry_file_versions;
-             DROP TABLE IF EXISTS quarry_files;
-             DROP TABLE IF EXISTS deal_scopes;
-             DROP TABLE IF EXISTS deal_parties;
-             DROP TABLE IF EXISTS deal_metadata;
-             DROP TABLE IF EXISTS deals;
-             DROP TABLE IF EXISTS companies;
-             DROP TABLE IF EXISTS reminders;
-             DROP TABLE IF EXISTS auth_sessions;
-             DROP TABLE IF EXISTS users;
-             DROP TABLE IF EXISTS app_metadata;",
-        )?;
-        transaction.execute_batch(SCHEMA)?;
-        transaction.execute_batch(TEMPLATE_SCHEMA)?;
-        transaction.execute_batch(NOTEBOOK_SCHEMA)?;
-        transaction.execute_batch(MEMBERSHIP_SCHEMA)?;
-        transaction.execute_batch(DOCUMENT_SCOPE_UPGRADE)?;
-        transaction.execute_batch(IMAGE_RECOVERY_SCHEMA)?;
-        transaction.execute_batch(CLASSIFICATION_STATUS_UPGRADE)?;
-        transaction.execute_batch(TEMPLATE_OWNERSHIP_UPGRADE)?;
-        transaction.execute_batch(DELETION_SCHEMA)?;
-        check_foreign_keys(&transaction)?;
-        transaction.pragma_update(None, "user_version", LATEST_SCHEMA_VERSION)?;
-        transaction.commit()?;
-        Ok(())
-    })();
-    let restore = connection.pragma_update(None, "foreign_keys", "ON");
-    result?;
-    restore?;
-    Ok(())
-}
-const SCHEMA: &str = r#"
-            CREATE TABLE app_metadata (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                job_title TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE auth_sessions (
-                token_hash TEXT PRIMARY KEY NOT NULL,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL CHECK(expires_at > created_at),
-                revoked_at INTEGER
-            );
-            CREATE INDEX idx_auth_sessions_owner ON auth_sessions(user_id);
-            CREATE INDEX idx_auth_sessions_expiry ON auth_sessions(expires_at);
-
-            CREATE TABLE assistant_threads (
-                thread_id TEXT PRIMARY KEY NOT NULL,
-                deal_id TEXT REFERENCES deals(deal_id) ON DELETE RESTRICT,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                title TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'regular'
-                    CHECK (status IN ('regular', 'archived')),
-                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                last_message_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                CHECK (length(trim(thread_id)) > 0),
-                CHECK (length(trim(title)) > 0)
-            );
-
-            CREATE INDEX idx_assistant_threads_user_status_recent
-                ON assistant_threads(user_id, status, last_message_at DESC, thread_id);
-
-            CREATE TABLE assistant_messages (
-                message_id TEXT PRIMARY KEY NOT NULL,
-                thread_id TEXT NOT NULL REFERENCES assistant_threads(thread_id) ON DELETE CASCADE,
-                parent_message_id TEXT REFERENCES assistant_messages(message_id),
-                sequence INTEGER NOT NULL CHECK (sequence >= 0),
-                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-                content TEXT NOT NULL,
-                status TEXT NOT NULL
-                    CHECK (status IN ('streaming', 'completed', 'failed', 'cancelled')),
-                model TEXT,
-                request_id TEXT,
-                error_code TEXT,
-                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                completed_at TEXT,
-                UNIQUE (thread_id, sequence),
-                UNIQUE (thread_id, request_id),
-                CHECK (length(trim(message_id)) > 0),
-                CHECK (request_id IS NULL OR length(trim(request_id)) > 0)
-            );
-
-            CREATE INDEX idx_assistant_messages_thread_sequence
-                ON assistant_messages(thread_id, sequence);
-            CREATE INDEX idx_assistant_messages_thread_parent
-                ON assistant_messages(thread_id, parent_message_id);
-
-            CREATE TABLE reminders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                reminder TEXT NOT NULL,
-                notes TEXT NOT NULL,
-                date TEXT NOT NULL,
-                link TEXT NOT NULL,
-                time TEXT,
-                deal TEXT,
-                tag TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE deals (
-                deal_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(deal_id)) > 0),
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-                deal_name TEXT NOT NULL CHECK (length(trim(deal_name)) > 0),
-                deal_code TEXT CHECK (deal_code IS NULL OR length(trim(deal_code)) > 0),
-                engagement_type TEXT NOT NULL CHECK (engagement_type IN ('buy_side', 'sell_side', 'other')),
-                transaction_type TEXT NOT NULL CHECK (transaction_type IN ('platform_acquisition', 'add_on_acquisition', 'strategic_acquisition', 'carve_out', 'merger', 'divestiture', 'recapitalization', 'growth_equity', 'other', 'unknown')),
-                status TEXT NOT NULL CHECK (status IN ('pipeline', 'prepare', 'review_plan_discovery', 'interviews_site_visit', 'debrief_flash_report', 'follow_ups_analysis', 'qa_readout_closeout', 'closed', 'pencils_down')),
-                start_date TEXT CHECK (start_date IS NULL OR length(trim(start_date)) > 0),
-                expected_close_date TEXT CHECK (expected_close_date IS NULL OR length(trim(expected_close_date)) > 0),
-                actual_close_date TEXT CHECK (actual_close_date IS NULL OR length(trim(actual_close_date)) > 0),
-                engagement_completed_date TEXT CHECK (engagement_completed_date IS NULL OR length(trim(engagement_completed_date)) > 0),
-                archived_at TEXT CHECK (archived_at IS NULL OR length(trim(archived_at)) > 0),
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX idx_deals_user_id ON deals(user_id);
-            CREATE INDEX idx_deals_status ON deals(status);
-            CREATE INDEX idx_deals_transaction_type ON deals(transaction_type);
-            CREATE INDEX idx_deals_expected_close_date ON deals(expected_close_date);
-            CREATE INDEX idx_deals_actual_close_date ON deals(actual_close_date);
-            CREATE TABLE companies (
-                company_id TEXT PRIMARY KEY NOT NULL,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-                name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-                website TEXT CHECK (website IS NULL OR length(trim(website)) > 0),
-                industry TEXT CHECK (industry IS NULL OR length(trim(industry)) > 0),
-                description TEXT CHECK (description IS NULL OR length(trim(description)) > 0),
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX idx_companies_owner_name ON companies(user_id, name, company_id);
-            CREATE TABLE deal_parties (
-                deal_party_id TEXT PRIMARY KEY NOT NULL,
-                deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-                company_id TEXT NOT NULL REFERENCES companies(company_id) ON DELETE RESTRICT,
-                role TEXT NOT NULL CHECK (role IN ('target', 'buyer', 'seller', 'pe_sponsor', 'portfolio_company', 'parent_company', 'client', 'other')),
-                notes TEXT CHECK (notes IS NULL OR length(trim(notes)) > 0),
-                UNIQUE (deal_id, company_id, role)
-            );
-            CREATE INDEX idx_parties_deal_role ON deal_parties(deal_id, role);
-            CREATE INDEX idx_parties_company ON deal_parties(company_id);
-            CREATE TABLE deal_scopes (
-                deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-                scope TEXT NOT NULL CHECK (scope IN ('product_architecture', 'corporate_it', 'cybersecurity', 'application_security', 'sdlc', 'it_organization', 'it_financials')),
-                PRIMARY KEY (deal_id, scope)
-            );
-            CREATE TABLE deal_metadata (
-                deal_id TEXT PRIMARY KEY NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-                key_questions_json TEXT NOT NULL DEFAULT '[]'
-                    CHECK (json_valid(key_questions_json) AND json_type(key_questions_json) = 'array'),
-                local_path TEXT CHECK (local_path IS NULL OR length(trim(local_path)) > 0),
-                sharepoint_link TEXT CHECK (sharepoint_link IS NULL OR length(trim(sharepoint_link)) > 0),
-                sow_link TEXT CHECK (sow_link IS NULL OR length(trim(sow_link)) > 0),
-                fact_sheet_link TEXT CHECK (fact_sheet_link IS NULL OR length(trim(fact_sheet_link)) > 0),
-                rl_link TEXT CHECK (rl_link IS NULL OR length(trim(rl_link)) > 0),
-                CHECK (NOT (local_path IS NOT NULL AND sharepoint_link IS NOT NULL))
-            );
-
-            CREATE TABLE quarry_files (
-                file_id       TEXT PRIMARY KEY NOT NULL,
-                deal_id       TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-                workspace_id  TEXT NOT NULL,
-                display_name  TEXT NOT NULL,
-                source_uri    TEXT,
-                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
-                created_at    TEXT NOT NULL,
-                updated_at    TEXT NOT NULL,
-                deleted_at    TEXT,
-                CHECK (length(trim(file_id)) > 0),
-                CHECK (length(trim(deal_id)) > 0),
-                CHECK (length(trim(workspace_id)) > 0),
-                CHECK (length(trim(display_name)) > 0),
-                CHECK (source_uri IS NULL OR length(trim(source_uri)) > 0)
-            );
-
-            CREATE TABLE quarry_file_versions (
-                version_id        TEXT PRIMARY KEY NOT NULL,
-                file_id           TEXT NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
-                version_number    INTEGER NOT NULL CHECK (version_number > 0),
-                original_filename TEXT NOT NULL,
-                mime_type         TEXT NOT NULL,
-                content_sha256    TEXT NOT NULL,
-                byte_size         INTEGER NOT NULL CHECK (byte_size >= 0),
-                is_current        INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1)),
-                created_at        TEXT NOT NULL,
-                UNIQUE (file_id, version_number),
-                UNIQUE (file_id, content_sha256),
-                CHECK (length(trim(version_id)) > 0),
-                CHECK (length(trim(original_filename)) > 0),
-                CHECK (length(content_sha256) = 64)
-            );
-
-            CREATE UNIQUE INDEX uq_quarry_file_versions_current
-                ON quarry_file_versions(file_id)
-                WHERE is_current = 1;
-            CREATE INDEX idx_quarry_files_deal
-                ON quarry_files(deal_id, deleted_at);
-            CREATE INDEX idx_quarry_files_workspace_deal
-                ON quarry_files(workspace_id, deal_id, deleted_at);
-            CREATE INDEX idx_quarry_file_versions_file
-                ON quarry_file_versions(file_id, version_number DESC);
-            CREATE INDEX idx_quarry_file_versions_hash
-                ON quarry_file_versions(content_sha256);
-
-            CREATE TABLE quarry_file_blobs (
-                version_id  TEXT PRIMARY KEY NOT NULL
-                    REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
-                file_bytes  BLOB NOT NULL
-            );
-
-            CREATE INDEX idx_assistant_threads_deal_recent
-                ON assistant_threads(user_id, deal_id, status, last_message_at DESC, thread_id);
-"#;
-
-const TEMPLATE_SCHEMA: &str = r#"
-CREATE TABLE templates (
-                 template_id TEXT PRIMARY KEY,
-                 template_json TEXT NOT NULL CHECK (json_valid(template_json))
-             ) STRICT;
-             CREATE TABLE template_assets (
-                 asset_id TEXT PRIMARY KEY,
-                 template_id TEXT NOT NULL,
-                 content_type TEXT NOT NULL CHECK (content_type LIKE 'image/%'),
-                 asset_data BLOB NOT NULL CHECK (length(asset_data) > 0),
-                 FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
-             ) STRICT;
-             CREATE TABLE template_metadata (
-                 template_id TEXT PRIMARY KEY,
-                 kind TEXT NOT NULL CHECK (kind IN ('diagram', 'commentary')),
-                 description TEXT NOT NULL,
-                 source TEXT NOT NULL CHECK (source IN ('builtin', 'import')),
-                 checksum TEXT,
-                 created_at TEXT NOT NULL,
-                 FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
-             ) STRICT;
-             CREATE TABLE template_previews (
-                 template_id TEXT PRIMARY KEY,
-                 content_type TEXT NOT NULL CHECK (content_type = 'image/png'),
-                 preview_data BLOB NOT NULL CHECK (length(preview_data) > 0),
-                 width INTEGER NOT NULL CHECK (width > 0),
-                 height INTEGER NOT NULL CHECK (height > 0),
-                 FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
-             ) STRICT;
-             CREATE INDEX template_assets_template_id_idx
-                 ON template_assets (template_id);
-             CREATE INDEX template_metadata_kind_created_at_idx
-                 ON template_metadata (kind, created_at DESC);
-             CREATE TABLE apps (
-                 app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
-                 metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
-                 created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
-             ) STRICT;
-             CREATE TABLE app_templates (
-                 app_id TEXT NOT NULL REFERENCES apps(app_id) ON DELETE CASCADE,
-                 template_id TEXT NOT NULL REFERENCES templates(template_id) ON DELETE CASCADE,
-                 created_at TEXT NOT NULL, PRIMARY KEY(app_id, template_id)
-             ) STRICT;
-             CREATE INDEX app_templates_template_id_idx ON app_templates(template_id);
-CREATE TABLE slide_classifications (
-        template_id TEXT PRIMARY KEY,
-        status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'ready', 'failed')),
-        metadata_json TEXT CHECK (metadata_json IS NULL OR json_valid(metadata_json)),
-        archetype TEXT,
-        layout_type TEXT,
-        content_density TEXT CHECK (content_density IS NULL OR content_density IN ('low', 'medium', 'high')),
-        embedding_status TEXT NOT NULL DEFAULT 'not_ready' CHECK (embedding_status IN ('not_ready', 'pending', 'processing', 'ready', 'failed')),
-        subject_embedding_document TEXT,
-        subject_embedding BLOB,
-        subject_embedding_fingerprint TEXT,
-        capability_embedding_document TEXT,
-        capability_embedding BLOB,
-        capability_embedding_fingerprint TEXT,
-        embedding_model TEXT,
-        embedding_dimensions INTEGER CHECK (embedding_dimensions IS NULL OR embedding_dimensions > 0),
-        embedding_attempt_count INTEGER NOT NULL DEFAULT 0,
-        embedding_next_attempt_at TEXT,
-        embedding_lease_expires_at TEXT,
-        embedding_last_error_code TEXT,
-        input_fingerprint TEXT NOT NULL,
-        classified_fingerprint TEXT,
-        schema_version INTEGER NOT NULL CHECK (schema_version = 2),
-        prompt_version TEXT NOT NULL,
-        model TEXT,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        next_attempt_at TEXT,
-        lease_expires_at TEXT,
-        classified_at TEXT,
-        last_error_code TEXT,
-        FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
-    ) STRICT;
-    CREATE INDEX slide_classifications_classification_jobs_idx
-        ON slide_classifications (status, next_attempt_at, lease_expires_at);
-    CREATE INDEX slide_classifications_embedding_jobs_idx
-        ON slide_classifications (embedding_status, embedding_next_attempt_at, embedding_lease_expires_at);
-    CREATE INDEX slide_classifications_schema_idx
-        ON slide_classifications (schema_version, status, embedding_status);
-    CREATE VIRTUAL TABLE slide_classifications_fts USING fts5(
-        template_id UNINDEXED,title,subject_summary,domains,topics,technologies,entities,
-        claims,synonyms,intents,information_types,audience,archetype,content_slots,
-        visual_structure,retrieval_keywords,
-        tokenize='unicode61 remove_diacritics 2');
-"#;
-
 #[cfg(test)]
 #[path = "../../tests/integration/app/migrations_tests.rs"]
 mod tests;
-
-const NOTEBOOK_SCHEMA: &str = r#"
-CREATE TABLE notebooks (
-    notebook_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(notebook_id)) > 0),
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    deal_id TEXT REFERENCES deals(deal_id) ON DELETE RESTRICT,
-    title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 300),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE notebook_folders (
-    folder_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(folder_id)) > 0),
-    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 200),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (notebook_id, folder_id)
-);
-
-CREATE TABLE notebook_notes (
-    note_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(note_id)) > 0),
-    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
-    folder_id TEXT,
-    title TEXT NOT NULL DEFAULT '' CHECK (length(title) <= 300),
-    blocks_json TEXT NOT NULL DEFAULT '[]'
-        CHECK (json_valid(blocks_json) AND json_type(blocks_json) = 'array'),
-    content_schema_version INTEGER NOT NULL DEFAULT 1
-        CHECK (content_schema_version = 1),
-    revision INTEGER NOT NULL DEFAULT 1
-        CHECK (revision BETWEEN 1 AND 9007199254740991),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (notebook_id, folder_id)
-        REFERENCES notebook_folders(notebook_id, folder_id)
-        ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
-);
-
-CREATE INDEX idx_notebooks_owner_recent
-    ON notebooks(user_id, updated_at DESC, notebook_id);
-CREATE INDEX idx_notebooks_owner_deal_recent
-    ON notebooks(user_id, deal_id, updated_at DESC, notebook_id);
-CREATE INDEX idx_notebooks_deal ON notebooks(deal_id);
-CREATE INDEX idx_notebook_folders_notebook
-    ON notebook_folders(notebook_id, folder_id);
-CREATE INDEX idx_notebook_notes_notebook_recent
-    ON notebook_notes(notebook_id, updated_at DESC, note_id);
-CREATE INDEX idx_notebook_notes_folder_recent
-    ON notebook_notes(notebook_id, folder_id, updated_at DESC, note_id);
-
-CREATE TABLE notebook_save_jobs (
-    job_id TEXT PRIMARY KEY NOT NULL,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    notebook_id TEXT NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
-    note_id TEXT NOT NULL,
-    operation_id TEXT NOT NULL,
-    request_hash TEXT NOT NULL CHECK(length(request_hash) = 64),
-    input_json TEXT NOT NULL CHECK(json_valid(input_json)),
-    status TEXT NOT NULL CHECK(status IN ('queued','processing','completed','failed')),
-    stage TEXT NOT NULL CHECK(stage IN ('persisting','exporting','chunking','embedding','indexing')),
-    committed_revision INTEGER CHECK(committed_revision BETWEEN 1 AND 9007199254740991),
-    attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt BETWEEN 1 AND 5),
-    sequence INTEGER NOT NULL DEFAULT 1 CHECK(sequence > 0),
-    error_code TEXT,
-    lease_token TEXT,
-    lease_until INTEGER,
-    pipeline_version TEXT NOT NULL DEFAULT 'notebook-markdown-v1/chunks-v1',
-    content_hash TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(user_id, operation_id)
-);
-CREATE UNIQUE INDEX idx_notebook_one_active_save ON notebook_save_jobs(note_id)
-    WHERE status IN ('queued','processing');
-CREATE INDEX idx_notebook_jobs_queue ON notebook_save_jobs(status, lease_until, created_at);
-CREATE INDEX idx_notebook_jobs_actor ON notebook_save_jobs(user_id, status);
-CREATE INDEX idx_notebook_jobs_parent ON notebook_save_jobs(notebook_id, note_id);
--- Independent tombstones survive cascades until Helix acknowledges physical removal.
-CREATE TABLE notebook_cleanup (
-    note_id TEXT PRIMARY KEY NOT NULL,
-    user_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    next_attempt_at INTEGER NOT NULL DEFAULT 0,
-    confirmed INTEGER NOT NULL DEFAULT 0 CHECK(confirmed IN (0,1))
-);
-"#;
-
-fn validate_owned_schema(connection: &Connection, schemas: &[&str]) -> rusqlite::Result<()> {
-    // Compare owned DDL, including constraints and indexes, rather than accepting a forged marker.
-    let reference = Connection::open_in_memory()?;
-    for schema in schemas {
-        reference.execute_batch(schema)?;
-    }
-    let mut statement = reference.prepare(
-        "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
-    )?;
-    for entry in
-        statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-    {
-        let (name, expected) = entry?;
-        let actual: String = connection.query_row(
-            "SELECT sql FROM sqlite_master WHERE name = ?1",
-            [&name],
-            |r| r.get(0),
-        )?;
-        if actual != expected {
-            return Err(rusqlite::Error::InvalidQuery);
-        }
-    }
-    Ok(())
-}
-
-const IMAGE_RECOVERY_SCHEMA: &str = r#"
-CREATE TABLE document_image_recovery (
-    version_id TEXT PRIMARY KEY NOT NULL REFERENCES document_identity_manifests(version_id) ON DELETE CASCADE,
-    assembly_json TEXT NOT NULL CHECK(json_valid(assembly_json) AND json_type(assembly_json) = 'object')
-);
-"#;
-
-const MEMBERSHIP_SCHEMA: &str = r#"
-CREATE TABLE deal_memberships (
-    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    role TEXT NOT NULL CHECK(role IN ('owner','manager','contributor','viewer')),
-    added_by_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
-    joined_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
-    PRIMARY KEY(deal_id, user_id)
-);
-CREATE UNIQUE INDEX idx_deal_single_owner ON deal_memberships(deal_id) WHERE role = 'owner';
-CREATE INDEX idx_deal_memberships_user ON deal_memberships(user_id, deal_id);
-CREATE TABLE deal_access_revisions (
-    deal_id TEXT PRIMARY KEY NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991)
-);
-CREATE TABLE deal_teams (
-    team_id TEXT PRIMARY KEY NOT NULL,
-    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
-    normalized_name TEXT NOT NULL CHECK(length(normalized_name) BETWEEN 1 AND 300),
-    created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
-    UNIQUE(deal_id, normalized_name),
-    UNIQUE(deal_id, team_id)
-);
-CREATE TABLE deal_team_memberships (
-    deal_id TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    user_id INTEGER NOT NULL,
-    PRIMARY KEY(deal_id, team_id, user_id),
-    FOREIGN KEY(deal_id, team_id) REFERENCES deal_teams(deal_id, team_id) ON DELETE CASCADE,
-    FOREIGN KEY(deal_id, user_id) REFERENCES deal_memberships(deal_id, user_id) ON DELETE CASCADE
-);
-CREATE TABLE deal_activity_events (
-    event_id TEXT PRIMARY KEY NOT NULL,
-    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    actor_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
-    kind TEXT NOT NULL CHECK(kind IN ('membership_backfilled','project_created','member_added','member_role_changed','member_removed','ownership_transferred','team_created','team_renamed','team_deleted','team_member_added','team_member_removed','deal_archived','deal_updated','metadata_updated','document_uploaded')),
-    target_id TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX idx_deal_activity_cursor ON deal_activity_events(deal_id, created_at, event_id);
-"#;
-
-const DOCUMENT_SCOPE_UPGRADE: &str = r#"
-CREATE TABLE quarry_files_deal_scope (
-    file_id TEXT PRIMARY KEY NOT NULL,
-    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    display_name TEXT NOT NULL,
-    source_uri TEXT,
-    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json)),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    deleted_at TEXT,
-    CHECK(length(trim(file_id)) > 0), CHECK(length(trim(deal_id)) > 0),
-    CHECK(length(trim(display_name)) > 0), CHECK(source_uri IS NULL OR length(trim(source_uri)) > 0)
-);
-INSERT INTO quarry_files_deal_scope SELECT file_id,deal_id,display_name,source_uri,metadata_json,created_at,updated_at,deleted_at FROM quarry_files;
-DROP TABLE quarry_files;
-ALTER TABLE quarry_files_deal_scope RENAME TO quarry_files;
-CREATE INDEX idx_quarry_files_deal ON quarry_files(deal_id, display_name, file_id);
-ALTER TABLE quarry_file_versions ADD COLUMN uploaded_by_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
-CREATE TABLE quarry_current_content (
-    deal_id TEXT NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
-    content_sha256 TEXT NOT NULL,
-    file_id TEXT NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
-    version_id TEXT NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
-    PRIMARY KEY(deal_id,content_sha256),
-    UNIQUE(file_id)
-);
-INSERT INTO quarry_current_content SELECT f.deal_id,v.content_sha256,f.file_id,v.version_id FROM quarry_files f JOIN quarry_file_versions v ON f.file_id=v.file_id WHERE f.deleted_at IS NULL AND v.is_current=1;
-CREATE TABLE document_identity_manifests (
-    version_id TEXT PRIMARY KEY NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
-    derivation_version INTEGER NOT NULL CHECK(derivation_version IN (1,2)),
-    document_id TEXT NOT NULL,
-    active_generation TEXT NOT NULL CHECK(length(active_generation) > 0),
-    chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
-    graph_migrated INTEGER NOT NULL DEFAULT 0 CHECK(graph_migrated IN (0,1))
-);
-CREATE TABLE document_chunk_identities (
-    chunk_id TEXT PRIMARY KEY NOT NULL,
-    version_id TEXT NOT NULL REFERENCES document_identity_manifests(version_id) ON DELETE CASCADE,
-    index_generation TEXT NOT NULL,
-    chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
-    chunk_sha256 TEXT NOT NULL,
-    UNIQUE(version_id,index_generation,chunk_index)
-);
-"#;
-
-// Keep historical DDL intact so validated 12–15 stores can upgrade without rebuilding rows.
-const CLASSIFICATION_STATUS_UPGRADE: &str = r#"
-ALTER TABLE slide_classifications RENAME TO template_classification_status;
-UPDATE template_classification_status SET status = 'pending', attempt_count = 0,
-    last_error_code = 'classification_interrupted', next_attempt_at = NULL
-    WHERE status = 'processing' AND lease_expires_at IS NULL;
-"#;
-
-// Existing shared records have no trustworthy importer identity. Preserve them unassigned.
-const TEMPLATE_OWNERSHIP_UPGRADE: &str = r#"
-ALTER TABLE templates ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
-CREATE INDEX templates_owner_user_id_idx ON templates(owner_user_id, template_id);
-"#;
-
-const DELETION_SCHEMA: &str = r#"
-CREATE TABLE deal_deletions (
-    deletion_id TEXT PRIMARY KEY NOT NULL,
-    deal_id TEXT NOT NULL UNIQUE,
-    owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    status TEXT NOT NULL CHECK(status IN ('pending','running','retrying','blocked','completed')),
-    phase TEXT NOT NULL CHECK(phase IN ('draining','fencing','sqlite','graph','verifying','completed')),
-    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
-    next_attempt INTEGER NOT NULL DEFAULT 0,
-    error_code TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    completed_at TEXT
-);
-CREATE INDEX idx_deal_deletions_pending ON deal_deletions(status,next_attempt);
-CREATE TABLE deal_deletion_files (
-    deletion_id TEXT NOT NULL REFERENCES deal_deletions(deletion_id) ON DELETE CASCADE,
-    file_id TEXT NOT NULL,
-    purged INTEGER NOT NULL DEFAULT 0 CHECK(purged IN (0,1)),
-    PRIMARY KEY(deletion_id,file_id)
-);
-CREATE TABLE deal_deletion_threads (
-    deletion_id TEXT NOT NULL REFERENCES deal_deletions(deletion_id) ON DELETE CASCADE,
-    thread_id TEXT NOT NULL,
-    PRIMARY KEY(deletion_id,thread_id)
-);
-"#;

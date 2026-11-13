@@ -67,6 +67,7 @@ export const diligenceScopeOptions = [
 export type DiligenceScope = (typeof diligenceScopeOptions)[number];
 
 export type Company = {
+  revision: number;
   companyId: string;
   userId: number;
   name: string;
@@ -126,3 +127,6 @@ export function partyNames(parties: readonly DealParty[], role: PartyRole) {
       .join(", ") || undefined
   );
 }
+
+export type CompanyUpdateInput = CompanyInput & { expectedRevision: number };
+export type UpdateDealInput = DealFields & { expectedRevision: number };

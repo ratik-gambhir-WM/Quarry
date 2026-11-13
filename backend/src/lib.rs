@@ -1,6 +1,9 @@
 pub mod adapters;
 pub mod app;
 pub mod domains;
+#[cfg(test)]
+#[path = "../tests/integration/resource_concurrency_tests.rs"]
+mod resource_concurrency_tests;
 pub mod shared;
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ async fn register(app: &Router, name: &str) -> Value {
 }
 #[tokio::test]
 async fn authentication_register_login_me_and_revoke_across_mounts() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     let owner = register(&app.router, "owner").await;
     assert!(owner["user"].get("passwordHash").is_none());
     assert!(owner["user"].get("apiKey").is_none());
@@ -137,7 +137,7 @@ async fn authentication_register_login_me_and_revoke_across_mounts() {
 }
 #[tokio::test]
 async fn authentication_protects_all_product_routes_and_removes_profile_bypasses() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     for prefix in ["/api", "/api/v1"] {
         for path in [
             "/deals",
@@ -228,18 +228,25 @@ async fn authentication_protects_all_product_routes_and_removes_profile_bypasses
 
 #[tokio::test]
 async fn authentication_hashes_are_salted_and_sessions_expire_without_exposing_secrets() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     let owner = register(&app.router, "owner").await;
     register(&app.router, "other").await;
     let hashes = app
-        .sqlite
-        .with_connection(|c| {
-            let mut statement = c.prepare("SELECT password_hash FROM users ORDER BY id")?;
+        .postgres
+        .with_connection(async |c| {
+            let mut statement = c
+                .prepare("SELECT password_hash FROM users ORDER BY id")
+                .await?;
             let values = statement
-                .query_map([], |r| r.get::<_, String>(0))?
+                .query_map(
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |r| r.get::<_, String>(0),
+                )
+                .await?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(values)
         })
+        .await
         .unwrap();
     assert_ne!(hashes[0], hashes[1]);
     assert!(hashes
@@ -247,25 +254,29 @@ async fn authentication_hashes_are_salted_and_sessions_expire_without_exposing_s
         .all(|h| h.starts_with("$argon2id$v=19$m=19456,t=2,p=1$")));
     let raw = owner["accessToken"].as_str().unwrap();
     let stored = app
-        .sqlite
-        .with_connection(|c| {
+        .postgres
+        .with_connection(async |c| {
             c.query_row(
                 "SELECT token_hash FROM auth_sessions WHERE user_id=1",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
                 |r| r.get::<_, String>(0),
             )
+            .await
         })
+        .await
         .unwrap();
     assert_ne!(raw, stored);
     assert_eq!(stored.len(), 64);
-    app.sqlite
-        .with_connection(|c| {
+    app.postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE auth_sessions SET created_at=0, expires_at=1 WHERE user_id=1",
-                [],
-            )?;
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            )
+            .await?;
             Ok(())
         })
+        .await
         .unwrap();
     assert_eq!(
         call(
@@ -286,7 +297,7 @@ async fn authentication_hashes_are_salted_and_sessions_expire_without_exposing_s
 
 #[tokio::test]
 async fn authentication_rejects_cross_owner_deals_companies_and_job_subscriptions() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     let owner = register(&app.router, "owner").await;
     let other = register(&app.router, "other").await;
     let (_, company) = call(
@@ -306,7 +317,7 @@ async fn authentication_rejects_cross_owner_deals_companies_and_job_subscription
             &app.router,
             "POST",
             &update,
-            json!({"name":"Stolen", "website":null,"industry":null,"description":null}),
+            json!({"expectedRevision":1,"name":"Stolen", "website":null,"industry":null,"description":null}),
             Some(&other)
         )
         .await
@@ -378,11 +389,11 @@ async fn authentication_logout_closes_an_admitted_stream_and_preflight_allows_he
     use crate::domains::users::UserRepository;
     use futures_util::StreamExt;
     use std::sync::Arc;
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     let owner = register(&app.router, "owner").await;
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
-        app.sqlite.clone(),
-        UserRepository::new(app.sqlite.clone()),
+        app.postgres.clone(),
+        UserRepository::new(app.postgres.clone()),
     )));
     let stream = Router::new()
         .route(
@@ -397,11 +408,11 @@ async fn authentication_logout_closes_an_admitted_stream_and_preflight_allows_he
             crate::app::http::auth::AuthBoundary {
                 identity: identity.clone(),
                 access: ResourceAccess::new(
-                    app.sqlite.clone(),
+                    app.postgres.clone(),
                     std::sync::Arc::new(
                         crate::domains::memberships::service::DealAccessService::new(
                             crate::domains::memberships::repository::MembershipRepository::new(
-                                app.sqlite.clone(),
+                                app.postgres.clone(),
                             ),
                         ),
                     ),
@@ -462,7 +473,7 @@ async fn authentication_logout_closes_an_admitted_stream_and_preflight_allows_he
 
 #[tokio::test]
 async fn authentication_registration_requires_the_exact_west_monroe_domain() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     for email in [
         "outsider@example.com",
         "analyst@westmonroe.com.evil.test",
@@ -478,7 +489,7 @@ async fn authentication_registration_requires_the_exact_west_monroe_domain() {
 
 #[tokio::test]
 async fn authentication_login_accepts_username_or_email_and_keeps_both_unique() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     let name = "a".repeat(32);
     let owner = register(&app.router, &name).await;
     for prefix in ["/api/v1", "/api"] {
@@ -539,7 +550,7 @@ async fn authentication_login_accepts_username_or_email_and_keeps_both_unique() 
 
 #[tokio::test]
 async fn authentication_login_limit_is_shared_by_username_and_email() {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     register(&app.router, "owner").await;
     let path = "/api/v1/auth/login";
     // Success through email clears failures accumulated through the username.

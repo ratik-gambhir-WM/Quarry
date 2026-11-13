@@ -469,6 +469,7 @@ function fixtureParty(name: string): DealParty {
     role: "target",
     notes: null,
     company: {
+      revision: 1,
       companyId: `demo-${name}`,
       userId: 0,
       name,

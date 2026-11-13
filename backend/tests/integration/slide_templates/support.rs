@@ -1,25 +1,32 @@
-use crate::{adapters::sqlite::client::SqliteClient, domains::templates::slide_templates::*};
+use crate::{adapters::postgres::client::PostgresClient, domains::templates::slide_templates::*};
 use std::{path::Path, sync::Arc};
-pub fn repository(path: &Path) -> anyhow::Result<SqliteTemplateRepository> {
+pub async fn repository(path: &Path) -> anyhow::Result<PostgresTemplateRepository> {
     let client = if path == std::path::Path::new(":memory:") {
-        SqliteClient::open_in_memory()?
+        PostgresClient::test_database().await?
     } else {
-        SqliteClient::open(path)?
+        PostgresClient::test_database_at(path).await?
     };
-    crate::app::migrations::migrate(&client)?;
-    let has_user = client.with_connection(|connection| {
-        connection.query_row("SELECT EXISTS(SELECT 1 FROM users WHERE id=1)", [], |row| {
-            row.get::<_, bool>(0)
+    crate::app::migrations::migrate(&client).await?;
+    let has_user = client
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM users WHERE id=1)",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |row| row.get::<_, bool>(0),
+                )
+                .await
         })
-    })?;
+        .await?;
     if !has_user {
-        crate::integration_support::seed_identity(&client, "template-fixture@example.com", 't');
+        crate::integration_support::seed_identity(&client, "template-fixture@example.com", 't')
+            .await;
     }
-    let repository = SqliteTemplateRepository::new(client).user_scope(1)?;
-    repository.ensure_app("Quarry_WestMonroe", None)?;
+    let repository = PostgresTemplateRepository::new(client).user_scope(1)?;
+    repository.ensure_app("Quarry_WestMonroe", None).await?;
     Ok(repository)
 }
-pub fn import_fixture(
+pub async fn import_fixture(
     repository: Arc<dyn TemplateRepository>,
     kind: TemplateKind,
 ) -> ImportResponse {
@@ -28,11 +35,12 @@ pub fn import_fixture(
             include_bytes!("../../fixtures/slide_templates/pptx/styled.pptx"),
             kind,
         )
+        .await
         .unwrap()
 }
 
-pub fn studio() -> Arc<SlideTemplates> {
-    let repository = Arc::new(repository(std::path::Path::new(":memory:")).unwrap());
+pub async fn studio() -> Arc<SlideTemplates> {
+    let repository = Arc::new(repository(std::path::Path::new(":memory:")).await.unwrap());
     Arc::new(SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
@@ -46,7 +54,7 @@ pub fn chromium_candidates() -> Vec<std::path::PathBuf> {
         .into_iter()
         .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
         .collect::<Vec<_>>();
-    crate::app::config::AppConfig::from_values(values)
+    crate::integration_support::config(values)
         .unwrap()
         .slide_templates
         .chromium_path

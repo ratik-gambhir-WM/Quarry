@@ -268,6 +268,7 @@ describe("DealRoomPage", () => {
     expect(screen.getByText("Updated question?")).toBeTruthy();
     expect(screen.getByText("retry-sow.pdf")).toBeTruthy();
     expect(api.saveDealMetadata).toHaveBeenLastCalledWith(deal.dealId, {
+      expectedRevision: 1,
       files: [file],
       sowLink: metadata.sowLink,
       factSheetLink: "https://example.com/facts",

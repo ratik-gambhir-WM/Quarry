@@ -12,6 +12,7 @@ export type DealLifecycle = "Current" | "Historic";
 export type DealScope = "all" | "current" | "historic";
 
 export type DealPortfolioView = {
+  revision: number | null;
   buyer?: string;
   canDelete: boolean;
   closeDate?: string;
@@ -57,6 +58,7 @@ export function buildDealPortfolioView(deal: WorkspaceDeal): DealPortfolioView {
   return {
     buyer: partyNames(deal.portfolio.parties, "buyer"),
     canDelete: deal.persisted?.role === "owner",
+    revision: deal.persisted?.revision ?? null,
     closeDate:
       deal.portfolio.actualCloseDate ?? deal.portfolio.expectedCloseDate,
     colorClassName: deal.colorClassName,

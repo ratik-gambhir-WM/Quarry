@@ -1,4 +1,4 @@
-"""Exercise Helix storage guards without starting Docker or product services."""
+"""Exercise PostgreSQL startup and Helix guards using isolated command stubs."""
 
 import json
 import os
@@ -37,6 +37,8 @@ elif args[:2] == ["container", "inspect"]:
         elif ".Mounts" in template:
             print({"wrong-volume": "other-data", "unmounted": "", "read-only": ""}
                   .get(scenario, os.environ["QUARRY_HELIX_CONTAINER_NAME"] + "-data"))
+        elif ".HostConfig.PortBindings" in template:
+            print("127.0.0.1:" + os.environ["QUARRY_HELIX_PORT"])
         elif template == "{{.State.Running}}":
             print("false")
         else:
@@ -51,8 +53,11 @@ elif args != ["info"]:
 '''
 
 
-class HelixStorageTests(unittest.TestCase):
-    def run_launcher(self, scenario):
+class LauncherTests(unittest.TestCase):
+    def run_launcher(
+        self, scenario, postgres_status=0, start_status=0,
+        target="web", database_status=0,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             docker = folder / "docker"
@@ -62,14 +67,33 @@ class HelixStorageTests(unittest.TestCase):
                 stub = folder / name
                 stub.write_text("#!/bin/sh\nexit 0\n")
                 stub.chmod(0o755)
+            postgres = folder / "pg_ctl"
+            postgres.write_text("""#!/usr/bin/env python3
+import json, os, pathlib, sys
+folder = pathlib.Path(os.environ["QUARRY_TEST_FOLDER"])
+with (folder / "postgres.jsonl").open("a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[-1] == "status":
+    sys.exit(int(os.environ["QUARRY_TEST_POSTGRES_STATUS"]))
+sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
+""")
+            postgres.chmod(0o755)
+            (folder / "uname").write_text("#!/bin/sh\necho Darwin\n")
+            (folder / "uname").chmod(0o755)
+            (folder / "cargo").write_text(
+                "#!/bin/sh\nexit " + str(database_status) + "\n")
             result = subprocess.run(
-                ["bash", str(ROOT / "quarry"), "web"],
+                ["bash", str(ROOT / "quarry"), target],
                 cwd=ROOT,
                 env={
                     **os.environ,
                     "PATH": f"{folder}:{os.environ['PATH']}",
                     "QUARRY_HELIX_CONTAINER_NAME": CONTAINER,
-                    "QUARRY_TEMPLATE_BACKEND": "embedded",
+                    "QUARRY_HELIX_PORT": "6970",
+                    "QUARRY_POSTGRES_BIN": str(folder),
+                    "QUARRY_POSTGRES_DATA_DIR": str(folder),
+                    "QUARRY_TEST_POSTGRES_STATUS": str(postgres_status),
+                    "QUARRY_TEST_START_STATUS": str(start_status),
                     "QUARRY_TEST_FOLDER": str(folder),
                     "QUARRY_TEST_SCENARIO": scenario,
                 },
@@ -77,18 +101,47 @@ class HelixStorageTests(unittest.TestCase):
                 text=True,
                 timeout=10,
             )
-            commands = [json.loads(line) for line in
-                        (folder / "commands.jsonl").read_text().splitlines()]
+            docker_log = folder / "commands.jsonl"
+            commands = (
+                [json.loads(line) for line in docker_log.read_text().splitlines()]
+                if docker_log.exists() else []
+            )
+            postgres_commands = [json.loads(line) for line in
+                                 (folder / "postgres.jsonl").read_text().splitlines()]
+            self.assertEqual(any("start" in c for c in postgres_commands), postgres_status == 3)
+            self.assertFalse(any("initdb" in c or "stop" in c for c in postgres_commands))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertFalse(any(c[0] in ("rm", "stop", "rename") for c in commands))
         return result, commands
+
+    def test_stopped_postgres_starts_for_both_targets(self):
+        for target in ("web", "desktop"):
+            with self.subTest(target=target):
+                result, commands = self.run_launcher("disk", postgres_status=3, target=target)
+                self.assertIn("Starting local PostgreSQL", result.stdout)
+                self.assertIn(["start", CONTAINER], commands)
+
+    def test_postgres_start_failure_stops_before_helix(self):
+        result, commands = self.run_launcher("disk", postgres_status=3, start_status=1)
+        self.assertIn("could not start the existing PostgreSQL", result.stderr)
+        self.assertEqual(commands, [])
+
+    def test_uninspectable_postgres_is_not_started(self):
+        result, commands = self.run_launcher("disk", postgres_status=4)
+        self.assertIn("could not inspect the existing PostgreSQL", result.stderr)
+        self.assertEqual(commands, [])
+
+    def test_database_connection_failure_stops_before_helix(self):
+        result, commands = self.run_launcher("disk", database_status=1)
+        self.assertIn("PostgreSQL is unavailable", result.stderr)
+        self.assertEqual(commands, [])
 
     def test_new_container_has_disk_storage_and_named_volume(self):
         result, commands = self.run_launcher("absent")
         create = next(c for c in commands if c[0] == "create")
         self.assertIn("HELIX_DATA_DIR=/var/lib/helix", create)
         self.assertIn(f"type=volume,source={VOLUME},target=/var/lib/helix", create)
-        self.assertIn("127.0.0.1:6969:8080", create)
+        self.assertIn("127.0.0.1:6970:8080", create)
         self.assertIn("could not start Helix", result.stderr)
         self.assertIn(["start", CONTAINER], commands)
 

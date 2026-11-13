@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-pub use crate::domains::documents::store::sqlite::DealDocumentSummary;
+pub use crate::domains::documents::store::postgres::DealDocumentSummary;
 
 use crate::{
     adapters::office::converter::OfficeConverter,
@@ -14,7 +14,7 @@ use crate::{
             formats::{
                 docx::parse_docx_from_bytes, image::decode_image, pdf::parse_pdf_from_bytes,
             },
-            store::sqlite::{DocumentStore, StoredDocumentBlob},
+            store::postgres::{DocumentStore, StoredDocumentBlob},
         },
     },
     shared::{

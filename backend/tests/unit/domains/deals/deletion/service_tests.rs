@@ -2,19 +2,19 @@ use super::*;
 use crate::{
     adapters::{
         helix::client::HelixClient, office::converter::OfficeConverter,
-        sqlite::client::SqliteClient,
+        postgres::client::PostgresClient,
     },
     app::migrations,
     domains::documents::{
         graph::repository::DocumentGraphReader, ingestion::service::DocumentIngestionService,
-        store::sqlite::DocumentStore,
+        store::postgres::DocumentStore,
     },
     integration_support::seed_identity,
 };
 use std::{num::NonZeroUsize, time::Duration};
-fn service(sqlite: SqliteClient, helix: Arc<HelixClient>) -> Arc<DealDeletionService> {
+fn service(postgres: PostgresClient, helix: Arc<HelixClient>) -> Arc<DealDeletionService> {
     let graph = DocumentGraphWriter::new(helix.clone(), NonZeroUsize::new(2).unwrap());
-    let files = DocumentStore::new(sqlite.clone());
+    let files = DocumentStore::new(postgres.clone());
     let lifecycle = DealLifecycle::default();
     let ingestion = Arc::new(
         DocumentIngestionService::new(
@@ -30,7 +30,7 @@ fn service(sqlite: SqliteClient, helix: Arc<HelixClient>) -> Arc<DealDeletionSer
     );
     let jobs = Arc::new(DocumentJobService::new(ingestion, Duration::from_secs(1)));
     DealDeletionService::new(
-        DeletionRepository::new(sqlite),
+        DeletionRepository::new(postgres),
         graph,
         lifecycle,
         jobs,
@@ -40,30 +40,30 @@ fn service(sqlite: SqliteClient, helix: Arc<HelixClient>) -> Arc<DealDeletionSer
         )),
     )
 }
-fn seed(sqlite: &SqliteClient) {
-    migrations::migrate(sqlite).unwrap();
-    seed_identity(sqlite, "deletion-test@example.com", 'a');
-    seed_deal(sqlite, "DELETE-RESTART");
+async fn seed(postgres: &PostgresClient) {
+    migrations::migrate(postgres).await.unwrap();
+    seed_identity(postgres, "deletion-test@example.com", 'a').await;
+    seed_deal(postgres, "DELETE-RESTART").await;
 }
-fn seed_deal(sqlite: &SqliteClient, deal: &str) {
-    sqlite.with_connection(|c| {
-        c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES(?1,1,'Synthetic','buy_side','unknown','pipeline','now','now')", [deal])?;
-        c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,1,'owner','now','now')", [deal])?;
-        c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)", [deal])?;
+async fn seed_deal(postgres: &PostgresClient, deal: &str) {
+    postgres.with_connection(async |c| {
+        c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES(?1,1,'Synthetic','buy_side','unknown','pipeline','now','now')", [deal]).await?;
+        c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES(?1,1,'owner','now','now')", [deal]).await?;
+        c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES(?1)", [deal]).await?;
         Ok(())
-    }).unwrap();
+     }).await.unwrap();
 }
 #[tokio::test]
 async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let worker = service(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
     let op = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     worker.tick().await.unwrap();
@@ -71,10 +71,16 @@ async fn failed_remote_fence_keeps_canonical_data_and_a_recoverable_receipt() {
     assert_eq!(status.status, super::super::model::DeletionStatus::Retrying);
     assert_eq!(status.error_code.as_deref(), Some("cleanup_unavailable"));
     assert_eq!(
-        sqlite
-            .with_connection(
-                |c| c.query_row("SELECT count(*) FROM deals", [], |r| r.get::<_, i64>(0))
-            )
+        postgres
+            .with_connection(async |c| {
+                c.query_row(
+                    "SELECT count(*) FROM deals",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |r| r.get::<_, i64>(0),
+                )
+                .await
+            })
+            .await
             .unwrap(),
         1
     );
@@ -98,21 +104,21 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
     let url = std::env::var("QUARRY_HELIX_COMPAT_URL").expect("disposable Helix URL");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("synthetic.sqlite");
-    let sqlite = SqliteClient::open(&path).unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
+    seed(&postgres).await;
     let helix = Arc::new(HelixClient::with_config(&url, None).unwrap());
-    let first = service(sqlite.clone(), helix.clone());
+    let first = service(postgres.clone(), helix.clone());
     first.graph.initialize().await.unwrap();
     let op = first
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     drop(first);
-    drop(sqlite);
-    let sqlite = SqliteClient::open(&path).unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    let second = service(sqlite.clone(), helix.clone());
+    drop(postgres);
+    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    let second = service(postgres.clone(), helix.clone());
     second.graph.fence_deal(&op.deal_id).await.unwrap();
     second
         .repository
@@ -120,17 +126,22 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
         .await
         .unwrap();
     drop(second);
-    drop(sqlite);
-    let sqlite = SqliteClient::open(&path).unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    let third = service(sqlite, helix);
+    drop(postgres);
+    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    let third = service(postgres, helix);
     third.tick().await.unwrap();
     assert_eq!(
         third.status(op.deletion_id, 1).await.unwrap().status,
         super::super::model::DeletionStatus::Completed
     );
     assert_eq!(
-        third.repository.accept(op.deal_id, 1).await.unwrap().status,
+        third
+            .repository
+            .accept(op.deal_id, 1, 1)
+            .await
+            .unwrap()
+            .status,
         super::super::model::DeletionStatus::Completed
     );
 }
@@ -166,39 +177,43 @@ async fn cloned_admission_survives_a_cancelled_parent_until_blocking_work_finish
 
 #[tokio::test]
 async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let worker = service(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
     let mut active = Vec::new();
     for index in 0..17 {
         let deal = format!("DELETE-BUSY-{index:02}");
-        seed_deal(&sqlite, &deal);
+        seed_deal(&postgres, &deal).await;
         active.push(worker.lifecycle.admit(&deal).await);
-        let op = worker.repository.accept(deal, 1).await.unwrap();
-        sqlite
-            .with_connection(|c| {
+        let op = worker.repository.accept(deal, 1, 1).await.unwrap();
+        postgres
+            .with_connection(async |c| {
                 c.execute(
                     "UPDATE deal_deletions SET deletion_id=?1 WHERE deletion_id=?2",
                     [format!("busy-{index:02}"), op.deletion_id],
                 )
+                .await
             })
+            .await
             .unwrap();
     }
     let ready = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
-    sqlite
-        .with_connection(|c| {
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE deal_deletions SET deletion_id='ready' WHERE deletion_id=?1",
                 [&ready.deletion_id],
             )
+            .await
         })
+        .await
         .unwrap();
 
     tokio::time::timeout(Duration::from_secs(2), worker.tick())
@@ -232,8 +247,8 @@ async fn busy_deals_do_not_block_cleanup_on_later_ledger_pages() {
 
 #[tokio::test]
 async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (started, mut requests) = tokio::sync::mpsc::channel(8);
@@ -261,13 +276,13 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
             .unwrap();
     });
     let worker = service(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap()),
     );
     for index in 0..8 {
         let deal = format!("DELETE-CONCURRENT-{index}");
-        seed_deal(&sqlite, &deal);
-        worker.repository.accept(deal, 1).await.unwrap();
+        seed_deal(&postgres, &deal).await;
+        worker.repository.accept(deal, 1, 1).await.unwrap();
     }
     let task = tokio::spawn(async move { worker.tick().await });
     tokio::time::timeout(Duration::from_secs(3), requests.recv())
@@ -277,10 +292,10 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
     // Helix intentionally serializes writes. The other admitted operations should reach
     // their durable fencing checkpoint while that first remote request is held open.
     let fencing_count = || {
-        sqlite.read_one_with_async(
-            crate::adapters::sqlite::query::SqlBuilder::select("deal_deletions")
+        postgres.read_one_with_async(
+            crate::adapters::postgres::query::SqlBuilder::select("deal_deletions")
                 .count_rows()
-                .and_where(crate::adapters::sqlite::query::Condition::equal(
+                .and_where(crate::adapters::postgres::query::Condition::equal(
                     "phase", "fencing",
                 ))
                 .build(),
@@ -313,14 +328,16 @@ async fn cleanup_limits_active_deals_while_preserving_serialized_helix_writes() 
         Some(4),
         "cleanup must not admit more than four deals"
     );
-    let attempts: i64 = sqlite
-        .with_connection(|c| {
+    let attempts: i64 = postgres
+        .with_connection(async |c| {
             c.query_row(
                 "SELECT count(*) FROM deal_deletions WHERE status='retrying'",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
                 |r| r.get(0),
             )
+            .await
         })
+        .await
         .unwrap();
     assert_eq!(attempts, 8);
 }
@@ -337,15 +354,15 @@ async fn idle(worker: &Arc<DealDeletionService>) {
 
 #[tokio::test]
 async fn acceptance_spawns_cleanup_without_startup_and_blocked_work_retires() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let worker = service(
-        sqlite,
+        postgres,
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
     assert_eq!(Arc::strong_count(&worker), 1, "construction must not spawn");
     let admission = worker.lifecycle.admit("DELETE-RESTART").await;
-    let receipt = worker.accept("DELETE-RESTART".into(), 1).await.unwrap();
+    let receipt = worker.accept("DELETE-RESTART".into(), 1, 1).await.unwrap();
     assert_eq!(receipt.phase, DeletionPhase::Draining);
     // Cleanup must survive the accepting request and wait for active work to drain.
     drop(admission);
@@ -375,15 +392,15 @@ async fn acceptance_spawns_cleanup_without_startup_and_blocked_work_retires() {
 
 #[tokio::test]
 async fn recovery_waits_for_a_future_retry_without_another_request() {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let worker = service(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
     let receipt = worker
         .repository
-        .accept("DELETE-RESTART".into(), 1)
+        .accept("DELETE-RESTART".into(), 1, 1)
         .await
         .unwrap();
     worker
@@ -395,14 +412,16 @@ async fn recovery_waits_for_a_future_retry_without_another_request() {
     worker.resume_pending();
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let attempts: i64 = sqlite
-                .with_connection(|c| {
+            let attempts: i64 = postgres
+                .with_connection(async |c| {
                     c.query_row(
                         "SELECT attempts FROM deal_deletions WHERE deletion_id=?1",
                         [&receipt.deletion_id],
                         |r| r.get(0),
                     )
+                    .await
                 })
+                .await
                 .unwrap();
             if attempts >= 2 {
                 break;
@@ -422,28 +441,30 @@ async fn recovery_waits_for_a_future_retry_without_another_request() {
 
 #[tokio::test]
 async fn cancelled_accepting_request_still_notifies_after_the_receipt_commits() {
-    use rusqlite::OptionalExtension;
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    seed(&sqlite);
+    use crate::adapters::postgres::client::test_support::OptionalExtension;
+    let postgres = PostgresClient::test_database().await.unwrap();
+    seed(&postgres).await;
     let worker = service(
-        sqlite.clone(),
+        postgres.clone(),
         Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
     );
     let (locked, ready) = tokio::sync::oneshot::channel();
-    let (release, released) = std::sync::mpsc::channel();
-    let blocked_sqlite = sqlite.clone();
-    let blocker = tokio::task::spawn_blocking(move || {
-        blocked_sqlite
-            .with_connection(|_| {
-                locked.send(()).unwrap();
-                released.recv().unwrap();
-                Ok(())
-            })
+    let (release, released) = tokio::sync::oneshot::channel();
+    let blocked_sqlite = postgres.clone();
+    let blocker = tokio::spawn(async move {
+        let mut tx = blocked_sqlite.pool().begin().await.unwrap();
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
+            .bind(crate::adapters::postgres::client::WRITE_LOCK)
+            .execute(&mut *tx)
+            .await
             .unwrap();
+        locked.send(()).unwrap();
+        released.await.unwrap();
+        tx.commit().await.unwrap();
     });
     ready.await.unwrap();
     {
-        let request = worker.accept("DELETE-RESTART".into(), 1);
+        let request = worker.accept("DELETE-RESTART".into(), 1, 1);
         tokio::pin!(request);
         assert!(futures_util::poll!(&mut request).is_pending());
         // Drop the HTTP-owned future while acceptance is waiting for storage.
@@ -452,11 +473,17 @@ async fn cancelled_accepting_request_still_notifies_after_the_receipt_commits() 
     blocker.await.unwrap();
     let id = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let id: Option<String> = sqlite
-                .with_connection(|c| {
-                    c.query_row("SELECT deletion_id FROM deal_deletions", [], |r| r.get(0))
-                        .optional()
+            let id: Option<String> = postgres
+                .with_connection(async |c| {
+                    c.query_row(
+                        "SELECT deletion_id FROM deal_deletions",
+                        Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                        |r| r.get(0),
+                    )
+                    .await
+                    .optional()
                 })
+                .await
                 .unwrap();
             if let Some(id) = id {
                 break id;

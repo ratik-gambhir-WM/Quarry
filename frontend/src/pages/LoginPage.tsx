@@ -151,9 +151,17 @@ export function LoginPage({ register = false }: { register?: boolean }) {
                   {error && <p className="text-error" role="alert">{error}</p>}
                   {user.notice && <p className="text-secondary" role="status">{user.notice}</p>}
                   <QuarryButton type="submit" disabled={pending}>
-                    {pending ? "Please wait…" : "Sign in"}
+                    <span className="inline-flex items-center justify-center gap-sm">
+                      {pending && (
+                        <span
+                          aria-hidden="true"
+                          className="size-4 shrink-0 rounded-full border-2 border-on-action/30 border-t-on-action motion-safe:animate-spin"
+                        />
+                      )}
+                      {pending ? "waiting for sign-in..." : "Sign in"}
+                    </span>
                   </QuarryButton>
-                  <span className="sr-only" role="status">{pending ? "Signing in…" : ""}</span>
+                  <span className="sr-only" role="status">{pending ? "waiting for sign-in..." : ""}</span>
                   <button type="button" disabled={pending} onClick={backToUsername} className="text-sm text-primary underline focus-visible:outline-2 disabled:opacity-60">
                     ← Use a different username or email
                   </button>

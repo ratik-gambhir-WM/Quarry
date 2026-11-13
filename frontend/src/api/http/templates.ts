@@ -1,3 +1,4 @@
+import { parseTemplateResponse } from "../templateResponse";
 import {
   classifiedTemplateImportPath,
   classifiedTemplateImportResult,
@@ -15,7 +16,6 @@ import type {
 } from "../../contracts/quarryApi";
 import { POWERPOINT_CONTENT_TYPE } from "../../contracts/quarryApi";
 import type { DiligenceCanvasDocument } from "../../contracts/diligenceCanvas";
-import { parseDiligenceCanvasDocument } from "../../contracts/diligenceCanvas";
 import { beginApiRequest, finishApiRequest } from "../../lib/activityLog";
 
 import { get, post, requestJson, apiUrl, BackendApiError } from "./transport";
@@ -194,7 +194,7 @@ async function getTemplate(templateId: string) {
     undefined,
     false,
   );
-  return parseDiligenceCanvasDocument(value);
+  return parseTemplateResponse(value);
 }
 
 async function importPptxTemplate(
@@ -232,9 +232,9 @@ async function importPptxTemplate(
   }
 }
 
-async function deleteTemplate(templateId: string) {
+async function deleteTemplate(templateId: string, expectedRevision: number) {
   await requestJson<void>(
-    `/api/v1/templates/${encodeURIComponent(templateId)}`,
+    `/api/v1/templates/${encodeURIComponent(templateId)}?expectedRevision=${expectedRevision}`,
     { method: "DELETE" },
   );
 }

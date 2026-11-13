@@ -1,5 +1,9 @@
 # Authentication implementation verification
 
+Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
+Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
+reset and verification records below describe the earlier implementation, not current commands.
+
 Date: 2026-10-28. Scope: schema 11, password/session API, resource ownership, HTTP/Tauri
 transports, global user provider, login/register/account UI, and the wider West Monroe form.
 

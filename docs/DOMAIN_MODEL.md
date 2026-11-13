@@ -1,12 +1,16 @@
 # Quarry domain and data model
 
+Current storage is fresh PostgreSQL schema 2 with retained Helix. See
+[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+SQLite marker upgrades are historical and are not executed by this runtime.
+
 # Version 1
 
 | Field | Value |
 | --- | --- |
 | Status | Current-state companion to `ARCHITECTURE.md` |
-| Last verified | 2026-11-01 |
-| Repository snapshot | Live working tree; optional legacy Diligence Studio is in a separate checkout |
+| Last verified | 2026-11-11 (storage, templates and launcher documentation) |
+| Repository snapshot | Live working tree; templates run inside Axum |
 | Audience | Quarry product engineers, reviewers, and coding agents |
 | Scope | Product-domain ownership, durable entities, projections, ephemeral models, and known gaps |
 
@@ -28,7 +32,7 @@ pattern, attachment compatibility, and execution responsibilities.
 
 Quarry's Axum backend is a modular monolith. A domain is a product capability boundary, not a
 deployment boundary or necessarily a database table. An implemented domain may own routes,
-handlers, services, domain models, and persistence ports. Concrete SQLite, Helix, AI, Office, and
+handlers, services, domain models, and persistence ports. Concrete PostgreSQL, Helix, AI, Office, and
 external-service mechanisms live under `backend/src/adapters/` and are injected at bootstrap.
 
 The directory tree deliberately contains both active modules and comment-only ownership markers:
@@ -55,11 +59,11 @@ and tests first.
 | `memberships` | Deal roles/capabilities, teams, optimistic access revisions and durable activity | `deal_memberships`, `deal_teams`, assignments, revisions and activity | No organization tenancy or independent team access |
 | `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive sets `archivedAt` while retaining the stage; authenticated identity is supplied by handlers; creator provenance is immutable |
 | `data_rooms` | Browse and preview a deal's configured local filesystem source | None of its own | Reads a local root from deal metadata or server configuration; does not own stored document blobs or activate SharePoint |
-| `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | SQLite is canonical; Helix is a search projection; jobs and locks are process-local |
+| `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | PostgreSQL is canonical; Helix is a search projection; jobs and locks are process-local |
 | `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
-| `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | SQLite-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
+| `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | PostgreSQL-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared SQLite catalog and Helix projection in default embedded mode | Explicit legacy mode uses the independent Diligence Studio service; no deal ownership implied |
+| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog and Helix projection inside Axum | Authenticated owner/app scope; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -107,10 +111,11 @@ flowchart LR
 
     Summaries --> OpenAI[OpenAI adapter]
     Research --> WMAI[WM AI adapters]
-    Templates --> DSAdapter[Diligence Studio adapter]
-    DSAdapter --> DS[Diligence Studio service\nin-memory catalog]
+    Templates --> Embedded[Embedded slide templates]
+    Embedded --> PostgreSQL
+    Embedded --> Helix
     DataRooms --> FS[Configured server filesystem]
-    Documents --> SQLite[(SQLite)]
+    Documents --> PostgreSQL[(PostgreSQL)]
     Documents --> Helix[(Helix)]
 ```
 
@@ -134,10 +139,10 @@ when adding or reviewing a check rather than inferring its owner from a domain n
 
 ## 4. Canonical relational model
 
-SQLite schema 15 is canonical. It preserves validated schema-12/13/14 data and retains shared access,
-nullable uploader attribution, deal-scoped content claims and immutable document identity manifests.
-Accepted image document/chunk snapshots are canonical version-keyed recovery inputs without vectors.
-The full table inventory is in [Architecture](ARCHITECTURE.md#91-shared-sqlite-schema-marker-15).
+PostgreSQL schema 2 is canonical and recreates the final former SQLite marker-18 layout directly.
+It includes membership/activity, document identity/image checkpoints, private templates, notebooks
+and deletion receipts. There is no old-data migration. The table inventory is in
+[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-2).
 
 ```mermaid
 erDiagram
@@ -168,7 +173,7 @@ creator grants them no implicit access; `deals.user_id` remains creator provenan
 
 A user has a numeric ID, unique normalized username/email, public display profile and private
 Argon2id password hash. Job title grants no privileges. Sessions contain token digests and server
-expiry/revocation; raw bearer tokens stay out of SQLite and logs. Every protected request has a
+expiry/revocation; raw bearer tokens stay out of PostgreSQL and logs. Every protected request has a
 verified principal; caller hints never establish identity. AI credentials remain server-side.
 See [authentication](authentication.md) and [deal policy](shared-deal-projects.md#access-policy).
 
@@ -199,7 +204,7 @@ working stages and Closed; Pipeline and Pencils Down permit incomplete parties. 
 stages in any order. Stage changes never assign or clear transaction/engagement dates. Archiving
 independently sets `archivedAt`, retaining the stage and children while excluding normal lists.
 
-Schema 12 enforces the stage codes. See [development reset](authentication.md#schema-15-and-development-reset).
+PostgreSQL schema 2 enforces the stage codes; see [storage setup](postgresql-storage.md).
 
 ### 4.3 Logical file aggregate
 
@@ -239,11 +244,11 @@ The parser and persistence layers use several identifiers with different meaning
 The ordinary ingestion lifecycle is:
 
 1. Validate the deal/request and compute the uploaded content hash.
-2. Look for a current SQLite attachment with the same deal and exact content hash.
-3. If both SQLite and Helix already contain the same current version, report the upload as
+2. Look for a current PostgreSQL attachment with the same deal and exact content hash.
+3. If both PostgreSQL and Helix already contain the same current version, report the upload as
    successfully skipped.
 4. Otherwise parse PDF/DOCX/XLSX/PPTX or cached/generated image descriptions, produce normalized chunks, and generate embeddings.
-5. Persist the file, immutable version/blob, exact identity manifest, uploader and activity in one SQLite transaction.
+5. Persist the file, immutable version/blob, exact identity manifest, uploader and activity in one PostgreSQL transaction.
 6. Project the committed file/version/chunks into Helix.
 
 Parsers assign a new random `file_id`. Exact-content re-upload can reuse a committed file ID, but
@@ -269,9 +274,9 @@ FileVersion
   section path, and timestamps.
 - Keyword/vector search derive accessible deals from the authenticated actor or authorize one explicit deal. Canonical current/live chunk candidates are selected and verified before ranking and rechecked before exposing text.
 
-SQLite commits before Helix indexing. If the Helix write fails, the canonical SQLite version and
+PostgreSQL commits before Helix indexing. If the Helix write fails, the canonical PostgreSQL version and
 blob remain committed. Re-uploading the exact bytes can reuse that identity and retry projection.
-There is no general SQLite-to-Helix reindex command, so canonical rows must not be deleted merely
+There is no general PostgreSQL-to-Helix reindex command, so canonical rows must not be deleted merely
 to hide a projection failure.
 
 ## 7. Non-canonical read and process models
@@ -282,7 +287,7 @@ Not every type returned by a domain is an entity that Quarry owns durably.
 
 `DealDataRoom` and `DataRoomTreeNode` are request-time filesystem read models. The `data_rooms`
 domain resolves a configured root, canonicalizes it, walks visible files/folders, and returns
-relative paths plus preview metadata. It does not copy those files into SQLite. Local PDF previews
+relative paths plus preview metadata. It does not copy those files into PostgreSQL. Local PDF previews
 read validated bytes; DOCX/XLSX/PPTX previews are converted through the injected Office adapter.
 
 The frontend currently merges this local tree with stored `documents` summaries for display. That
@@ -303,15 +308,22 @@ Research aggregate today.
 
 ### 7.4 Slide templates and previews
 
-`TemplatePreviewPage`, pagination, and preview records are validated service-owned read models
-supplied by the optional external Diligence Studio process. Single-slide and deck PPTX imports are
-service writes whose compact Quarry results contain only the selected mode and imported/warning
-counts. Diligence Studio converts and stores one template per selected source slide in its own
-in-memory SQLite catalog; Quarry's canonical SQLite and Helix stores receive no template copy. A
-template preview is not a deliverable and has no current deal ownership, selection, or generation
-lifecycle. Built-ins reseed from tracked catalog files when Diligence Studio starts. Imported
-templates, assets, previews, classifications, and app registrations disappear on process restart,
-and imports without a generated preview remain absent from Quarry's preview-only gallery.
+The maintained web/desktop launcher selects embedded templates in Axum. PostgreSQL stores
+owner-scoped template documents, binary assets, generated previews, classification/embedding
+artifacts and durable processing jobs. Helix holds their app-scoped metadata and dual-vector
+projection. Catalog and binary reads resolve ownership from PostgreSQL before exposing content;
+startup reconciles the template projection from canonical records. New databases have no seeded
+built-in catalog. Imported templates survive application restart.
+
+The stable Quarry facade returns compact import counts; native embedded endpoints also expose
+full template documents, editing/import/export operations, retrieval state and explicit retries.
+Classified imports commit slides/previews/pending jobs before asynchronous enrichment. Imports
+without a generated preview remain absent from the preview-only gallery. A template is not a saved
+deliverable and has no current deal ownership or deliverable-generation lifecycle. Presentation
+editor changes remain local to the open editor.
+
+See [template ownership](template-ownership.md) and
+[current architecture](ARCHITECTURE.md#1121-embedded-slide-templates-studio).
 
 ### 7.5 Frontend view models and fixtures
 
@@ -347,7 +359,7 @@ content by relocating notes to root and incrementing revisions; notebook deletio
 
 `notebook_save_jobs` stores actor-scoped operation IDs/request hashes, immutable accepted input,
 committed revision, pinned pipeline fingerprint, state/stage, attempt/sequence, leases and sanitized
-terminal outcomes. A completed save confirms both SQLite and a published Helix revision. Failed
+terminal outcomes. A completed save confirms both PostgreSQL and a published Helix revision. Failed
 indexing retains canonical content and supports retry without reapplying the mutation. Independent
 `notebook_cleanup` tombstones survive parent cascades and drive recoverable physical graph cleanup.
 Helix's notebook revision/chunk labels are separate from document and template projections. There
@@ -357,10 +369,9 @@ is no notebook search integration yet. See [notebook API and recovery](notebook-
 
 | Class | Current examples | Owner | Lifetime/recovery |
 | --- | --- | --- | --- |
-| Canonical durable state | Users, deals, metadata, files, versions, blobs, notebooks/folders/notes/save jobs | SQLite through owning domain repositories | Survives restart; subject to current schema migration policy |
-| Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from SQLite, but general tooling is missing |
+| Canonical durable state | Users, deals, metadata, files, versions, blobs, notebooks/folders/notes/save jobs | PostgreSQL through owning domain repositories | Survives restart; subject to current schema migration policy |
+| Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from PostgreSQL, but general tooling is missing |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
-| Legacy service ephemeral state | Diligence Studio templates, assets, previews, classifications, and app registrations | Diligence Studio in-memory SQLite repository | Seeded built-ins return on restart; imports do not |
 | Server ephemeral state | Document jobs, ingestion locks, Office preview cache | Owning service/process | Lost on restart; not multi-instance |
 | Desktop ephemeral authority | Authorized local roots | Tauri process | Lost on desktop restart |
 | Client session state | Activity log, route state, modal/view state | React/module/session storage | Tab/webview or route lifetime |
@@ -400,9 +411,9 @@ When adding or changing a domain model:
    handler, service, or repository modules.
 6. Treat authentication and authorization as server boundaries. Client route state, IDs, CORS, and
    Tauri validation are not authorization.
-7. For SQLite changes, define forward migration and recovery behavior, update migration/invariant
+7. For PostgreSQL changes, define forward migration and recovery behavior, update migration/invariant
    tests, and protect existing local data. The current pre-v6 migration is destructive.
-8. For Helix changes, preserve SQLite ownership, deterministic projection identity, and the
+8. For Helix changes, preserve PostgreSQL ownership, deterministic projection identity, and the
    reindex/rollback constraints in `ARCHITECTURE.md`.
 9. Update this document when domain ownership or model semantics change, and update
    [`ARCHITECTURE.md`](ARCHITECTURE.md) when the runtime boundary, route/API, schema, integration,
@@ -412,7 +423,7 @@ When adding or changing a domain model:
 
 - Domain registry and ownership markers: [`backend/src/domains/`](../backend/src/domains/)
 - Application composition: [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs)
-- SQLite schema: [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
+- PostgreSQL schema: [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
 - User model/repository: [`backend/src/domains/users/`](../backend/src/domains/users/)
 - Deal model/repository: [`backend/src/domains/deals/`](../backend/src/domains/deals/)
 - Local Data Room read model: [`backend/src/domains/data_rooms/`](../backend/src/domains/data_rooms/)

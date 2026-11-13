@@ -2,8 +2,8 @@ use super::model::ThreadScope;
 use serde::Serialize;
 
 use crate::{
-    adapters::sqlite::{
-        client::{SqlRow, SqliteClient, SqliteClientError},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, SqlRow},
         query::{ComparisonOperator, Condition, SortDirection, SqlBuilder, SqlValue},
     },
     shared::error::RepositoryError,
@@ -89,12 +89,12 @@ pub enum StartRunResult {
 
 #[derive(Clone)]
 pub struct AssistantChatRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 
 impl AssistantChatRepository {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
 
     pub async fn create_thread(
@@ -111,17 +111,25 @@ impl AssistantChatRepository {
             .on_conflict_do_nothing(["thread_id"])
             .build();
         let inserted_deal = deal_id.clone();
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 if let Some(deal) = &inserted_deal {
+                    crate::domains::deals::coordination::lock_authority(
+                        tx,
+                        deal,
+                        crate::adapters::postgres::query::RowLock::Share,
+                    )
+                    .await?;
                     crate::domains::memberships::require_deal(
                         tx,
                         deal,
                         user_id,
                         crate::domains::memberships::model::Capability::Read,
-                    )?;
+                    )
+                    .await?;
                 }
-                tx.write(insert)?;
+                tx.write(insert).await?;
                 Ok::<_, RepositoryError>(())
             })
             .await?;
@@ -201,7 +209,7 @@ impl AssistantChatRepository {
         }
         let query = builder.build();
         let rows = self
-            .sqlite
+            .postgres
             .read_async(query)
             .await
             .map_err(storage("list assistant threads"))?;
@@ -222,7 +230,7 @@ impl AssistantChatRepository {
             .order_by("sequence", SortDirection::Ascending)
             .build();
         let rows = self
-            .sqlite
+            .postgres
             .read_async(query)
             .await
             .map_err(storage("load assistant messages"))?;
@@ -271,10 +279,11 @@ impl AssistantChatRepository {
             .and_where(Condition::equal("user_id", user_id))
             .build();
         let result = self
-            .sqlite
-            .transaction_result_async(move |tx| {
-                ensure_thread_live(tx, &thread_id, Some(user_id))?;
-                Ok::<_, RepositoryError>(tx.write(update)?)
+            .postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                ensure_thread_live(tx, &thread_id, Some(user_id), true).await?;
+                Ok::<_, RepositoryError>(tx.write(update).await?)
             })
             .await?;
         Ok(result.rows_affected == 1)
@@ -290,28 +299,30 @@ impl AssistantChatRepository {
             .and_where(Condition::equal("user_id", user_id))
             .build();
         let result = self
-            .sqlite
-            .transaction_result_async(move |tx| {
-                ensure_thread_live(tx, &thread_id, Some(user_id))?;
-                Ok::<_, RepositoryError>(tx.write(delete)?)
+            .postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                ensure_thread_live(tx, &thread_id, Some(user_id), true).await?;
+                Ok::<_, RepositoryError>(tx.write(delete).await?)
             })
             .await?;
         Ok(result.rows_affected == 1)
     }
 
     pub async fn start_run(&self, input: StartRunInput) -> Result<StartRunResult, RepositoryError> {
-        self.sqlite
-            .transaction_async(move |transaction| {
-                ensure_thread_live(transaction, &input.thread_id, Some(input.user_id)).map_err(
-                    |_| SqliteClientError::transaction_aborted("deal_deletion_in_progress"),
-                )?;
+        self.postgres
+            .transaction_async(move |transaction| async move {
+                let transaction = &transaction;
+                ensure_thread_live(transaction, &input.thread_id, Some(input.user_id), true)
+                    .await
+                    .map_err(|_| PostgresError::transaction_aborted("deal_deletion_in_progress"))?;
                 let owned_query = SqlBuilder::select("assistant_threads")
                     .columns(["thread_id", "title"])
                     .and_where(Condition::equal("thread_id", &input.thread_id))
                     .and_where(Condition::equal("user_id", input.user_id))
                     .build();
-                let Some(thread_row) = transaction.read_one(owned_query)? else {
-                    return Err(SqliteClientError::transaction_aborted(
+                let Some(thread_row) = transaction.read_one(owned_query).await? else {
+                    return Err(PostgresError::transaction_aborted(
                         "assistant thread was not found",
                     ));
                 };
@@ -320,7 +331,7 @@ impl AssistantChatRepository {
                     .and_where(Condition::equal("thread_id", &input.thread_id))
                     .and_where(Condition::equal("request_id", &input.request_id))
                     .build();
-                if let Some(row) = transaction.read_one(existing_query)? {
+                if let Some(row) = transaction.read_one(existing_query).await? {
                     return Ok(StartRunResult::Existing(transaction_message(row)?));
                 }
                 if input.assistant_message_id == input.user_message_id {
@@ -330,14 +341,18 @@ impl AssistantChatRepository {
                     .columns(["message_id"])
                     .and_where(Condition::equal("message_id", &input.assistant_message_id))
                     .build();
-                if transaction.read_one(assistant_message_query)?.is_some() {
+                if transaction
+                    .read_one(assistant_message_query)
+                    .await?
+                    .is_some()
+                {
                     return Ok(StartRunResult::Conflict);
                 }
                 let user_message_query = SqlBuilder::select("assistant_messages")
                     .columns(MESSAGE_COLUMNS)
                     .and_where(Condition::equal("message_id", &input.user_message_id))
                     .build();
-                let existing_user_sequence = match transaction.read_one(user_message_query)? {
+                let existing_user_sequence = match transaction.read_one(user_message_query).await? {
                     Some(row) => {
                         let message = transaction_message(row)?;
                         let parent_matches = if message.parent_message_id.as_deref()
@@ -356,7 +371,8 @@ impl AssistantChatRepository {
                                 .limit(1)
                                 .build();
                             let expected_parent = transaction
-                                .read_one(previous_assistant_query)?
+                                .read_one(previous_assistant_query)
+                                .await?
                                 .map(|row| transaction_text(&row, "message_id"))
                                 .transpose()?;
                             expected_parent == input.parent_message_id
@@ -382,12 +398,13 @@ impl AssistantChatRepository {
                     .limit(1)
                     .build();
                 let next_sequence = transaction
-                    .read_one(latest_query)?
+                    .read_one(latest_query)
+                    .await?
                     .map(|row| transaction_integer(&row, "sequence"))
                     .transpose()?
                     .map(|sequence| {
                         sequence.checked_add(1).ok_or_else(|| {
-                            SqliteClientError::transaction_aborted(
+                            PostgresError::transaction_aborted(
                                 "assistant message sequence overflow",
                             )
                         })
@@ -410,7 +427,8 @@ impl AssistantChatRepository {
                     .limit(64)
                     .build();
                 let mut prior_messages = transaction
-                    .read(history_query)?
+                    .read(history_query)
+                    .await?
                     .into_iter()
                     .map(transaction_message)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -425,15 +443,13 @@ impl AssistantChatRepository {
                         .value("content", &input.prompt)
                         .value("status", "completed")
                         .build();
-                    transaction.write(user_insert)?;
+                    transaction.write(user_insert).await?;
                 }
                 let assistant_sequence = if existing_user_sequence.is_some() {
                     next_sequence
                 } else {
                     next_sequence.checked_add(1).ok_or_else(|| {
-                        SqliteClientError::transaction_aborted(
-                            "assistant message sequence overflow",
-                        )
+                        PostgresError::transaction_aborted("assistant message sequence overflow")
                     })?
                 };
                 let assistant_insert = SqlBuilder::insert_into("assistant_messages")
@@ -447,7 +463,7 @@ impl AssistantChatRepository {
                     .value("model", &input.model)
                     .value("request_id", &input.request_id)
                     .build();
-                transaction.write(assistant_insert)?;
+                transaction.write(assistant_insert).await?;
                 let title = transaction_text(&thread_row, "title")?;
                 let updated_at = now_timestamp();
                 let mut thread_update = SqlBuilder::update("assistant_threads")
@@ -459,12 +475,12 @@ impl AssistantChatRepository {
                     thread_update = thread_update.set("title", derive_title(&input.prompt));
                 }
                 let thread_update = thread_update.build();
-                transaction.write(thread_update)?;
+                transaction.write(thread_update).await?;
                 Ok(StartRunResult::Started { prior_messages })
             })
             .await
             .map_err(|error| match error {
-                SqliteClientError::TransactionAborted(message)
+                PostgresError::TransactionAborted(message)
                     if message == "assistant thread was not found" =>
                 {
                     RepositoryError::invalid(message)
@@ -492,19 +508,22 @@ impl AssistantChatRepository {
             .and_where(Condition::equal("status", "streaming"))
             .build();
         let result = self
-            .sqlite
-            .transaction_result_async(move |tx| {
-                let thread = tx.read_one_with(
-                    SqlBuilder::select("assistant_messages")
-                        .columns(["thread_id"])
-                        .and_where(Condition::equal("message_id", message_id))
-                        .build(),
-                    |r| r.get::<_, String>(0),
-                )?;
+            .postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let thread = tx
+                    .read_one_with(
+                        SqlBuilder::select("assistant_messages")
+                            .columns(["thread_id"])
+                            .and_where(Condition::equal("message_id", message_id))
+                            .build(),
+                        |r| r.get::<_, String>(0),
+                    )
+                    .await?;
                 if let Some(thread) = thread {
-                    ensure_thread_live(tx, &thread, None)?;
+                    ensure_thread_live(tx, &thread, None, status == "completed").await?;
                 }
-                Ok::<_, RepositoryError>(tx.write(update)?)
+                Ok::<_, RepositoryError>(tx.write(update).await?)
             })
             .await?;
         if result.rows_affected != 1 {
@@ -529,7 +548,7 @@ impl AssistantChatRepository {
             .and_where(Condition::equal("assistant_threads.thread_id", thread_id))
             .and_where(Condition::equal("assistant_threads.user_id", user_id))
             .build();
-        self.sqlite
+        self.postgres
             .read_one_async(query)
             .await
             .map_err(storage("load assistant thread"))?
@@ -538,31 +557,56 @@ impl AssistantChatRepository {
     }
 }
 
-fn ensure_thread_live(
-    tx: &crate::adapters::sqlite::client::SqliteTransaction<'_>,
+async fn ensure_thread_live(
+    tx: &crate::adapters::postgres::client::PostgresTransaction,
     thread: &str,
     actor: Option<i64>,
+    authorize: bool,
 ) -> Result<(), RepositoryError> {
+    use crate::adapters::postgres::query::{LockWait, RowLock};
     let mut query = SqlBuilder::select("assistant_threads")
-        .columns(["deal_id"])
+        .columns(["deal_id", "user_id"])
         .and_where(Condition::equal("thread_id", thread));
     if let Some(actor) = actor {
         query = query.and_where(Condition::equal("user_id", actor));
     }
-    let deal = tx
-        .read_one_with(query.build(), |r| r.get::<_, Option<String>>(0))?
-        .flatten();
-    if let Some(deal) = deal {
-        if crate::domains::deals::deletion::barrier(tx, &deal)? {
+    let Some((deal, owner)) = tx
+        .read_one_with(query.clone().build(), |r| {
+            Ok((
+                r.get::<_, Option<String>>("deal_id")?,
+                r.get::<_, i64>("user_id")?,
+            ))
+        })
+        .await?
+    else {
+        return Ok(());
+    };
+    if let Some(deal) = &deal {
+        crate::domains::deals::coordination::lock_authority(tx, deal, RowLock::Share).await?;
+        if crate::domains::deals::deletion::barrier(tx, deal).await? {
             return Err(RepositoryError::Conflict(
                 "deal_deletion_in_progress".into(),
             ));
         }
+        if authorize {
+            crate::domains::memberships::require_deal(
+                tx,
+                deal,
+                owner,
+                crate::domains::memberships::model::Capability::Read,
+            )
+            .await?;
+        }
     }
+    tx.lock_with(query.lock(RowLock::Update, LockWait::Wait).build(), |_| {
+        Ok(())
+    })
+    .await?;
+
     Ok(())
 }
 
-fn storage(context: &'static str) -> impl FnOnce(SqliteClientError) -> RepositoryError {
+fn storage(context: &'static str) -> impl FnOnce(PostgresError) -> RepositoryError {
     move |error| RepositoryError::storage(format!("failed to {context}: {error}"))
 }
 
@@ -593,8 +637,8 @@ fn message_from_row(row: SqlRow) -> Result<AssistantMessage, RepositoryError> {
     })
 }
 
-fn transaction_message(row: SqlRow) -> Result<AssistantMessage, SqliteClientError> {
-    message_from_row(row).map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))
+fn transaction_message(row: SqlRow) -> Result<AssistantMessage, PostgresError> {
+    message_from_row(row).map_err(|error| PostgresError::transaction_aborted(error.to_string()))
 }
 
 fn normalize_legacy_user_parents(messages: &mut [AssistantMessage]) {
@@ -639,12 +683,12 @@ fn integer(row: &SqlRow, column: &str) -> Result<i64, RepositoryError> {
     }
 }
 
-fn transaction_text(row: &SqlRow, column: &str) -> Result<String, SqliteClientError> {
-    text(row, column).map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))
+fn transaction_text(row: &SqlRow, column: &str) -> Result<String, PostgresError> {
+    text(row, column).map_err(|error| PostgresError::transaction_aborted(error.to_string()))
 }
 
-fn transaction_integer(row: &SqlRow, column: &str) -> Result<i64, SqliteClientError> {
-    integer(row, column).map_err(|error| SqliteClientError::transaction_aborted(error.to_string()))
+fn transaction_integer(row: &SqlRow, column: &str) -> Result<i64, PostgresError> {
+    integer(row, column).map_err(|error| PostgresError::transaction_aborted(error.to_string()))
 }
 
 fn derive_title(prompt: &str) -> String {
@@ -667,9 +711,9 @@ fn now_timestamp() -> String {
 mod tests;
 
 fn apply_scope(
-    builder: crate::adapters::sqlite::query::SelectBuilder,
+    builder: crate::adapters::postgres::query::SelectBuilder,
     scope: &ThreadScope,
-) -> crate::adapters::sqlite::query::SelectBuilder {
+) -> crate::adapters::postgres::query::SelectBuilder {
     let builder = builder.and_where(Condition::is_null("deal_deletions.deal_id"));
     match scope {
         ThreadScope::All => builder,

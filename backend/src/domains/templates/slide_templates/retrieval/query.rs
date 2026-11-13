@@ -215,7 +215,7 @@ impl SlideRetrievalService {
         let repository = self.repository.clone();
         let app = app_id.to_owned();
         let app_records =
-            tokio::task::spawn_blocking(move || repository.list_retrieval_classifications(&app))
+            tokio::spawn(async move { repository.list_retrieval_classifications(&app).await })
                 .await??;
         let records = apply_filters(&app_records, &input.filters);
         if input.mode == "facets" {
@@ -236,7 +236,7 @@ impl SlideRetrievalService {
                     records
                         .iter()
                         .find(|record| record.template_id == *id)
-                        .cloned()
+                        .copied()
                 })
                 .collect(),
             "filter" => records,
@@ -330,39 +330,41 @@ impl SlideRetrievalService {
         finding::find_for_finding(self, app_id, untrusted_input).await
     }
 
-    async fn lexical(
+    async fn lexical<'a>(
         &self,
         app_id: &str,
         query: Option<&str>,
-        records: &[RetrievalClassificationRecord],
+        records: &[&'a RetrievalClassificationRecord],
         operator: &str,
-    ) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
+    ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
         let expression = build_safe_fts_query(
             query.ok_or_else(|| SlideRetrievalError::new("invalid_query"))?,
             operator,
         )?;
         let available: HashMap<_, _> = records
             .iter()
-            .map(|record| (record.template_id.as_str(), record))
+            .map(|&record| (record.template_id.as_str(), record))
             .collect();
         let repository = self.repository.clone();
         let app = app_id.to_owned();
-        let ids = tokio::task::spawn_blocking(move || {
-            repository.search_slide_classifications(&app, &expression, 200)
+        let ids = tokio::spawn(async move {
+            repository
+                .search_slide_classifications(&app, &expression, 200)
+                .await
         })
         .await??;
         Ok(ids
             .iter()
-            .filter_map(|id| available.get(id.as_str()).cloned().cloned())
+            .filter_map(|id| available.get(id.as_str()).copied())
             .collect())
     }
 
-    async fn semantic(
+    async fn semantic<'a>(
         &self,
         query: Option<&str>,
-        records: &[RetrievalClassificationRecord],
+        records: &[&'a RetrievalClassificationRecord],
         target: &str,
-    ) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
+    ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
         let query = query.ok_or_else(|| SlideRetrievalError::new("invalid_query"))?;
         let compatible: Vec<_> = records
             .iter()
@@ -374,7 +376,7 @@ impl SlideRetrievalService {
                         .or(record.classification.embedding_dimensions),
                 )
             })
-            .cloned()
+            .copied()
             .collect();
         if compatible.is_empty() {
             return Ok(Vec::new());
@@ -450,14 +452,14 @@ fn compatible_vectors(
         && record.classification.embedding_model.as_deref() == model
         && record.classification.embedding_dimensions == dimensions
 }
-fn rank_by_vector(
+fn rank_by_vector<'a>(
     vector: &[f64],
-    records: &[RetrievalClassificationRecord],
+    records: &[&'a RetrievalClassificationRecord],
     role: VectorRole,
-) -> anyhow::Result<Vec<RetrievalClassificationRecord>> {
+) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
     let mut scored = records
         .iter()
-        .map(|record| {
+        .map(|&record| {
             let candidate = match role {
                 VectorRole::Subject => record.classification.subject_vector.as_deref(),
                 VectorRole::Capability => record.classification.capability_vector.as_deref(),
@@ -472,32 +474,29 @@ fn rank_by_vector(
             .then_with(|| locale_compare(&right.created_at, &left.created_at))
             .then_with(|| locale_compare(&left.template_id, &right.template_id))
     });
-    Ok(scored
-        .into_iter()
-        .map(|(record, _)| record.clone())
-        .collect())
+    Ok(scored.into_iter().map(|(record, _)| record).collect())
 }
 /// Fuse ordinal ranks without combining lexical and vector scores directly.
-pub fn reciprocal_rank_fusion(
-    first: &[RetrievalClassificationRecord],
-    second: &[RetrievalClassificationRecord],
+pub fn reciprocal_rank_fusion<'a>(
+    first: &[&'a RetrievalClassificationRecord],
+    second: &[&'a RetrievalClassificationRecord],
     rank_constant: f64,
-) -> Vec<RetrievalClassificationRecord> {
-    reciprocal_rank_scores(&[first.to_vec(), second.to_vec()], rank_constant)
+) -> Vec<&'a RetrievalClassificationRecord> {
+    reciprocal_rank_scores(&[first, second], rank_constant)
         .into_iter()
         .map(|(record, _)| record)
         .collect()
 }
-fn reciprocal_rank_scores(
-    rankings: &[Vec<RetrievalClassificationRecord>],
+fn reciprocal_rank_scores<'a>(
+    rankings: &[&[&'a RetrievalClassificationRecord]],
     rank_constant: f64,
-) -> Vec<(RetrievalClassificationRecord, f64)> {
+) -> Vec<(&'a RetrievalClassificationRecord, f64)> {
     let mut positions: HashMap<&str, usize> = HashMap::new();
-    let mut records: Vec<(RetrievalClassificationRecord, f64)> = Vec::new();
+    let mut records: Vec<(&RetrievalClassificationRecord, f64)> = Vec::new();
     for ranking in rankings {
-        for (index, record) in ranking.iter().enumerate() {
+        for (index, &record) in ranking.iter().enumerate() {
             let position = *positions.entry(&record.template_id).or_insert_with(|| {
-                records.push((record.clone(), 0.0));
+                records.push((record, 0.0));
                 records.len() - 1
             });
             records[position].1 += 1.0 / (rank_constant + index as f64 + 1.0);
@@ -531,10 +530,10 @@ fn all_topics(metadata: &SlideRetrievalMetadata) -> Vec<String> {
         .cloned()
         .collect()
 }
-fn apply_filters(
-    records: &[RetrievalClassificationRecord],
+fn apply_filters<'a>(
+    records: &'a [RetrievalClassificationRecord],
     filters: &SlideQueryFilters,
-) -> Vec<RetrievalClassificationRecord> {
+) -> Vec<&'a RetrievalClassificationRecord> {
     records
         .iter()
         .filter(|record| {
@@ -567,7 +566,6 @@ fn apply_filters(
                         .content_density
                         .contains(&metadata.visual.content_density))
         })
-        .cloned()
         .collect()
 }
 
@@ -612,7 +610,7 @@ fn project_record(
     )
 }
 fn build_facet_response(
-    records: &[RetrievalClassificationRecord],
+    records: &[&RetrievalClassificationRecord],
     facet: &str,
 ) -> anyhow::Result<Value> {
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -687,9 +685,9 @@ pub struct SlideAgentTools {
     pub templates: super::super::ImportService,
 }
 impl SlideAgentTools {
-    pub fn get_slide(&self, input: &Value) -> anyhow::Result<Value> {
+    pub async fn get_slide(&self, input: &Value) -> anyhow::Result<Value> {
         let id = Self::parse_get_slide_input(input)?;
-        match self.templates.for_app(&self.app_id)?.find(id)? {
+        match self.templates.for_app(&self.app_id).await?.find(id).await? {
             Some(slide) => Ok(serde_json::to_value(slide)?),
             None => Ok(json!({"error":{"code":"slide_not_available"}})),
         }

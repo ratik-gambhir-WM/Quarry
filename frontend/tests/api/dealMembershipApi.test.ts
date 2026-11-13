@@ -13,7 +13,7 @@ describe("shared deal membership contracts", () => {
       role: "contributor",
       expectedRevision: 4,
     });
-    await api.removeDealMember("DEAL /one", 2);
+    await api.removeDealMember("DEAL /one", 2, 1);
     await api.transferDealOwnership("DEAL /one", {
       userId: 2,
       expectedAccessRevision: 9,
@@ -24,7 +24,7 @@ describe("shared deal membership contracts", () => {
       name: "Delivery",
       expectedRevision: 2,
     });
-    await api.deleteDealTeam("DEAL /one", "team /one");
+    await api.deleteDealTeam("DEAL /one", "team /one", 1);
     await api.addDealTeamMember("DEAL /one", "team /one", 2);
     await api.removeDealTeamMember("DEAL /one", "team /one", 2);
     await api.listDealActivity("DEAL /one", {
@@ -43,7 +43,7 @@ describe("shared deal membership contracts", () => {
         "/api/v1/deals/DEAL%20%2Fone/members/2",
         { role: "contributor", expectedRevision: 4 },
       ],
-      ["DELETE", "/api/v1/deals/DEAL%20%2Fone/members/2"],
+      ["DELETE", "/api/v1/deals/DEAL%20%2Fone/members/2?expectedRevision=1"],
       [
         "POST",
         "/api/v1/deals/DEAL%20%2Fone/ownership-transfer",
@@ -56,7 +56,7 @@ describe("shared deal membership contracts", () => {
         "/api/v1/deals/DEAL%20%2Fone/teams/team%20%2Fone",
         { name: "Delivery", expectedRevision: 2 },
       ],
-      ["DELETE", "/api/v1/deals/DEAL%20%2Fone/teams/team%20%2Fone"],
+      ["DELETE", "/api/v1/deals/DEAL%20%2Fone/teams/team%20%2Fone?expectedRevision=1"],
       [
         "POST",
         "/api/v1/deals/DEAL%20%2Fone/teams/team%20%2Fone/members",
@@ -94,7 +94,7 @@ describe("shared deal membership contracts", () => {
       expectedRevision: 1,
     });
     await expect(
-      httpQuarryApi.removeDealMember("DEAL-1", 2),
+      httpQuarryApi.removeDealMember("DEAL-1", 2, 1),
     ).resolves.toBeUndefined();
     await httpQuarryApi.searchDealDocumentChunksByKeyword("DEAL /one", {
       queryText: "scope",
@@ -110,7 +110,7 @@ describe("shared deal membership contracts", () => {
     });
     expect(fetch.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
       ["/api/v1/deals/DEAL-1/members/2", "PATCH"],
-      ["/api/v1/deals/DEAL-1/members/2", "DELETE"],
+      ["/api/v1/deals/DEAL-1/members/2?expectedRevision=1", "DELETE"],
       ["/api/v1/deals/DEAL%20%2Fone/documents/search/keyword", "POST"],
       ["/api/v1/documents/search/keyword", "POST"],
       ["/api/v1/deals/DEAL-1/documents/search/vector", "POST"],
@@ -136,7 +136,7 @@ describe("shared deal membership contracts", () => {
       role: "manager",
       expectedRevision: 7,
     });
-    await api.removeDealMember("DEAL-1", 2);
+    await api.removeDealMember("DEAL-1", 2, 1);
     await api.searchDealDocumentChunksByKeyword("DEAL /one", {
       queryText: "scope",
       limit: 5,
@@ -147,7 +147,7 @@ describe("shared deal membership contracts", () => {
       { role: "manager", expectedRevision: 7 },
     );
     expect(transport.delete).toHaveBeenCalledWith(
-      "/api/v1/deals/DEAL-1/members/2",
+      "/api/v1/deals/DEAL-1/members/2?expectedRevision=1",
     );
     expect(transport.post.mock.calls.map(([path]) => path)).toEqual([
       "/api/v1/deals/DEAL%20%2Fone/documents/search/keyword",

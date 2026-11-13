@@ -1,6 +1,6 @@
 use crate::domains::assistant::chat::model::ThreadScope;
 use crate::{
-    adapters::sqlite::client::SqliteClient,
+    adapters::postgres::client::PostgresClient,
     app::migrations,
     domains::{
         assistant::chat::repository::{AssistantChatRepository, StartRunInput, StartRunResult},
@@ -8,10 +8,10 @@ use crate::{
     },
 };
 
-async fn repository_fixture() -> (AssistantChatRepository, i64, SqliteClient) {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrations::migrate(&sqlite).unwrap();
-    let user = UserRepository::new(sqlite.clone())
+async fn repository_fixture() -> (AssistantChatRepository, i64, PostgresClient) {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrations::migrate(&postgres).await.unwrap();
+    let user = UserRepository::new(postgres.clone())
         .create(AddUserInput {
             email: "analyst@example.com".to_string(),
             first_name: "Avery".to_string(),
@@ -21,9 +21,9 @@ async fn repository_fixture() -> (AssistantChatRepository, i64, SqliteClient) {
         .await
         .unwrap();
     (
-        AssistantChatRepository::new(sqlite.clone()),
+        AssistantChatRepository::new(postgres.clone()),
         user.id,
-        sqlite,
+        postgres,
     )
 }
 
@@ -77,7 +77,7 @@ async fn run_persists_an_ordered_pair_and_replays_the_same_request_id() {
 
 #[tokio::test]
 async fn retry_reuses_the_user_message_and_excludes_the_retried_pair_from_context() {
-    let (repository, user_id, sqlite) = repository_fixture().await;
+    let (repository, user_id, postgres) = repository_fixture().await;
     repository
         .create_thread(user_id, "thread-1".to_string(), None)
         .await
@@ -102,14 +102,13 @@ async fn retry_reuses_the_user_message_and_excludes_the_retried_pair_from_contex
         )
         .await
         .unwrap();
-    sqlite
-        .with_connection(|connection| {
+    postgres
+        .with_connection(async |connection| {
             connection.execute(
-                "UPDATE assistant_messages SET parent_message_id = message_id WHERE message_id = 'user-1'",
-                [],
-            )?;
+                "UPDATE assistant_messages SET parent_message_id = message_id WHERE message_id = 'user-1'", Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
 
     let retry = StartRunInput {
@@ -252,7 +251,7 @@ async fn ownership_and_archive_filtering_are_enforced() {
 
 #[tokio::test]
 async fn thread_pagination_keeps_same_timestamp_ties() {
-    let (repository, user_id, sqlite) = repository_fixture().await;
+    let (repository, user_id, postgres) = repository_fixture().await;
     repository
         .create_thread(user_id, "thread-a".to_string(), None)
         .await
@@ -261,14 +260,14 @@ async fn thread_pagination_keeps_same_timestamp_ties() {
         .create_thread(user_id, "thread-b".to_string(), None)
         .await
         .unwrap();
-    sqlite
-        .with_connection(|connection| {
+    postgres
+        .with_connection(async |connection| {
             connection.execute(
                 "UPDATE assistant_threads SET last_message_at = '2026-01-01 00:00:00' WHERE user_id = ?1",
                 [user_id],
-            )?;
+            ).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
 
     let first_page = repository
@@ -294,25 +293,29 @@ async fn thread_pagination_keeps_same_timestamp_ties() {
 
 #[tokio::test]
 async fn scoped_cursor_filters_before_limiting_even_when_recency_is_tied() {
-    let (repository, owner, sqlite) = repository_fixture().await;
-    sqlite.with_connection(|c| c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now'),('DEAL-B',?1,'B','sell_side','unknown','pipeline','now','now')", [owner])).unwrap();
-    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [owner])).unwrap();
-    sqlite
-        .with_connection(|c| {
+    let (repository, owner, postgres) = repository_fixture().await;
+    postgres.with_connection(async |c| { c.execute("INSERT INTO deals (deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES ('DEAL-A',?1,'A','buy_side','unknown','pipeline','now','now'),('DEAL-B',?1,'B','sell_side','unknown','pipeline','now','now')", [owner]).await }).await.unwrap();
+    postgres.with_connection(async |c| { c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',?1,'owner','now','now')", [owner]).await }).await.unwrap();
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
-    sqlite.with_connection(|c| c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-B',?1,'owner','now','now')", [owner])).unwrap();
-    sqlite
-        .with_connection(|c| {
+    postgres.with_connection(async |c| { c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-B',?1,'owner','now','now')", [owner]).await }).await.unwrap();
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-B')",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
     for (thread, deal) in [
         ("z-free", None),
@@ -326,13 +329,15 @@ async fn scoped_cursor_filters_before_limiting_even_when_recency_is_tied() {
             .await
             .unwrap();
     }
-    sqlite
-        .with_connection(|c| {
+    postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE assistant_threads SET last_message_at='2026-10-15T12:00:00Z'",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
     for (scope, expected) in [
         (ThreadScope::Freeform, vec!["z-free", "v-free"]),

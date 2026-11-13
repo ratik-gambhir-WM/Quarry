@@ -1,7 +1,7 @@
 use super::*;
 use crate::domains::notebooks::test_support;
-fn repository() -> NotebookRepository {
-    NotebookRepository::new(test_support::database())
+async fn repository() -> NotebookRepository {
+    NotebookRepository::new(test_support::database().await)
 }
 async fn saved(
     repo: &NotebookRepository,
@@ -22,7 +22,7 @@ async fn saved(
 }
 #[tokio::test]
 async fn notebook_repository_lifecycle_ownership_relocation_and_cascades() {
-    let repo = repository();
+    let repo = repository().await;
     let b = repo.create(1, "Notebook".into(), None).await.unwrap();
     let other = repo.create(2, "Other".into(), None).await.unwrap();
     assert!(repo.get(2, b.notebook_id.clone()).await.is_err());
@@ -69,7 +69,7 @@ async fn notebook_repository_lifecycle_ownership_relocation_and_cascades() {
 }
 #[tokio::test]
 async fn notebook_revision_races_active_jobs_idempotence_and_content_clear() {
-    let repo = repository();
+    let repo = repository().await;
     let book = repo
         .create(1, "Book".into(), None)
         .await
@@ -151,7 +151,7 @@ async fn notebook_revision_races_active_jobs_idempotence_and_content_clear() {
 }
 #[tokio::test]
 async fn notebook_folder_delete_rolls_back_typed_domain_failure_and_overflow() {
-    let repo = repository();
+    let repo = repository().await;
     let book = repo
         .create(1, "Book".into(), None)
         .await
@@ -164,9 +164,10 @@ async fn notebook_folder_delete_rolls_back_typed_domain_failure_and_overflow() {
     let n = saved(&repo, &book, Some(f.folder_id.clone()), "Note").await;
     let fid = f.folder_id.clone();
     let result: Result<()> = repo
-        .sqlite
-        .transaction_result_async(move |tx| {
-            relocate_folder(tx, &fid)?;
+        .postgres
+        .transaction_result_async(move |tx| async move {
+            let tx = &tx;
+            relocate_folder(tx, &fid).await?;
             Err(conflict())
         })
         .await;
@@ -177,7 +178,7 @@ async fn notebook_folder_delete_rolls_back_typed_domain_failure_and_overflow() {
         .unwrap();
     assert_eq!(n.summary.folder_id, Some(f.folder_id.clone()));
     assert_eq!(n.summary.revision, 1);
-    repo.sqlite
+    repo.postgres
         .write_async(
             Q::update("notebook_notes")
                 .set("revision", MAX_REVISION)
@@ -205,8 +206,8 @@ async fn notebook_folder_delete_rolls_back_typed_domain_failure_and_overflow() {
 }
 #[tokio::test]
 async fn notebook_constraints_parent_membership_deal_ownership_and_literal_search() {
-    let repo = repository();
-    repo.sqlite.with_connection(|c| { c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-A',1,'Deal','buy_side','unknown','pipeline','now','now')",[])?; c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',1,'owner','now','now')",[])?; c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')",[])?; Ok(()) }).unwrap();
+    let repo = repository().await;
+    repo.postgres.with_connection(async |c| {  c.execute("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-A',1,'Deal','buy_side','unknown','pipeline','now','now')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?; c.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-A',1,'owner','now','now')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?; c.execute("INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-A')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?; Ok(())  }).await.unwrap();
     assert!(repo
         .create(2, "Foreign".into(), Some("DEAL-A".into()))
         .await
@@ -216,9 +217,29 @@ async fn notebook_constraints_parent_membership_deal_ownership_and_literal_searc
         .await
         .unwrap()
         .notebook_id;
+    // Filtering is an ordinary read; it must not request a lifecycle row lock.
+    let linked = repo
+        .list(
+            1,
+            ListOptions {
+                relationship: Some("DEAL-A".into()),
+                limit: 10,
+                ..ListOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(linked.items.notebooks[0].notebook_id, book);
     assert!(repo
-        .sqlite
-        .with_connection(|c| c.execute("DELETE FROM deals WHERE deal_id='DEAL-A'", []))
+        .postgres
+        .with_connection(async |c| {
+            c.execute(
+                "DELETE FROM deals WHERE deal_id='DEAL-A'",
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            )
+            .await
+        })
+        .await
         .is_err());
     repo.update(1, book.clone(), None, PatchField::Null)
         .await
@@ -251,7 +272,7 @@ async fn notebook_constraints_parent_membership_deal_ownership_and_literal_searc
     assert!(!page.has_more);
     assert_eq!(page.items.notes[0].note_id, n.summary.note_id);
     // Summary reads exclude corrupt native content, while full reads fail closed.
-    repo.sqlite
+    repo.postgres
         .write_async(
             Q::update("notebook_notes")
                 .set("blocks_json", "[123]")
@@ -281,7 +302,7 @@ async fn notebook_constraints_parent_membership_deal_ownership_and_literal_searc
 
 #[tokio::test]
 async fn notebook_queue_capacity_and_claims_are_atomic_and_idempotent() {
-    let repo = repository();
+    let repo = repository().await;
     let book = repo
         .create(1, "Queue".into(), None)
         .await
@@ -315,7 +336,7 @@ async fn notebook_queue_capacity_and_claims_are_atomic_and_idempotent() {
 
 #[tokio::test]
 async fn notebook_corrupt_checkpoint_fails_closed_without_poisoning_the_queue() {
-    let repo = repository();
+    let repo = repository().await;
     let book = repo
         .create(1, "Queue".into(), None)
         .await
@@ -325,13 +346,15 @@ async fn notebook_corrupt_checkpoint_fails_closed_without_poisoning_the_queue() 
         .admit(1, book.clone(), None, test_support::input("Bad checkpoint"))
         .await
         .unwrap();
-    repo.sqlite
-        .with_connection(|c| {
+    repo.postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE notebook_save_jobs SET input_json='{}' WHERE job_id=?1",
                 [&bad.job_id],
             )
+            .await
         })
+        .await
         .unwrap();
     assert!(repo.claim().await.unwrap().is_none());
     let failed = repo.job(1, book.clone(), bad.job_id).await.unwrap();

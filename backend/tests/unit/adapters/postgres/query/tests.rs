@@ -1,0 +1,570 @@
+use super::*;
+use crate::adapters::postgres::client::PostgresError;
+
+fn build_error(result: Result<SqlQuery, PostgresError>) -> SqlBuilderError {
+    match result.unwrap_err() {
+        PostgresError::QueryBuild(error) => error,
+        error => panic!("expected query construction error, got {error}"),
+    }
+}
+
+#[test]
+fn all_builders_preserve_construction_error_sources() {
+    use std::error::Error;
+
+    let cases = [
+        (
+            SqlBuilder::select("").build(),
+            SqlBuilderError::EmptyIdentifier,
+        ),
+        (
+            SqlBuilder::insert_into("users").build(),
+            SqlBuilderError::MissingInsertValues,
+        ),
+        (
+            SqlBuilder::update("users").build(),
+            SqlBuilderError::MissingUpdateAssignments,
+        ),
+        (
+            SqlBuilder::delete_from("users").build(),
+            SqlBuilderError::MissingCondition("DELETE"),
+        ),
+    ];
+
+    for (result, expected) in cases {
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<SqlBuilderError>(),
+            Some(&expected)
+        );
+        assert!(matches!(error, PostgresError::QueryBuild(_)));
+    }
+}
+
+#[test]
+fn builds_parameterized_selects() {
+    let query = SqlBuilder::select("users")
+        .columns(["id", "email"])
+        .and_where(Condition::equal("status", "active"))
+        .and_where(Condition::in_values("role", ["admin", "analyst"]))
+        .order_by("updated_at", SortDirection::Descending)
+        .limit(25)
+        .offset(50)
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        query.sql(),
+        "SELECT \"id\", \"email\" FROM \"users\" WHERE (\"status\" = $1) AND (\"role\" IN ($2, $3)) ORDER BY \"updated_at\" DESC NULLS LAST LIMIT 25 OFFSET 50"
+    );
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::Text("active".to_string()),
+            SqlValue::Text("admin".to_string()),
+            SqlValue::Text("analyst".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn resource_and_queue_locks_are_distinct_from_ordinary_selects() {
+    for (mode, wait, suffix) in [
+        (RowLock::Share, LockWait::Wait, "FOR SHARE"),
+        (RowLock::Update, LockWait::Wait, "FOR UPDATE"),
+        (
+            RowLock::Update,
+            LockWait::SkipLocked,
+            "FOR UPDATE SKIP LOCKED",
+        ),
+    ] {
+        let query = SqlBuilder::select("jobs")
+            .and_where(Condition::equal("status", "queued"))
+            .order_by("id", SortDirection::Ascending)
+            .limit(1)
+            .lock(mode, wait)
+            .build()
+            .unwrap();
+        assert_eq!(query.kind(), QueryKind::LockingSelect);
+        assert!(!query.kind().is_read());
+        assert!(!query.kind().is_mutation());
+        assert!(query.sql().ends_with(&format!("LIMIT 1 {suffix}")));
+        assert_eq!(query.parameters(), &[SqlValue::from("queued")]);
+    }
+    for query in [
+        SqlBuilder::select("jobs")
+            .distinct()
+            .lock(RowLock::Update, LockWait::Wait),
+        SqlBuilder::select("jobs")
+            .count_rows()
+            .lock(RowLock::Share, LockWait::Wait),
+    ] {
+        assert_eq!(
+            build_error(query.build()),
+            SqlBuilderError::InvalidLockingSelect
+        );
+    }
+}
+
+#[test]
+fn conditional_mutations_return_quoted_columns_and_keep_values_bound() {
+    let query = SqlBuilder::update("notes")
+        .set("content", "' OR true --")
+        .increment("revision")
+        .and_where(Condition::equal("id", "note"))
+        .and_where(Condition::equal("revision", 3_i64))
+        .returning("revision")
+        .returning("odd\"name")
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"content\" = $1, \"revision\" = \"revision\" + 1 WHERE (\"id\" = $2) AND (\"revision\" = $3) RETURNING \"revision\", \"odd\"\"name\"");
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::from("' OR true --"),
+            SqlValue::from("note"),
+            SqlValue::from(3_i64)
+        ]
+    );
+    assert_eq!(query.kind(), QueryKind::UpdateReturning);
+    assert!(!query.kind().is_read());
+    assert!(query.kind().is_mutation());
+    assert!(query.kind().returns_mutation_rows());
+    let query = SqlBuilder::delete_from("notes")
+        .and_where(Condition::equal("revision", 3_i64))
+        .returning("id")
+        .build()
+        .unwrap();
+    assert_eq!(query.kind(), QueryKind::DeleteReturning);
+    assert!(query.sql().ends_with(" RETURNING \"id\""));
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("notes")
+                .set("content", "x")
+                .returning("id")
+                .build()
+        ),
+        SqlBuilderError::MissingCondition("UPDATE")
+    );
+    assert_eq!(
+        build_error(SqlBuilder::delete_from("notes").returning("id").build()),
+        SqlBuilderError::MissingCondition("DELETE")
+    );
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("notes")
+                .set("content", "x")
+                .allow_all_rows()
+                .returning("id")
+                .returning("id")
+                .build()
+        ),
+        SqlBuilderError::DuplicateColumn("id".into())
+    );
+}
+
+#[test]
+fn deadline_assignments_and_predicates_use_database_time() {
+    let query = SqlBuilder::update("jobs")
+        .set("token", "attempt")
+        .set_epoch_seconds_after("lease_until", 180)
+        .and_where(Condition::equal("id", "job"))
+        .and_where(Condition::unexpired("lease_until"))
+        .returning("lease_until")
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"jobs\" SET \"token\" = $1, \"lease_until\" = floor(extract(epoch FROM clock_timestamp()))::bigint + $2::bigint WHERE (\"id\" = $3) AND (\"lease_until\" > floor(extract(epoch FROM clock_timestamp()))::bigint) RETURNING \"lease_until\"");
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::from("attempt"),
+            SqlValue::from(180_i64),
+            SqlValue::from("job")
+        ]
+    );
+    let expired = SqlBuilder::select("jobs")
+        .and_where(Condition::expired("lease_until"))
+        .build()
+        .unwrap();
+    assert!(expired
+        .sql()
+        .contains("\"lease_until\" <= floor(extract(epoch FROM clock_timestamp()))::bigint"));
+    assert_eq!(
+        build_error(
+            SqlBuilder::update("jobs")
+                .set("lease_until", 0_i64)
+                .set_epoch_seconds_after("lease_until", 1)
+                .allow_all_rows()
+                .build()
+        ),
+        SqlBuilderError::DuplicateColumn("lease_until".into())
+    );
+    assert_eq!(
+        SqlBuilder::insert_into("users")
+            .value("email", "test@example.invalid")
+            .build()
+            .unwrap()
+            .kind(),
+        QueryKind::InsertReturningId
+    );
+}
+
+#[test]
+fn keeps_untrusted_values_out_of_sql() {
+    let untrusted = "' OR 1 = 1 --";
+    let query = SqlBuilder::select("users")
+        .and_where(Condition::equal("email", untrusted))
+        .build()
+        .unwrap();
+
+    assert!(!query.sql().contains(untrusted));
+    assert_eq!(query.parameters(), &[SqlValue::Text(untrusted.to_string())]);
+}
+
+#[test]
+fn builds_insert_update_and_delete_queries() {
+    let insert = SqlBuilder::insert_into("users")
+        .value("email", "ada@example.com")
+        .value("active", true)
+        .build()
+        .unwrap();
+    assert_eq!(
+        insert.sql(),
+        "INSERT INTO \"users\" (\"email\", \"active\") VALUES ($1, $2) RETURNING id"
+    );
+
+    let update = SqlBuilder::update("users")
+        .set("active", false)
+        .and_where(Condition::equal("id", 7_i64))
+        .build()
+        .unwrap();
+    assert_eq!(
+        update.sql(),
+        "UPDATE \"users\" SET \"active\" = $1 WHERE (\"id\" = $2)"
+    );
+
+    let delete = SqlBuilder::delete_from("users")
+        .and_where(Condition::equal("id", 7_i64))
+        .build()
+        .unwrap();
+    assert_eq!(delete.sql(), "DELETE FROM \"users\" WHERE (\"id\" = $1)");
+}
+
+#[test]
+fn builds_parameterized_insert_on_conflict_update() {
+    let query = SqlBuilder::insert_into("deal_metadata")
+        .value("deal_id", 42_i64)
+        .value("key_questions_json", "[]")
+        .value("document_count", 3_i64)
+        .value("data_room_size_bytes", 1024_i64)
+        .on_conflict_update(
+            ConflictUpdate::new(["deal_id"])
+                .set_excluded("key_questions_json")
+                .set_excluded("document_count")
+                .set_excluded("data_room_size_bytes")
+                .set_current_timestamp("updated_at"),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        query.sql(),
+        "INSERT INTO \"deal_metadata\" (\"deal_id\", \"key_questions_json\", \"document_count\", \"data_room_size_bytes\") VALUES ($1, $2, $3, $4) ON CONFLICT (\"deal_id\") DO UPDATE SET \"key_questions_json\" = excluded.\"key_questions_json\", \"document_count\" = excluded.\"document_count\", \"data_room_size_bytes\" = excluded.\"data_room_size_bytes\", \"updated_at\" = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"
+    );
+    assert_eq!(
+        query.parameters(),
+        &[
+            SqlValue::Integer(42),
+            SqlValue::Text("[]".to_string()),
+            SqlValue::Integer(3),
+            SqlValue::Integer(1024),
+        ]
+    );
+}
+
+#[test]
+fn supports_bound_conflict_updates_and_do_nothing() {
+    let update = SqlBuilder::insert_into("users")
+        .value("email", "ada@example.com")
+        .on_conflict_update(ConflictUpdate::new(["email"]).set("status", "already_registered"))
+        .build()
+        .unwrap();
+    assert_eq!(
+        update.sql(),
+        "INSERT INTO \"users\" (\"email\") VALUES ($1) ON CONFLICT (\"email\") DO UPDATE SET \"status\" = $2 RETURNING id"
+    );
+    assert_eq!(
+        update.parameters(),
+        &[
+            SqlValue::Text("ada@example.com".to_string()),
+            SqlValue::Text("already_registered".to_string()),
+        ]
+    );
+
+    let do_nothing = SqlBuilder::insert_into("users")
+        .value("email", "ada@example.com")
+        .on_conflict_do_nothing(["email"])
+        .build()
+        .unwrap();
+    assert_eq!(
+        do_nothing.sql(),
+        "INSERT INTO \"users\" (\"email\") VALUES ($1) ON CONFLICT (\"email\") DO NOTHING RETURNING id"
+    );
+}
+
+#[test]
+fn validates_conflict_updates() {
+    assert_eq!(
+        build_error(
+            SqlBuilder::insert_into("users")
+                .value("email", "ada@example.com")
+                .on_conflict_update(ConflictUpdate::new(Vec::<String>::new()).set_excluded("email"))
+                .build()
+        ),
+        SqlBuilderError::MissingConflictTarget
+    );
+    assert_eq!(
+        build_error(
+            SqlBuilder::insert_into("users")
+                .value("email", "ada@example.com")
+                .on_conflict_update(ConflictUpdate::new(["email"]))
+                .build()
+        ),
+        SqlBuilderError::MissingConflictAssignments
+    );
+}
+
+#[test]
+fn update_and_delete_require_explicit_scope() {
+    assert_eq!(
+        build_error(SqlBuilder::update("users").set("active", false).build()),
+        SqlBuilderError::MissingCondition("UPDATE")
+    );
+    assert_eq!(
+        build_error(SqlBuilder::delete_from("users").build()),
+        SqlBuilderError::MissingCondition("DELETE")
+    );
+
+    assert!(SqlBuilder::delete_from("users")
+        .allow_all_rows()
+        .build()
+        .is_ok());
+}
+
+#[test]
+fn equal_null_uses_sql_null_semantics() {
+    let query = SqlBuilder::select("users")
+        .and_where(Condition::equal("deleted_at", SqlValue::Null))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        query.sql(),
+        "SELECT * FROM \"users\" WHERE (\"deleted_at\" IS NULL)"
+    );
+    assert!(query.parameters().is_empty());
+}
+
+#[test]
+fn join_and_where_comparisons_share_null_and_parameter_semantics() {
+    for (operator, sql_operator) in [
+        (ComparisonOperator::Equal, "="),
+        (ComparisonOperator::NotEqual, "!="),
+        (ComparisonOperator::GreaterThan, ">"),
+        (ComparisonOperator::GreaterThanOrEqual, ">="),
+        (ComparisonOperator::LessThan, "<"),
+        (ComparisonOperator::LessThanOrEqual, "<="),
+        (ComparisonOperator::Like, "LIKE"),
+        (ComparisonOperator::NotLike, "NOT LIKE"),
+    ] {
+        for value in [SqlValue::Null, SqlValue::Integer(7), "' OR 1=1 --".into()] {
+            let query = SqlBuilder::select("users")
+                .join(JoinClause::left("memberships").on(JoinCondition::value(
+                    "memberships.role",
+                    operator,
+                    value.clone(),
+                )))
+                .and_where(Condition::compare("users.role", operator, value.clone()))
+                .build()
+                .unwrap();
+            let (comparison, parameters) = match (operator, &value) {
+                (ComparisonOperator::Equal, SqlValue::Null) => ("IS NULL".to_owned(), vec![]),
+                (ComparisonOperator::NotEqual, SqlValue::Null) => {
+                    ("IS NOT NULL".to_owned(), vec![])
+                }
+                _ => (format!("{sql_operator} ?"), vec![value.clone(), value]),
+            };
+            let predicate = |table: &str, n| {
+                let column = format!("\"{table}\".\"role\"");
+                if matches!(
+                    operator,
+                    ComparisonOperator::Like | ComparisonOperator::NotLike
+                ) {
+                    format!("translate({column}::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') {sql_operator} translate(${n}::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')")
+                } else {
+                    format!("{column} {}", comparison.replace('?', &format!("${n}")))
+                }
+            };
+            assert_eq!(
+                query.sql(),
+                format!(
+                    "SELECT * FROM \"users\" LEFT JOIN \"memberships\" ON ({}) WHERE ({})",
+                    predicate("memberships", 1),
+                    predicate("users", 2)
+                )
+            );
+            assert_eq!(query.parameters(), parameters);
+        }
+    }
+}
+
+#[test]
+fn updates_keep_assignments_increments_and_conditions_in_parameter_order() {
+    let query = SqlBuilder::update("notes")
+        .increment("revision")
+        .set("title", "Changed")
+        .increment("access_revision")
+        .set("content", "Body")
+        .and_where(Condition::equal("id", "note-1"))
+        .build()
+        .unwrap();
+    assert_eq!(query.sql(), "UPDATE \"notes\" SET \"title\" = $1, \"content\" = $2, \"revision\" = \"revision\" + 1, \"access_revision\" = \"access_revision\" + 1 WHERE (\"id\" = $3)");
+    assert_eq!(
+        query.parameters(),
+        &["Changed".into(), "Body".into(), "note-1".into()]
+    );
+
+    for builder in [
+        SqlBuilder::update("notes")
+            .set("revision", 1)
+            .increment("revision"),
+        SqlBuilder::update("notes")
+            .increment("revision")
+            .increment("revision"),
+    ] {
+        assert_eq!(
+            build_error(builder.allow_all_rows().build()),
+            SqlBuilderError::DuplicateColumn("revision".into())
+        );
+    }
+}
+
+#[test]
+fn builds_simple_joins_with_qualified_wildcards() {
+    let query = SqlBuilder::select("users")
+        .columns(["users.*", "profiles.bio"])
+        .left_join("profiles", "users.id", "profiles.user_id")
+        .inner_join("teams", "users.team_id", "teams.id")
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        query.sql(),
+        "SELECT \"users\".*, \"profiles\".\"bio\" FROM \"users\" LEFT JOIN \"profiles\" ON (\"users\".\"id\" = \"profiles\".\"user_id\") INNER JOIN \"teams\" ON (\"users\".\"team_id\" = \"teams\".\"id\")"
+    );
+    assert!(query.parameters().is_empty());
+}
+
+#[test]
+fn builds_aliased_joins_with_composable_on_conditions() {
+    let query = SqlBuilder::select("users")
+        .alias("u")
+        .columns(["u.id", "m.role"])
+        .join(
+            JoinClause::left("memberships")
+                .alias("m")
+                .on(JoinCondition::equal("u.id", "m.user_id"))
+                .and_on(JoinCondition::value(
+                    "m.active",
+                    ComparisonOperator::Equal,
+                    true,
+                )),
+        )
+        .and_where(Condition::equal("u.status", "active"))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        query.sql(),
+        "SELECT \"u\".\"id\", \"m\".\"role\" FROM \"users\" AS \"u\" LEFT JOIN \"memberships\" AS \"m\" ON (\"u\".\"id\" = \"m\".\"user_id\") AND (\"m\".\"active\" = $1) WHERE (\"u\".\"status\" = $2)"
+    );
+    assert_eq!(
+        query.parameters(),
+        &[SqlValue::Integer(1), SqlValue::Text("active".to_string()),]
+    );
+}
+
+#[test]
+fn validates_join_conditions() {
+    assert_eq!(
+        build_error(
+            SqlBuilder::select("users")
+                .join(JoinClause::inner("profiles"))
+                .build()
+        ),
+        SqlBuilderError::MissingJoinCondition {
+            join_type: "INNER",
+            table: "profiles".to_string(),
+        }
+    );
+    assert_eq!(
+        build_error(
+            SqlBuilder::select("users")
+                .join(
+                    JoinClause::cross("roles")
+                        .on(JoinCondition::equal("users.role_id", "roles.id")),
+                )
+                .build()
+        ),
+        SqlBuilderError::UnexpectedCrossJoinCondition("roles".to_string())
+    );
+
+    let cross_join = SqlBuilder::select("users")
+        .cross_join("roles")
+        .build()
+        .unwrap();
+    assert_eq!(
+        cross_join.sql(),
+        "SELECT * FROM \"users\" CROSS JOIN \"roles\""
+    );
+}
+
+#[test]
+fn count_rows_keeps_bound_input() {
+    let query = SqlBuilder::select("templates")
+        .and_where(Condition::equal("template_id", "value' OR 1=1"))
+        .count_rows()
+        .build()
+        .unwrap();
+    assert!(query.sql().starts_with("SELECT COUNT(*)"));
+    assert_eq!(query.parameters(), &[SqlValue::from("value' OR 1=1")]);
+}
+
+#[test]
+fn notebook_query_increment_and_literal_substring_remain_typed_and_bound() {
+    let query = SqlBuilder::update("notes")
+        .set("folder_id", None::<String>)
+        .increment("revision")
+        .and_where(Condition::equal("folder_id", "folder"))
+        .build()
+        .unwrap();
+    assert!(query.sql().contains("\"revision\" = \"revision\" + 1"));
+    assert_eq!(query.parameters().len(), 2);
+    assert!(SqlBuilder::update("notes")
+        .set("revision", 1_i64)
+        .increment("revision")
+        .and_where(Condition::equal("id", "id"))
+        .build()
+        .is_err());
+    let query = SqlBuilder::select("notes")
+        .and_where(Condition::literal_substring("title", "%_\\' OR 1=1"))
+        .build()
+        .unwrap();
+    assert!(!query.sql().contains("OR 1=1"));
+    assert!(query.sql().contains("LIKE translate($1::text"));
+    assert!(query.sql().contains("ESCAPE"));
+    assert_eq!(
+        query.parameters(),
+        &[SqlValue::Text("%\\%\\_\\\\' OR 1=1%".into())]
+    );
+}

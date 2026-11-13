@@ -20,7 +20,7 @@ const POWERPOINT_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const ONE_PIXEL_PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
-fn test_app(max_json: usize, max_upload: usize) -> Router {
+async fn test_app(max_json: usize, max_upload: usize) -> Router {
     compose(
         SlideTemplateEndpoint::open(SlideTemplateConfig {
             database_path: PathBuf::from(":memory:"),
@@ -29,7 +29,8 @@ fn test_app(max_json: usize, max_upload: usize) -> Router {
             request_timeout: Duration::from_secs(5),
             preview: TemplatePreviewConfig::Disabled,
         })
-        .expect("test SQLite should open"),
+        .await
+        .expect("test PostgreSQL should open"),
     )
 }
 
@@ -104,29 +105,33 @@ async fn svg_asset_responses_isolate_active_content() {
             request_timeout: Duration::from_secs(5),
             preview: TemplatePreviewConfig::Disabled,
         })
+        .await
         .unwrap(),
     );
-    let connection = rusqlite::Connection::open(path).unwrap();
+    let connection = crate::adapters::postgres::client::test_support::TestConnection::open(path)
+        .await
+        .unwrap();
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" onload="fetch('/api/v1/deals')"><script>localStorage.setItem('svg-executed','yes')</script><foreignObject><iframe xmlns="http://www.w3.org/1999/xhtml" src="/api/v1/deals"/></foreignObject><rect width="10" height="10" fill="red"/></svg>"#;
     connection
         .execute(
             "INSERT INTO templates (template_id, template_json, owner_user_id) VALUES (?1, json(?2), 1)",
-            rusqlite::params![
+            crate::pg_params![
                 "svg-template",
                 serde_json::to_string(&presentation(false)).unwrap()
             ],
-        )
+        ).await
         .unwrap();
     connection
         .execute(
             "INSERT INTO app_templates VALUES ('Quarry_WestMonroe', ?1, CURRENT_TIMESTAMP)",
             ["svg-template"],
         )
+        .await
         .unwrap();
     connection.execute(
         "INSERT INTO template_assets (asset_id, template_id, content_type, asset_data) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params!["svg-asset", "svg-template", "image/svg+xml", svg.as_slice()],
-    ).unwrap();
+        crate::pg_params!["svg-asset", "svg-template", "image/svg+xml", svg.as_slice()],
+    ).await.unwrap();
 
     for prefix in ["/api/v1", "/api"] {
         let request = Request::get(format!(
@@ -149,7 +154,7 @@ async fn svg_asset_responses_isolate_active_content() {
 
 #[tokio::test]
 async fn export_returns_valid_powerpoint_and_contract_headers() {
-    let app = test_app(1024 * 1024, 1024 * 1024);
+    let app = test_app(1024 * 1024, 1024 * 1024).await;
     let mut document = presentation(false);
     document["presentation"]["slides"][0]["elements"]
         .as_array_mut()
@@ -229,7 +234,7 @@ async fn export_returns_valid_powerpoint_and_contract_headers() {
 
 #[tokio::test]
 async fn connector_types_survive_export_and_import() {
-    let app = test_app(1024 * 1024, 1024 * 1024);
+    let app = test_app(1024 * 1024, 1024 * 1024).await;
     let mut document = presentation(false);
     let elements = document["presentation"]["slides"][0]["elements"]
         .as_array_mut()
@@ -313,7 +318,7 @@ async fn connector_types_survive_export_and_import() {
 
 #[tokio::test]
 async fn import_rejects_multi_slide_powerpoints() {
-    let app = test_app(1024 * 1024, 1024 * 1024);
+    let app = test_app(1024 * 1024, 1024 * 1024).await;
     let document = json!({
         "presentation": {
             "title": "Brand policy deck",
@@ -467,7 +472,8 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
             request_timeout: Duration::from_secs(5),
             preview: TemplatePreviewConfig::Disabled,
         })
-        .expect("test SQLite should open"),
+        .await
+        .expect("test PostgreSQL should open"),
     );
     let export_request = Request::post("/api/v1/templates/slide-templates/export")
         .header(header::CONTENT_TYPE, "application/json")
@@ -508,11 +514,14 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
         .expect("hydrated image");
     assert!(hydrated_image.starts_with("data:image/png;base64,"));
 
-    let connection = rusqlite::Connection::open(&database_path).expect("open SQLite for assertion");
+    let connection =
+        crate::adapters::postgres::client::test_support::TestConnection::open(&database_path)
+            .await
+            .expect("open PostgreSQL for assertion");
     let (asset_id, storage_type, blob_length, stored_json): (String, String, i64, String) =
         connection
             .query_row(
-                "SELECT template_assets.asset_id, typeof(template_assets.asset_data),
+                "SELECT template_assets.asset_id, pg_typeof(template_assets.asset_data)::text,
                         length(template_assets.asset_data), templates.template_json
                  FROM template_assets
                  JOIN templates ON templates.template_id = template_assets.template_id
@@ -520,8 +529,9 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
                 [template_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
+            .await
             .expect("stored image BLOB");
-    assert_eq!(storage_type, "blob");
+    assert_eq!(storage_type, "bytea");
     assert!(blob_length > 0);
     assert!(stored_json.contains(&format!("/import/{template_id}/assets/{asset_id}")));
     assert!(!stored_json.contains("base64"));
@@ -546,14 +556,10 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
     connection
         .execute(
             "UPDATE templates
-             SET template_json = json_set(
-                 template_json,
-                 '$.presentation.slides[0].elements[0].h',
-                 0
-             )
+             SET template_json = jsonb_set(template_json::jsonb,'{presentation,slides,0,elements,0,h}','0')::text
              WHERE template_id = ?1",
             [template_id],
-        )
+        ).await
         .expect("seed a legacy zero-sized element");
     let get_request = Request::get(format!(
         "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
@@ -565,14 +571,12 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
     assert!(String::from_utf8_lossy(&retrieved).contains("base64"));
     let stored_height: f64 = connection
         .query_row(
-            "SELECT json_extract(
-                template_json,
-                '$.presentation.slides[0].elements[0].h'
-             )
+            "SELECT (template_json::jsonb #>> '{presentation,slides,0,elements,0,h}')::float8
              FROM templates WHERE template_id = ?1",
             [template_id],
             |row| row.get(0),
         )
+        .await
         .expect("repaired stored dimension");
     assert_eq!(stored_height, 1.0);
 
@@ -598,8 +602,9 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
     connection
         .execute(
             "DELETE FROM template_assets WHERE template_id = ?1 AND asset_id = ?2",
-            rusqlite::params![template_id, asset_id],
+            crate::pg_params![template_id, asset_id],
         )
+        .await
         .expect("delete test asset");
     let missing_joined_asset = Request::get(format!(
         "/api/v1/templates/slide-templates/import/{template_id}"
@@ -624,36 +629,42 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
             request_timeout: Duration::from_secs(5),
             preview: TemplatePreviewConfig::Disabled,
         })
-        .expect("test SQLite should open"),
+        .await
+        .expect("test PostgreSQL should open"),
     );
     let template_id = "template-to-delete";
     let asset_id = "asset-to-delete";
-    let connection = rusqlite::Connection::open(&database_path).expect("open SQLite for seeding");
+    let connection =
+        crate::adapters::postgres::client::test_support::TestConnection::open(&database_path)
+            .await
+            .expect("open PostgreSQL for seeding");
     connection
         .execute(
             "INSERT INTO templates (template_id, template_json, owner_user_id) VALUES (?1, json(?2), 1)",
-            rusqlite::params![
+            crate::pg_params![
                 template_id,
                 serde_json::to_string(&presentation(false)).expect("serialize presentation")
             ],
-        )
+        ).await
         .expect("seed template");
     connection
         .execute(
             "INSERT INTO template_assets (asset_id, template_id, content_type, asset_data)
              VALUES (?1, ?2, 'image/png', ?3)",
-            rusqlite::params![asset_id, template_id, [1_u8, 2, 3]],
+            crate::pg_params![asset_id, template_id, [1_u8, 2, 3]],
         )
+        .await
         .expect("seed template asset");
     connection
         .execute(
             "INSERT INTO app_templates VALUES ('Quarry_WestMonroe',?1,CURRENT_TIMESTAMP)",
             [template_id],
         )
+        .await
         .expect("grant seeded template to default app");
 
     let delete_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -668,6 +679,7 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
             [template_id],
             |row| row.get(0),
         )
+        .await
         .expect("count deleted template");
     let asset_count: i64 = connection
         .query_row(
@@ -675,12 +687,13 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
             [template_id],
             |row| row.get(0),
         )
+        .await
         .expect("count cascaded assets");
     assert_eq!(template_count, 0);
     assert_eq!(asset_count, 0);
 
     let repeated_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -693,10 +706,12 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
 #[tokio::test]
 async fn imported_templates_filter_by_kind_and_serve_previews() {
     let repository = Arc::new(
-        crate::slide_template_test_support::repository(std::path::Path::new(":memory:")).unwrap(),
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
     );
     for kind in [TemplateKind::Diagram, TemplateKind::Commentary] {
-        crate::slide_template_test_support::import_fixture(repository.clone(), kind);
+        crate::slide_template_test_support::import_fixture(repository.clone(), kind).await;
     }
     let app = compose(SlideTemplateEndpoint {
         studio: Arc::new(SlideTemplates::new(
@@ -763,6 +778,7 @@ async fn import_persists_preview_and_selected_kind() {
     };
     let repository = Arc::new(
         crate::slide_template_test_support::repository(&config.database_path)
+            .await
             .expect("persistent repository"),
     );
     let endpoint = SlideTemplateEndpoint::with_repository_and_preview(
@@ -801,7 +817,7 @@ async fn import_persists_preview_and_selected_kind() {
     assert!(list["templates"][0]["previewUrl"].is_string());
 
     drop(app);
-    let app = compose(SlideTemplateEndpoint::open(config).unwrap());
+    let app = compose(SlideTemplateEndpoint::open(config).await.unwrap());
     let (status, _, body) = send(
         &app,
         Request::get(format!(
@@ -813,11 +829,11 @@ async fn import_persists_preview_and_selected_kind() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
+        serde_json::from_slice::<Value>(&body).unwrap()["document"],
         serde_json::from_slice::<Value>(&imported_body).unwrap()
     );
     let body: Value = serde_json::from_slice(&body).unwrap();
-    assert!(body["presentation"]["slides"][0]["elements"]
+    assert!(body["document"]["presentation"]["slides"][0]["elements"]
         .as_array()
         .unwrap()
         .iter()
@@ -839,6 +855,7 @@ async fn import_persists_preview_and_selected_kind() {
 async fn batch_import_stores_each_slide_and_lists_paginated_preview_data() {
     let repository = Arc::new(
         crate::slide_template_test_support::repository(PathBuf::from(":memory:").as_path())
+            .await
             .expect("in-memory repository"),
     );
     let endpoint = SlideTemplateEndpoint::with_repository_and_preview(
@@ -952,7 +969,7 @@ async fn batch_import_stores_each_slide_and_lists_paginated_preview_data() {
 
 #[tokio::test]
 async fn insert_endpoint_adds_generated_slide_and_clamps_position_to_target_deck() {
-    let app = test_app(1024 * 1024, 1024 * 1024);
+    let app = test_app(1024 * 1024, 1024 * 1024).await;
     let json = serde_json::to_vec(&presentation(false)).expect("presentation JSON");
     let export_request = Request::post("/api/v1/templates/slide-templates/export")
         .header(header::CONTENT_TYPE, "application/json")
@@ -1021,10 +1038,9 @@ struct SlideTemplateEndpoint {
     studio: Arc<SlideTemplates>,
 }
 impl SlideTemplateEndpoint {
-    fn open(config: SlideTemplateConfig) -> anyhow::Result<Self> {
-        let repository = Arc::new(crate::slide_template_test_support::repository(
-            &config.database_path,
-        )?);
+    async fn open(config: SlideTemplateConfig) -> anyhow::Result<Self> {
+        let repository =
+            Arc::new(crate::slide_template_test_support::repository(&config.database_path).await?);
         Ok(Self::with_repository_and_preview(
             config,
             repository,
@@ -1049,8 +1065,9 @@ impl SlideTemplateEndpoint {
 }
 fn compose(endpoint: SlideTemplateEndpoint) -> Router {
     let studio = endpoint.studio;
-    let facade =
-        Arc::new(crate::domains::templates::service::TemplateService::embedded(studio.clone()));
+    let facade = Arc::new(crate::domains::templates::service::TemplateService::new(
+        Some(studio.clone()),
+    ));
     let api = crate::domains::templates::route::routes(facade).merge(
         crate::domains::templates::slide_templates::route::routes(studio),
     );

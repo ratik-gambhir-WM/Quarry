@@ -1,6 +1,7 @@
 import type {
   Company,
   CompanyInput,
+  CompanyUpdateInput,
   CompanyPage,
   CompanySearch,
 } from "../../data/dealModel";
@@ -12,8 +13,8 @@ function createCompany(input: CompanyInput) {
   return post<Company, CompanyInput>("/api/v1/companies", input);
 }
 
-function updateCompany(id: string, input: CompanyInput) {
-  return post<Company, CompanyInput>(
+function updateCompany(id: string, input: CompanyUpdateInput) {
+  return post<Company, CompanyUpdateInput>(
     `/api/v1/companies/${encodeURIComponent(id)}/update`,
     input,
   );

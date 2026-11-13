@@ -541,7 +541,7 @@ describe("Notebook selector", () => {
     await screen.findByDisplayValue("Finance source");
     await user.click(screen.getByRole("button", { name: "Delete note" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete note" }));
-    await waitFor(() => expect(api.deleteNotebookNote).toHaveBeenCalledWith(secondBook.notebookId, secondNote.noteId));
+    await waitFor(() => expect(api.deleteNotebookNote).toHaveBeenCalledWith(secondBook.notebookId, secondNote.noteId, secondNote.revision));
     expect(await screen.findByText("Finance notes · 0")).toBeTruthy();
     expect(screen.queryByLabelText("Note title")).toBeNull();
     expect(screen.queryByRole("link", { name: /Research source/ })).toBeNull();

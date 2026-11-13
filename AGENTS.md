@@ -53,7 +53,6 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
-| `$HOME/diligence-studio-server/` | External Node/Express template catalog and PowerPoint service | npm + `package-lock.json` |
 | `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
@@ -62,22 +61,20 @@ build root. There is currently no CI, deployment manifest, repository-owned cont
 configuration, or repository-pinned Node/Rust version. Do not invent scripts that do
 not exist.
 
-### Diligence Studio remains a separate server boundary
+### Embedded templates
 
-- `$HOME/diligence-studio-server/` is an independent Node 22.5+ build root outside this repository. Do not add it to the
-  frontend package or create a root npm workspace.
-- The browser and Tauri webview call only Axum. Axum reaches Diligence Studio through its typed
-  adapter and fixed `X-App-Id: Quarry_WestMonroe`; client code must never call port `43127`.
-- Default `embedded` mode runs `domains/templates/slide_templates` in Axum with native conversion,
-  Chromium/CDP previews, shared durable product SQLite, and Helix template/metadata/dual-vector
-  projection. Explicit `diligence-studio` mode retains the independent Node service and legacy
-  in-memory catalog. Quarry's hidden Vite route supplies the shared read-only SVG render surface.
-- `app/migrations.rs` owns all SQLite schema (marker 18), including templates, assets, previews,
-  metadata, app memberships, classification, FTS, and both embeddings. Bootstrap passes the same
-  `SqliteClient` to product and template repositories. Old schemas require an explicit offline development reset;
-  no standalone template database setting, initializer, or memory-store default exists. Previously
-  created standalone files must remain untouched. SQLite is canonical; Helix is recoverable.
-- Keep server keys in the ignored `$HOME/diligence-studio-server/.env`; never place them in `VITE_*`,
+- Templates run only inside Axum through `domains/templates/slide_templates`, with native
+  conversion, Chromium/CDP previews, shared durable PostgreSQL and Helix metadata/dual-vector
+  projection. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
+  the shared read-only SVG render surface.
+- Bootstrap's main API assembly initializes one template engine for the facade, native routes
+  and shutdown lifecycle; there is no alternate template backend or service selector.
+- `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
+  `app/migrations.rs` initializes/validates version 2, checksums and catalog fingerprints.
+  Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
+  repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
+  schemas. Old SQLite files and Helix stores remain untouched; no import, fallback or reset exists.
+- Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
 ## Non-negotiable architecture boundaries
@@ -146,27 +143,41 @@ request -> router -> handler -> service -> repository/client
 
 ### Persistence and indexing
 
-- SQLite is the canonical store for users, deals, logical files, immutable versions, blobs, and
-  embedded templates/assets/previews/classification/embeddings.
-- Helix is the document graph/search projection. It is required during normal backend bootstrap.
-- Ingestion commits SQLite before indexing Helix. A Helix failure can therefore leave a durable
-  version; re-uploading the same bytes can retry indexing. No general reindex command exists, so
-  do not “fix” the gap by deleting canonical SQLite data.
-- The current shared schema marker is 18. Startup creates an empty database, additively upgrades
-  validated marker-12/13/14/15/16/17 layouts, or validates/reuses schema 18. Accepted image document/chunk
-  text is checkpointed per immutable version for retry recovery; old images without a checkpoint
-  require reviewed maintenance if their projection is lost. Existing documents require verified
-  identity/graph checkpoints before serving. The one-time Helix migration tool was removed after local cutover; see `docs/shared-deal-projects.md` for offline recovery. Older profile schemas require the
-  explicit offline development reset. The notebook upgrade preserves existing data; rollback
-  requires a matching pre-upgrade backup and binary during a drained window.
-  Incompatible schemas fail without deleting records. The explicit offline
-  `reset_development --discard <absolute-database-path>` utility is destructive and must never
-  run automatically at startup. Run it only for a deliberately selected, drained disposable
-  database, paired with a fresh isolated Helix store. Do not discard valuable local data.
-- `cargo run --bin clear_helix` deletes graph data. Run it only under the explicit, backed-up,
-  drained rollout procedure in `docs/ARCHITECTURE.md` and only when the user has authorized that
-  operation.
-- Document jobs and several caches are in memory. Do not document them as durable or distributed.
+- PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
+  and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
+- Helix remains the graph/search projection, required at normal startup. Ingestion commits
+  PostgreSQL before indexing; graph failure preserves canonical records and exact-content retry
+  reuses the same identity and accepted image text. There is no distributed transaction or general
+  bulk reindex tool. Never delete canonical rows to conceal a graph failure.
+- PostgreSQL schema version 2 adds bounded resource revisions and retained deal lifecycle guards
+  to the former marker-18 layout. Version 1 is intentionally unsupported; select an empty database. Startup
+  initializes an empty selected schema or validates its version, checksum, live catalog and owner/
+  document readiness invariants. Incompatible nonempty layouts fail without deletion. No old-data
+  migration, SQLite fallback or destructive relational reset is supported. Leave old stores alone.
+- One application writer lease is retained by the pool's dedicated session through router and
+  detached-worker clones. Writes fail closed on ownership loss. Reads use ordinary pooled
+  connections with no writer-session ping, ownership/generation check or explicit row lock,
+  including at snapshot commit. Aggregate writes additionally
+  use a schema-scoped transaction advisory lock and retained revision/lease guards; read aggregates
+  use a repeatable-read snapshot. Keep helpers on the same transaction/connection.
+  Typed resource locks, mutation RETURNING and database-clock deadlines are available in the query
+  layer; read-only runners reject locking SELECT and mutations. Global write controls remain until
+  durable worker claims/recovery and remote-publication safeguards are implemented and verified. Do not infer
+  multi-instance support from independent reads or test-only unguarded transaction fixtures.
+- Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
+  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
+  document and template Helix projection/search contracts remain unchanged.
+- `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
+  canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
+- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook indexes. Template vector
+  dimensions are configured independently. A configuration change does not resize existing indexes;
+  do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
+  a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
+  `docs/postgresql-storage.md` for the verified-empty-index case.
+- `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
+  drained operational procedure; never use it as verification. Document jobs/caches remain in memory.
+- See `docs/postgresql-storage.md` for server-only URL/pool configuration, fresh local graph port
+  6970, isolated PostgreSQL tests, backups and recovery.
 
 ## Frontend development rules
 
@@ -276,17 +287,17 @@ being changed, keep abstractions proportional to its complexity, and preserve un
   validation and those integrity checks, but must not depend on HTTP types or errors.
 - Use `ServiceError` for use-case failures, `RepositoryError` for persistence failures, and
   `AppError` only at the HTTP boundary. Log internal context and return sanitized client messages.
-- Never hold a blocking filesystem, SQLite, Office, or CPU-heavy operation on a Tokio worker.
+- Never hold a blocking filesystem, Office, or CPU-heavy operation on a Tokio worker.
   Follow existing client/service offloading patterns.
-- Do not write ad hoc SQL. Always use bound parameters through the existing SQL builder/client,
+- Do not write ad hoc SQL in handlers/services. Use bound parameters through the owned PostgreSQL query modules/client,
   and preserve transaction and file-version invariants when changing persistence.
 - Update migration tests and architecture/recovery documentation for schema or graph changes. Do
-  not edit local SQLite databases, ignored `backend/data/`, or `.env` files as implementation
+  not edit local PostgreSQL test schemas, ignored `backend/data/`, or `.env` files as implementation
   shortcuts.
 - Optional OpenAI and WM AI capabilities must fail explicitly when invoked but unconfigured;
   partial WM AI configuration must fail startup validation. Never move provider keys into
   frontend code or logs.
-- The Rust SharePoint client under `backend/src/core/clients/sharepoint_client/` is isolated and
+- The Rust SharePoint client under `backend/src/adapters/sharepoint/` is isolated and
   is not currently wired into product bootstrap. Do not imply the frontend SharePoint modal is a
   completed integration.
 
@@ -330,14 +341,14 @@ relevant viewport sizes.
 cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 `autotests = false`; unit tests mirror `backend/src/` under `backend/tests/unit/`, and cross-module
 suites live under `backend/tests/integration/`. Both are included manually with `#[path]`. Use
 `cargo test <name-filter>` for focused tests. Do not invent `cargo test --test <file>` commands.
 
-Do not use `cargo run` as a routine check. Startup opens/migrates SQLite and connects to Helix.
+Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and connects to Helix. Tests never reset the development database.
 
 ### Tauri shell (`frontend/src-tauri/`)
 
@@ -351,21 +362,12 @@ Also run frontend desktop typechecking and boundary checks for native contract c
 `npm run build:desktop` for packaging or release validation; it is substantially broader than a
 normal code check.
 
-### Diligence Studio server (`$HOME/diligence-studio-server/`)
-
-```sh
-npm ci
-npm run typecheck
-npm test
-```
-
-Install the matching local preview browser with `npx playwright install chromium` when imports
-will be exercised. The root `./quarry web` and `./quarry desktop` launchers supervise Axum, the
-selected UI, and, only in explicit legacy mode, this server after ensuring Docker Desktop and the
-configured local Helix container are ready; Docker and Helix remain running after the launcher exits. A direct `npm start` is a
-standalone runtime operation.
-
 ## Change checklists
+
+The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
+embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped, check
+the configured database connection, and ensure Docker Desktop and the configured local Helix
+container are ready. PostgreSQL, Docker, and Helix remain running after the launcher exits.
 
 ### When changing a frontend route or feature
 
@@ -384,12 +386,12 @@ standalone runtime operation.
 - For backend validation/authorization changes, review check placement and test early rejection
   before protected work, plus the retained state-dependent guards. Run the architecture suite
   (directly or through the full backend gate); static dependency checks alone do not prove order.
-- When a template operation changes, also update and test the matching Diligence Studio route,
-  headers, request bounds, app scoping, and error contract.
+- When a template operation changes, update and test the facade and native template routes,
+  headers, request bounds, owner/app scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 
-### When changing SQLite or Helix data shape
+### When changing PostgreSQL or Helix data shape
 
 - Define canonical ownership and stable IDs before coding.
 - Make forward migration and rollback/recovery behavior explicit.
@@ -415,7 +417,7 @@ standalone runtime operation.
   command arguments. The user-authorized bearer-session cache in `localStorage` is a deliberate
   exception, documented in `docs/authentication.md`; never expand it to other secrets.
 - Users have salted Argon2id password hashes; only public profile fields are serialized. Sessions
-  store token digests in SQLite. The app restores unexpired bearer sessions from origin-scoped
+  store token digests in PostgreSQL. The app restores unexpired bearer sessions from origin-scoped
   `localStorage` and sends a matching `X-User-Id` consistency header; the token is the identity authority.
 - User-provided API-key collection was removed. AI services use server-side `OPENAI_API_KEY`.
   Job titles grant no privileges. See `docs/authentication.md` for current limits and reset policy.

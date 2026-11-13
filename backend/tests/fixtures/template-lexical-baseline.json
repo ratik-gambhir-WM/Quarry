@@ -1,0 +1,558 @@
+{
+  "emptyDocuments": 300,
+  "tokenization": [
+    {
+      "input": "résumé",
+      "tokens": [
+        "resume"
+      ]
+    },
+    {
+      "input": "café",
+      "tokens": [
+        "cafe"
+      ]
+    },
+    {
+      "input": "ÁBC",
+      "tokens": [
+        "abc"
+      ]
+    },
+    {
+      "input": "άβγ",
+      "tokens": [
+        "αβγ"
+      ]
+    },
+    {
+      "input": "άβγ",
+      "tokens": [
+        "άβγ"
+      ]
+    },
+    {
+      "input": "İSTANBUL",
+      "tokens": [
+        "istanbul"
+      ]
+    },
+    {
+      "input": "Σςσ",
+      "tokens": [
+        "σσσ"
+      ]
+    },
+    {
+      "input": "ßẞ",
+      "tokens": [
+        "ßß"
+      ]
+    },
+    {
+      "input": "C++ .NET Node.js PostgreSQL",
+      "tokens": [
+        "c",
+        "net",
+        "node",
+        "js",
+        "postgresql"
+      ]
+    },
+    {
+      "input": "भाषा",
+      "tokens": [
+        "भ",
+        "ष"
+      ]
+    },
+    {
+      "input": "a_b",
+      "tokens": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "input": "東京",
+      "tokens": [
+        "東京"
+      ]
+    },
+    {
+      "input": "Œ ø ł æ",
+      "tokens": [
+        "œ",
+        "ø",
+        "ł",
+        "æ"
+      ]
+    },
+    {
+      "input": "😀emoji",
+      "tokens": [
+        "emoji"
+      ]
+    }
+  ],
+  "provenance": "Captured from empty SQLite FTS5 unicode61 remove_diacritics=2 using the original 16-column weights, before adapter retirement.",
+  "columns": [
+    "title",
+    "subject_summary",
+    "domains",
+    "topics",
+    "technologies",
+    "entities",
+    "claims",
+    "synonyms",
+    "intents",
+    "information_types",
+    "audience",
+    "archetype",
+    "content_slots",
+    "visual_structure",
+    "retrieval_keywords"
+  ],
+  "rows": [
+    {
+      "id": "01-title",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Cloud architecture",
+        "A service diagram",
+        "cloud",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "02-summary",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Service design",
+        "cloud cloud cloud architecture architecture",
+        "",
+        "cloud architecture",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "03-long",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Cloud architecture unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated unrelated ",
+        "Cloud services",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "04-private",
+      "owner": 2,
+      "app": "A",
+      "fields": [
+        "Cloud architecture",
+        "cloud cloud cloud cloud cloud cloud",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "05-app",
+      "owner": 1,
+      "app": "B",
+      "fields": [
+        "Cloud architecture",
+        "cloud cloud cloud cloud cloud cloud",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "06-accent",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Café Résumé",
+        "café cafe résume résumé café",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "07-tech",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "C++ .NET Node.js PostgreSQL",
+        "",
+        "",
+        "",
+        "C++ .NET Node.js PostgreSQL v18",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "node cloudnative"
+      ]
+    },
+    {
+      "id": "08-synonyms",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Infrastructure",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "cloud cloud cloud architecture",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "cloud architecture"
+      ]
+    },
+    {
+      "id": "09-tie-a",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Cloud architecture",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "10-tie-b",
+      "owner": 1,
+      "app": "A",
+      "fields": [
+        "Cloud architecture",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "expression": "cloud",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "02-summary",
+        "08-synonyms",
+        "01-title",
+        "09-tie-a",
+        "10-tie-b",
+        "03-long"
+      ]
+    },
+    {
+      "expression": "cloud",
+      "owner": 2,
+      "app": "A",
+      "expected": [
+        "04-private"
+      ]
+    },
+    {
+      "expression": "cloud",
+      "owner": 1,
+      "app": "B",
+      "expected": [
+        "05-app"
+      ]
+    },
+    {
+      "expression": "\"cloud\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "02-summary",
+        "08-synonyms",
+        "01-title",
+        "09-tie-a",
+        "10-tie-b",
+        "07-tech",
+        "03-long"
+      ]
+    },
+    {
+      "expression": "\"cloud\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": [
+        "04-private"
+      ]
+    },
+    {
+      "expression": "\"cloud\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": [
+        "05-app"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* AND \"arch\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "02-summary",
+        "08-synonyms",
+        "09-tie-a",
+        "10-tie-b",
+        "01-title",
+        "03-long"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* AND \"arch\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": [
+        "04-private"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* AND \"arch\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": [
+        "05-app"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* OR \"node\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "02-summary",
+        "08-synonyms",
+        "07-tech",
+        "01-title",
+        "09-tie-a",
+        "10-tie-b",
+        "03-long"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* OR \"node\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": [
+        "04-private"
+      ]
+    },
+    {
+      "expression": "\"cloud\"* OR \"node\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": [
+        "05-app"
+      ]
+    },
+    {
+      "expression": "\"cafe\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "06-accent"
+      ]
+    },
+    {
+      "expression": "\"cafe\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": []
+    },
+    {
+      "expression": "\"cafe\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": []
+    },
+    {
+      "expression": "\"resume\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "06-accent"
+      ]
+    },
+    {
+      "expression": "\"resume\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": []
+    },
+    {
+      "expression": "\"resume\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": []
+    },
+    {
+      "expression": "\"net\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "07-tech"
+      ]
+    },
+    {
+      "expression": "\"net\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": []
+    },
+    {
+      "expression": "\"net\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": []
+    },
+    {
+      "expression": "\"postgre\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "07-tech"
+      ]
+    },
+    {
+      "expression": "\"postgre\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": []
+    },
+    {
+      "expression": "\"postgre\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": []
+    },
+    {
+      "expression": "\"cloudnative\"*",
+      "owner": 1,
+      "app": "A",
+      "expected": [
+        "07-tech"
+      ]
+    },
+    {
+      "expression": "\"cloudnative\"*",
+      "owner": 2,
+      "app": "A",
+      "expected": []
+    },
+    {
+      "expression": "\"cloudnative\"*",
+      "owner": 1,
+      "app": "B",
+      "expected": []
+    }
+  ]
+}

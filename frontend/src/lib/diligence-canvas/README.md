@@ -1,8 +1,9 @@
 # DiligenceCanvas (Quarry snapshot)
 
 Copied from the standalone Diligence Canvas source on 2026-09-14. The source matched the
-revalidated Quarry integration-plan baseline; Diligence Studio was at `c1665ad`, with `84fef3b`
-as the minimum known-compatible app-scoped template retrieval revision.
+revalidated Quarry integration-plan baseline. The retired reference converter was at `c1665ad`;
+`84fef3b` was its minimum known-compatible app-scoped template retrieval revision. Quarry now
+owns template processing inside Axum.
 
 The snapshot keeps the slide model, immutable edit helpers, SVG renderer, interactions, text
 layout, shapes, Plate rich-text editor, normalization code, Tailwind utility styling, and bundled

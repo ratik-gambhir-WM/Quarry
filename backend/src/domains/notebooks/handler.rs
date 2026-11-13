@@ -267,9 +267,18 @@ pub(super) async fn delete_note(
     State(s): State<NotebookHttpState>,
     Extension(a): Extension<AuthenticatedUser>,
     ids: Ids,
+    axum::extract::Query(input): axum::extract::Query<DeleteRevision>,
 ) -> AppResult<StatusCode> {
+    if !(1..=MAX_REVISION).contains(&input.expected_revision) {
+        return Err(AppError::bad_request("invalid expectedRevision"));
+    }
     s.service
-        .delete_note(a.user.id, ids.notebook(), ids.child("note_id"))
+        .delete_note(
+            a.user.id,
+            ids.notebook(),
+            ids.child("note_id"),
+            input.expected_revision,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -356,3 +365,9 @@ pub(super) async fn events(
 #[cfg(test)]
 #[path = "../../../tests/unit/domains/notebooks/handler_tests.rs"]
 mod tests;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct DeleteRevision {
+    expected_revision: i64,
+}

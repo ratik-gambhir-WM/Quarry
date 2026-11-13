@@ -139,6 +139,8 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
     ) {
       return;
     }
+    const revision = previewState.slides.find((slide) => slide.id === templateId)?.revision;
+    if (revision === undefined) return;
     previewState = {
       ...previewState,
       activeOperation: { type: "delete", templateId },
@@ -147,7 +149,7 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
     notify();
 
     try {
-      await runtime.api.deleteTemplate(templateId);
+      await runtime.api.deleteTemplate(templateId, revision);
       if (previewState.status !== "success") return;
       previewState = {
         activeOperation: null,
@@ -161,8 +163,8 @@ function createTemplatePreviewStore(): TemplatePreviewStore {
         ...previewState,
         activeOperation: null,
         feedback: {
-          canRefresh: false,
-          message: "The template could not be deleted.",
+          canRefresh: true,
+          message: "The template could not be deleted. Refresh templates and review the current version before trying again.",
           type: "error",
         },
       };

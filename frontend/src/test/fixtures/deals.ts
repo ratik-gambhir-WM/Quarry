@@ -10,6 +10,7 @@ export function testCompany(
 ): Company {
   return {
     companyId,
+    revision: 1,
     userId: 1,
     name,
     website: null,
@@ -36,6 +37,7 @@ export function testParty(
 export function testDeal(overrides: Partial<SavedDeal> = {}): SavedDeal {
   return {
     dealId: "DEAL-000184",
+    revision: 1,
     userId: 1,
     role: "owner",
     accessRevision: 1,
@@ -70,6 +72,7 @@ export function testDeal(overrides: Partial<SavedDeal> = {}): SavedDeal {
 }
 export function testMetadata(dealId = "DEAL-000184"): SavedDealMetadata {
   return {
+    revision: 1,
     dealId,
     factSheetLink: null,
     keyQuestionsJson: "[]",

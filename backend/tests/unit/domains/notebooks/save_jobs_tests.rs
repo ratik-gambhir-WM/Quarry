@@ -3,7 +3,7 @@ use crate::domains::notebooks::{model::*, repository::NotebookRepository, test_s
 use std::sync::atomic::Ordering;
 #[tokio::test]
 async fn notebook_save_is_admitted_while_provider_paused_and_completion_waits_for_publication() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     app.pipeline.blocked.store(true, Ordering::SeqCst);
     let book = app
         .service
@@ -54,7 +54,7 @@ async fn notebook_save_is_admitted_while_provider_paused_and_completion_waits_fo
 }
 #[tokio::test]
 async fn notebook_index_failure_retains_canonical_content_retry_does_not_increment_revision() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     app.pipeline.fail.store(true, Ordering::SeqCst);
     let book = app
         .service
@@ -81,13 +81,15 @@ async fn notebook_index_failure_retains_canonical_content_retry_does_not_increme
             .revision,
         1
     );
-    app.sqlite
-        .with_connection(|c| {
+    app.postgres
+        .with_connection(async |c| {
             c.execute(
                 "UPDATE notebook_save_jobs SET updated_at='2020-01-01T00:00:00.000Z'",
-                [],
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
             )
+            .await
         })
+        .await
         .unwrap();
     app.pipeline.fail.store(false, Ordering::SeqCst);
     app.service
@@ -111,8 +113,8 @@ async fn notebook_index_failure_retains_canonical_content_retry_does_not_increme
 #[tokio::test]
 async fn notebook_restart_recovers_admission_and_post_commit_checkpoint_without_reapplying_mutation(
 ) {
-    let sqlite = test_support::database();
-    let repo = NotebookRepository::new(sqlite.clone());
+    let postgres = test_support::database().await;
+    let repo = NotebookRepository::new(postgres.clone());
     let book = repo
         .create(1, "Book".into(), None)
         .await
@@ -124,8 +126,15 @@ async fn notebook_restart_recovers_admission_and_post_commit_checkpoint_without_
         .unwrap();
     let claim = repo.claim().await.unwrap().unwrap();
     repo.persist(&claim).await.unwrap();
-    sqlite
-        .with_connection(|c| c.execute("UPDATE notebook_save_jobs SET lease_until=0", []))
+    postgres
+        .with_connection(async |c| {
+            c.execute(
+                "UPDATE notebook_save_jobs SET lease_until=0",
+                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+            )
+            .await
+        })
+        .await
         .unwrap();
     let pipeline = Arc::new(test_support::FakePipeline::default());
     // Simulate a crash after Helix publication but before the durable completion checkpoint.
@@ -135,7 +144,7 @@ async fn notebook_restart_recovers_admission_and_post_commit_checkpoint_without_
         .unwrap()
         .insert((job.note_id.clone(), 1));
     let recovered =
-        NotebookService::with_pipeline(NotebookRepository::new(sqlite), pipeline.clone());
+        NotebookService::with_pipeline(NotebookRepository::new(postgres), pipeline.clone());
     let completed = test_support::terminal(&recovered, &book, &job.job_id).await;
     assert_eq!(completed.status, "completed");
     assert_eq!(completed.committed_revision, Some(1));
@@ -152,7 +161,7 @@ async fn notebook_restart_recovers_admission_and_post_commit_checkpoint_without_
 }
 #[tokio::test]
 async fn notebook_folder_relocation_and_delete_fence_stale_worker_without_resurrection() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     let book = app
         .service
         .create(1, "Book".into(), None)
@@ -198,7 +207,7 @@ async fn notebook_folder_relocation_and_delete_fence_stale_worker_without_resurr
         2
     );
     app.service
-        .delete_note(1, book.clone(), job.note_id.clone())
+        .delete_note(1, book.clone(), job.note_id.clone(), 2)
         .await
         .unwrap();
     assert!(app
@@ -210,7 +219,7 @@ async fn notebook_folder_relocation_and_delete_fence_stale_worker_without_resurr
 }
 #[tokio::test]
 async fn notebook_empty_note_completes_without_embedding_input() {
-    let app = test_support::application();
+    let app = test_support::application().await;
     let book = app
         .service
         .create(1, "Book".into(), None)
@@ -233,8 +242,8 @@ async fn notebook_empty_note_completes_without_embedding_input() {
 
 #[tokio::test]
 async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_indexing() {
-    let sqlite = test_support::database();
-    let repo = NotebookRepository::new(sqlite.clone());
+    let postgres = test_support::database().await;
+    let repo = NotebookRepository::new(postgres.clone());
     let book = repo
         .create(1, "Book".into(), None)
         .await
@@ -252,7 +261,7 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     let pipeline = Arc::new(test_support::FakePipeline::default());
     pipeline.blocked.store(true, Ordering::SeqCst);
     let recovered =
-        NotebookService::with_pipeline(NotebookRepository::new(sqlite), pipeline.clone());
+        NotebookService::with_pipeline(NotebookRepository::new(postgres), pipeline.clone());
     tokio::time::timeout(Duration::from_secs(3), async {
         while pipeline.embeds.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -261,7 +270,7 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     .await
     .unwrap();
     recovered
-        .delete_note(1, book.clone(), queued.note_id.clone())
+        .delete_note(1, book.clone(), queued.note_id.clone(), 1)
         .await
         .unwrap();
     pipeline.gate.notify_one();
@@ -279,4 +288,59 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     .await
     .unwrap();
     assert!(recovered.get_note(1, book, queued.note_id).await.is_err());
+}
+
+#[tokio::test]
+async fn notebook_parent_delete_waits_for_admitted_child_and_other_parent_remains_independent() {
+    use crate::adapters::postgres::client::PostgresClient;
+    let (a, b) = PostgresClient::concurrent_test_clients().await;
+    crate::integration_support::seed_identity(&a, "book-lock@example.invalid", 'a').await;
+    let ra = NotebookRepository::new(a.clone());
+    let rb = NotebookRepository::new(b.clone());
+    let book = ra.create(1, "Book".into(), None).await.unwrap().notebook_id;
+    let other = rb
+        .create(1, "Other".into(), None)
+        .await
+        .unwrap()
+        .notebook_id;
+    let mut held = a.pool().begin().await.unwrap();
+    sqlx::query("SELECT notebook_id FROM notebooks WHERE notebook_id=$1 FOR SHARE")
+        .bind(&book)
+        .fetch_one(&mut *held)
+        .await
+        .unwrap();
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *held)
+        .await
+        .unwrap();
+    let waiting = tokio::spawn(async move { ra.delete(1, book).await });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))",
+            )
+            .bind(pid)
+            .fetch_one(b.pool())
+            .await
+            .unwrap();
+            if blocked {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        rb.create_folder(1, other, "Folder".into()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!waiting.is_finished());
+    held.commit().await.unwrap();
+    waiting.await.unwrap().unwrap();
+    a.close().await;
+    b.close().await;
 }

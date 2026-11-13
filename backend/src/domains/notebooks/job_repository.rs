@@ -3,18 +3,19 @@ use super::{
     model::*,
     repository::{conflict, folder, missing, note, owned, NotebookRepository, Result},
 };
+use crate::adapters::postgres::client::Row;
+use crate::adapters::postgres::client::RowResult;
 use crate::{
-    adapters::sqlite::{
-        client::SqliteTransaction,
+    adapters::postgres::{
+        client::PostgresTransaction,
         query::{ComparisonOperator as Op, Condition as C, SortDirection as Sort, SqlBuilder as Q},
     },
     shared::error::RepositoryError as Error,
 };
-use rusqlite::Row;
 use sha2::{Digest, Sha256};
 
 const ACTIVE: [&str; 2] = ["queued", "processing"];
-fn job_row(r: &Row<'_>) -> rusqlite::Result<SaveJob> {
+fn job_row(r: &Row<'_>) -> RowResult<SaveJob> {
     let notebook_id: String = r.get("notebook_id")?;
     let job_id: String = r.get("job_id")?;
     let status_url = format!("/api/v1/notebooks/{notebook_id}/save-jobs/{job_id}");
@@ -50,16 +51,17 @@ fn job_row(r: &Row<'_>) -> rusqlite::Result<SaveJob> {
         status_url,
     })
 }
-fn load(tx: &SqliteTransaction<'_>, id: &str) -> Result<SaveJob> {
+async fn load(tx: &PostgresTransaction, id: &str) -> Result<SaveJob> {
     tx.read_one_with(
         Q::select("notebook_save_jobs")
             .and_where(C::equal("job_id", id))
             .build(),
         job_row,
-    )?
+    )
+    .await?
     .ok_or_else(missing)
 }
-fn fence(tx: &SqliteTransaction<'_>, claim: &ClaimedJob) -> Result<SaveJob> {
+async fn fence(tx: &PostgresTransaction, claim: &ClaimedJob) -> Result<SaveJob> {
     let job = tx
         .read_one_with(
             Q::select("notebook_save_jobs")
@@ -73,11 +75,17 @@ fn fence(tx: &SqliteTransaction<'_>, claim: &ClaimedJob) -> Result<SaveJob> {
                 ))
                 .build(),
             job_row,
-        )?
+        )
+        .await?
         .ok_or_else(conflict)?;
-    owned(tx, claim.owner, &job.notebook_id)?;
+    owned(tx, claim.owner, &job.notebook_id).await?;
     if let Some(revision) = job.committed_revision {
-        if note(tx, &job.notebook_id, &job.note_id)?.summary.revision != revision {
+        if note(tx, &job.notebook_id, &job.note_id)
+            .await?
+            .summary
+            .revision
+            != revision
+        {
             return Err(conflict());
         }
     }
@@ -92,25 +100,35 @@ impl NotebookRepository {
         input: SaveInput,
         pipeline_version: String,
     ) -> Result<SaveJob> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                super::repository::lock_parent(
+                    tx,
+                    owner,
+                    &notebook,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
                 let bytes = serde_json::to_vec(&(&notebook, &note_id, &input))
                     .map_err(|_| Error::storage("invalid save input"))?;
                 let hash = format!("{:x}", Sha256::digest(bytes));
-                if let Some((existing, prior_hash, prior_parent)) = tx.read_one_with(
-                    Q::select("notebook_save_jobs")
-                        .and_where(C::equal("user_id", owner))
-                        .and_where(C::equal("operation_id", &input.operation_id))
-                        .build(),
-                    |r| {
-                        Ok((
-                            job_row(r)?,
-                            r.get::<_, String>("request_hash")?,
-                            r.get::<_, String>("notebook_id")?,
-                        ))
-                    },
-                )? {
+                if let Some((existing, prior_hash, prior_parent)) = tx
+                    .read_one_with(
+                        Q::select("notebook_save_jobs")
+                            .and_where(C::equal("user_id", owner))
+                            .and_where(C::equal("operation_id", &input.operation_id))
+                            .build(),
+                        |r| {
+                            Ok((
+                                job_row(r)?,
+                                r.get::<_, String>("request_hash")?,
+                                r.get::<_, String>("notebook_id")?,
+                            ))
+                        },
+                    )
+                    .await?
+                {
                     if prior_hash != hash || prior_parent != notebook {
                         return Err(Error::Conflict(
                             "operationId already used with different input".into(),
@@ -120,7 +138,7 @@ impl NotebookRepository {
                 }
                 let time = now();
                 let mut snapshot = if let Some(id) = &note_id {
-                    note(tx, &notebook, id)?
+                    note(tx, &notebook, id).await?
                 } else {
                     Note {
                         summary: NoteSummary {
@@ -138,7 +156,7 @@ impl NotebookRepository {
                 };
                 let target = input.folder_id.apply(snapshot.summary.folder_id);
                 if let Some(id) = &target {
-                    folder(tx, &notebook, id)?;
+                    folder(tx, &notebook, id).await?;
                 }
                 let expected = if let PatchField::Value(value) = input.expected_revision {
                     Some(value)
@@ -159,31 +177,37 @@ impl NotebookRepository {
                     snapshot.blocks = blocks;
                 }
                 snapshot.summary.updated_at = time.clone();
-                let active_note = tx.read_one(
-                    Q::select("notebook_save_jobs")
-                        .columns(["job_id"])
-                        .and_where(C::equal("note_id", &snapshot.summary.note_id))
-                        .and_where(C::in_values("status", ACTIVE))
-                        .build(),
-                )?;
+                let active_note = tx
+                    .read_one(
+                        Q::select("notebook_save_jobs")
+                            .columns(["job_id"])
+                            .and_where(C::equal("note_id", &snapshot.summary.note_id))
+                            .and_where(C::in_values("status", ACTIVE))
+                            .build(),
+                    )
+                    .await?;
                 if active_note.is_some() {
                     return Err(Error::Conflict("note save already active".into()));
                 }
-                let global = tx.read(
-                    Q::select("notebook_save_jobs")
-                        .columns(["job_id"])
-                        .and_where(C::in_values("status", ACTIVE))
-                        .limit(256)
-                        .build(),
-                )?;
-                let actor = tx.read(
-                    Q::select("notebook_save_jobs")
-                        .columns(["job_id"])
-                        .and_where(C::equal("user_id", owner))
-                        .and_where(C::in_values("status", ACTIVE))
-                        .limit(32)
-                        .build(),
-                )?;
+                let global = tx
+                    .read(
+                        Q::select("notebook_save_jobs")
+                            .columns(["job_id"])
+                            .and_where(C::in_values("status", ACTIVE))
+                            .limit(256)
+                            .build(),
+                    )
+                    .await?;
+                let actor = tx
+                    .read(
+                        Q::select("notebook_save_jobs")
+                            .columns(["job_id"])
+                            .and_where(C::equal("user_id", owner))
+                            .and_where(C::in_values("status", ACTIVE))
+                            .limit(32)
+                            .build(),
+                    )
+                    .await?;
                 if global.len() >= 256 || actor.len() >= 32 {
                     return Err(Error::Capacity);
                 }
@@ -210,16 +234,18 @@ impl NotebookRepository {
                         .value("created_at", &time)
                         .value("updated_at", time)
                         .build(),
-                )?;
-                load(tx, &id)
+                )
+                .await?;
+                load(tx, &id).await
             })
             .await
     }
     pub(super) async fn job(&self, owner: i64, notebook: String, id: String) -> Result<SaveJob> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                let job = load(tx, &id)?;
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(tx, owner, &notebook).await?;
+                let job = load(tx, &id).await?;
                 if job.notebook_id != notebook {
                     return Err(missing());
                 }
@@ -228,10 +254,17 @@ impl NotebookRepository {
             .await
     }
     pub(super) async fn retry(&self, owner: i64, notebook: String, id: String) -> Result<SaveJob> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                owned(tx, owner, &notebook)?;
-                let job = load(tx, &id)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                super::repository::lock_parent(
+                    tx,
+                    owner,
+                    &notebook,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
+                let job = load(tx, &id).await?;
                 if job.notebook_id != notebook {
                     return Err(missing());
                 }
@@ -245,7 +278,8 @@ impl NotebookRepository {
                             .and_where(C::equal("job_id", &id))
                             .build(),
                         |r| r.get::<_, String>(0),
-                    )?
+                    )
+                    .await?
                     .ok_or_else(missing)?;
                 let previous = chrono::DateTime::parse_from_rfc3339(&previous)
                     .map_err(|_| Error::storage("invalid job timestamp"))?;
@@ -257,7 +291,7 @@ impl NotebookRepository {
                     return Err(Error::Conflict("retry backoff; retry later".into()));
                 }
                 if let Some(revision) = job.committed_revision {
-                    if note(tx, &notebook, &job.note_id)?.summary.revision != revision {
+                    if note(tx, &notebook, &job.note_id).await?.summary.revision != revision {
                         return Err(conflict());
                     }
                 }
@@ -268,7 +302,8 @@ impl NotebookRepository {
                             .and_where(C::equal("note_id", &job.note_id))
                             .and_where(C::in_values("status", ACTIVE))
                             .build(),
-                    )?
+                    )
+                    .await?
                     .is_some()
                 {
                     return Err(Error::Conflict("note save already active".into()));
@@ -281,7 +316,8 @@ impl NotebookRepository {
                             .and_where(C::in_values("status", ACTIVE))
                             .limit(256)
                             .build(),
-                    )?
+                    )
+                    .await?
                     .len()
                     >= 256
                     || tx
@@ -292,7 +328,8 @@ impl NotebookRepository {
                                 .and_where(C::in_values("status", ACTIVE))
                                 .limit(32)
                                 .build(),
-                        )?
+                        )
+                        .await?
                         .len()
                         >= 32
                 {
@@ -309,40 +346,25 @@ impl NotebookRepository {
                         .increment("sequence")
                         .and_where(C::equal("job_id", &id))
                         .build(),
-                )?;
-                load(tx, &id)
+                )
+                .await?;
+                load(tx, &id).await
             })
             .await
     }
     pub(super) async fn claim(&self) -> Result<Option<ClaimedJob>> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let base = || {
                     Q::select("notebook_save_jobs")
                         .order_by("created_at", Sort::Ascending)
                         .order_by("job_id", Sort::Ascending)
                         .limit(1)
                 };
-                let mut candidate = tx.read_one_with(
-                    base().and_where(C::equal("status", "queued")).build(),
-                    |r| {
-                        Ok((
-                            job_row(r)?,
-                            r.get::<_, i64>("user_id")?,
-                            r.get::<_, String>("input_json")?,
-                        ))
-                    },
-                )?;
-                if candidate.is_none() {
-                    candidate = tx.read_one_with(
-                        base()
-                            .and_where(C::equal("status", "processing"))
-                            .and_where(C::compare(
-                                "lease_until",
-                                Op::LessThanOrEqual,
-                                chrono::Utc::now().timestamp(),
-                            ))
-                            .build(),
+                let mut candidate = tx
+                    .read_one_with(
+                        base().and_where(C::equal("status", "queued")).build(),
                         |r| {
                             Ok((
                                 job_row(r)?,
@@ -350,7 +372,28 @@ impl NotebookRepository {
                                 r.get::<_, String>("input_json")?,
                             ))
                         },
-                    )?;
+                    )
+                    .await?;
+                if candidate.is_none() {
+                    candidate = tx
+                        .read_one_with(
+                            base()
+                                .and_where(C::equal("status", "processing"))
+                                .and_where(C::compare(
+                                    "lease_until",
+                                    Op::LessThanOrEqual,
+                                    chrono::Utc::now().timestamp(),
+                                ))
+                                .build(),
+                            |r| {
+                                Ok((
+                                    job_row(r)?,
+                                    r.get::<_, i64>("user_id")?,
+                                    r.get::<_, String>("input_json")?,
+                                ))
+                            },
+                        )
+                        .await?;
                 }
                 let Some((job, owner, input)) = candidate else {
                     return Ok(None);
@@ -371,7 +414,8 @@ impl NotebookRepository {
                             .increment("sequence")
                             .and_where(C::equal("job_id", &job.job_id))
                             .build(),
-                    )?;
+                    )
+                    .await?;
                     return Ok(None);
                 };
                 let token = uuid::Uuid::new_v4().to_string();
@@ -385,9 +429,10 @@ impl NotebookRepository {
                         .increment("sequence")
                         .and_where(C::equal("job_id", &job.job_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(Some(ClaimedJob {
-                    job: load(tx, &job.job_id)?,
+                    job: load(tx, &job.job_id).await?,
                     owner,
                     token,
                     input,
@@ -397,34 +442,58 @@ impl NotebookRepository {
     }
     pub(super) async fn persist(&self, claim: &ClaimedJob) -> Result<()> {
         let claim = clone_claim(claim);
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let job = fence(tx, &claim)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                super::repository::lock_parent(
+                    tx,
+                    claim.owner,
+                    &claim.input.note.summary.notebook_id,
+                    crate::adapters::postgres::query::RowLock::Share,
+                )
+                .await?;
+                if let Some(id) = &claim.input.note.summary.folder_id {
+                    super::repository::lock_folder(
+                        tx,
+                        &claim.input.note.summary.notebook_id,
+                        id,
+                        crate::adapters::postgres::query::RowLock::Share,
+                    )
+                    .await?;
+                }
+                let job = fence(tx, &claim).await?;
                 if job.committed_revision.is_some() {
                     return Ok(());
                 }
                 let n = &claim.input.note;
                 let s = &n.summary;
                 if let Some(id) = &s.folder_id {
-                    folder(tx, &s.notebook_id, id)?;
+                    folder(tx, &s.notebook_id, id).await?;
                 }
                 let blocks = serde_json::to_string(&n.blocks)
                     .map_err(|_| Error::storage("invalid durable blocks"))?;
                 if let Some(expected) = claim.input.expected_revision {
-                    if note(tx, &s.notebook_id, &s.note_id)?.summary.revision != expected {
+                    if note(tx, &s.notebook_id, &s.note_id).await?.summary.revision != expected {
                         return Err(conflict());
                     }
-                    tx.write(
-                        Q::update("notebook_notes")
-                            .set("title", &s.title)
-                            .set("folder_id", s.folder_id.as_deref())
-                            .set("blocks_json", blocks)
-                            .set("content_schema_version", 1_i64)
-                            .set("revision", s.revision)
-                            .set("updated_at", &s.updated_at)
-                            .and_where(C::equal("note_id", &s.note_id))
-                            .build(),
-                    )?;
+                    let changed = tx
+                        .write(
+                            Q::update("notebook_notes")
+                                .set("title", &s.title)
+                                .set("folder_id", s.folder_id.as_deref())
+                                .set("blocks_json", blocks)
+                                .set("content_schema_version", 1_i64)
+                                .set("revision", s.revision)
+                                .set("updated_at", &s.updated_at)
+                                .and_where(C::equal("note_id", &s.note_id))
+                                .and_where(C::equal("notebook_id", &s.notebook_id))
+                                .and_where(C::equal("revision", expected))
+                                .build(),
+                        )
+                        .await?;
+                    if changed.rows_affected != 1 {
+                        return Err(conflict());
+                    }
                 } else {
                     // A deletion tombstone fences a worker even before an admitted create commits.
                     if tx
@@ -432,7 +501,8 @@ impl NotebookRepository {
                             Q::select("notebook_cleanup")
                                 .and_where(C::equal("note_id", &s.note_id))
                                 .build(),
-                        )?
+                        )
+                        .await?
                         .is_some()
                     {
                         return Err(missing());
@@ -449,7 +519,8 @@ impl NotebookRepository {
                             .value("created_at", &s.created_at)
                             .value("updated_at", &s.updated_at)
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 }
                 tx.write(
                     Q::update("notebook_save_jobs")
@@ -459,7 +530,8 @@ impl NotebookRepository {
                         .increment("sequence")
                         .and_where(C::equal("job_id", job.job_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -472,9 +544,10 @@ impl NotebookRepository {
         complete: bool,
     ) -> Result<()> {
         let claim = clone_claim(claim);
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let job = fence(tx, &claim)?;
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let job = fence(tx, &claim).await?;
                 tx.write(
                     Q::update("notebook_save_jobs")
                         .set("stage", stage)
@@ -484,7 +557,8 @@ impl NotebookRepository {
                         .increment("sequence")
                         .and_where(C::equal("job_id", job.job_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -492,7 +566,7 @@ impl NotebookRepository {
     pub(super) async fn fail(&self, claim: &ClaimedJob, code: &'static str) -> Result<()> {
         let id = claim.job.job_id.clone();
         let token = claim.token.clone();
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::update("notebook_save_jobs")
                     .set("status", "failed")
@@ -509,7 +583,7 @@ impl NotebookRepository {
     }
     pub(super) async fn cleanup_batch(&self) -> Result<Vec<(String, i64)>> {
         Ok(self
-            .sqlite
+            .postgres
             .read_with_async(
                 Q::select("notebook_cleanup")
                     .and_where(C::compare(
@@ -525,7 +599,7 @@ impl NotebookRepository {
             .await?)
     }
     pub(super) async fn cleaned(&self, note: String) -> Result<()> {
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::update("notebook_cleanup")
                     .set("next_attempt_at", chrono::Utc::now().timestamp() + 3600)
@@ -537,7 +611,7 @@ impl NotebookRepository {
         Ok(())
     }
     pub(super) async fn cleanup_failed(&self, note: String) -> Result<()> {
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::update("notebook_cleanup")
                     .set("next_attempt_at", chrono::Utc::now().timestamp() + 60)
@@ -550,7 +624,7 @@ impl NotebookRepository {
     pub(super) async fn prune(&self) -> Result<()> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(30))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::delete_from("notebook_save_jobs")
                     .and_where(C::in_values("status", ["completed", "failed"]))
@@ -560,7 +634,7 @@ impl NotebookRepository {
             .await?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(30))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::delete_from("notebook_cleanup")
                     .and_where(C::equal("confirmed", 1_i64))

@@ -7,35 +7,35 @@ readonly QUARRY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly QUARRY_API_HOST="127.0.0.1"
 readonly QUARRY_API_PORT="3001"
 readonly QUARRY_API_URL="http://${QUARRY_API_HOST}:${QUARRY_API_PORT}"
-readonly DILIGENCE_STUDIO_HOST="127.0.0.1"
-readonly DILIGENCE_STUDIO_PORT="43127"
-readonly DILIGENCE_STUDIO_API_URL="http://${DILIGENCE_STUDIO_HOST}:${DILIGENCE_STUDIO_PORT}"
-readonly DILIGENCE_STUDIO_API_BASE_URL="${DILIGENCE_STUDIO_API_URL}/api/v1"
 readonly QUARRY_UI_URL="http://localhost:1420"
 readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template-preview"
-readonly TEMPLATE_BACKEND="${QUARRY_TEMPLATE_BACKEND:-embedded}"
-readonly DILIGENCE_STUDIO_ROOT="${QUARRY_DILIGENCE_STUDIO_ROOT:-${HOME}/diligence-studio-server}"
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
+readonly POSTGRES_BIN="${QUARRY_POSTGRES_BIN:-/Applications/Postgres.app/Contents/Versions/18/bin}"
+readonly POSTGRES_DATA_DIR="${QUARRY_POSTGRES_DATA_DIR:-${HOME}/Library/Application Support/Postgres/var-18}"
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-postgres-dev}"
 readonly HELIX_VOLUME_NAME="${HELIX_CONTAINER_NAME}-data"
 readonly HELIX_DATA_DIR="/var/lib/helix"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
-readonly LOCAL_HELIX_URL="http://127.0.0.1:6969"
+readonly LOCAL_HELIX_PORT="${QUARRY_HELIX_PORT:-6970}"
+readonly LOCAL_HELIX_URL="http://127.0.0.1:${LOCAL_HELIX_PORT}"
 
 backend_pid=""
 ui_pid=""
-diligence_studio_pid=""
 
 usage() {
   cat <<'EOF'
 Usage: quarry <web|desktop>
 
-  web      Start Docker, Helix, Axum, and the React web UI.
-  desktop  Start Docker, Helix, Axum, and the Tauri desktop UI.
+  web      Start PostgreSQL, Docker, Helix, Axum, and the React web UI.
+  desktop  Start PostgreSQL, Docker, Helix, Axum, and the Tauri desktop UI.
 
-Templates run in Axum and persist in Quarry's shared SQLite database by default.
+Templates run in Axum and persist in the Quarry PostgreSQL database.
+Set server-only QUARRY_DATABASE_URL before starting (postgresql://localhost/Quarry locally).
+The fresh Helix store uses port 6970; QUARRY_HELIX_PORT overrides it.
 Helix uses disk storage in the Docker volume <container-name>-data.
-QUARRY_TEMPLATE_BACKEND=diligence-studio selects the retained Node rollback service.
+On macOS, an existing Postgres.app 18 cluster starts automatically.
+QUARRY_POSTGRES_BIN and QUARRY_POSTGRES_DATA_DIR select another existing local cluster.
+PostgreSQL, Docker, and Helix remain running when the launcher exits.
 
 Run this command from the Quarry repository root.
 EOF
@@ -63,8 +63,7 @@ signal_process_group() {
 }
 
 children_are_running() {
-  process_group_is_running "$diligence_studio_pid" \
-    || process_group_is_running "$ui_pid" \
+  process_group_is_running "$ui_pid" \
     || process_group_is_running "$backend_pid"
 }
 
@@ -74,7 +73,6 @@ cleanup() {
 
   trap - EXIT INT TERM HUP
 
-  signal_process_group "$diligence_studio_pid" INT
   signal_process_group "$ui_pid" INT
   signal_process_group "$backend_pid" INT
 
@@ -85,7 +83,6 @@ cleanup() {
     sleep 0.1
   done
 
-  signal_process_group "$diligence_studio_pid" TERM
   signal_process_group "$ui_pid" TERM
   signal_process_group "$backend_pid" TERM
 
@@ -96,13 +93,9 @@ cleanup() {
     sleep 0.1
   done
 
-  signal_process_group "$diligence_studio_pid" KILL
   signal_process_group "$ui_pid" KILL
   signal_process_group "$backend_pid" KILL
 
-  if [[ -n "$diligence_studio_pid" ]]; then
-    wait "$diligence_studio_pid" 2>/dev/null || true
-  fi
   if [[ -n "$ui_pid" ]]; then
     wait "$ui_pid" 2>/dev/null || true
   fi
@@ -147,12 +140,6 @@ case "$1" in
     ;;
 esac
 
-[[ "$TEMPLATE_BACKEND" == "diligence-studio" || "$TEMPLATE_BACKEND" == "embedded" ]] \
-  || fail "QUARRY_TEMPLATE_BACKEND must be diligence-studio or embedded"
-if [[ "$TEMPLATE_BACKEND" == "diligence-studio" && ! -d "$DILIGENCE_STUDIO_ROOT" ]]; then
-  fail "legacy Diligence Studio directory not found: ${DILIGENCE_STUDIO_ROOT}; set QUARRY_DILIGENCE_STUDIO_ROOT to its location"
-fi
-
 for required_command in cargo npm curl node docker; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     fail "required command not found: ${required_command}"
@@ -174,10 +161,30 @@ port_is_available "$QUARRY_API_HOST" "$QUARRY_API_PORT" \
   || fail "port ${QUARRY_API_PORT} is already in use; refusing to start the Quarry API"
 port_is_available "127.0.0.1" "1420" \
   || fail "port 1420 is already in use; refusing to start the Quarry UI"
-if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]]; then
-  port_is_available "$DILIGENCE_STUDIO_HOST" "$DILIGENCE_STUDIO_PORT" \
-    || fail "port ${DILIGENCE_STUDIO_PORT} is already in use; refusing to start Diligence Studio"
+# Only start an existing local cluster; never initialize or replace database storage.
+if [[ "$(uname -s)" == "Darwin" && -x "$POSTGRES_BIN/pg_ctl" && -d "$POSTGRES_DATA_DIR" ]]; then
+  "$POSTGRES_BIN/pg_ctl" -D "$POSTGRES_DATA_DIR" status >/dev/null 2>&1
+  postgres_status=$?
+  case "$postgres_status" in
+    0) ;;
+    3)
+      printf 'Starting local PostgreSQL...\n'
+      "$POSTGRES_BIN/pg_ctl" -D "$POSTGRES_DATA_DIR" start \
+        -l "$POSTGRES_DATA_DIR/postgres-server.log" -w -t 30 \
+        || fail "could not start the existing PostgreSQL cluster; check its server log"
+      ;;
+    *) fail "could not inspect the existing PostgreSQL cluster; start PostgreSQL manually" ;;
+  esac
 fi
+
+printf 'Checking the selected PostgreSQL connection...\n'
+(
+  cd "$QUARRY_ROOT/backend" || exit 1
+  cargo run --locked --bin check_database
+) || fail "PostgreSQL is unavailable; start your PostgreSQL service and configure QUARRY_DATABASE_URL for the Quarry database"
+
+node -e 'const value = process.argv[1]; if (!/^[0-9]{1,5}$/.test(value) || Number(value) < 1 || Number(value) > 65535) process.exit(1)' "$LOCAL_HELIX_PORT" \
+  || fail "QUARRY_HELIX_PORT must be a port between 1 and 65535"
 
 docker_daemon_is_ready() {
   docker info >/dev/null 2>&1
@@ -244,12 +251,17 @@ else
   docker create \
     --name "$HELIX_CONTAINER_NAME" \
     --restart unless-stopped \
-    --publish 127.0.0.1:6969:8080 \
+    --publish "127.0.0.1:${LOCAL_HELIX_PORT}:8080" \
     --env "HELIX_DATA_DIR=${HELIX_DATA_DIR}" \
     --mount "type=volume,source=${HELIX_VOLUME_NAME},target=${HELIX_DATA_DIR}" \
     "$HELIX_IMAGE" >/dev/null \
     || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
 fi
+
+helix_host_port="$(docker container inspect --format '{{range (index .HostConfig.PortBindings "8080/tcp")}}{{.HostIp}}:{{.HostPort}}{{end}}' "$HELIX_CONTAINER_NAME")" \
+  || fail "could not inspect Helix port mapping"
+[[ "$helix_host_port" == "127.0.0.1:${LOCAL_HELIX_PORT}" ]] \
+  || fail "the selected Helix container uses a different port; select its matching QUARRY_HELIX_PORT or a fresh container"
 
 helix_disk_storage="$(docker container inspect --format '{{range .Config.Env}}{{if eq . "HELIX_DATA_DIR=/var/lib/helix"}}true{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
   || fail "could not inspect Helix storage configuration"
@@ -283,11 +295,10 @@ set -m
 (
   cd "$QUARRY_ROOT/backend" || exit 1
   exec env \
+    HELIX_URL="$LOCAL_HELIX_URL" \
     QUARRY_API_HOST="$QUARRY_API_HOST" \
     QUARRY_API_PORT="$QUARRY_API_PORT" \
-    QUARRY_TEMPLATE_BACKEND="$TEMPLATE_BACKEND" \
     QUARRY_TEMPLATE_PREVIEW_RENDER_URL="$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" \
-    DILIGENCE_STUDIO_API_BASE_URL="$DILIGENCE_STUDIO_API_BASE_URL" \
     cargo run --locked
 ) &
 backend_pid=$!
@@ -355,50 +366,8 @@ while ! curl --fail --silent --max-time 1 "$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" 
   sleep 0.25
 done
 
-if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]]; then
-printf '%s is ready at %s. Starting Diligence Studio at %s...\n' \
-  "$ui_label" "$QUARRY_UI_URL" "$DILIGENCE_STUDIO_API_URL"
-set -m
-(
-  cd "$DILIGENCE_STUDIO_ROOT" || exit 1
-  exec env \
-    HOST="$DILIGENCE_STUDIO_HOST" \
-    PORT="$DILIGENCE_STUDIO_PORT" \
-    QUARRY_TEMPLATE_PREVIEW_RENDER_URL="$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" \
-    npm start
-) &
-diligence_studio_pid=$!
-set +m
-
-while ! curl --fail --silent --max-time 1 \
-  --header 'X-App-Id: Quarry_WestMonroe' \
-  "${DILIGENCE_STUDIO_API_BASE_URL}/templates/previews?page=1" >/dev/null 2>&1; do
-  if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]] && ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
-    wait "$diligence_studio_pid"
-    diligence_studio_status=$?
-    diligence_studio_pid=""
-    if [[ $diligence_studio_status -eq 0 ]]; then
-      diligence_studio_status=1
-    fi
-    printf 'quarry: Diligence Studio exited before becoming ready.\n' >&2
-    exit "$diligence_studio_status"
-  fi
-
-  if ! kill -0 "$backend_pid" 2>/dev/null || ! kill -0 "$ui_pid" 2>/dev/null; then
-    fail "a required child process stopped while Diligence Studio was starting"
-  fi
-
-  if ((SECONDS >= startup_deadline)); then
-    fail "Diligence Studio did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
-  fi
-
-  sleep 0.25
-done
-
-fi
-
 printf 'Quarry is ready: Helix %s, Axum %s, UI %s, templates %s.\n' \
-  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "$TEMPLATE_BACKEND"
+  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "embedded"
 
 while true; do
   if ! kill -0 "$backend_pid" 2>/dev/null; then
@@ -417,17 +386,6 @@ while true; do
     ui_status=$?
     ui_pid=""
     exit "$ui_status"
-  fi
-
-  if [[ "$TEMPLATE_BACKEND" == "diligence-studio" ]] && ! kill -0 "$diligence_studio_pid" 2>/dev/null; then
-    wait "$diligence_studio_pid"
-    diligence_studio_status=$?
-    diligence_studio_pid=""
-    if [[ $diligence_studio_status -eq 0 ]]; then
-      diligence_studio_status=1
-    fi
-    printf 'quarry: Diligence Studio stopped; shutting down the local stack.\n' >&2
-    exit "$diligence_studio_status"
   fi
 
   sleep 0.5

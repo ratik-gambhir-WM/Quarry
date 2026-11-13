@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    adapters::{helix::client::HelixClient, sqlite::client::SqliteClient},
+    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
     app::migrations::migrate,
 };
 use std::sync::Arc;
@@ -79,16 +79,16 @@ fn dense_chunks(document: &Document) -> Vec<DocumentChunk> {
         .collect()
 }
 
-fn test_document_store() -> (SqliteClient, DocumentStore) {
-    let sqlite = SqliteClient::open_in_memory().unwrap();
-    migrate(&sqlite).unwrap();
-    sqlite
-        .with_connection(|connection| {
+async fn test_document_store() -> (PostgresClient, DocumentStore) {
+    let postgres = PostgresClient::test_database().await.unwrap();
+    migrate(&postgres).await.unwrap();
+    postgres
+        .with_connection(async |connection| {
             connection.execute(
                 "INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES ('Avery', 'Analyst', ?1, 'key', 'Analyst')",
                 ["analyst@example.com"],
-            )?;
-            let deal_id = connection.last_insert_rowid();
+            ).await?;
+            let deal_id = 1i64;
             connection.execute(
                 r#"
                 INSERT INTO deals (
@@ -97,20 +97,27 @@ fn test_document_store() -> (SqliteClient, DocumentStore) {
                           'buy_side', 'unknown')
                 "#,
                 [deal_id],
-            )?;
-            connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-1',1,'owner','now','now')",[])?;
-            connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-1')",[])?;
+            ).await?;
+            connection.execute("INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-1',1,'owner','now','now')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
+            connection.execute("INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-1')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
             Ok(())
-        })
+         }).await
         .unwrap();
-    (sqlite.clone(), DocumentStore::new(sqlite))
+    (postgres.clone(), DocumentStore::new(postgres))
 }
 
-fn persisted_file_count(sqlite: &SqliteClient) -> i64 {
-    sqlite
-        .with_connection(|connection| {
-            connection.query_row("SELECT COUNT(*) FROM quarry_files", [], |row| row.get(0))
+async fn persisted_file_count(postgres: &PostgresClient) -> i64 {
+    postgres
+        .with_connection(async |connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM quarry_files",
+                    Vec::<crate::adapters::postgres::query::SqlValue>::new(),
+                    |row| row.get(0),
+                )
+                .await
         })
+        .await
         .unwrap()
 }
 
@@ -222,9 +229,9 @@ fn preflight_reuses_one_timestamp_and_splits_a_large_graph() {
     .expect("large documents should be split into Helix-safe chunk writes");
 }
 
-#[test]
-fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
-    let (sqlite, _files) = test_document_store();
+#[tokio::test]
+async fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
+    let (postgres, _files) = test_document_store().await;
     let writer = test_graph_writer(1536);
     let bytes = b"office bytes".to_vec();
     let document = document("logical-office", OWNER, "model.xlsx", &bytes);
@@ -239,7 +246,7 @@ fn large_graph_preflight_does_not_persist_a_sqlite_file_row() {
     )
     .expect("preflight should not reject a graph that can be split into safe writes");
 
-    assert_eq!(persisted_file_count(&sqlite), 0);
+    assert_eq!(persisted_file_count(&postgres).await, 0);
 }
 
 #[test]
@@ -413,7 +420,7 @@ fn rejects_a_chunk_for_another_document_before_persisting() {
 
 #[tokio::test]
 async fn dimension_mismatch_is_rejected_before_any_canonical_document_is_saved() {
-    let (sqlite, files) = test_document_store();
+    let (postgres, files) = test_document_store().await;
     let bytes = b"synthetic dimension evidence".to_vec();
     let document = document("dimension-file", OWNER, "dimensions.pdf", &bytes);
     let mut chunk = document_chunk(&document);
@@ -431,7 +438,7 @@ async fn dimension_mismatch_is_rejected_before_any_canonical_document_is_saved()
     .unwrap_err();
     assert!(!error.sqlite_committed());
     assert!(error.to_string().contains("embedding dimension"));
-    assert_eq!(persisted_file_count(&sqlite), 0);
+    assert_eq!(persisted_file_count(&postgres).await, 0);
 }
 
 #[test]

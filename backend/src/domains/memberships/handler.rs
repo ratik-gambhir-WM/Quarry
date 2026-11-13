@@ -114,10 +114,19 @@ pub(super) async fn remove_member(
     Extension(a): Extension<AuthenticatedUser>,
     State(s): State<Arc<DealAccessService>>,
     Path((d, id)): Path<(String, i64)>,
+    Query(b): Query<DeleteRevision>,
 ) -> AppResult<StatusCode> {
     user(id)?;
-    s.mutate(d, a.user.id, Mutation::RemoveMember { user_id: id })
-        .await?;
+    revision(b.expected_revision)?;
+    s.mutate(
+        d,
+        a.user.id,
+        Mutation::RemoveMember {
+            user_id: id,
+            revision: b.expected_revision,
+        },
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -196,10 +205,19 @@ pub(super) async fn delete_team(
     Extension(a): Extension<AuthenticatedUser>,
     State(s): State<Arc<DealAccessService>>,
     Path((d, id)): Path<(String, String)>,
+    Query(b): Query<DeleteRevision>,
 ) -> AppResult<StatusCode> {
     team(&id)?;
-    s.mutate(d, a.user.id, Mutation::DeleteTeam { team_id: id })
-        .await?;
+    revision(b.expected_revision)?;
+    s.mutate(
+        d,
+        a.user.id,
+        Mutation::DeleteTeam {
+            team_id: id,
+            revision: b.expected_revision,
+        },
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -250,3 +268,9 @@ pub(super) async fn unassign(
 #[cfg(test)]
 #[path = "../../../tests/unit/domains/memberships/route_tests.rs"]
 mod tests;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct DeleteRevision {
+    expected_revision: i64,
+}

@@ -472,7 +472,7 @@ export function createNotebookPersistence(
           "Wait for this save to finish before deleting the note.",
         );
       if (previous?.noteId && previous.revision !== undefined)
-        await api.deleteNotebookNote(previous.notebookId, previous.noteId);
+        await api.deleteNotebookNote(previous.notebookId, previous.noteId, previous.revision);
       if (active) {
         stopMonitor(id);
         session.remove(id);

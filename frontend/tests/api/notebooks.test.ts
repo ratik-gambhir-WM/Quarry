@@ -147,9 +147,9 @@ const operations: [
   ],
   [
     "delete note",
-    (a) => a.deleteNotebookNote(n, j),
+    (a) => a.deleteNotebookNote(n, j, 1),
     "DELETE",
-    `/api/v1/notebooks/${n}/notes/${j}`,
+    `/api/v1/notebooks/${n}/notes/${j}?expectedRevision=1`,
   ],
   [
     "job status",

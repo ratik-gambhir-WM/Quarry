@@ -273,9 +273,15 @@ pub(super) async fn delete(
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    let pairs = query(request.uri(), request.headers(), &["expectedRevision"])?;
+    let expected_revision = pairs
+        .iter()
+        .find(|(key, _)| key == "expectedRevision")
+        .and_then(|(_, value)| value.parse::<i64>().ok())
+        .filter(|value| (1..=crate::shared::revision::MAX_REVISION).contains(value))
+        .ok_or_else(|| invalid("expectedRevision must be a positive safe integer."))?;
     validate_id(&id)?;
-    if !s.studio.delete(id).await? {
+    if !s.studio.delete(id, expected_revision).await? {
         return Err(absent());
     }
     Ok(StatusCode::NO_CONTENT.into_response())

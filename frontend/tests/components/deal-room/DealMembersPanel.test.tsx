@@ -281,5 +281,5 @@ it("keeps team management collapsed and confirms team deletion", async () => {
   await screen.findByRole("alertdialog");
   expect(mocks.api.deleteDealTeam).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Confirm change" }));
-  await waitFor(() => expect(mocks.api.deleteDealTeam).toHaveBeenCalledWith(deal.dealId, team.teamId));
+  await waitFor(() => expect(mocks.api.deleteDealTeam).toHaveBeenCalledWith(deal.dealId, team.teamId, team.revision));
 });

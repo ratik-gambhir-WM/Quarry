@@ -21,7 +21,7 @@ pub use json_contract::{compact_document, normalized_document};
 pub use models::*;
 pub use preview::*;
 pub use providers::*;
-pub use repository::{AppRegistration, SqliteTemplateRepository, StoredApp, TemplateRepository};
+pub use repository::{AppRegistration, PostgresTemplateRepository, StoredApp, TemplateRepository};
 pub use retrieval::*;
 pub use service::{ExportService, ImportService, TEMPLATE_PREVIEW_PAGE_SIZE};
 pub(crate) const APP_ID: &str = repository::DEFAULT_APP_ID;

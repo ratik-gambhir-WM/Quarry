@@ -1,16 +1,12 @@
 # PowerPoint parity fixtures
 
 These golden JSON files were supplied with the Rust source and generated against the
-TypeScript converter. Quarry keeps the comparison fixtures and a generator that can
-be run deliberately against its retained `diligence-studio-server` implementation.
-Production Rust has no TypeScript conversion dependency.
+original TypeScript reference converter. They are retained comparison data; production Rust
+has no TypeScript conversion dependency or separate template service.
 
-From the Quarry repository root, with Node dependencies already installed:
-
-```sh
-node --import "$HOME/diligence-studio-server/node_modules/tsx/dist/esm/index.mjs" \
-  backend/tests/fixtures/slide_templates/pptx/generate-reference.mjs "$HOME/diligence-studio-server"
-```
+The optional `generate-reference.mjs` utility accepts an explicitly supplied read-only reference
+checkout. Regenerate only when deliberately updating the retained baseline; no external checkout
+is required for normal builds or tests.
 
 Run the parity suite from `backend/` with
 `cargo test --locked slide_templates_pptx_parity_tests`. Regeneration overwrites the

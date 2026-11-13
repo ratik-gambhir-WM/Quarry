@@ -39,17 +39,13 @@ fn init_tracing() {
 }
 
 async fn shutdown_signal(
-    templates: Option<
-        std::sync::Arc<quarry_backend::domains::templates::slide_templates::SlideTemplates>,
-    >,
+    templates: std::sync::Arc<quarry_backend::domains::templates::slide_templates::SlideTemplates>,
 ) {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to install shutdown signal handler");
         return;
     }
-    if let Some(templates) = templates {
-        templates.shutdown();
-        templates.stop_worker().await;
-    }
+    templates.shutdown();
+    templates.stop_worker().await;
     tracing::info!("shutdown signal received");
 }

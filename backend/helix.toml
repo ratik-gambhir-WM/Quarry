@@ -4,7 +4,7 @@ queries = "db"
 container_runtime = "docker"
 
 [local.dev]
-port = 6969
+port = 6970
 image = "ghcr.io/helixdb/helixdb"
 tag = "latest"
 digest = "sha256:94b29942658ebdca0a91bf15edffe921a46da3e26e1223ea333ccce58c6212dd"

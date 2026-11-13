@@ -30,8 +30,12 @@ fn comparison_metadata() -> SlideRetrievalMetadata {
     metadata
 }
 
-fn insert(repository: &dyn TemplateRepository, id: &str, title: &str) -> SlideClassificationJob {
-    let template = StoredTemplate {
+async fn insert(
+    repository: &dyn TemplateRepository,
+    id: &str,
+    title: &str,
+) -> SlideClassificationJob {
+    let template = StoredTemplate { revision: 1,
         template_id: id.to_owned(),
         template_json: serde_json::from_value(json!({
             "presentation":{"title":title,"preserveElementOrder":true,"showBranding":false,"slides":[{
@@ -67,6 +71,7 @@ fn insert(repository: &dyn TemplateRepository, id: &str, title: &str) -> SlideCl
             },
             &pending,
         )
+        .await
         .unwrap();
     SlideClassificationJob {
         attempt_count: 1,
@@ -170,16 +175,18 @@ fn metadata_and_embedding_documents_are_normalized_and_bounded() {
 #[tokio::test]
 async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
     let repository: Arc<dyn TemplateRepository> = Arc::new(
-        crate::slide_template_test_support::repository(std::path::Path::new(":memory:")).unwrap(),
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
     );
-    let app = repository.for_app("TestApp").unwrap().unwrap();
+    let app = repository.for_app("TestApp").await.unwrap().unwrap();
     let service = service(Arc::clone(&app));
     service
-        .process_and_persist(&insert(app.as_ref(), "security", "Security Architecture"))
+        .process_and_persist(&insert(app.as_ref(), "security", "Security Architecture").await)
         .await
         .unwrap();
     service
-        .process_and_persist(&insert(app.as_ref(), "other", "Other Architecture"))
+        .process_and_persist(&insert(app.as_ref(), "other", "Other Architecture").await)
         .await
         .unwrap();
     let retrieval = SlideRetrievalService {

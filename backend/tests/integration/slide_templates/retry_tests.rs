@@ -34,7 +34,7 @@ impl SlideEmbedder for RetryEmbedder {
     }
 }
 fn configured(
-    repository: Arc<SqliteTemplateRepository>,
+    repository: Arc<PostgresTemplateRepository>,
     classifier: Arc<dyn SlideClassifier>,
     embedder: Arc<dyn SlideEmbedder>,
 ) -> Arc<SlideTemplates> {
@@ -78,10 +78,19 @@ async fn import(app: &Router) -> String {
     assert_eq!(status, StatusCode::CREATED);
     body["templateId"].as_str().unwrap().to_owned()
 }
-async fn wait_for(repository: &SqliteTemplateRepository, id: &str, status: &str, embedding: bool) {
+async fn wait_for(
+    repository: &PostgresTemplateRepository,
+    id: &str,
+    status: &str,
+    embedding: bool,
+) {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let state = repository.find_slide_classification(id).unwrap().unwrap();
+            let state = repository
+                .find_slide_classification(id)
+                .await
+                .unwrap()
+                .unwrap();
             if (if embedding {
                 &state.embedding_status
             } else {
@@ -99,7 +108,11 @@ async fn wait_for(repository: &SqliteTemplateRepository, id: &str, status: &str,
 
 #[tokio::test]
 async fn retry_failed_classification_is_durable_and_does_not_reimport_or_duplicate_work() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let calls = Arc::new(AtomicUsize::new(0));
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let studio = configured(
@@ -114,7 +127,7 @@ async fn retry_failed_classification_is_durable_and_does_not_reimport_or_duplica
     let app = routes(studio.clone());
     let id = import(&app).await;
     wait_for(&repository, &id, "failed", false).await;
-    let preview = repository.find_preview(&id).unwrap().unwrap().bytes;
+    let preview = repository.find_preview(&id).await.unwrap().unwrap().bytes;
     let response = app.clone().oneshot(retry(&id)).await.unwrap();
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(response.headers()["cache-control"], "private, no-store");
@@ -127,12 +140,16 @@ async fn retry_failed_classification_is_durable_and_does_not_reimport_or_duplica
     assert_eq!(send(&app, retry(&id)).await.0, StatusCode::CONFLICT);
     release.add_permits(1);
     wait_for(&repository, &id, "ready", true).await;
-    let state = repository.find_slide_classification(&id).unwrap().unwrap();
+    let state = repository
+        .find_slide_classification(&id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(state.attempt_count, 1);
     assert_eq!(state.embedding_attempt_count, 1);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(
-        repository.find_preview(&id).unwrap().unwrap().bytes,
+        repository.find_preview(&id).await.unwrap().unwrap().bytes,
         preview
     );
     assert_eq!(studio.catalog(None).await.unwrap().templates.len(), 1);
@@ -143,7 +160,11 @@ async fn retry_failed_classification_is_durable_and_does_not_reimport_or_duplica
 
 #[tokio::test]
 async fn retry_failed_embeddings_preserves_metadata_and_skips_classification() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let calls = Arc::new(AtomicUsize::new(0));
     let fail_embedding = Arc::new(AtomicBool::new(true));
     let studio = configured(
@@ -158,13 +179,21 @@ async fn retry_failed_embeddings_preserves_metadata_and_skips_classification() {
     let app = routes(studio.clone());
     let id = import(&app).await;
     wait_for(&repository, &id, "failed", true).await;
-    let before = repository.find_slide_classification(&id).unwrap().unwrap();
+    let before = repository
+        .find_slide_classification(&id)
+        .await
+        .unwrap()
+        .unwrap();
     fail_embedding.store(false, Ordering::SeqCst);
     let (status, result) = send(&app, retry(&id)).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(result["stage"], "embedding");
     wait_for(&repository, &id, "ready", true).await;
-    let after = repository.find_slide_classification(&id).unwrap().unwrap();
+    let after = repository
+        .find_slide_classification(&id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(before.metadata, after.metadata);
     assert_eq!(before.classified_at, after.classified_at);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -175,7 +204,11 @@ async fn retry_failed_embeddings_preserves_metadata_and_skips_classification() {
 
 #[tokio::test]
 async fn retry_validates_transport_missing_templates_and_configuration() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let studio = configured(
         repository,
         Arc::new(support::FixtureClassifier),
@@ -213,7 +246,9 @@ async fn retry_validates_transport_missing_templates_and_configuration() {
     *request.body_mut() = Body::from("x".repeat(1025));
     assert_eq!(send(&app, request).await.0, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(
-        send(&routes(support::studio()), retry("missing")).await.0,
+        send(&routes(support::studio().await), retry("missing"))
+            .await
+            .0,
         StatusCode::SERVICE_UNAVAILABLE
     );
     studio.shutdown();

@@ -1,7 +1,7 @@
 //! Authenticated resource policy and bounded canonical document snapshots.
 use crate::{
-    adapters::sqlite::{
-        client::SqliteClient,
+    adapters::postgres::{
+        client::PostgresClient,
         query::{Condition, SqlBuilder},
     },
     domains::{
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ResourceAccess {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
     policy: Arc<DealAccessService>,
 }
 
@@ -26,8 +26,8 @@ pub struct CanonicalChunk {
 }
 
 impl ResourceAccess {
-    pub fn new(sqlite: SqliteClient, policy: Arc<DealAccessService>) -> Self {
-        Self { sqlite, policy }
+    pub fn new(postgres: PostgresClient, policy: Arc<DealAccessService>) -> Self {
+        Self { postgres, policy }
     }
 
     pub async fn deal(&self, id: String, actor: i64) -> ServiceResult<()> {
@@ -56,7 +56,7 @@ impl ResourceAccess {
             ));
         }
         let rows = self
-            .sqlite
+            .postgres
             .read_with_async(
                 SqlBuilder::select("document_chunk_identities")
                     .columns([
@@ -123,32 +123,36 @@ impl ResourceAccess {
     ) -> ServiceResult<Vec<CanonicalChunk>> {
         let deal = deal.to_string();
         let result = self
-            .sqlite
-            .read_transaction_result_async::<_, RepositoryError, _>(move |tx| {
-                crate::domains::memberships::require_deal(tx, &deal, actor, Capability::Read)?;
-                let versions = tx.read_with(
-                    SqlBuilder::select("quarry_files")
-                        .columns([
-                            "quarry_file_versions.version_id",
-                            "document_identity_manifests.chunk_count",
-                        ])
-                        .inner_join(
-                            "quarry_file_versions",
-                            "quarry_files.file_id",
-                            "quarry_file_versions.file_id",
-                        )
-                        .left_join(
-                            "document_identity_manifests",
-                            "quarry_file_versions.version_id",
-                            "document_identity_manifests.version_id",
-                        )
-                        .and_where(Condition::equal("quarry_files.deal_id", deal))
-                        .and_where(Condition::is_null("quarry_files.deleted_at"))
-                        .and_where(Condition::equal("quarry_file_versions.is_current", true))
-                        .limit(5001)
-                        .build(),
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
-                )?;
+            .postgres
+            .read_transaction_result_async::<_, RepositoryError, _, _>(move |tx| async move {
+                let tx = &tx;
+                crate::domains::memberships::require_deal(tx, &deal, actor, Capability::Read)
+                    .await?;
+                let versions = tx
+                    .read_with(
+                        SqlBuilder::select("quarry_files")
+                            .columns([
+                                "quarry_file_versions.version_id",
+                                "document_identity_manifests.chunk_count",
+                            ])
+                            .inner_join(
+                                "quarry_file_versions",
+                                "quarry_files.file_id",
+                                "quarry_file_versions.file_id",
+                            )
+                            .left_join(
+                                "document_identity_manifests",
+                                "quarry_file_versions.version_id",
+                                "document_identity_manifests.version_id",
+                            )
+                            .and_where(Condition::equal("quarry_files.deal_id", deal))
+                            .and_where(Condition::is_null("quarry_files.deleted_at"))
+                            .and_where(Condition::equal("quarry_file_versions.is_current", true))
+                            .limit(5001)
+                            .build(),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+                    )
+                    .await?;
                 if versions.len() > 5000 {
                     return Err(RepositoryError::Unavailable(
                         "deal search exceeds 5,000 current documents".into(),
@@ -172,49 +176,51 @@ impl ResourceAccess {
                         "deal search exceeds 10,000 canonical chunks".into(),
                     ));
                 }
-                let rows = tx.read_with(
-                    SqlBuilder::select("document_chunk_identities")
-                        .columns([
-                            "quarry_file_versions.file_id",
-                            "document_chunk_identities.version_id",
-                            "document_chunk_identities.chunk_id",
-                            "document_chunk_identities.chunk_index",
-                            "document_chunk_identities.index_generation",
-                            "document_chunk_identities.chunk_sha256",
-                            "document_identity_manifests.active_generation",
-                        ])
-                        .inner_join(
-                            "quarry_file_versions",
-                            "document_chunk_identities.version_id",
-                            "quarry_file_versions.version_id",
-                        )
-                        .inner_join(
-                            "document_identity_manifests",
-                            "document_chunk_identities.version_id",
-                            "document_identity_manifests.version_id",
-                        )
-                        .and_where(Condition::in_values(
-                            "document_chunk_identities.version_id",
-                            versions.iter().map(|(id, _)| id.as_str()),
-                        ))
-                        .limit(10001)
-                        .build(),
-                    |row| {
-                        Ok((
-                            CanonicalChunk {
-                                file_id: row.get("file_id")?,
-                                version_id: row.get("version_id")?,
-                                identity: ChunkIdentity {
-                                    chunk_id: row.get("chunk_id")?,
-                                    index_generation: row.get("index_generation")?,
-                                    chunk_index: row.get("chunk_index")?,
-                                    chunk_sha256: row.get("chunk_sha256")?,
+                let rows = tx
+                    .read_with(
+                        SqlBuilder::select("document_chunk_identities")
+                            .columns([
+                                "quarry_file_versions.file_id",
+                                "document_chunk_identities.version_id",
+                                "document_chunk_identities.chunk_id",
+                                "document_chunk_identities.chunk_index",
+                                "document_chunk_identities.index_generation",
+                                "document_chunk_identities.chunk_sha256",
+                                "document_identity_manifests.active_generation",
+                            ])
+                            .inner_join(
+                                "quarry_file_versions",
+                                "document_chunk_identities.version_id",
+                                "quarry_file_versions.version_id",
+                            )
+                            .inner_join(
+                                "document_identity_manifests",
+                                "document_chunk_identities.version_id",
+                                "document_identity_manifests.version_id",
+                            )
+                            .and_where(Condition::in_values(
+                                "document_chunk_identities.version_id",
+                                versions.iter().map(|(id, _)| id.as_str()),
+                            ))
+                            .limit(10001)
+                            .build(),
+                        |row| {
+                            Ok((
+                                CanonicalChunk {
+                                    file_id: row.get("file_id")?,
+                                    version_id: row.get("version_id")?,
+                                    identity: ChunkIdentity {
+                                        chunk_id: row.get("chunk_id")?,
+                                        index_generation: row.get("index_generation")?,
+                                        chunk_index: row.get("chunk_index")?,
+                                        chunk_sha256: row.get("chunk_sha256")?,
+                                    },
                                 },
-                            },
-                            row.get::<_, String>("active_generation")?,
-                        ))
-                    },
-                )?;
+                                row.get::<_, String>("active_generation")?,
+                            ))
+                        },
+                    )
+                    .await?;
                 if i64::try_from(rows.len()).ok() != Some(expected) {
                     return Err(RepositoryError::Unavailable(
                         "document identity manifest is incomplete".into(),

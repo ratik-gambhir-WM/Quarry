@@ -14,6 +14,7 @@ pub(crate) async fn collect_deal_metadata_input(
     mut multipart: Multipart,
 ) -> AppResult<SaveDealMetadataInput> {
     let mut files = Vec::new();
+    let mut expected_revision = None;
     let mut sharepoint_link = None;
     let mut sow_link = None;
     let mut fact_sheet_link = None;
@@ -25,6 +26,21 @@ pub(crate) async fn collect_deal_metadata_input(
         .map_err(|err| AppError::bad_request(format!("failed to read multipart field: {err}")))?
     {
         let field_name = field.name().unwrap_or_default().to_string();
+        if field_name == "expectedRevision" {
+            if expected_revision.is_some() {
+                return Err(AppError::bad_request("duplicate expectedRevision"));
+            }
+            let text = field
+                .text()
+                .await
+                .map_err(|_| AppError::bad_request("invalid expectedRevision"))?;
+            let value = text
+                .parse::<i64>()
+                .map_err(|_| AppError::bad_request("invalid expectedRevision"))?;
+            super::validate::revision(value)?;
+            expected_revision = Some(value);
+            continue;
+        }
         if field_name != "files" {
             let target = match field_name.as_str() {
                 "sharepointLink" => &mut sharepoint_link,
@@ -74,6 +90,8 @@ pub(crate) async fn collect_deal_metadata_input(
         });
     }
     Ok(SaveDealMetadataInput {
+        expected_revision: expected_revision
+            .ok_or_else(|| AppError::bad_request("expectedRevision is required"))?,
         uploaded_files: files,
         sharepoint_link,
         sow_link,

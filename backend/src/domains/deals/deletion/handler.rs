@@ -4,21 +4,33 @@ use crate::{
     domains::identity::model::AuthenticatedUser,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     Extension, Json,
 };
 use std::sync::Arc;
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct DeleteRevision {
+    expected_revision: i64,
+}
+
 pub(super) async fn delete(
     State(service): State<Arc<DealDeletionService>>,
     Extension(actor): Extension<AuthenticatedUser>,
     Path(deal): Path<String>,
+    Query(input): Query<DeleteRevision>,
 ) -> AppResult<Response> {
     crate::domains::deals::handler::validate_deal_id(&deal)?;
+    if !(1..=crate::shared::revision::MAX_REVISION).contains(&input.expected_revision) {
+        return Err(AppError::bad_request("invalid expectedRevision"));
+    }
     service.authorize(deal.clone(), actor.user.id).await?;
-    let op = service.accept(deal, actor.user.id).await?;
+    let op = service
+        .accept(deal, actor.user.id, input.expected_revision)
+        .await?;
     if op.status == DeletionStatus::Completed {
         return Ok((
             StatusCode::NO_CONTENT,

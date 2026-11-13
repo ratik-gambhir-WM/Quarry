@@ -179,15 +179,14 @@ fn domains_and_adapters_preserve_dependency_direction() {
 #[test]
 fn product_infrastructure_is_constructed_only_in_bootstrap() {
     let constructors = [
-        "SqliteClient::open(",
+        "PostgresClient::connect(",
         "HelixClient::from_config(",
         "OpenAiClient::from_config(",
         "OfficeConverter::new(",
         "FileUploadServiceClient::new(",
         "IndexServiceClient::new(",
         "GraphRagClient::new(",
-        "DiligenceStudioClient::new(",
-        "SqliteTemplateRepository::new(",
+        "PostgresTemplateRepository::new(",
         "HeadlessTemplatePreviewGenerator::new(",
         "OpenAISlideClassifier::new(",
         "OpenAISlideEmbedder::new(",
@@ -299,14 +298,14 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
         "document authorization must use the canonical membership transaction policy"
     );
     let store = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/sqlite.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/postgres.rs"),
     )
     .unwrap();
     assert!(store.contains("transaction_result_async") && store.contains("require_deal"));
 
     let behavior_tests = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/integration/domains/documents/store/sqlite_tests.rs"),
+            .join("tests/integration/domains/documents/store/postgres_tests.rs"),
     )
     .unwrap();
     assert!(
@@ -329,7 +328,7 @@ fn template_domain_keeps_sql_and_http_ownership_explicit() {
             !source.contains("Connection::open(")
                 && !source.contains(".execute_batch(")
                 && !source.contains(".prepare("),
-            "template domain bypasses the SQLite builder/client: {path}"
+            "template domain bypasses the PostgreSQL builder/client: {path}"
         );
     }
 }

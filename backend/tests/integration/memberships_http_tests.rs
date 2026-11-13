@@ -13,6 +13,18 @@ async fn call(
     path: &str,
     body: Value,
 ) -> (StatusCode, Value) {
+    let path = if method == "DELETE" && !path.contains('?') && path.split('/').count() == 7 {
+        format!("{path}?expectedRevision=1")
+    } else {
+        path.to_owned()
+    };
+    let mut body = body;
+    if path.ends_with("/update") {
+        body.as_object_mut()
+            .unwrap()
+            .entry("expectedRevision")
+            .or_insert(json!(1));
+    }
     let token = (char::from(b'a' + u8::try_from(actor - 1).unwrap()))
         .to_string()
         .repeat(43);
@@ -21,7 +33,7 @@ async fn call(
         .oneshot(
             Request::builder()
                 .method(method)
-                .uri(path)
+                .uri(&path)
                 .header("authorization", format!("Bearer {token}"))
                 .header("x-user-id", actor)
                 .header("content-type", "application/json")
@@ -38,7 +50,7 @@ async fn call(
     )
 }
 async fn fixture() -> TestApplication {
-    let app = test_application().unwrap();
+    let app = test_application().await.unwrap();
     for (name, token) in [
         ("owner", 'a'),
         ("manager", 'b'),
@@ -46,15 +58,17 @@ async fn fixture() -> TestApplication {
         ("viewer", 'd'),
         ("outsider", 'e'),
     ] {
-        seed_identity(&app.sqlite, &format!("{name}@example.test"), token);
-        app.sqlite
-            .with_connection(|c| {
+        seed_identity(&app.postgres, &format!("{name}@example.test"), token).await;
+        app.postgres
+            .with_connection(async |c| {
                 c.execute(
                     "UPDATE users SET username=?1 WHERE email=?2",
                     [name, &format!("{name}@example.test")],
-                )?;
+                )
+                .await?;
                 Ok(())
             })
+            .await
             .unwrap();
     }
     let body = json!({
@@ -74,7 +88,7 @@ async fn fixture() -> TestApplication {
     // Retain legacy-ID coverage independently of the UUID-only creation API.
     let input: crate::domains::deals::service::SaveDealInput =
         serde_json::from_value(body).unwrap();
-    crate::domains::deals::repository::DealRepository::new(app.sqlite.clone())
+    crate::domains::deals::repository::DealRepository::new(app.postgres.clone())
         .create(crate::domains::deals::repository::CreateDealRecord {
             deal_id: "DEAL-SHARED".into(),
             user_id: 1,
@@ -354,7 +368,7 @@ async fn membership_http_validation_conflicts_and_team_lifecycle() {
             &app.router,
             2,
             "DELETE",
-            &format!("{root}/teams/{team}"),
+            &format!("{root}/teams/{team}?expectedRevision=2"),
             Value::Null
         )
         .await
@@ -433,7 +447,7 @@ async fn transfer_removal_archive_and_private_resources_stay_isolated() {
             &app.router,
             2,
             "DELETE",
-            &format!("{root}/members/1"),
+            &format!("{root}/members/1?expectedRevision=2"),
             Value::Null
         )
         .await
@@ -733,9 +747,9 @@ async fn backend_generated_deal_uuids_work_across_product_boundaries() {
         StatusCode::BAD_REQUEST
     );
     let rows = app
-        .sqlite
+        .postgres
         .read_async(
-            crate::adapters::sqlite::query::SqlBuilder::select("deals")
+            crate::adapters::postgres::query::SqlBuilder::select("deals")
                 .columns(["deal_id"])
                 .build(),
         )

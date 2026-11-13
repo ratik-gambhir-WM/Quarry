@@ -88,7 +88,7 @@ impl SlideEmbedder for BatchEmbedder {
     }
 }
 fn service(
-    repository: Arc<SqliteTemplateRepository>,
+    repository: Arc<PostgresTemplateRepository>,
     classifier: Arc<dyn SlideClassifier>,
     embedder: Arc<dyn SlideEmbedder>,
 ) -> Arc<SlideClassificationService> {
@@ -108,7 +108,11 @@ fn service(
 
 #[tokio::test]
 async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_finish() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let class_entered = Arc::new(tokio::sync::Semaphore::new(0));
     let class_release = Arc::new(tokio::sync::Semaphore::new(0));
     let embed_entered = Arc::new(tokio::sync::Semaphore::new(0));
@@ -158,7 +162,7 @@ async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_f
     .unwrap();
     assert_eq!(body["importedCount"], 12);
     assert_eq!(body["retrieval"]["status"], "pending");
-    assert_eq!(repository.list(None).unwrap().len(), 12);
+    assert_eq!(repository.list(None).await.unwrap().len(), 12);
     let templates = body["templates"].as_array().unwrap();
     assert_eq!(templates.len(), 12);
     for (template, expected) in templates
@@ -171,13 +175,17 @@ async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_f
             template["templateJson"]["presentation"]["title"],
             expected.name
         );
-        assert!(repository.find_by_id(id).unwrap().is_some());
-        assert!(repository.find_preview(id).unwrap().is_some());
+        assert!(repository.find_by_id(id).await.unwrap().is_some());
+        assert!(repository.find_preview(id).await.unwrap().is_some());
         assert_eq!(
-            repository.find_metadata(id).unwrap().unwrap().kind,
+            repository.find_metadata(id).await.unwrap().unwrap().kind,
             TemplateKind::Commentary
         );
-        let state = repository.find_slide_classification(id).unwrap().unwrap();
+        let state = repository
+            .find_slide_classification(id)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(state.metadata.is_none());
         assert!(state.subject_vector.is_none());
     }
@@ -196,16 +204,19 @@ async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_f
     embed_release.add_permits(24);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if templates.iter().all(|template| {
+            let mut ready = true;
+            for template in templates {
                 let state = repository
                     .find_slide_classification(template["templateId"].as_str().unwrap())
+                    .await
                     .unwrap()
                     .unwrap();
-                state.status == "ready"
+                ready &= state.status == "ready"
                     && state.embedding_status == "ready"
                     && state.subject_vector.is_some()
-                    && state.capability_vector.is_some()
-            }) {
+                    && state.capability_vector.is_some();
+            }
+            if ready {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -219,7 +230,11 @@ async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_f
 
 #[tokio::test]
 async fn batch_classified_preview_failure_does_not_publish_partial_deck_or_jobs() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let source = deck(12);
     let fail_title = pptx::read(&source)
         .unwrap()
@@ -255,16 +270,21 @@ async fn batch_classified_preview_failure_does_not_publish_partial_deck_or_jobs(
         body["error"],
         "A preview could not be generated. Try importing the template again."
     );
-    assert!(repository.list(None).unwrap().is_empty());
+    assert!(repository.list(None).await.unwrap().is_empty());
     assert!(repository
         .claim_next_slide_classification("2099-01-01T00:00:00Z", "2099-01-01T00:03:00Z")
+        .await
         .unwrap()
         .is_none());
 }
 
 #[tokio::test]
 async fn batch_classified_validates_inputs_and_capability_without_writes() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let classifier = service(
         repository.clone(),
         Arc::new(support::FixtureClassifier),
@@ -305,8 +325,8 @@ async fn batch_classified_validates_inputs_and_capability_without_writes() {
             expected
         );
     }
-    assert!(repository.list(None).unwrap().is_empty());
-    let disabled = routes(support::studio());
+    assert!(repository.list(None).await.unwrap().is_empty());
+    let disabled = routes(support::studio().await);
     assert_eq!(
         send(
             &disabled,
@@ -323,7 +343,11 @@ async fn batch_classified_validates_inputs_and_capability_without_writes() {
 
 #[tokio::test]
 async fn batch_classified_request_cancellation_stops_previews_without_partial_publication() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let started = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
     let studio = Arc::new(SlideTemplates::new(
@@ -363,9 +387,10 @@ async fn batch_classified_request_cancellation_stops_previews_without_partial_pu
     // Wait for owned blocking workers to finish so no delayed publication escapes this assertion.
     studio.shutdown();
     studio.stop_worker().await;
-    assert!(repository.list(None).unwrap().is_empty());
+    assert!(repository.list(None).await.unwrap().is_empty());
     assert!(repository
         .claim_next_slide_classification("2099-01-01T00:00:00Z", "2099-01-01T00:03:00Z")
+        .await
         .unwrap()
         .is_none());
 }

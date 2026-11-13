@@ -1,5 +1,9 @@
 # Notebook API implementation verification
 
+Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
+Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
+reset and verification records below describe the earlier implementation, not current commands.
+
 This record covers the initial API/transport implementation before the subsequent explicit-Save
 editor integration. See [Save UI verification](notebook-save-ui-verification.md) for the current
 UI behavior and later checks.
@@ -43,8 +47,7 @@ unrelated UI/QuickLook implementation or test assertions were changed to conceal
 Eight default-ignored backend tests comprise the interactive notebook fixture (run separately here),
 a template validation server, disposable live Helix compatibility/projection tests, and installed
 Chromium preview tests. Live OpenAI/Helix and packaged Tauri execution remain unverified. No release
-packaging, normal product `cargo run`, reset utility, graph clearing, or Diligence Studio run was
-needed or performed.
+packaging, normal product `cargo run`, reset utility, or graph clearing was needed or performed.
 
 ## Coverage and review
 

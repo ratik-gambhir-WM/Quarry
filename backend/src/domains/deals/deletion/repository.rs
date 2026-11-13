@@ -1,19 +1,20 @@
 use super::model::{DealDeletion, DeletionPhase, DeletionStatus};
+use crate::adapters::postgres::client::Row;
+use crate::adapters::postgres::client::RowResult;
 use crate::{
-    adapters::sqlite::{
-        client::{SqliteClient, SqliteClientError, SqliteTransaction},
+    adapters::postgres::{
+        client::{PostgresClient, PostgresError, PostgresTransaction},
         query::{ComparisonOperator as Op, Condition as C, SortDirection, SqlBuilder as Q},
     },
     domains::memberships::{model::Capability, require_deal},
     shared::error::RepositoryError,
 };
-use rusqlite::Row;
 
 #[derive(Clone)]
 pub(crate) struct DeletionRepository {
-    pub(super) sqlite: SqliteClient,
+    pub(super) postgres: PostgresClient,
 }
-pub(crate) fn barrier(tx: &SqliteTransaction<'_>, deal: &str) -> Result<bool, SqliteClientError> {
+pub(crate) async fn barrier(tx: &PostgresTransaction, deal: &str) -> Result<bool, PostgresError> {
     Ok(tx
         .read_one_with(
             Q::select("deal_deletions")
@@ -21,21 +22,18 @@ pub(crate) fn barrier(tx: &SqliteTransaction<'_>, deal: &str) -> Result<bool, Sq
                 .and_where(C::equal("deal_id", deal))
                 .build(),
             |_| Ok(()),
-        )?
+        )
+        .await?
         .is_some())
 }
 fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
-fn decode(r: &Row<'_>) -> rusqlite::Result<DealDeletion> {
-    fn enumeration<T: serde::de::DeserializeOwned>(
-        r: &Row<'_>,
-        column: &str,
-    ) -> rusqlite::Result<T> {
+fn decode(r: &Row<'_>) -> RowResult<DealDeletion> {
+    fn enumeration<T: serde::de::DeserializeOwned>(r: &Row<'_>, column: &str) -> RowResult<T> {
         let value: String = r.get(column)?;
-        serde_json::from_value(serde_json::Value::String(value)).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })
+        serde_json::from_value(serde_json::Value::String(value))
+            .map_err(crate::adapters::postgres::client::PostgresError::decode)
     }
     let deletion_id: String = r.get("deletion_id")?;
     let status = enumeration(r, "status")?;
@@ -52,17 +50,18 @@ fn decode(r: &Row<'_>) -> rusqlite::Result<DealDeletion> {
         completed_at: r.get("completed_at")?,
     })
 }
-fn find(
-    tx: &SqliteTransaction<'_>,
+async fn find(
+    tx: &PostgresTransaction,
     column: &str,
     id: &str,
-) -> Result<Option<(i64, DealDeletion)>, SqliteClientError> {
+) -> Result<Option<(i64, DealDeletion)>, PostgresError> {
     tx.read_one_with(
         Q::select("deal_deletions")
             .and_where(C::equal(column, id))
             .build(),
         |r| Ok((r.get("owner_user_id")?, decode(r)?)),
     )
+    .await
 }
 fn owned(value: Option<(i64, DealDeletion)>, actor: i64) -> Result<DealDeletion, RepositoryError> {
     value
@@ -71,16 +70,17 @@ fn owned(value: Option<(i64, DealDeletion)>, actor: i64) -> Result<DealDeletion,
         .ok_or_else(|| RepositoryError::NotFound("resource not found".into()))
 }
 impl DeletionRepository {
-    pub(crate) fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub(crate) fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
     pub(super) async fn preflight(&self, deal: String, actor: i64) -> Result<(), RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| {
-                if let Some(receipt) = find(tx, "deal_id", &deal)? {
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                if let Some(receipt) = find(tx, "deal_id", &deal).await? {
                     owned(Some(receipt), actor)?;
                 } else {
-                    require_deal(tx, &deal, actor, Capability::Delete)?;
+                    require_deal(tx, &deal, actor, Capability::Delete).await?;
                 }
                 Ok(())
             })
@@ -90,10 +90,18 @@ impl DeletionRepository {
         &self,
         deal: String,
         actor: i64,
+        expected_revision: i64,
     ) -> Result<DealDeletion, RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                if let Some(receipt) = find(tx, "deal_id", &deal)? {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                crate::domains::deals::coordination::lock(
+                    tx,
+                    &deal,
+                    crate::adapters::postgres::query::RowLock::Update,
+                )
+                .await?;
+                if let Some(receipt) = find(tx, "deal_id", &deal).await? {
                     let op = owned(Some(receipt), actor)?;
                     if matches!(
                         op.status,
@@ -107,12 +115,36 @@ impl DeletionRepository {
                                 .set("updated_at", now())
                                 .and_where(C::equal("deletion_id", &op.deletion_id))
                                 .build(),
-                        )?;
-                        return owned(find(tx, "deletion_id", &op.deletion_id)?, actor);
+                        )
+                        .await?;
+                        return owned(find(tx, "deletion_id", &op.deletion_id).await?, actor);
                     }
                     return Ok(op);
                 }
-                require_deal(tx, &deal, actor, Capability::Delete)?;
+                require_deal(tx, &deal, actor, Capability::Delete).await?;
+                let changed = tx
+                    .write(
+                        Q::update("deal_lifecycle_guards")
+                            .set("state", "deleting")
+                            .and_where(C::equal("deal_id", &deal))
+                            .and_where(C::equal("state", "active"))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected != 1 {
+                    return Err(crate::shared::revision::conflict());
+                }
+                let actual = tx
+                    .read_one_with(
+                        Q::select("deals")
+                            .and_where(C::equal("deal_id", &deal))
+                            .build(),
+                        |r| r.get::<_, i64>("content_revision"),
+                    )
+                    .await?;
+                if actual != Some(expected_revision) {
+                    return Err(crate::shared::revision::conflict());
+                }
                 let id = uuid::Uuid::new_v4().to_string();
                 let time = now();
                 tx.write(
@@ -125,8 +157,9 @@ impl DeletionRepository {
                         .value("created_at", &time)
                         .value("updated_at", &time)
                         .build(),
-                )?;
-                owned(find(tx, "deletion_id", &id)?, actor)
+                )
+                .await?;
+                owned(find(tx, "deletion_id", &id).await?, actor)
             })
             .await
     }
@@ -135,13 +168,16 @@ impl DeletionRepository {
         id: String,
         actor: i64,
     ) -> Result<DealDeletion, RepositoryError> {
-        self.sqlite
-            .read_transaction_result_async(move |tx| owned(find(tx, "deletion_id", &id)?, actor))
+        self.postgres
+            .read_transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                owned(find(tx, "deletion_id", &id).await?, actor)
+            })
             .await
     }
     pub(super) async fn pending(&self, after: &str) -> Result<Vec<DealDeletion>, RepositoryError> {
         Ok(self
-            .sqlite
+            .postgres
             .read_with_async(
                 Q::select("deal_deletions")
                     .and_where(C::in_values(
@@ -164,7 +200,7 @@ impl DeletionRepository {
     /// Include delayed retries; an empty due page alone does not mean the queue is drained.
     pub(super) async fn has_pending(&self) -> Result<bool, RepositoryError> {
         Ok(self
-            .sqlite
+            .postgres
             .read_one_with_async(
                 Q::select("deal_deletions")
                     .columns(["deletion_id"])
@@ -181,7 +217,7 @@ impl DeletionRepository {
         id: String,
         phase: DeletionPhase,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::update("deal_deletions")
                     .set("status", "running")
@@ -195,9 +231,32 @@ impl DeletionRepository {
         Ok(())
     }
     pub(super) async fn snapshot_and_purge(&self, op: DealDeletion) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let (owner, saved) = find(tx, "deletion_id", &op.deletion_id)?
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                crate::domains::deals::coordination::lock(
+                    tx,
+                    &op.deal_id,
+                    crate::adapters::postgres::query::RowLock::Update,
+                )
+                .await?;
+                tx.lock_with(
+                    Q::select("notebooks")
+                        .and_where(C::equal("deal_id", &op.deal_id))
+                        .order_by(
+                            "notebook_id",
+                            crate::adapters::postgres::query::SortDirection::Ascending,
+                        )
+                        .lock(
+                            crate::adapters::postgres::query::RowLock::Update,
+                            crate::adapters::postgres::query::LockWait::Wait,
+                        )
+                        .build(),
+                    |_| Ok(()),
+                )
+                .await?;
+                let (owner, saved) = find(tx, "deletion_id", &op.deletion_id)
+                    .await?
                     .ok_or_else(|| RepositoryError::NotFound("deletion not found".into()))?;
                 if matches!(
                     saved.phase,
@@ -214,7 +273,8 @@ impl DeletionRepository {
                             .and_where(C::equal("role", "owner"))
                             .build(),
                         |_| Ok(()),
-                    )?
+                    )
+                    .await?
                     .is_none()
                 {
                     return Err(RepositoryError::invalid(
@@ -227,16 +287,18 @@ impl DeletionRepository {
                 ] {
                     let mut after = String::new();
                     loop {
-                        let ids = tx.read_with(
-                            Q::select(source)
-                                .columns([column])
-                                .and_where(C::equal("deal_id", &op.deal_id))
-                                .and_where(C::compare(column, Op::GreaterThan, after.clone()))
-                                .order_by(column, SortDirection::Ascending)
-                                .limit(512)
-                                .build(),
-                            |r| r.get::<_, String>(0),
-                        )?;
+                        let ids = tx
+                            .read_with(
+                                Q::select(source)
+                                    .columns([column])
+                                    .and_where(C::equal("deal_id", &op.deal_id))
+                                    .and_where(C::compare(column, Op::GreaterThan, after.clone()))
+                                    .order_by(column, SortDirection::Ascending)
+                                    .limit(512)
+                                    .build(),
+                                |r| r.get::<_, String>(0),
+                            )
+                            .await?;
                         if ids.is_empty() {
                             break;
                         }
@@ -247,7 +309,8 @@ impl DeletionRepository {
                                     .value(column, id)
                                     .on_conflict_do_nothing(["deletion_id", column])
                                     .build(),
-                            )?;
+                            )
+                            .await?;
                         }
                         after = ids.last().cloned().unwrap_or_default();
                     }
@@ -256,19 +319,22 @@ impl DeletionRepository {
                     Q::delete_from("assistant_threads")
                         .and_where(C::equal("deal_id", &op.deal_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 tx.write(
                     Q::update("notebooks")
                         .set("deal_id", Option::<String>::None)
                         .set("updated_at", now())
                         .and_where(C::equal("deal_id", &op.deal_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 tx.write(
                     Q::delete_from("deals")
                         .and_where(C::equal("deal_id", &op.deal_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 tx.write(
                     Q::update("deal_deletions")
                         .set("status", "running")
@@ -276,7 +342,8 @@ impl DeletionRepository {
                         .set("updated_at", now())
                         .and_where(C::equal("deletion_id", op.deletion_id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -287,7 +354,7 @@ impl DeletionRepository {
             .and_where(C::equal("deletion_id", id))
             .and_where(C::equal("purged", 0));
         Ok(self
-            .sqlite
+            .postgres
             .read_with_async(
                 q.order_by("file_id", SortDirection::Ascending)
                     .limit(64)
@@ -301,7 +368,7 @@ impl DeletionRepository {
         id: String,
         file: String,
     ) -> Result<(), RepositoryError> {
-        self.sqlite
+        self.postgres
             .write_async(
                 Q::update("deal_deletion_files")
                     .set("purged", 1)
@@ -313,8 +380,9 @@ impl DeletionRepository {
         Ok(())
     }
     pub(super) async fn failure(&self, id: String, blocked: bool) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 let attempts: i64 = tx
                     .read_one_with(
                         Q::select("deal_deletions")
@@ -322,7 +390,8 @@ impl DeletionRepository {
                             .and_where(C::equal("deletion_id", &id))
                             .build(),
                         |r| r.get(0),
-                    )?
+                    )
+                    .await?
                     .unwrap_or(0);
                 let delay = 2_i64
                     .pow(u32::try_from(attempts.min(8)).unwrap_or(8))
@@ -346,15 +415,18 @@ impl DeletionRepository {
                         .set("updated_at", now())
                         .and_where(C::equal("deletion_id", id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
     }
     pub(super) async fn complete(&self, id: String) -> Result<(), RepositoryError> {
-        self.sqlite
-            .transaction_result_async(move |tx| {
-                let op = find(tx, "deletion_id", &id)?
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
+                let op = find(tx, "deletion_id", &id)
+                    .await?
                     .ok_or_else(|| RepositoryError::NotFound("deletion not found".into()))?
                     .1;
                 for (table, column, value) in [
@@ -371,7 +443,8 @@ impl DeletionRepository {
                                 .limit(1)
                                 .build(),
                             |_| Ok(()),
-                        )?
+                        )
+                        .await?
                         .is_some()
                     {
                         return Err(RepositoryError::Conflict(
@@ -388,7 +461,8 @@ impl DeletionRepository {
                             .limit(1)
                             .build(),
                         |_| Ok(()),
-                    )?
+                    )
+                    .await?
                     .is_some()
                 {
                     return Err(RepositoryError::Conflict("deletion targets remain".into()));
@@ -398,7 +472,8 @@ impl DeletionRepository {
                         Q::delete_from(table)
                             .and_where(C::equal("deletion_id", &id))
                             .build(),
-                    )?;
+                    )
+                    .await?;
                 }
                 let time = now();
                 tx.write(
@@ -410,7 +485,8 @@ impl DeletionRepository {
                         .set("completed_at", &time)
                         .and_where(C::equal("deletion_id", id))
                         .build(),
-                )?;
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -419,10 +495,12 @@ impl DeletionRepository {
 
 pub(super) fn integrity_failure(error: &RepositoryError) -> bool {
     match error {
-        RepositoryError::InvalidData(_) | RepositoryError::Conflict(_) | RepositoryError::NotFound(_) => true,
-        RepositoryError::StorageCause(source) => {
-            source.downcast_ref::<crate::adapters::sqlite::client::SqliteClientError>().is_some_and(|error| matches!(error, crate::adapters::sqlite::client::SqliteClientError::Database(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::ConstraintViolation))
-        }
+        RepositoryError::InvalidData(_)
+        | RepositoryError::Conflict(_)
+        | RepositoryError::NotFound(_) => true,
+        RepositoryError::StorageCause(source) => source
+            .downcast_ref::<crate::adapters::postgres::client::PostgresError>()
+            .is_some_and(|error| error.is_integrity_violation()),
         _ => false,
     }
 }

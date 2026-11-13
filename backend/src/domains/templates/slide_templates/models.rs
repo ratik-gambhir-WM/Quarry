@@ -307,6 +307,7 @@ pub struct ImageCrop {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StoredTemplate {
+    pub revision: i64,
     pub template_id: String,
     pub template_json: CanvasDocument,
 }
@@ -360,6 +361,7 @@ pub struct StoredTemplateMetadata {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredTemplatePreview {
+    pub revision: i64,
     pub template_id: String,
     pub content_type: String,
     pub bytes: Vec<u8>,
@@ -390,6 +392,7 @@ pub struct StoredTemplateCatalogItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoredTemplateWithAssets {
+    pub revision: i64,
     pub template_id: String,
     pub template_json: CanvasDocument,
     pub assets: Vec<TemplateAsset>,
@@ -446,6 +449,7 @@ impl TemplatePreviewStatus {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateResponse {
+    pub revision: i64,
     pub template_id: String,
     pub template_json: CanvasDocument,
 }
@@ -454,6 +458,7 @@ pub struct TemplateResponse {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateListItem {
+    pub revision: i64,
     pub template_id: String,
     pub title: String,
     pub description: String,
@@ -483,6 +488,7 @@ pub struct TemplatePreviewPageMetadata {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplatePreviewListItem {
+    pub revision: i64,
     pub template_id: String,
     pub preview_url: String,
     pub content_type: String,

@@ -11,6 +11,7 @@ import {
 
 export type DeleteDealTarget = Pick<DealPortfolioView, "id" | "name"> & {
   trigger: HTMLButtonElement | null;
+  revision: number;
 };
 
 export function DealActionsMenu({
@@ -47,8 +48,9 @@ export function DealActionsMenu({
         <DropdownMenuItem
           variant="destructive"
           onSelect={() => {
+            if (deal.revision === null) return;
             openingDialog.current = true;
-            onDelete({ id: deal.id, name: deal.name, trigger: trigger.current });
+            onDelete({ id: deal.id, name: deal.name, revision: deal.revision, trigger: trigger.current });
           }}
         >
           <Trash2 aria-hidden="true" />

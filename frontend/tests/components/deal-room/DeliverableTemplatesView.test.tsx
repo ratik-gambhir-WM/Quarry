@@ -165,7 +165,7 @@ describe("DeliverableTemplatesView", () => {
     expect(window.confirm).toHaveBeenCalledWith(
       "Delete “first template”? This cannot be undone.",
     );
-    expect(deleteTemplate).toHaveBeenCalledWith("first-template");
+    expect(deleteTemplate).toHaveBeenCalledWith("first-template", 1);
     await waitFor(() => {
       expect(
         screen.queryByAltText("Template preview: first template"),
@@ -195,7 +195,7 @@ describe("DeliverableTemplatesView", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Delete first template" }),
     );
-    expect(deleteTemplate).toHaveBeenCalledWith("first-template");
+    expect(deleteTemplate).toHaveBeenCalledWith("first-template", 1);
     expect(onSelectSlide).toHaveBeenCalledOnce();
   });
 
@@ -210,7 +210,7 @@ describe("DeliverableTemplatesView", () => {
     );
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "The template could not be deleted.",
+      "The template could not be deleted. Refresh templates and review the current version before trying again.",
     );
     expect(
       screen.getByAltText("Template preview: first template"),
@@ -487,6 +487,7 @@ function page(
     },
     previews: ids.map((templateId) => ({
       contentType: "image/png" as const,
+      revision: 1,
       dataUrl: `data:image/png;base64,${btoa(templateId)}`,
       height: 900,
       previewUrl: `/templates/${templateId}/preview`,

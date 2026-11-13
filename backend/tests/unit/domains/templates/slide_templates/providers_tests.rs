@@ -354,7 +354,9 @@ async fn embedding_pairs_infer_dimensions_and_reject_invalid_capability_vectors(
                 embedding_model: "fixture".into(),
                 input_limits: Default::default(),
                 repository: Arc::new(
-                    support::repository(std::path::Path::new(":memory:")).unwrap(),
+                    support::repository(std::path::Path::new(":memory:"))
+                        .await
+                        .unwrap(),
                 ),
             });
             let pair = service.embed_pair("subject", "capability").await;

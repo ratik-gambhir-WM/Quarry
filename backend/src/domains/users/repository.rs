@@ -1,9 +1,10 @@
-use rusqlite::Row;
+use crate::adapters::postgres::client::Row;
+use crate::adapters::postgres::client::RowResult;
 use serde::Serialize;
 
 use crate::{
-    adapters::sqlite::{
-        client::SqliteClient,
+    adapters::postgres::{
+        client::PostgresClient,
         query::{Condition, SqlBuilder},
     },
     shared::error::RepositoryError,
@@ -35,12 +36,12 @@ pub struct User {
 
 #[derive(Clone)]
 pub struct UserRepository {
-    sqlite: SqliteClient,
+    postgres: PostgresClient,
 }
 
 impl UserRepository {
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(postgres: PostgresClient) -> Self {
+        Self { postgres }
     }
 
     pub async fn by_email(&self, email: String) -> Result<Option<User>, RepositoryError> {
@@ -48,7 +49,7 @@ impl UserRepository {
             .columns(USER_COLUMNS)
             .and_where(Condition::equal("email", email))
             .build();
-        self.sqlite
+        self.postgres
             .read_one_with_async(query, user_from_row)
             .await
             .map_err(|error| RepositoryError::storage(format!("failed to read user: {error}")))
@@ -59,14 +60,14 @@ impl UserRepository {
             .columns(USER_COLUMNS)
             .and_where(Condition::equal("id", id))
             .build();
-        self.sqlite
+        self.postgres
             .read_one_with_async(query, user_from_row)
             .await
             .map_err(|error| RepositoryError::storage(format!("failed to read user: {error}")))
     }
 }
 
-pub(crate) fn user_from_row(row: &Row<'_>) -> rusqlite::Result<User> {
+pub(crate) fn user_from_row(row: &Row<'_>) -> RowResult<User> {
     Ok(User {
         id: row.get("id")?,
         first_name: row.get("first_name")?,

@@ -1,7 +1,7 @@
 use validate::validate_company;
 mod validate;
 use super::{
-    model::{Company, CompanyInput, CompanyPage},
+    model::{Company, CompanyInput, CompanyPage, CompanyUpdateInput},
     service::CompanyService,
 };
 use crate::app::http::error::{AppError, AppResult};
@@ -60,17 +60,23 @@ pub(super) async fn create(
     validate_company(&input)?;
     Ok((
         StatusCode::CREATED,
-        Json(state.companies.save(None, input).await?),
+        Json(state.companies.save(None, input, None).await?),
     ))
 }
 pub(super) async fn update(
     Extension(actor): Extension<AuthenticatedUser>,
     State(state): State<CompanyState>,
     Path(id): Path<String>,
-    Json(mut input): Json<CompanyInput>,
+    Json(mut input): Json<CompanyUpdateInput>,
 ) -> AppResult<Json<Company>> {
     uuid::Uuid::parse_str(&id).map_err(|_| AppError::bad_request("invalid companyId"))?;
-    input.user_email = actor.user.email;
-    validate_company(&input)?;
-    Ok(Json(state.companies.save(Some(id), input).await?))
+    validate::revision(input.expected_revision)?;
+    input.fields.user_email = actor.user.email;
+    validate_company(&input.fields)?;
+    Ok(Json(
+        state
+            .companies
+            .save(Some(id), input.fields, Some(input.expected_revision))
+            .await?,
+    ))
 }

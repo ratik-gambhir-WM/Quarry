@@ -15,7 +15,7 @@ async fn unconfigured_delete_returns_a_sanitized_unavailable_error() {
     let service = TemplateService::new(None);
 
     assert_eq!(
-        service.delete("example").await.unwrap_err(),
+        service.delete("example", 1).await.unwrap_err(),
         ServiceError::Unavailable("template capability is not configured".to_string())
     );
 }
@@ -47,22 +47,6 @@ async fn unconfigured_import_returns_a_sanitized_unavailable_error() {
 }
 
 #[test]
-fn export_client_errors_are_sanitized_by_failure_class() {
-    assert_eq!(
-        map_powerpoint_export_client_error(SlideTemplateClientError::Status(
-            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
-        )),
-        ServiceError::Validation("The presentation could not be exported.".to_string())
-    );
-    assert_eq!(
-        map_powerpoint_export_client_error(SlideTemplateClientError::InvalidPayload(
-            "private upstream detail".to_string(),
-        )),
-        ServiceError::Unavailable("PowerPoint export is temporarily unavailable".to_string())
-    );
-}
-
-#[test]
 fn service_rejects_a_powerpoint_result_above_the_response_limit() {
     assert_eq!(
         validate_powerpoint_export_size(MAX_POWERPOINT_EXPORT_BYTES),
@@ -79,62 +63,41 @@ fn service_rejects_a_powerpoint_result_above_the_response_limit() {
 #[test]
 fn single_slide_rejection_maps_to_the_actionable_product_error() {
     assert_eq!(
-        map_pptx_import_client_error(
-            SlideTemplateClientError::PptxTemplateMustHaveOneSlide,
-            PptxTemplateImportMode::Single,
-        ),
+        map_embedded_error(super::super::slide_templates::SlideTemplateError::new(
+            super::super::slide_templates::error::FailureKind::Invalid,
+            "template_must_have_one_slide",
+            "Template PowerPoint files must contain exactly one slide.",
+        )),
         ServiceError::Validation(PPTX_MULTI_SLIDE_IMPORT_MESSAGE.to_string())
     );
 }
 
 #[test]
-fn transport_failure_maps_to_an_uncertain_outcome_without_upstream_details() {
+fn embedded_internal_errors_do_not_expose_their_source() {
     assert_eq!(
-        map_pptx_import_client_error(
-            SlideTemplateClientError::Request("private URL".to_string()),
-            PptxTemplateImportMode::Batch,
-        ),
-        ServiceError::Unavailable(
-            "Template import could not be confirmed. Refresh templates before trying again."
-                .to_string()
-        )
+        map_embedded_error(super::super::slide_templates::SlideTemplateError::internal(
+            anyhow::anyhow!("private storage detail"),
+        )),
+        ServiceError::Unavailable("The request could not be completed.".to_string())
     );
 }
 
 #[test]
-fn upstream_missing_template_maps_to_not_found() {
+fn embedded_missing_templates_preserve_not_found() {
     assert_eq!(
-        map_slide_template_delete_client_error(SlideTemplateClientError::Status(
-            reqwest::StatusCode::NOT_FOUND,
+        map_embedded_error(super::super::slide_templates::SlideTemplateError::new(
+            super::super::slide_templates::error::FailureKind::NotFound,
+            "template_not_found",
+            "template was not found",
         )),
         ServiceError::NotFound("template was not found".to_string())
     );
 }
 
 #[test]
-fn upstream_missing_template_document_maps_to_not_found() {
-    assert_eq!(
-        map_template_document_client_error(SlideTemplateClientError::Status(
-            reqwest::StatusCode::NOT_FOUND,
-        )),
-        ServiceError::NotFound("template was not found".to_string())
-    );
-}
-
-#[test]
-fn malformed_template_document_maps_to_sanitized_unavailable() {
-    assert_eq!(
-        map_template_document_client_error(SlideTemplateClientError::InvalidJson(
-            "private payload details".to_string(),
-        )),
-        ServiceError::Unavailable("template is temporarily unavailable".to_string())
-    );
-}
-
-#[test]
-fn adapter_response_maps_to_the_camel_case_product_contract() {
-    let page = TemplatePreviewPage::from(AdapterPage {
-        pagination: crate::adapters::diligence_studio::templates::TemplatePreviewPagination {
+fn preview_response_preserves_the_camel_case_product_contract() {
+    let page = TemplatePreviewPage {
+        pagination: TemplatePreviewPagination {
             page: 1,
             page_size: 10,
             total_items: 1,
@@ -142,17 +105,16 @@ fn adapter_response_maps_to_the_camel_case_product_contract() {
             has_next_page: false,
             has_previous_page: false,
         },
-        previews: vec![
-            crate::adapters::diligence_studio::templates::TemplatePreview {
-                template_id: "example".to_string(),
-                content_type: "image/png".to_string(),
-                data_url: "data:image/png;base64,example".to_string(),
-                preview_url: "/templates/example/preview?appId=Quarry_WestMonroe".to_string(),
-                width: 1600,
-                height: 900,
-            },
-        ],
-    });
+        previews: vec![TemplatePreview {
+            revision: 1,
+            template_id: "example".to_string(),
+            content_type: "image/png".to_string(),
+            data_url: "data:image/png;base64,example".to_string(),
+            preview_url: "/api/v1/templates/slide-templates/import/example/preview".to_string(),
+            width: 1600,
+            height: 900,
+        }],
+    };
 
     let json = serde_json::to_value(page).unwrap();
     assert_eq!(json["pagination"]["pageSize"], 10);

@@ -92,8 +92,8 @@ impl From<anyhow::Error> for RepositoryError {
     }
 }
 
-impl From<crate::adapters::sqlite::client::SqliteClientError> for RepositoryError {
-    fn from(source: crate::adapters::sqlite::client::SqliteClientError) -> Self {
+impl From<crate::adapters::postgres::client::PostgresError> for RepositoryError {
+    fn from(source: crate::adapters::postgres::client::PostgresError) -> Self {
         Self::StorageCause(source.into())
     }
 }

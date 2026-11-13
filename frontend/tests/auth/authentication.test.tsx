@@ -66,16 +66,18 @@ it("submits autofilled credentials, preserves them through visibility and retry,
   fireEvent.click(screen.getByRole("button", { name: "Show password" }));
   expect(password.value).toBe("  a sufficiently long password  ");
   fireEvent.click(button);
-  expect(screen.getByRole("button", { name: "Please wait…" })).toHaveProperty(
+  expect(screen.getByRole("button", { name: "waiting for sign-in..." })).toHaveProperty(
     "disabled",
     true,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Please wait…" }));
+  expect(screen.getByRole("status").textContent).toBe("waiting for sign-in...");
+  fireEvent.click(screen.getByRole("button", { name: "waiting for sign-in..." }));
   expect(login).toHaveBeenCalledExactlyOnceWith({
     username: "analyst",
     password: "  a sufficiently long password  ",
   });
   expect((await screen.findByRole("alert")).textContent).toBe("Try again");
+  expect(screen.getByRole("status").textContent).toBe("");
   expect(username.value).toBe("analyst");
   expect(password.value).toBe("  a sufficiently long password  ");
   expect(screen.getByRole("button", { name: "Sign in" })).toHaveProperty(

@@ -33,3 +33,10 @@ pub(super) fn validate_text(field: &str, value: &str, max: usize) -> AppResult<(
     }
     Ok(())
 }
+
+pub(super) fn revision(value: i64) -> AppResult<()> {
+    if !(1..=crate::shared::revision::MAX_REVISION).contains(&value) {
+        return Err(AppError::bad_request("invalid expectedRevision"));
+    }
+    Ok(())
+}

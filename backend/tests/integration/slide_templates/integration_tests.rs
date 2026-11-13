@@ -22,8 +22,12 @@ const PPTX: &str = "application/vnd.openxmlformats-officedocument.presentationml
 
 #[tokio::test]
 async fn compressed_preview_response_finishes_without_repolling_an_exhausted_stream() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
-    support::import_fixture(repository.clone(), TemplateKind::Diagram);
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
+    support::import_fixture(repository.clone(), TemplateKind::Diagram).await;
     let studio = Arc::new(SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
@@ -50,7 +54,7 @@ async fn compressed_preview_response_finishes_without_repolling_an_exhausted_str
 
 #[tokio::test]
 async fn cross_origin_export_exposes_headers_required_by_the_browser_adapter() {
-    let response = routes(support::studio())
+    let response = routes(support::studio().await)
         .oneshot(
             Request::post("/api/v1/templates/export")
                 .header("origin", "http://localhost:1420")
@@ -87,9 +91,9 @@ async fn cross_origin_export_exposes_headers_required_by_the_browser_adapter() {
 
 fn routes(studio: Arc<SlideTemplates>) -> Router {
     crate::create_router(
-        templates::route::routes(Arc::new(templates::service::TemplateService::embedded(
+        templates::route::routes(Arc::new(templates::service::TemplateService::new(Some(
             studio.clone(),
-        )))
+        ))))
         .merge(templates::slide_templates::route::routes(studio))
         .layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,
@@ -121,7 +125,7 @@ fn multipart(source: &[u8]) -> Vec<u8> {
 }
 #[tokio::test]
 async fn existing_facade_import_counts_single_rejection_and_no_legacy_fallback() {
-    let studio = support::studio();
+    let studio = support::studio().await;
     let app = routes(studio.clone());
     let source = pptx::write(&document()).unwrap();
     let request = || {
@@ -179,7 +183,7 @@ async fn existing_facade_import_counts_single_rejection_and_no_legacy_fallback()
 }
 #[tokio::test]
 async fn native_routes_reject_scope_selection_duplicate_queries_and_real_declared_limits() {
-    let app = routes(support::studio());
+    let app = routes(support::studio().await);
     for uri in [
         "/api/v1/templates/slide-templates/catalog?appId=Other",
         "/api/v1/templates/slide-templates/catalog/previews?page=0",
@@ -270,7 +274,11 @@ impl TemplatePreviewGenerator for SlowPreview {
 }
 #[tokio::test]
 async fn dropping_request_cancels_blocking_preview_and_prevents_publication() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let started = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
     let studio = Arc::new(SlideTemplates::new(
@@ -301,14 +309,14 @@ async fn dropping_request_cancels_blocking_preview_and_prevents_publication() {
     })
     .await
     .unwrap();
-    assert!(repository.list(None).unwrap().is_empty());
+    assert!(repository.list(None).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn projection_failure_preserves_the_canonical_import_without_fallback() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("quarry.sqlite3");
-    let repository = Arc::new(support::repository(&path).unwrap());
+    let repository = Arc::new(support::repository(&path).await.unwrap());
     let helix = Arc::new(
         crate::adapters::helix::client::HelixClient::with_config("http://127.0.0.1:9", None)
             .unwrap(),
@@ -329,17 +337,17 @@ async fn projection_failure_preserves_the_canonical_import_without_fallback() {
         .await
         .unwrap_err();
     assert_eq!(error.code, "template_projection_failed");
-    let saved = repository.list(None).unwrap();
+    let saved = repository.list(None).await.unwrap();
     assert_eq!(saved.len(), 1);
     assert_eq!(
         studio.reconcile().await.unwrap_err().code,
         "template_projection_failed"
     );
-    assert_eq!(repository.list(None).unwrap(), saved);
+    assert_eq!(repository.list(None).await.unwrap(), saved);
     drop(studio);
     drop(repository);
-    let reopened = support::repository(&path).unwrap();
-    assert_eq!(reopened.list(None).unwrap(), saved);
+    let reopened = support::repository(&path).await.unwrap();
+    assert_eq!(reopened.list(None).await.unwrap(), saved);
 }
 
 struct GatedClassifier {
@@ -360,7 +368,11 @@ impl SlideClassifier for GatedClassifier {
 
 #[tokio::test]
 async fn classified_http_returns_saved_json_and_preview_before_classification_finishes() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let classifier = Arc::new(SlideClassificationService::new(
         SlideClassificationServiceOptions {
@@ -400,9 +412,13 @@ async fn classified_http_returns_saved_json_and_preview_before_classification_fi
     assert_eq!(body["retrieval"]["status"], "pending");
     assert_eq!(body["previewAvailable"], true);
     let id = body["templateId"].as_str().unwrap();
-    assert!(repository.find_by_id(id).unwrap().is_some());
-    assert!(repository.find_preview(id).unwrap().is_some());
-    let state = repository.find_slide_classification(id).unwrap().unwrap();
+    assert!(repository.find_by_id(id).await.unwrap().is_some());
+    assert!(repository.find_preview(id).await.unwrap().is_some());
+    let state = repository
+        .find_slide_classification(id)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(state.metadata.is_none());
     assert!(state.subject_vector.is_none());
     // Progress is visible without requesting metadata or enabling vector inspection.
@@ -424,7 +440,11 @@ async fn classified_http_returns_saved_json_and_preview_before_classification_fi
     release.add_permits(1);
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let state = repository.find_slide_classification(id).unwrap().unwrap();
+            let state = repository
+                .find_slide_classification(id)
+                .await
+                .unwrap()
+                .unwrap();
             if state.embedding_status == "ready" {
                 break;
             }
@@ -433,7 +453,11 @@ async fn classified_http_returns_saved_json_and_preview_before_classification_fi
     })
     .await
     .unwrap();
-    let state = repository.find_slide_classification(id).unwrap().unwrap();
+    let state = repository
+        .find_slide_classification(id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(state.status, "ready");
     assert_eq!(state.subject_vector.as_ref().unwrap().len(), 2);
     assert_eq!(state.capability_vector.as_ref().unwrap().len(), 2);
@@ -443,7 +467,11 @@ async fn classified_http_returns_saved_json_and_preview_before_classification_fi
 
 #[tokio::test]
 async fn classified_import_does_not_acknowledge_saved_preview_when_preview_generation_fails() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let classifier = Arc::new(SlideClassificationService::new(
         SlideClassificationServiceOptions {
             classifier: Arc::new(support::FixtureClassifier),
@@ -473,12 +501,16 @@ async fn classified_import_does_not_acknowledge_saved_preview_when_preview_gener
     )
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(repository.list(None).unwrap().is_empty());
+    assert!(repository.list(None).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn shutdown_cancels_owned_preview_and_rejects_new_work() {
-    let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).unwrap());
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
     let started = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
     let studio = Arc::new(SlideTemplates::new(
@@ -504,7 +536,7 @@ async fn shutdown_cancels_owned_preview_and_rejects_new_work() {
     studio.shutdown();
     assert!(task.await.unwrap().is_err());
     assert!(finished.load(Ordering::Acquire));
-    assert!(repository.list(None).unwrap().is_empty());
+    assert!(repository.list(None).await.unwrap().is_empty());
     assert_eq!(
         studio.get("absent".into()).await.unwrap_err().code,
         "template_stopping"
@@ -513,7 +545,7 @@ async fn shutdown_cancels_owned_preview_and_rejects_new_work() {
 
 #[tokio::test]
 async fn native_import_checks_actual_bytes_even_without_declared_length() {
-    let app = routes(support::studio());
+    let app = routes(support::studio().await);
     let body = Body::from(vec![0; 25 * 1024 * 1024 + 1]);
     assert_eq!(
         send(
@@ -531,7 +563,7 @@ async fn native_import_checks_actual_bytes_even_without_declared_length() {
 
 #[tokio::test]
 async fn admission_is_shared_by_facade_and_native_routes_and_held_until_body_drop() {
-    let app = routes(support::studio()).route(
+    let app = routes(support::studio().await).route(
         "/api/v1/health",
         axum::routing::get(|| async { StatusCode::OK }),
     );
