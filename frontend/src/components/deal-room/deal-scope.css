@@ -1,0 +1,26 @@
+/* Radix owns expansion and focus; only the answer content and chevron move. */
+.scope-question-chevron {
+  transition: transform var(--motion-content) var(--ease-out-expo);
+}
+
+.scope-question-body[data-state="open"] > div {
+  animation: quarry-content-in var(--motion-content) var(--ease-out-expo);
+}
+
+@media (hover: hover) {
+  .scope-question-trigger:hover {
+    background: var(--theme-surface-hover);
+  }
+}
+
+html[data-motion-input="keyboard"] .deal-scope :is(.scope-question-chevron, .scope-question-body > div) {
+  animation: none;
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deal-scope :is(.scope-question-chevron, .scope-question-body > div) {
+    animation: none;
+    transition: none;
+  }
+}

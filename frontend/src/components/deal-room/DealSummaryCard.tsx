@@ -1,29 +1,18 @@
-import { useMemo, type CSSProperties } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
-import { useTable } from "@tanstack/react-table";
+import type { CSSProperties } from "react";
+import { CalendarDays, ChartNoAxesColumnIncreasing, CircleAlert, ClipboardList, Files, SlidersHorizontal } from "lucide-react";
+import { overviewDashboardPreview } from "../../fixtures/deal-room/overviewDashboard";
 import type { DealResource, DealRoomData } from "../../data/workspace";
-import {
-  DataGrid,
-  DataGridContainer,
-  dataGridFeatures,
-  type DataGridFeatures,
-} from "../reui/data-grid/data-grid";
-import { DataGridColumnHeader } from "../reui/data-grid/data-grid-column-header";
-import { DataGridScrollArea } from "../reui/data-grid/data-grid-scroll-area";
-import { DataGridTable } from "../reui/data-grid/data-grid-table";
-import {
-  quarryDataGridHeaderClassName,
-  quarryDataGridTableClassNames,
-} from "../reui/data-grid/quarry-data-grid";
 import { WorkspaceCard } from "../hub/WorkspaceCard";
 import { Icon } from "../ui/Icon";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { WorkstreamStatusBadge } from "./WorkstreamStatusBadge";
 import { Separator } from "../ui/separator";
 
 type DealSummaryCardProps = {
   deal: DealRoomData;
   onAddResources?: () => void;
+  onEdit?: () => void;
 };
 
 const overviewCardStyle: CSSProperties = {
@@ -33,126 +22,126 @@ const overviewCardStyle: CSSProperties = {
   boxShadow: "none",
 };
 
-const keyQuestionsTableClassNames = {
-  ...quarryDataGridTableClassNames,
-  base: "bg-transparent text-[13px] text-on-surface [&_th]:border-outline-variant/70 [&_td]:border-outline-variant/70 [&_tbody_td]:px-4 [&_tbody_td]:py-3",
-  header: "bg-transparent",
-  headerRow: "border-outline-variant/70 bg-transparent",
-};
-
 export function DealSummaryCard({
   deal,
   onAddResources,
+  onEdit,
 }: DealSummaryCardProps) {
   return (
-    <div className="grid grid-cols-12 gap-4 lg:gap-6">
+    <div className="grid min-w-0 grid-cols-12 gap-4 lg:gap-5">
       <WorkspaceCard
         aria-labelledby="deal-overview-heading"
-        className="col-span-12 flex min-h-64 flex-col p-6 sm:p-7 lg:col-span-7"
+        className="col-span-12 p-5 sm:p-6"
         interactive={false}
         style={overviewCardStyle}
       >
-        <div className="flex flex-col gap-5">
-          <div>
-            <p className="type-label uppercase tracking-[0.14em] text-muted">
-              Due Diligence Overview
-            </p>
-            <h1
-              className="type-display mt-2 break-words text-text-main"
-              id="deal-overview-heading"
-            >
-              {deal.name}
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="default">{deal.stageLabel}</Badge>
-            <Badge variant="secondary">{deal.phaseLabel}</Badge>
-            <Badge variant="outline">{deal.sectorLabel}</Badge>
-          </div>
-          <Separator className="bg-outline-variant/70" />
-          {deal.summaryDetails?.length ? (
-            <dl
-              aria-label="Engagement overview"
-              className="grid gap-3 text-sm leading-6"
-            >
-              {deal.summaryDetails.map((detail, index) => (
-                <div
-                  className="grid min-w-0 gap-0.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4"
-                  key={`${detail.label}-${index}`}
-                >
-                  <dt className="font-medium text-muted">{detail.label}</dt>
-                  <dd className="min-w-0 break-words text-text-main">
-                    {detail.value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="max-w-[58rem] text-[14px] leading-7 text-text-main/86 sm:text-[15px]">
-              {deal.summary}
-            </p>
-          )}
-        </div>
-      </WorkspaceCard>
-
-      <WorkspaceCard
-        aria-labelledby="deal-resources-heading"
-        className="col-span-12 p-5 sm:p-6 lg:col-span-5"
-        interactive={false}
-        style={overviewCardStyle}
-      >
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-primary">
-              <Icon className="size-4.5" name="folderOpen" />
-            </span>
-            <div>
-              <h2
-                className="type-h3 text-text-main"
-                id="deal-resources-heading"
-              >
-                Deal Resources
-              </h2>
-              <p className="mt-0.5 text-[11px] text-muted">
-                Source documents and connected rooms
-              </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="type-label uppercase tracking-[0.14em] text-muted">Deal overview</p>
+            <h1 className="type-display mt-2 break-words text-text-main" id="deal-overview-heading">{deal.name}</h1>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Badge variant="default">{deal.stageLabel}</Badge>
+              <Badge variant="secondary">{deal.phaseLabel}</Badge>
+              <Badge variant="outline">{deal.sectorLabel}</Badge>
             </div>
           </div>
-          {onAddResources ? (
-            <Button
-              className="shrink-0"
-              size="sm"
-              variant="outline"
-              onClick={onAddResources}
-            >
-              Add deal resources
+          {onEdit ? (
+            <Button type="button" variant="outline" onClick={onEdit}>
+              <SlidersHorizontal aria-hidden="true" className="size-4" />
+              Edit deal
             </Button>
           ) : null}
         </div>
-        <div className="space-y-2" role="list">
-          {deal.resources.map((resource) => (
-            <ResourceRow key={resource.id} resource={resource} />
-          ))}
-        </div>
+        <Separator className="my-5 bg-outline-variant/70" />
+        {deal.summaryDetails?.length ? (
+          <dl aria-label="Engagement overview" className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+            {deal.summaryDetails.map((detail, index) => (
+              <div className={`min-w-0 ${detail.label === "Scope" ? "sm:col-span-2" : ""}`} key={`${detail.label}-${index}`}>
+                <dt className="text-xs text-muted">{detail.label}</dt>
+                <dd className="mt-1 break-words text-sm leading-6 text-text-main">{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="max-w-[80ch] text-sm leading-6 text-text-main/86">{deal.summary}</p>
+        )}
       </WorkspaceCard>
 
-      <WorkspaceCard
-        aria-labelledby="key-questions-heading"
-        className="col-span-12 overflow-hidden"
-        interactive={false}
-        style={overviewCardStyle}
-      >
-        <div className="flex items-center px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
-          <div>
-            <h2 className="type-h3 text-text-main" id="key-questions-heading">
-              Key Questions
-            </h2>
-            <p className="mt-0.5 text-[11px] text-muted">
-              Questions extracted from submitted SOW
-            </p>
-          </div>
+      <div className="col-span-12 flex flex-wrap items-center gap-2 text-xs text-muted">
+        <Badge variant="outline">Sample data</Badge>
+        <p>Metrics, assessment progress, actions, and milestones are illustrative. Deal details and resources reflect this deal.</p>
+      </div>
+      <section aria-label="Illustrative assessment metrics" className="col-span-12 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[
+          { label: "Documents", value: overviewDashboardPreview.documents, detail: "In data room", icon: Files },
+          { label: "Findings", value: overviewDashboardPreview.findings, detail: "Identified", icon: ClipboardList },
+          { label: "Open items", value: overviewDashboardPreview.openItems, detail: "Awaiting resolution", icon: CircleAlert },
+          { label: "Progress", value: `${overviewDashboardPreview.progress}%`, detail: "Assessment complete", icon: ChartNoAxesColumnIncreasing },
+        ].map(({ label, value, detail, icon: MetricIcon }) => (
+          <WorkspaceCard key={label} aria-label={`${label}: ${value} (sample)`} className="min-w-0 p-4 sm:p-5" style={overviewCardStyle}>
+            <div className="flex items-center justify-between gap-2 text-muted">
+              <span className="text-sm">{label}</span><MetricIcon aria-hidden="true" className="size-4 shrink-0" />
+            </div>
+            <p className="mt-4 text-3xl tabular-nums text-text-main">{value}</p>
+            <p className="mt-2 text-xs leading-5 text-muted">{detail}</p>
+          </WorkspaceCard>
+        ))}
+      </section>
+
+      <WorkspaceCard aria-labelledby="assessment-progress-heading" className="col-span-12 min-w-0 p-5 sm:p-6 lg:col-span-8" style={overviewCardStyle}>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="type-h3 text-text-main" id="assessment-progress-heading">Assessment Progress</h2>
+          <span className="text-xs text-muted">By scope · Sample</span>
         </div>
-        <KeyQuestionsGrid questions={deal.keyQuestions} />
+        <ul aria-label="Sample assessment status by scope" className="divide-y divide-outline-variant/70">
+          {overviewDashboardPreview.workstreams.map((workstream) => (
+            <li key={workstream.name} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+              <span className="min-w-0 break-words text-sm text-text-main">{workstream.name}</span>
+              <WorkstreamStatusBadge stage={workstream.stage} />
+            </li>
+          ))}
+        </ul>
+      </WorkspaceCard>
+
+      <WorkspaceCard aria-labelledby="deal-resources-heading" className="col-span-12 min-w-0 p-5 sm:p-6 lg:col-span-4" style={overviewCardStyle}>
+        <h2 className="type-h3 text-text-main" id="deal-resources-heading">Deal Resources</h2>
+        <div className="mt-4 space-y-1" role="list">
+          {deal.resources.map((resource) => <ResourceRow key={resource.id} resource={resource} />)}
+        </div>
+        {onAddResources ? (
+          <Button className="mt-4 w-full" type="button" variant="outline" onClick={onAddResources}>Manage resources</Button>
+        ) : null}
+      </WorkspaceCard>
+
+      <WorkspaceCard aria-labelledby="actions-heading" className="col-span-12 min-w-0 p-5 sm:p-6 lg:col-span-8" style={overviewCardStyle}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="type-h3 text-text-main" id="actions-heading">Action Required</h2>
+          <span className="text-xs text-muted">Outstanding items · Sample</span>
+        </div>
+        <ul className="divide-y divide-outline-variant/70">
+          {overviewDashboardPreview.actions.map((action) => (
+            <li key={action.title} className="flex items-start justify-between gap-3 py-3">
+              <div className="min-w-0"><p className="break-words text-sm text-text-main">{action.title}</p><p className="mt-1 text-xs text-muted">{action.detail}</p></div>
+              <Badge className="shrink-0" variant="outline">{action.priority}</Badge>
+            </li>
+          ))}
+        </ul>
+      </WorkspaceCard>
+
+      <WorkspaceCard aria-labelledby="milestones-heading" className="col-span-12 min-w-0 p-5 sm:p-6 lg:col-span-4" style={overviewCardStyle}>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 className="type-h3 text-text-main" id="milestones-heading">Upcoming Milestones</h2>
+          <CalendarDays aria-hidden="true" className="size-4 shrink-0 text-muted" />
+        </div>
+        <ol className="grid gap-4" aria-label="Sample milestones">
+          {overviewDashboardPreview.milestones.map((milestone) => (
+            <li key={milestone.title} className="flex items-start gap-3">
+              <span className="shrink-0 rounded-md bg-surface-container-lowest px-2 py-1 text-xs text-muted">{milestone.date}</span>
+              <div className="min-w-0"><p className="break-words text-sm text-text-main">{milestone.title}</p><p className="mt-1 text-xs text-muted">{milestone.detail}</p></div>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-4 text-xs text-muted">Illustrative schedule</p>
       </WorkspaceCard>
     </div>
   );
@@ -161,7 +150,7 @@ export function DealSummaryCard({
 function ResourceRow({ resource }: { resource: DealResource }) {
   const content = (
     <>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-lowest text-primary">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
         <Icon
           className="size-4"
           name={resource.id === "sharepoint" ? "sharepoint" : "doc"}
@@ -204,7 +193,7 @@ function ResourceRow({ resource }: { resource: DealResource }) {
       <div role="listitem">
         <Button
           asChild
-          className="h-auto w-full justify-start gap-3 rounded-xl px-3 py-3"
+          className="h-auto w-full justify-start gap-2 rounded-lg px-0 py-2"
           variant="ghost"
         >
           <a
@@ -223,99 +212,10 @@ function ResourceRow({ resource }: { resource: DealResource }) {
   return (
     <div
       aria-disabled="true"
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 opacity-70"
+      className="flex w-full items-center gap-2 rounded-lg px-0 py-2 opacity-70"
       role="listitem"
     >
       {content}
     </div>
-  );
-}
-
-type KeyQuestionRow = {
-  answer: string;
-  id: string;
-  question: string;
-};
-
-function KeyQuestionsGrid({ questions }: { questions: readonly string[] }) {
-  const rows = useMemo<KeyQuestionRow[]>(
-    () =>
-      questions.map((question, index) => ({
-        answer: "",
-        id: `question-${index}`,
-        question,
-      })),
-    [questions],
-  );
-  const columns = useMemo<ColumnDef<DataGridFeatures, KeyQuestionRow>[]>(
-    () => [
-      {
-        accessorKey: "question",
-        enableSorting: false,
-        header: ({ column }) => (
-          <DataGridColumnHeader
-            className={quarryDataGridHeaderClassName}
-            column={column}
-            title="Question"
-          />
-        ),
-        cell: ({ row }) => (
-          <p className="whitespace-normal break-words text-[13px] leading-6">
-            {row.original.question}
-          </p>
-        ),
-        size: 520,
-        meta: { fillWidth: true, headerTitle: "Question" },
-      },
-      {
-        accessorKey: "answer",
-        enableSorting: false,
-        header: ({ column }) => (
-          <DataGridColumnHeader
-            className={quarryDataGridHeaderClassName}
-            column={column}
-            title="Answer"
-          />
-        ),
-        cell: () => (
-          <span aria-label="No answer yet" className="text-muted">
-            —
-          </span>
-        ),
-        size: 320,
-        meta: { headerTitle: "Answer" },
-      },
-    ],
-    [],
-  );
-  const table = useTable({
-    columns,
-    data: rows,
-    features: dataGridFeatures,
-    getRowId: (row) => row.id,
-    state: { pagination: { pageIndex: 0, pageSize: Math.max(rows.length, 1) } },
-  });
-
-  return (
-    <DataGrid
-      emptyMessage="No key questions were extracted from the submitted source files."
-      recordCount={rows.length}
-      table={table}
-      tableClassNames={keyQuestionsTableClassNames}
-      tableLayout={{
-        cellBorder: true,
-        dense: true,
-        headerBackground: false,
-        headerBorder: true,
-        rowBorder: true,
-        width: "fixed",
-      }}
-    >
-      <DataGridContainer className="border-t border-outline-variant/70 bg-transparent">
-        <DataGridScrollArea orientation="horizontal">
-          <DataGridTable />
-        </DataGridScrollArea>
-      </DataGridContainer>
-    </DataGrid>
   );
 }

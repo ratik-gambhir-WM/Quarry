@@ -5,7 +5,7 @@ export type DealRoomOverviewSection =
   | "overview"
   | "activity"
   | "file-summary"
-  | "evidence"
+  | "scope"
   | "findings"
   | "site-visits"
   | "open-items"
@@ -26,10 +26,10 @@ const sections: ReadonlyArray<{
   { enabled: true, label: "Deal Activity", value: "activity" },
   { enabled: true, label: "Site Visits", value: "site-visits" },
   { enabled: true, label: "File Summary", value: "file-summary" },
-  { enabled: false, label: "Evidence", value: "evidence" },
+  { enabled: true, label: "Scope", value: "scope" },
   { enabled: false, label: "Findings", value: "findings" },
   { enabled: false, label: "Open Items", value: "open-items" },
-  { enabled: true, label: "Settings", value: "settings" },
+  { enabled: true, label: "Team", value: "settings" },
   { enabled: true, label: "Search documents", value: "search" },
 ];
 

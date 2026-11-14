@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DealRoomData } from "@/data/workspace";
 import { DealSummaryCard } from "@/components/deal-room/DealSummaryCard";
 
@@ -72,7 +72,7 @@ describe("DealSummaryCard", () => {
       expect(screen.queryByText(label)).toBeNull();
     }
   });
-  it("renders the overview, resources, and extracted questions in response order", () => {
+  it("renders the overview and resources without the Scope table", () => {
     const { container } = render(<DealSummaryCard deal={deal} />);
 
     expect(
@@ -81,16 +81,6 @@ describe("DealSummaryCard", () => {
     expect(screen.getByText("A focused diligence summary.")).not.toBeNull();
     expect(screen.getByText("SOW")).not.toBeNull();
     expect(screen.getByText("Fact Sheet")).not.toBeNull();
-    expect(
-      screen.getByText("Questions extracted from submitted SOW"),
-    ).not.toBeNull();
-    const keyQuestionsHeading = screen.getByRole("heading", {
-      level: 2,
-      name: "Key Questions",
-    });
-    expect(
-      keyQuestionsHeading.parentElement?.parentElement?.querySelector("svg"),
-    ).toBeNull();
     expect(screen.queryByText("No source is currently available")).toBeNull();
     expect(screen.queryByText("Source support coming soon")).toBeNull();
     for (const [label, href] of [
@@ -107,15 +97,11 @@ describe("DealSummaryCard", () => {
       expect(within(resourceLink).getByText("Available")).not.toBeNull();
     }
 
-    const markup = container.textContent ?? "";
-    expect(markup.indexOf("What drives growth?")).toBeLessThan(
-      markup.indexOf("Which contracts can terminate?"),
-    );
-    expect(container.querySelector('[data-slot="data-grid"]')).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Question" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Key Questions" })).toBeNull();
+    expect(container.querySelector('[data-slot="data-grid"]')).toBeNull();
   });
 
-  it("renders an explicit empty state and does not link unavailable resources", () => {
+  it("does not link unavailable resources", () => {
     render(
       <DealSummaryCard
         deal={{
@@ -131,25 +117,47 @@ describe("DealSummaryCard", () => {
     );
 
     expect(
-      screen.getByText(
-        "No key questions were extracted from the submitted source files.",
-      ),
-    ).not.toBeNull();
-    expect(
       screen.queryByRole("link", {
         name: /SOW|Fact Sheet|SharePoint VDR|Request List/,
       }),
     ).toBeNull();
   });
 
-  it("renders every extracted question without hidden grid pagination", () => {
-    const questions = Array.from(
-      { length: 12 },
-      (_, index) => `Question ${index + 1}?`,
-    );
-
-    render(<DealSummaryCard deal={{ ...deal, keyQuestions: questions }} />);
-
-    expect(screen.getByText("Question 12?")).not.toBeNull();
+  it("shows the dashboard while keeping saved deal details separate from sample metrics", () => {
+    render(<DealSummaryCard deal={{ ...deal, summaryDetails: [
+      { label: "Engagement", value: "Buy-side" },
+      { label: "Transaction", value: "Add-on acquisition" },
+      { label: "Target", value: "Actual target" },
+      { label: "Buyer", value: "Actual buyer" },
+      { label: "Scope", value: "Corporate IT, SDLC" },
+    ] }} />);
+    const details = screen.getByLabelText("Engagement overview");
+    for (const value of ["Buy-side", "Add-on acquisition", "Actual target", "Actual buyer", "Corporate IT, SDLC"]) {
+      expect(within(details).getByText(value)).toBeTruthy();
+    }
+    expect(screen.getByText("Sample data")).toBeTruthy();
+    for (const name of ["Assessment Progress", "Deal Resources", "Action Required", "Upcoming Milestones"]) {
+      expect(screen.getByRole("heading", { name })).toBeTruthy();
+    }
+    const statuses = screen.getByRole("list", { name: "Sample assessment status by scope" });
+    expect(within(statuses).queryByRole("progressbar")).toBeNull();
+    expect(within(statuses).queryByText(/%/)).toBeNull();
+    const rows = within(statuses).getAllByRole("listitem");
+    for (const [index, stage] of ["Analysis", "Discovery", "QA", "Not Started"].entries()) {
+      expect(within(rows[index]).getByText(stage)).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: "Edit deal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage resources" })).toBeNull();
   });
+
+  it("connects overview edit and resource management to the provided actions", () => {
+    const onEdit = vi.fn();
+    const onAddResources = vi.fn();
+    render(<DealSummaryCard deal={deal} onEdit={onEdit} onAddResources={onAddResources} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit deal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage resources" }));
+    expect(onEdit).toHaveBeenCalledOnce();
+    expect(onAddResources).toHaveBeenCalledOnce();
+  });
+
 });

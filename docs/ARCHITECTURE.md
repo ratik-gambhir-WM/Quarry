@@ -373,7 +373,7 @@ navigation, outside dismissal, Escape, positioning, and trigger focus restoratio
 the sidebar is collapsed. Shared auth fields and their email-domain composite use consistent
 48-pixel controls; workspace panels generally use a flat surface, and cards are static unless explicitly
 marked interactive. Deal Room overview cards use the Kanban lanes' muted-to-transparent surface
-and compact corners, with a transparent Key Questions grid. Deals keeps portfolio metrics out of the phone header so search and creation
+and compact corners, with a searchable, expandable Key Questions list. Deals keeps portfolio metrics out of the phone header so search and creation
 remain reachable. Search opens a collision-aware popover with a full-width field, and Escape or
 Close clears the filter and restores trigger focus. It distinguishes initial loading, request failure,
 an empty portfolio, and a filtered-to-empty result; table text and headers align left for easier comparison. Dialog, empty,
@@ -446,7 +446,7 @@ global state or query-cache library.
   thread list plus a New chat action. The normal home sidebar still labels `/hub/assistant` as Assistant
   and uses an animated Twitch glyph.
   The Deal Room sidebar identity opens a deal-switching menu from the existing workspace deal
-  resource. It lists other accessible non-terminal deals (excluding Closed and Pencils Down),
+  resource. It lists other accessible non-terminal deals directly, without a heading (excluding Closed and Pencils Down),
   preserves navigation state, and links to the selected deal’s overview route. Its back and collapse
   controls remain separate; an empty menu explains that no other active deals are available.
   Collapsing any shared sidebar reduces its rail from 288px to 48px, leaving only the centered
@@ -537,8 +537,10 @@ global state or query-cache library.
   API-backed deals retain their typed persisted fields for
   editing. Creation and editing share optional date, engagement/transaction, scope, and company-role
   controls. Date fields accept typed dates and calendar selection, preserve date-only values, and
-  reject unreadable drafts before submission; company search is bounded, stale results are ignored,
-  and directory creation is explicit.
+  reject unreadable drafts before submission; company search is bounded and debounced by 250 ms
+  for nonempty queries. Typing preserves the previous results and pagination geometry, marks them
+  busy, and disables stale result actions until the current response arrives. New queries reset
+  pagination; superseded responses and pending timers are discarded. Directory creation is explicit.
   Enter in a company text input saves that company; Save and Cancel buttons retain their native
   keyboard activation and do not submit the surrounding deal form.
   `useDealSaveWorkflow` owns core writes, team reconciliation, metadata submission and final
@@ -679,7 +681,7 @@ global state or query-cache library.
   preference.
   Deal Room tabs and both Deliverables headers occupy the same fixed-height `WorkspaceMain` header
   rail and bottom divider inside the persistent `WorkspaceShell`. The overview
-  section enables Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents.
+  section enables Overview, Deal Activity, Site Visits, File Summary, Scope, Team, and Search documents.
   Deal Activity shows persisted activity for saved deals through a Quarry-themed Stealth activity
   feed with day groups, event icons, exact timestamp labels, and a responsive timeline. Icons use
   semantic colors: green for uploads/additions/creation, red for removal/deletion, amber for edits,
@@ -691,9 +693,28 @@ global state or query-cache library.
   create persisted activity events or durable visit records. Enabled tabs use the `section` query parameter, with Overview
   as the default; tab navigation preserves router state and supports refresh, Back, and Forward.
   The former `/activity` route redirects to `?section=activity`. Timeline edits remain deal-scoped
-  in-memory state. Evidence, Findings, Open Items,
-  and History remain explicitly disabled until typed backing data and view behavior exist. The
-  page consumes already extracted/persisted key questions and does not trigger extraction. A
+  in-memory state. Scope (`?section=scope`) replaces the former disabled Evidence tab and renders
+  a searchable, numbered Key Questions list directly in the full-size main inset, with a fixed
+  header and contained scrolling. Radix disclosures reveal read-only answers beneath each question;
+  the first question opens initially. Local search preserves original text, order and numbering,
+  retains disclosure selections when filtered, and offers a focus-restoring clear action.
+  Empty-source and no-match states remain distinct. The list resets on deal identity changes.
+  Pointer expansion uses the shared content motion tokens; keyboard and reduced-motion paths
+  are immediate. Overview retains the deal summary and resources; it does not repeat the
+  questions. The Overview layout has a full-width deal identity header and visible engagement/transaction,
+  party and scope details, followed by four metric tiles, assessment progress, resources, actions
+  and milestones. The cards retain the existing theme, typography and 8-pixel surface treatment.
+  Assessment Progress shows one colored lifecycle badge per scope (Not Started, Discovery, Analysis,
+  QA or Complete), with centered text and no dot, instead of per-scope percentages or progress bars.
+  Status text and semantic theme
+  colors convey the stage; the separate overall Progress metric remains illustrative.
+  Metrics, workstream stages, actions and milestones currently use explicitly labeled sample
+  data from `fixtures/deal-room/overviewDashboard.ts`; they are not live assessment results or
+  document totals. Deal details, resource links and availability remain deal-derived. Capability-
+  gated Edit deal and Manage resources actions open the existing dialogs. Scope consumes already
+  extracted/persisted key questions, preserves the existing empty
+  state and explicit unanswered messages, and does not trigger extraction. Findings, Open Items,
+  and History remain explicitly disabled until typed backing data and view behavior exist. A
   freshly submitted SOW name
   is carried only in router state, while a validated persisted SharePoint URL is mapped as an
   external resource; neither behavior turns the dormant SharePoint client into an import
@@ -759,7 +780,7 @@ operational failures.
 | Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
 | Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
-| Deal room | Deal lookup, responsive overview/resource/key-question cards, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Settings, and Search documents tabs, ReUI question/review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s embedded template engine; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Evidence, Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
+| Deal room | Deal lookup, responsive overview dashboard with labeled sample assessment metrics/planning, deal-derived details/resources, and a Scope key-question list, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Scope, Team, and Search documents tabs, ReUI review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s embedded template engine; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas shares authenticated deal-linked threads and explicit current-room file references; there is no automatic document retrieval; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | PostgreSQL-backed multi-thread chat with current-turn uploads and scoped `@` file references, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, automatic retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
@@ -794,16 +815,16 @@ disabled by `DARK_THEME_ENABLED` in `useThemeMode.tsx`.
 Deal Resources maps persisted HTTPS SOW, fact-sheet, SharePoint, and request-list URLs to external
 links and keeps each resource icon, title, and availability badge on one horizontal row; only an
 actual source filename adds secondary text beneath the title. Missing or unsafe URLs remain
-non-clickable and unavailable. Saved deals expose **Add deal resources** at the top right of this
-card. Its dialog reuses the creation source fields, prefills saved links, and submits optional
+non-clickable and unavailable. Editable saved deals expose **Manage resources** below the resource
+list. Its dialog reuses the creation source fields, prefills saved links, and submits optional
 links and SOW/timeline files to the existing metadata endpoint without recreating or editing core
 deal fields. Failed saves retain the draft for retry; successful saves refresh cached resources and
 questions in place. Link-only saves preserve persisted questions and session-only SOW filenames.
-The enabled **Settings** overview tab replaces the disabled History tab and contains **Edit deal**;
-the Overview no longer has a standalone edit button. The API accepts only credential-free HTTPS resource links and also
+The enabled **Team** overview tab (`?section=settings`) replaces the disabled History tab and contains **Edit deal**;
+editable deals also expose **Edit deal** in the Overview header. The API accepts only credential-free HTTPS resource links and also
 requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions header
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
-Deals, Deal Room key-question, and File Summary review tables use the vendored public ReUI
+Deals and File Summary review tables use the vendored public ReUI
 data-grid implementation on TanStack React Table. When a selected document replaces the normal
 workspace sidebar with the Data Room explorer, Saved documents has a separate plus button that
 opens the existing file-upload modal without toggling the folder; dismissing it restores focus to
@@ -856,14 +877,21 @@ focus. The Deals add-deal flow composes the
 shared ReUI/shadcn dialog, field, input, select, and button primitives. Its portal overlay remains separate from the legacy named modal view transition so
 opening the dialog does not capture the page chrome as part of that transition.
 Deal creation has four draft steps: details, companies, an optional team name, and metadata.
+The companies step scopes its content layout to a container-responsive search/create toolbar,
+compact role rows with company, role, notes and a red icon-only removal action aligned on one
+row when space permits, and a two-column company form that stacks in narrow content areas.
+Removing a role preserves its directory company. Inputs and
+actions use 8-pixel corners with the existing theme colors; the dialog and stepper are unchanged.
+Company-form swaps use the shared interruptible content transition, with immediate keyboard and
+reduced-motion paths.
 Finish (including Skip metadata) creates the deal, then its named team through the existing
 membership API. These are separate requests; a team or metadata failure retains the created deal
 for retry, and metadata retries reuse a successfully created team. After an unsuccessful team
 creation response, a retry first reads the deal's teams and reuses the matching normalized name
 if creation already committed. An unavailable roster prevents replay; a different existing team
-requires review in Settings.
-Settings uses a bounded, responsive workspace with a team header, avatar-based member roster,
-and add-member/access-guide rail. Settings cards match the Overview cards' muted-to-transparent
+requires review in the Team tab.
+The Team tab uses a bounded, responsive workspace with a team header, avatar-based member roster,
+and add-member/access-guide rail. Its cards match the Overview cards' muted-to-transparent
 surface, 8-pixel corners, and borderless, shadowless treatment. Each member's controlled permissions
 picker adapts Stealth's FollowButton label reservation, animated check and label transition to
 the existing deal roles;
@@ -874,7 +902,7 @@ delete live in a collapsed management panel; deletion, ownership transfer, and m
 use explicit confirmations and focus restoration. Edit deal sits in the page header. Role transitions
 and layout motion respect
 reduced motion, and the roster layout responds to available content width as well as viewport size.
-Deals without a team can create one in Settings; creation is hidden once one exists. The repository checks the one-team
+Deals without a team can create one in the Team tab; creation is hidden once one exists. The repository checks the one-team
 limit inside the mutation transaction and returns HTTP 409 for a second team, including a different
 name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
 but cannot add more. The paginated team API and schema are unchanged.

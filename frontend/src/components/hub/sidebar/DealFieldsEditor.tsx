@@ -1,3 +1,5 @@
+import { Plus, Search, Trash2 } from "lucide-react";
+import { useContentTransition } from "../../../hooks/useContentTransition";
 import { CheckboxField } from "../../ui/checkbox-field";
 import { useEffect, useRef, useState } from "react";
 import { runtime } from "@quarry/runtime";
@@ -144,10 +146,13 @@ export function DealCompanyRolesEditor({
     () =>
       new Map(initialCompanies.map((company) => [company.companyId, company])),
   );
-  const [query, setQuery] = useState("");
+  const [{ query, offset }, setSearch] = useState({ query: "", offset: 0 });
   const [attempt, setAttempt] = useState(0);
   const [companyForm, setCompanyForm] = useState<Company | "new" | null>(null);
   const [notice, setNotice] = useState("");
+  const companyFormRef = useContentTransition(
+    companyForm === "new" ? "new" : companyForm?.companyId ?? "closed",
+  );
   const update = <K extends keyof DealFields>(key: K, value: DealFields[K]) =>
     onChange({ ...fields, [key]: value });
   function addCompany(company: Company) {
@@ -162,7 +167,7 @@ export function DealCompanyRolesEditor({
     onCompanyFormChange?.(company !== null);
   }
   return (
-    <fieldset className="grid gap-3">
+    <fieldset className="deal-companies grid min-w-0 gap-3">
       <legend className="mb-2 text-sm font-semibold">
         Companies and roles (optional for pipeline deals)
       </legend>
@@ -173,14 +178,15 @@ export function DealCompanyRolesEditor({
       </p>
       {fields.parties.map((party, index) => (
         <div
-          className="grid gap-3 rounded-lg border border-border p-3"
+          className="deal-company-role grid min-w-0 gap-3 rounded-lg border border-border p-3"
           key={index}
         >
-          <span className="text-sm font-semibold">
+          <span className="deal-company-name min-w-0 break-words text-sm font-semibold">
             {companies.get(party.companyId)?.name ?? "Company unavailable"}
           </span>
           <CodeSelect
             label={`Role for company ${index + 1}`}
+            displayLabel="Role"
             options={partyRoleOptions}
             value={party.role}
             onChange={(role) =>
@@ -192,9 +198,10 @@ export function DealCompanyRolesEditor({
               )
             }
           />
-          <label className="grid gap-1 text-xs">
-            Deal-specific notes for company {index + 1}
+          <label className="deal-company-notes grid min-w-0 gap-1 text-xs">
+            Notes
             <Input
+              aria-label={`Deal-specific notes for company ${index + 1}`}
               maxLength={2000}
               value={party.notes ?? ""}
               onChange={(e) =>
@@ -211,7 +218,11 @@ export function DealCompanyRolesEditor({
           </label>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="icon"
+            className="deal-company-remove text-error hover:bg-error/10 hover:text-error"
+            aria-label={`Remove company role ${index + 1}`}
+            title={`Remove ${companies.get(party.companyId)?.name ?? "company"} role`}
             onClick={() =>
               update(
                 "parties",
@@ -219,55 +230,66 @@ export function DealCompanyRolesEditor({
               )
             }
           >
-            Remove company role {index + 1}
+            <Trash2 aria-hidden="true" className="size-4" />
           </Button>
         </div>
       ))}
-      <label className="grid gap-2 text-sm">
-        Search company directory
-        <Input
-          maxLength={200}
-          value={query}
-          onChange={(e) => setQuery(e.currentTarget.value)}
-        />
-      </label>
+      <div className="deal-company-toolbar">
+        <label className="deal-company-search grid gap-2 text-sm">
+          Search company directory
+          <span className="relative block">
+            <Search aria-hidden="true" className="deal-company-search-icon pointer-events-none absolute left-3 top-1/2 hidden size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              maxLength={200}
+              value={query}
+              onChange={(e) => setSearch({ query: e.currentTarget.value, offset: 0 })}
+            />
+          </span>
+        </label>
+        <Button
+          type="button"
+          variant="outline"
+          className="deal-company-create"
+          onClick={() => editCompany("new")}
+        >
+          <Plus aria-hidden="true" className="deal-company-create-icon hidden size-4" />
+          Create company
+        </Button>
+      </div>
       <CompanyResults
-        key={`${userEmail}:${query}:${attempt}`}
+        key={`${userEmail}:${attempt}`}
         userEmail={userEmail}
         query={query}
+        offset={offset}
+        onPageChange={(offset) => setSearch({ query, offset })}
         onAdd={addCompany}
         onEdit={editCompany}
         onRetry={() => setAttempt((n) => n + 1)}
         disabled={fields.parties.length >= 100}
       />
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => editCompany("new")}
-      >
-        Create company
-      </Button>
-      {companyForm ? (
-        <CompanyForm
-          key={companyForm === "new" ? "new" : companyForm.companyId}
-          company={companyForm === "new" ? undefined : companyForm}
-          onCancel={() => { editCompany(null); setAttempt((n) => n + 1); }}
-          onSaved={(company, created) => {
-            setCompanies((current) =>
-              new Map(current).set(company.companyId, company),
-            );
-            if (created) addCompany(company);
-            onCompanySaved?.(company);
-            setNotice(
-              created
-                ? `${company.name} was saved to the directory and selected. It remains available if you cancel this deal.`
-                : `${company.name} was updated for every linked deal.`,
-            );
-            editCompany(null);
-            setAttempt((n) => n + 1);
-          }}
-        />
-      ) : null}
+      <div ref={companyFormRef} hidden={!companyForm}>
+        {companyForm ? (
+          <CompanyForm
+            key={companyForm === "new" ? "new" : companyForm.companyId}
+            company={companyForm === "new" ? undefined : companyForm}
+            onCancel={() => { editCompany(null); setAttempt((n) => n + 1); }}
+            onSaved={(company, created) => {
+              setCompanies((current) =>
+                new Map(current).set(company.companyId, company),
+              );
+              if (created) addCompany(company);
+              onCompanySaved?.(company);
+              setNotice(
+                created
+                  ? `${company.name} was saved to the directory and selected. It remains available if you cancel this deal.`
+                  : `${company.name} was updated for every linked deal.`,
+              );
+              editCompany(null);
+              setAttempt((n) => n + 1);
+            }}
+          />
+        ) : null}
+      </div>
       {notice ? (
         <p className="text-sm text-muted-foreground" role="status">
           {notice}
@@ -280,6 +302,8 @@ export function DealCompanyRolesEditor({
 function CompanyResults({
   userEmail,
   query,
+  offset,
+  onPageChange,
   onAdd,
   onEdit,
   onRetry,
@@ -287,57 +311,67 @@ function CompanyResults({
 }: {
   userEmail: string;
   query: string;
+  offset: number;
+  onPageChange: (offset: number) => void;
   onAdd: (company: Company) => void;
   onEdit: (company: Company) => void;
   onRetry: () => void;
   disabled: boolean;
 }) {
-  const [result, setResult] = useState<{ page?: CompanyPage; error?: string }>(
-    {},
-  );
-  const [offset, setOffset] = useState(0);
-  const requestRef = useRef(0);
+  const [result, setResult] = useState<{
+    query: string;
+    offset: number;
+    page?: CompanyPage;
+    error?: string;
+  }>();
   useEffect(() => {
     let active = true;
-    const request = ++requestRef.current;
-    void runtime.api
-      .listCompanies({ query, limit: 30, offset })
-      .then((page) => {
-        if (active && request === requestRef.current) setResult({ page });
-      })
-      .catch((error: unknown) => {
-        if (active && request === requestRef.current)
-          setResult({
-            error: error instanceof Error ? error.message : String(error),
-          });
-      });
+    // Keep the current list mounted while typing; only search after a short pause.
+    const timer = window.setTimeout(() => {
+      void runtime.api
+        .listCompanies({ query, limit: 30, offset })
+        .then((page) => {
+          if (active) setResult({ query, offset, page });
+        })
+        .catch((error: unknown) => {
+          if (active)
+            setResult({
+              query,
+              offset,
+              error: error instanceof Error ? error.message : String(error),
+            });
+        });
+    }, query ? 250 : 0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [offset, query, userEmail]);
-  function nextPage(next: number) {
-    setResult({});
-    setOffset(next);
-  }
-  if (result.error)
+  const pending = !result || result.query !== query || result.offset !== offset;
+  const page = result?.page;
+  const error = pending ? undefined : result?.error;
+  if (error)
     return (
       <div role="alert">
-        Couldn’t load companies. {result.error}{" "}
+        Couldn’t load companies. {error}{" "}
         <Button type="button" variant="outline" onClick={onRetry}>
           Retry companies
         </Button>
       </div>
     );
-  if (!result.page)
+  if (!page)
     return (
-      <p role="status" className="text-sm">
+      <p role="status" className="min-h-16 text-sm">
         Loading companies…
       </p>
     );
   return (
-    <div className="grid gap-2">
-      {result.page.companies.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
+    <div className="deal-company-results grid gap-2" aria-busy={pending}>
+      <span className="sr-only" role="status">
+        {pending ? "Searching companies…" : ""}
+      </span>
+      {page.companies.length === 0 ? (
+        <p className="deal-company-empty text-sm text-muted-foreground">
           No matching companies. Create one to add it to the directory.
         </p>
       ) : null}
@@ -345,9 +379,9 @@ function CompanyResults({
         aria-label="Matching companies"
         className="max-h-48 overflow-y-auto rounded-md border border-border"
       >
-        {result.page.companies.map((company) => (
+        {page.companies.map((company) => (
           <li
-            className="flex items-center gap-2 border-b border-border p-2 last:border-0"
+            className="flex flex-wrap items-center gap-2 border-b border-border p-2 last:border-0"
             key={company.companyId}
           >
             <span className="min-w-0 flex-1 text-sm">
@@ -359,7 +393,7 @@ function CompanyResults({
               ) : null}
             </span>
             <Button
-              disabled={disabled}
+              disabled={disabled || pending}
               type="button"
               variant="outline"
               onClick={() => onAdd(company)}
@@ -370,6 +404,7 @@ function CompanyResults({
             <Button
               type="button"
               variant="ghost"
+              disabled={pending}
               onClick={() => onEdit(company)}
               aria-label={`Edit shared company ${company.name}`}
             >
@@ -378,20 +413,23 @@ function CompanyResults({
           </li>
         ))}
       </ul>
-      <div className="flex gap-2">
+      <div
+        className="deal-company-pagination flex flex-wrap gap-2"
+        hidden={!result?.offset && !page.hasMore}
+      >
         <Button
-          disabled={!offset}
+          disabled={pending || !offset}
           type="button"
           variant="ghost"
-          onClick={() => nextPage(Math.max(0, offset - 30))}
+          onClick={() => onPageChange(Math.max(0, offset - 30))}
         >
           Previous companies
         </Button>
         <Button
-          disabled={!result.page.hasMore}
+          disabled={pending || !page.hasMore}
           type="button"
           variant="ghost"
-          onClick={() => nextPage(offset + 30)}
+          onClick={() => onPageChange(offset + 30)}
         >
           More companies
         </Button>
@@ -453,7 +491,7 @@ function CompanyForm({
           if (!pending) void save();
         }
       }}
-      className="grid gap-3 rounded-lg border border-border p-4"
+      className="deal-company-form grid gap-3 rounded-lg border border-border p-4"
       aria-label={company ? "Edit shared company" : "Create company"}
     >
       <h3 className="text-sm font-semibold">
@@ -473,7 +511,7 @@ function CompanyForm({
           ["description", "Description"],
         ] as const
       ).map(([key, label]) => (
-        <label className="grid gap-1 text-sm" key={key}>
+        <label className="deal-company-field grid min-w-0 gap-1 text-sm" key={key}>
           {label}
           <Input
             disabled={pending}
@@ -495,7 +533,7 @@ function CompanyForm({
           {error}
         </p>
       ) : null}
-      <div className="flex gap-2">
+      <div className="deal-company-form-actions flex flex-wrap gap-2">
         <Button disabled={pending} type="button" onClick={() => void save()}>
           {pending ? "Saving company…" : "Save company"}
         </Button>

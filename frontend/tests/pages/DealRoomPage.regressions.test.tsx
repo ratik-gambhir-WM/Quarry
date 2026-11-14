@@ -190,7 +190,7 @@ describe("DealRoomPage", () => {
     await user.click(screen.getByRole("button", { name: "Finish deal" }));
     await screen.findByRole("heading", { name: deal.dealName });
     expect(await screen.findByText("sow.pdf")).toBeTruthy();
-    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Team" }));
     await user.click(screen.getByRole("button", { name: "Edit deal" }));
     await user.clear(screen.getByLabelText("Deal name"));
     await user.type(screen.getByLabelText("Deal name"), "Edited project");
@@ -234,9 +234,9 @@ describe("DealRoomPage", () => {
       });
     renderDealRoutes(`/hub/deals/${deal.dealId}`);
     const add = await screen.findByRole("button", {
-      name: "Add deal resources",
+      name: "Manage resources",
     });
-    expect(screen.queryByRole("button", { name: "Edit deal" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit deal" })).toBeTruthy();
     await user.click(add);
     expect(screen.getByLabelText("SOW link")).toHaveProperty(
       "value",
@@ -265,7 +265,6 @@ describe("DealRoomPage", () => {
       await screen.findByRole("link", { name: "Open Fact Sheet in a new tab" }),
     ).toHaveProperty("href", "https://example.com/facts");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Updated question?")).toBeTruthy();
     expect(screen.getByText("retry-sow.pdf")).toBeTruthy();
     expect(api.saveDealMetadata).toHaveBeenLastCalledWith(deal.dealId, {
       expectedRevision: 1,
@@ -285,6 +284,12 @@ describe("DealRoomPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(api.saveDealMetadata).toHaveBeenCalledTimes(2);
+    api.getDeal.mockResolvedValue({
+      ...deal,
+      metadata: { ...metadata, factSheetLink: "https://example.com/facts", keyQuestionsJson: '["Updated question?"]' },
+    });
+    await user.click(screen.getByRole("tab", { name: "Scope" }));
+    expect(await screen.findByText("Updated question?")).toBeTruthy();
   });
 
   it("keeps archived deal settings read-only while personal company records remain separate", async () => {
@@ -293,7 +298,7 @@ describe("DealRoomPage", () => {
     api.getDeal.mockResolvedValue({ ...deal, metadata: testMetadata() });
     renderDealRoutes(`/hub/deals/${deal.dealId}`);
     await screen.findByRole("heading", { name: deal.dealName });
-    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Team" }));
     expect(screen.queryByRole("button", { name: "Edit deal" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create team" })).toBeNull();
     expect(api.updateDeal).not.toHaveBeenCalled();
