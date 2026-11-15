@@ -198,5 +198,5 @@ uncertainty, and pre-existing failures separately.
 Server configuration requires redacted `QUARRY_DATABASE_URL`; the dedicated development database is
 `Quarry`. Pool/query/acquisition bounds are parsed only in `AppConfig`. Tests require an explicit URL
 ending in `_test`, use isolated random schemas and clean only namespaces they created. Match fresh
-PostgreSQL data with a separate fresh Helix store; the launcher defaults to the new port-6970 store
-and leaves older port-6969 data alone. See `docs/postgresql-storage.md` for setup/recovery.
+PostgreSQL data with a separate fresh Helix store selected explicitly through the launcher overrides;
+the launcher defaults to the existing `helix-quarry-v3-dev` store on port 6969. See `docs/postgresql-storage.md` for setup/recovery.

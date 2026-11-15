@@ -18,6 +18,14 @@ for (const file of walk(sourceRoot)) {
     continue;
   }
   const source = readFileSync(file, "utf8");
+  if (
+    !projectPath.startsWith("src/components/ui/") &&
+    /\b(?:from\s*|import\s*(?:\(\s*)?)["'](?:radix-ui|@(?:radix-ui|base-ui|ark-ui)\/[^"']+)["']/.test(source)
+  ) {
+    violations.push(
+      `${projectPath}: primitive-library imports belong in src/components/ui; use shared shadcn components`,
+    );
+  }
   if (source.includes("@tauri-apps/") && projectPath !== allowedTauriFile) {
     violations.push(
       `${projectPath}: Tauri imports belong only in ${allowedTauriFile}`,

@@ -1,0 +1,6 @@
+/* Shared shadcn accordion owns disclosure behavior and motion. */
+@media (hover: hover) {
+  .scope-question-trigger:hover {
+    background: var(--theme-surface-hover);
+  }
+}

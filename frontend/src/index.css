@@ -961,10 +961,52 @@
   animation: quarry-content-in var(--motion-content) var(--ease-out-expo);
 }
 
+.quarry-accordion-chevron {
+  transition: transform var(--motion-content) var(--ease-out-expo);
+}
+
+.quarry-accordion-content[data-state="open"] > div {
+  animation: quarry-content-in var(--motion-content) var(--ease-out-expo);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quarry-accordion-chevron, .quarry-accordion-trigger { transition: none; }
+  .quarry-accordion-content > div { animation: none; }
+}
+
+/* Reveal a file's review in place; the grid owns expansion and immediate removal. */
+.file-review-table {
+  container-type: inline-size;
+  container-name: file-review;
+}
+
+.file-review-details {
+  position: sticky;
+  inset-inline-start: 0;
+  max-width: calc(100cqw - 2rem);
+  animation: quarry-content-in var(--motion-content) var(--ease-out-expo);
+}
+
+@container file-review (min-width: 36rem) {
+  .file-review-details dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.file-review-chevron {
+  transition: transform var(--motion-content) var(--ease-out-expo);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-review-details { animation: none; }
+  .file-review-chevron, .file-review-toggle { transition: none; }
+}
+
 /* Shortcuts, Escape and arrow-key navigation must not wait for visual feedback. */
 html[data-motion-input="keyboard"] :is(
   .quarry-popup-motion, .quarry-dialog-motion, .quarry-backdrop-motion,
-  .quarry-tab-panel, .quarry-sidebar-motion
+  .quarry-tab-panel, .quarry-sidebar-motion,
+  .quarry-accordion-chevron, .quarry-accordion-trigger, .quarry-accordion-content > div,
+  .quarry-toolbar-button,
+  .file-review-details, .file-review-chevron, .file-review-toggle
 ) {
   animation-duration: 0.01ms !important;
   animation-delay: 0ms !important;

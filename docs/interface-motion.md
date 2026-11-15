@@ -16,6 +16,9 @@ Quiet, consistent transitions are the default; frequently repeated work needs le
 - Shared tab panels reveal with a 180 ms opacity/4-pixel translation. Sidebar width changes use
   220 ms. Width is a bounded exception because collapsing the sidebar changes available workspace
   space; do not apply layout animation to every row or card.
+- The shared shadcn accordion owns its 180 ms answer-content reveal and chevron rotation.
+  Closing removes content immediately; the primitive retains expansion, presence, and focus
+  ownership. Keyboard and reduced-motion paths suppress both animations and transitions.
 - `useContentTransition(view)` animates an existing container only when its selected view changes.
   Deal Room sections and Assistant sidebar views use it. It preserves the container and its state,
   skips initial render, cancels interrupted animations, and falls back to immediate rendering when

@@ -2,8 +2,8 @@
 
 PostgreSQL setup: use the existing server with a dedicated database named `Quarry`; export
 `QUARRY_DATABASE_URL=postgresql://localhost/Quarry` before launching. Tests use the separate
-`Quarry_test` database. The launcher selects a fresh Helix store on port 6970 and preserves old
-SQLite files and the port-6969 graph. See [storage setup and recovery](docs/postgresql-storage.md).
+`Quarry_test` database. The launcher reuses `helix-quarry-v3-dev` on port 6969 and preserves its data.
+Select a separate graph explicitly for a fresh PostgreSQL deployment. See [storage setup and recovery](docs/postgresql-storage.md).
 
 This guide covers local development for Quarry's browser and desktop applications.
 For a product overview and upcoming features, see the [README](README.md).
@@ -120,9 +120,11 @@ From the repository root, choose one target:
 ```
 
 The launcher starts an existing Postgres.app 18 cluster and Docker Desktop if needed on macOS,
-checks the configured PostgreSQL connection, prepares Helix, starts the backend,
-and then starts the selected UI. Open [localhost:1420](http://localhost:1420) for the web target;
-the desktop target opens a Tauri window. Register an account or sign in to use protected workflows.
+prepares Helix, and starts the backend, which opens its PostgreSQL pool during bootstrap.
+There is no separate database connection preflight. If the connection fails, startup exits
+without starting the UI; otherwise the selected UI starts after the API is ready.
+Open [localhost:1420](http://localhost:1420) for the web target; the desktop target opens a Tauri
+window. Register an account or sign in to use protected workflows.
 
 Templates run inside the backend and persist in Quarry's shared PostgreSQL database.
 The browser and desktop app call the backend. The launcher always selects embedded templates
@@ -130,9 +132,9 @@ and runs template processing inside Axum.
 
 ### Helix and local storage
 
-The launcher creates the `helix-quarry-postgres-dev` container if absent, using the digest-pinned image
-in [`backend/helix.toml`](backend/helix.toml). It maps host port `6970` to container port `8080`,
-waits for `/healthz`, and stores graph data in the Docker volume `helix-quarry-postgres-dev-data`.
+The launcher creates the `helix-quarry-v3-dev` container if absent, using the digest-pinned image
+in [`backend/helix.toml`](backend/helix.toml). It maps host port `6969` to container port `8080`,
+waits for `/healthz`, and stores graph data in the Docker volume `helix-quarry-v3-dev-data`.
 The Helix CLI is not required.
 
 An existing container is reused only if its image and persistent storage configuration match.
@@ -143,10 +145,10 @@ another name:
 QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
 ```
 
-That container must use host port `6970` and its matching `<container-name>-data` volume.
+That container must use host port `6969` (or set `QUARRY_HELIX_PORT` to its binding) and its matching `<container-name>-data` volume.
 Preserve existing data before deliberately replacing any container. PostgreSQL is the canonical
 product store; Helix is the required graph/search projection. Startup initializes an empty
-PostgreSQL schema or validates version 1 and its catalog; it also initializes graph indexes. Consult the architecture's recovery procedures if an
+PostgreSQL schema or validates version 2 and its catalog; it also initializes graph indexes. Consult the architecture's recovery procedures if an
 existing database or projection is incompatible; do not delete stores as a setup shortcut.
 
 ### Local addresses
@@ -155,7 +157,7 @@ existing database or projection is incompatible; do not delete stores as a setup
 | --- | --- | --- |
 | Web UI / desktop development UI | `http://localhost:1420` | Both launcher targets |
 | Backend API | `http://127.0.0.1:3001` | Health: `/api/v1/health` |
-| Helix | `http://127.0.0.1:6970` | Required by normal backend startup |
+| Helix (launcher) | `http://127.0.0.1:6969` | Required by normal backend startup |
 
 ### Stop the application
 
@@ -166,7 +168,7 @@ Docker, and Helix remain running.
 Stop Helix separately when appropriate:
 
 ```sh
-docker stop helix-quarry-postgres-dev
+docker stop helix-quarry-v3-dev
 ```
 
 Stopping the container preserves its named volume.
@@ -287,7 +289,7 @@ contract changes. Reserve `npm run build:desktop` for packaging/release validati
   existing document index. Align the setting only after confirming the intended embedding size;
   changing the index requires a planned rebuild. Do not delete the graph to bypass the conflict.
 - **Docker or Helix timeout:** check `docker info`, `docker ps -a`, and
-  `docker logs helix-quarry-postgres-dev`. Confirm registry access and the pinned image configuration.
+  `docker logs helix-quarry-v3-dev`. Confirm registry access and the pinned image configuration.
 - **Helix image/storage mismatch:** preserve the live graph and follow the architecture's cutover
   procedure. The launcher intentionally leaves the incompatible container untouched.
 - **Embedded template preview failure:** check Chromium discovery or set its absolute executable

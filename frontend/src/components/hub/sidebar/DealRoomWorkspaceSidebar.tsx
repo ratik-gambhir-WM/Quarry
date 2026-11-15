@@ -11,7 +11,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
 import { SidebarFrame } from "./SidebarFrame";
@@ -121,9 +120,6 @@ export function DealRoomWorkspaceSidebar({
             align="start"
             className="min-w-64 max-w-80 rounded-xl p-2 motion-reduce:animate-none [font-family:var(--font-sidebar)]"
           >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Other active deals
-            </DropdownMenuLabel>
             {otherActiveDeals.map((deal) => (
               <DropdownMenuItem asChild key={deal.room.id}>
                 <Link

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PointerEvent, ReactNode } from "react";
+import type { ComponentProps, PointerEvent, ReactNode } from "react";
 import { useDataGrid } from "@/components/reui/data-grid/data-grid";
-import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
+import { ScrollAreaRoot, ScrollAreaViewport, ScrollAreaContent, ScrollAreaScrollbar, ScrollAreaThumb } from "@/components/ui/scroll-area";
 
 import { cn } from "@/lib/utils";
 
@@ -46,7 +46,7 @@ type ObservedElements = {
 };
 
 type DataGridScrollAreaProps = Omit<
-  ScrollAreaPrimitive.Root.Props,
+  ComponentProps<typeof ScrollAreaRoot>,
   "children"
 > & {
   children: ReactNode;
@@ -400,7 +400,7 @@ function DataGridScrollArea({
 
   return (
     <div ref={containerRef} className="relative">
-      <ScrollAreaPrimitive.Root
+      <ScrollAreaRoot
         data-slot="data-grid-scroll-area"
         // Styling hook: present while the sticky-header scroll mode detects
         // vertical overflow, so consumers can style scrollable vs short
@@ -409,18 +409,18 @@ function DataGridScrollArea({
         className={cn("relative", className)}
         {...props}
       >
-        <ScrollAreaPrimitive.Viewport
+        <ScrollAreaViewport
           ref={viewportRef}
           data-slot="scroll-area-viewport"
           className="size-full"
         >
-          <ScrollAreaPrimitive.Content data-slot="scroll-area-content">
+          <ScrollAreaContent data-slot="scroll-area-content">
             {children}
-          </ScrollAreaPrimitive.Content>
-        </ScrollAreaPrimitive.Viewport>
+          </ScrollAreaContent>
+        </ScrollAreaViewport>
 
         {showHorizontal && (
-          <ScrollAreaPrimitive.Scrollbar
+          <ScrollAreaScrollbar
             data-slot="data-grid-scrollbar"
             data-orientation="horizontal"
             orientation="horizontal"
@@ -434,27 +434,27 @@ function DataGridScrollArea({
                 : undefined
             }
           >
-            <ScrollAreaPrimitive.Thumb
+            <ScrollAreaThumb
               data-slot="data-grid-thumb"
               className={SCROLLBAR_THUMB_CLASSNAME}
             />
-          </ScrollAreaPrimitive.Scrollbar>
+          </ScrollAreaScrollbar>
         )}
 
         {showVertical && !usesCustomVerticalScrollbar && (
-          <ScrollAreaPrimitive.Scrollbar
+          <ScrollAreaScrollbar
             data-slot="data-grid-scrollbar"
             data-orientation="vertical"
             orientation="vertical"
             className={SCROLLBAR_CLASSNAME}
           >
-            <ScrollAreaPrimitive.Thumb
+            <ScrollAreaThumb
               data-slot="data-grid-thumb"
               className={SCROLLBAR_THUMB_CLASSNAME}
             />
-          </ScrollAreaPrimitive.Scrollbar>
+          </ScrollAreaScrollbar>
         )}
-      </ScrollAreaPrimitive.Root>
+      </ScrollAreaRoot>
 
       {usesCustomVerticalScrollbar && hasCustomVerticalOverflow && (
         <div

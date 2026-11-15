@@ -11,14 +11,14 @@ describe("buildStoredDocumentNodes", () => {
   it("groups stored documents and derives their explorer kinds", () => {
     expect(
       buildStoredDocumentNodes([
-        { displayName: "model.XLSX", fileId: "sheet-1" },
+        { displayName: "model.XLSX", fileId: "sheet-1", sizeBytes: 4096, addedAt: "2026-11-15T12:00:00Z" },
         { displayName: "memo.pdf", fileId: "pdf-1" },
         { displayName: "notes.docx", fileId: "doc-1" },
       ]),
     ).toMatchObject([
       {
         children: [
-          { kind: "sheet", storedFileId: "sheet-1" },
+          { kind: "sheet", storedFileId: "sheet-1", sizeBytes: 4096, addedAt: "2026-11-15T12:00:00Z" },
           { kind: "pdf", storedFileId: "pdf-1" },
           { kind: "doc", storedFileId: "doc-1" },
         ],

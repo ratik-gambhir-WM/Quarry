@@ -16,11 +16,13 @@ export type FileReviewSummary = {
 };
 
 export type FileReviewRow = FileReviewSummary & {
+  addedAt?: string;
   fileName: string;
   fileType: FileType;
   folderLabel: string;
   id: string;
   node: DataRoomTreeNode;
+  sizeBytes?: number;
   source: DataRoomFileEntry["source"];
 };
 
@@ -35,11 +37,19 @@ export function buildFileReviewRows(
         : pendingSummary;
     return {
       ...summary,
+      addedAt: entry.node.addedAt && Number.isFinite(Date.parse(entry.node.addedAt))
+        ? entry.node.addedAt
+        : undefined,
       fileName: entry.node.name,
       fileType: getFileType(entry.node.name, entry.node.kind),
       folderLabel: entry.folderPath.join(" / ") || "Data Room",
       id: entry.node.id,
       node: entry.node,
+      sizeBytes:
+        typeof entry.node.sizeBytes === "number" &&
+        Number.isSafeInteger(entry.node.sizeBytes) && entry.node.sizeBytes >= 0
+          ? entry.node.sizeBytes
+          : undefined,
       source: entry.source,
     };
   });
