@@ -81,7 +81,7 @@ function ScrollArea({
           viewportPropsClassName, viewportClassName,
         )}
       >
-        {children}
+        <ScrollAreaContent>{children}</ScrollAreaContent>
       </ScrollAreaViewport>
       {(["vertical", "horizontal"] as const).filter((axis) => orientation === "both" || orientation === axis).map((axis) => (
         <ScrollAreaScrollbar
