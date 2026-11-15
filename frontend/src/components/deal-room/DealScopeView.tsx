@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Accordion } from "radix-ui";
-import { ChevronDown } from "lucide-react";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../ui/accordion";
 import { Badge } from "../ui/badge";
 import { SearchField } from "../ui/search-field";
 import "./deal-scope.css";
@@ -41,31 +40,26 @@ export function DealScopeView({ questions }: { questions: readonly string[] }) {
         ) : visibleQuestions.length === 0 ? (
           <p className="px-3 py-8 text-sm text-muted">No questions match your search. Try another term or clear the search.</p>
         ) : null}
-        <Accordion.Root type="multiple" defaultValue={["question-0"]} asChild>
+        <Accordion type="multiple" defaultValue={["question-0"]} asChild>
           <ol aria-label="Key questions" className="grid gap-2">
             {visibleQuestions.map(({ question, index }) => (
-              <Accordion.Item key={index} value={`question-${index}`} asChild>
+              <AccordionItem key={index} value={`question-${index}`} asChild>
                 <li className="scope-question min-w-0 rounded-lg border border-transparent border-b-outline-variant/50 data-[state=open]:border-outline-variant/60 data-[state=open]:bg-surface-container-low">
-                  <Accordion.Header asChild>
-                    <h2>
-                      <Accordion.Trigger className="scope-question-trigger group grid w-full grid-cols-[2rem_minmax(0,1fr)_1rem] items-start gap-3 rounded-lg px-3 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-4">
-                        <span aria-hidden="true" className="pt-0.5 text-xs tabular-nums text-muted">{String(index + 1).padStart(2, "0")}</span>
-                        <span className="max-w-[100ch] min-w-0 break-words text-sm leading-6 text-text-main sm:text-[15px]">{question}</span>
-                        <ChevronDown aria-hidden="true" className="scope-question-chevron mt-1 size-4 shrink-0 text-muted group-data-[state=open]:rotate-180" />
-                      </Accordion.Trigger>
-                    </h2>
-                  </Accordion.Header>
-                  <Accordion.Content className="scope-question-body overflow-hidden px-3 sm:px-4">
+                  <AccordionTrigger headingLevel={2} className="scope-question-trigger grid w-full grid-cols-[2rem_minmax(0,1fr)_1rem] items-start gap-3 rounded-lg px-3 py-4 text-left font-normal outline-none [@media(hover:hover)]:hover:no-underline focus-visible:ring-2 focus-visible:ring-primary sm:px-4">
+                    <span aria-hidden="true" className="pt-0.5 text-xs tabular-nums text-muted">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="max-w-[100ch] min-w-0 break-words text-sm leading-6 text-text-main sm:text-[15px]">{question}</span>
+                  </AccordionTrigger>
+                  <AccordionContent className="scope-question-body px-3 pb-0 sm:px-4">
                     <div className="ml-11 border-t border-outline-variant/60 pb-5 pt-4">
                       <p className="text-xs font-medium text-text-main">Answer</p>
                       <p className="mt-2 text-sm leading-6 text-muted">No answer yet.</p>
                     </div>
-                  </Accordion.Content>
+                  </AccordionContent>
                 </li>
-              </Accordion.Item>
+              </AccordionItem>
             ))}
           </ol>
-        </Accordion.Root>
+        </Accordion>
       </div>
     </section>
   );

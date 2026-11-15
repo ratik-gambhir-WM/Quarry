@@ -1152,9 +1152,9 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     assert_eq!(
         listed,
         serde_json::json!([
-            {"fileId": "file-alpha", "displayName": "Alpha.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
-            {"fileId": "file-raw", "displayName": "Raw.docx", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
-            {"fileId": "file-zulu", "displayName": "Zulu.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"}
+            {"fileId": "file-alpha", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": b"%PDF-1.4\nalpha".len(), "displayName": "Alpha.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
+            {"fileId": "file-raw", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": docx_bytes.len(), "displayName": "Raw.docx", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
+            {"fileId": "file-zulu", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": b"%PDF-1.4\nzulu".len(), "displayName": "Zulu.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"}
         ])
     );
 
@@ -1240,7 +1240,7 @@ async fn insert_stored_document(
         INSERT INTO quarry_file_versions (
             version_id, file_id, version_number, original_filename, mime_type,
             content_sha256, byte_size, is_current, created_at
-        ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, 1, '2026-01-01T00:00:00Z')
+        ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, 1, '2026-02-01T00:00:00Z')
         "#,
             crate::pg_params![
                 version_id,

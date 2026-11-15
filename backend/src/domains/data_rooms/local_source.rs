@@ -17,6 +17,8 @@ pub struct DataRoomTreeNode {
     pub kind: String,
     pub name: String,
     pub relative_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 pub fn build_directory_node(
@@ -73,7 +75,13 @@ pub fn build_directory_node(
                         false,
                     ));
                 } else if file_type.is_file() {
-                    children.push(file_node(&entry_name, &child_relative));
+                    let mut node = file_node(&entry_name, &child_relative);
+                    // Inspect the entry itself; a raced symlink must not expose target metadata.
+                    node.size_bytes = fs::symlink_metadata(entry.path())
+                        .ok()
+                        .filter(|metadata| metadata.is_file())
+                        .map(|metadata| metadata.len());
+                    children.push(node);
                 }
             }
             children.sort_by(|left, right| {
@@ -91,6 +99,7 @@ pub fn build_directory_node(
                 kind: "folder".to_string(),
                 name,
                 relative_path: None,
+                size_bytes: None,
             }
         }
         Err(err) => DataRoomTreeNode {
@@ -101,6 +110,7 @@ pub fn build_directory_node(
             kind: "folder".to_string(),
             name,
             relative_path: None,
+            size_bytes: None,
         },
     }
 }
@@ -125,6 +135,7 @@ fn file_node(name: &str, relative_path: &Path) -> DataRoomTreeNode {
         kind: kind.to_string(),
         name: name.to_string(),
         relative_path: Some(relative_path),
+        size_bytes: None,
     }
 }
 

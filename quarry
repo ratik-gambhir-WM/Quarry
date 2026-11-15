@@ -12,11 +12,11 @@ readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
 readonly POSTGRES_BIN="${QUARRY_POSTGRES_BIN:-/Applications/Postgres.app/Contents/Versions/18/bin}"
 readonly POSTGRES_DATA_DIR="${QUARRY_POSTGRES_DATA_DIR:-${HOME}/Library/Application Support/Postgres/var-18}"
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-postgres-dev}"
+readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
 readonly HELIX_VOLUME_NAME="${HELIX_CONTAINER_NAME}-data"
 readonly HELIX_DATA_DIR="/var/lib/helix"
 readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
-readonly LOCAL_HELIX_PORT="${QUARRY_HELIX_PORT:-6970}"
+readonly LOCAL_HELIX_PORT="${QUARRY_HELIX_PORT:-6969}"
 readonly LOCAL_HELIX_URL="http://127.0.0.1:${LOCAL_HELIX_PORT}"
 
 backend_pid=""
@@ -31,7 +31,8 @@ Usage: quarry <web|desktop>
 
 Templates run in Axum and persist in the Quarry PostgreSQL database.
 Set server-only QUARRY_DATABASE_URL before starting (postgresql://localhost/Quarry locally).
-The fresh Helix store uses port 6970; QUARRY_HELIX_PORT overrides it.
+The default Helix container is helix-quarry-v3-dev on port 6969.
+QUARRY_HELIX_CONTAINER_NAME and QUARRY_HELIX_PORT select another store.
 Helix uses disk storage in the Docker volume <container-name>-data.
 On macOS, an existing Postgres.app 18 cluster starts automatically.
 QUARRY_POSTGRES_BIN and QUARRY_POSTGRES_DATA_DIR select another existing local cluster.
@@ -177,12 +178,6 @@ if [[ "$(uname -s)" == "Darwin" && -x "$POSTGRES_BIN/pg_ctl" && -d "$POSTGRES_DA
   esac
 fi
 
-printf 'Checking the selected PostgreSQL connection...\n'
-(
-  cd "$QUARRY_ROOT/backend" || exit 1
-  cargo run --locked --bin check_database
-) || fail "PostgreSQL is unavailable; start your PostgreSQL service and configure QUARRY_DATABASE_URL for the Quarry database"
-
 node -e 'const value = process.argv[1]; if (!/^[0-9]{1,5}$/.test(value) || Number(value) < 1 || Number(value) > 65535) process.exit(1)' "$LOCAL_HELIX_PORT" \
   || fail "QUARRY_HELIX_PORT must be a port between 1 and 65535"
 
@@ -198,9 +193,9 @@ helix_local_dev_config_value() {
   local key="$1"
 
   awk -F '"' -v key="$key" '
-    /^\[local\.dev\][[:space:]]*$/ { in_local_dev = 1; next }
-    in_local_dev && /^\[/ { exit }
-    in_local_dev && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*\"[^\"]+\"[[:space:]]*$") {
+    /^[[:space:]]*\[local\.dev\][[:space:]]*(#.*)?$/ { in_local_dev = 1; next }
+    in_local_dev && /^[[:space:]]*\[/ { exit }
+    in_local_dev && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*\"[^\"]+\"[[:space:]]*(#.*)?$") {
       print $2
       exit
     }

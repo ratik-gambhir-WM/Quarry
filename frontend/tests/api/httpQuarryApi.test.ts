@@ -371,7 +371,7 @@ describe("httpQuarryApi", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json([{ displayName: "Report.pdf", fileId: "file / 1" }]),
+        Response.json([{ displayName: "Report.pdf", fileId: "file / 1", sizeBytes: 2048, addedAt: "2026-11-15T12:00:00Z" }]),
       )
       .mockResolvedValueOnce(
         new Response(pdfBytes, {
@@ -389,6 +389,8 @@ describe("httpQuarryApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const documents = await httpQuarryApi.listDealDocuments("DEAL / 1");
+    expect(documents[0].sizeBytes).toBe(2048);
+    expect(documents[0].addedAt).toBe("2026-11-15T12:00:00Z");
     const pdf = await httpQuarryApi.getDealDocumentPdf(
       "DEAL / 1",
       documents[0].fileId,

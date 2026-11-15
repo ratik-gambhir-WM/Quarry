@@ -189,13 +189,19 @@ There is no root workspace manifest. The root `quarry` executable is a developme
 supervisor, not another build root: it can run only while the working directory is the repository
 root. Both modes reject conflicting listeners on ports 3001 and 1420. On macOS they start an
 existing Postgres.app 18 cluster if stopped, with optional `QUARRY_POSTGRES_BIN` and
-`QUARRY_POSTGRES_DATA_DIR` overrides; no cluster or database is created. They check the configured
-PostgreSQL connection before starting application processes. They start Docker Desktop on macOS
-when its daemon is unavailable and wait for Docker and the Helix service
-at `127.0.0.1:6970`. The launcher first inspects the local container named by
-`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-postgres-dev`. If it is absent, the launcher
+`QUARRY_POSTGRES_DATA_DIR` overrides; no cluster or database is created. Axum opens and retains
+its PostgreSQL pool during bootstrap, with no separate connection preflight or `check_database`
+build. Connection failure exits startup before the UI starts. The launcher starts Docker Desktop
+on macOS when its daemon is unavailable and waits for Docker and the Helix service at
+`127.0.0.1:6969`. The launcher first inspects the local container named by
+`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-v3-dev`. If it is absent, the launcher
 creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section,
-the `unless-stopped` restart policy, and the loopback-only `127.0.0.1:6970:8080` port mapping.
+the `unless-stopped` restart policy, and the loopback-only `127.0.0.1:6969:8080` port mapping.
+The metadata reader accepts whitespace and inline comments.
+The default reuses the existing `helix-quarry-v3-dev` graph; it does not migrate or reset data.
+For a fresh PostgreSQL deployment, explicitly select a separate graph with
+`QUARRY_HELIX_CONTAINER_NAME` and `QUARRY_HELIX_PORT`. Direct backend startup retains its
+port-6970 default; the launcher overrides `HELIX_URL` with its selected port.
 It sets `HELIX_DATA_DIR=/var/lib/helix` and mounts the named Docker volume
 `<container-name>-data` there. Helix's default storage is in memory: `DB_PATH=db/` and a
 restart policy alone do not preserve graph data when the server stops. The data volume is
@@ -825,7 +831,20 @@ editable deals also expose **Edit deal** in the Overview header. The API accepts
 requires the SharePoint hostname to end in `.sharepoint.com`. The Key Questions header
 identifies its questions as SOW-derived without a decorative icon. The populated Data Room,
 Deals and File Summary review tables use the vendored public ReUI
-data-grid implementation on TanStack React Table. When a selected document replaces the normal
+data-grid implementation on TanStack React Table. The Data Room file-review grid lists file name, type,
+size, category (`N/A` until classification is integrated), Date added, and RL ID (`Coming soon`
+until request-list associations exist). Date added uses the logical file's original PostgreSQL
+creation timestamp, passed as optional `addedAt` through both client adapters; missing/invalid dates
+(including untracked local files) show a dash. Date sorting uses timestamps and puts missing values
+last. No request-list IDs or associations are inferred. Named disclosure buttons and row
+presses expand independent detail panels with key findings, risks, opportunities and key-question
+impact; file-name buttons still open previews. Expansion follows stable file IDs through sorting,
+filtering and pagination. Review summaries remain explicitly labelled illustrative fixture data.
+Pointer expansion uses the shared content/chevron motion tokens; keyboard and reduced-motion
+paths are immediate. Stored-document listings include the current immutable version's `sizeBytes`
+from PostgreSQL; local tree entries include file byte sizes from non-following filesystem metadata.
+Missing sizes display `N/A`. This is additive JSON metadata passed through both API adapters and
+the desktop gateway; routes, authorization and schemas are unchanged. When a selected document replaces the normal
 workspace sidebar with the Data Room explorer, Saved documents has a separate plus button that
 opens the existing file-upload modal without toggling the folder; dismissing it restores focus to
 the plus button. The former four-icon toolbar is removed. Upload uses the ReUI dialog primitives,
@@ -856,7 +875,20 @@ outside the Data Room.
 
 [`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
-and primitives instead of adding hard-coded parallel color/spacing systems. Workspace navigation
+and primitives instead of adding hard-coded parallel color/spacing systems. Feature/page code
+and registry integrations consume reusable local shadcn components from `components/ui/`.
+Direct Radix, Base UI and Ark UI imports are confined to that shared layer and enforced by
+`check:boundaries`; underlying libraries still own accessible behavior inside the wrappers.
+The shared layer owns styling, interaction states, accessibility and motion while feature
+owners retain state and requests. Adding controls does not replace Quarry's theme, typography,
+spacing, radii or motion tokens with registry defaults. Key Questions uses the shared accordion
+with ordered-list and level-two heading semantics, independent expansion and existing local
+search. Membership permissions and chat model selection use the shared shadcn select; message
+actions compose shadcn buttons inside a shared roving-focus toolbar. The shared scroll-area
+component owns standard surfaces and configurable PDF viewports (including composed refs,
+gutter, fade, orientation and viewport-resolution hooks). The Data Grid keeps its sticky-header
+scrollbar measurements and drag behavior on the same shared scroll-area parts. The two copied
+PDF scroll-area implementations have been removed. Workspace navigation
 uses shared semantic icon accents: slate blue for navigation, muted teal for knowledge/analysis,
 plum for Assistant, and ochre for folders. The same color roles appear in desktop and mobile
 navigation; Data Room folders, search results and tool actions reuse these accents. Light and
@@ -1124,7 +1156,7 @@ method allowlist.
 | GET | `/deal-deletions/{deletion_id}` | Poll durable cleanup state after the deal is gone | Current valid session for the accepting actor only; no-store |
 | GET/POST | `/companies` | Search/create the resolved owner's company directory | `{companies, hasMore}`; default 30/max 100; no implicit name/website merge |
 | POST | `/companies/{company_id}/update` | Edit shared company details | Same-owner lookup; reflected in every linked deal; no delete/merge |
-| GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | Can expose absolute `rootPath` |
+| GET | `/deals/{deal_id}/data-room` | List configured server data-room tree | File nodes include `sizeBytes` when available; can expose absolute `rootPath` |
 | POST | `/deals/{deal_id}/data-room/preview` | Parse/convert a selected relative document | Canonical containment; PDF/DOCX/XLSX/PPTX |
 
 Deal aggregates include actor role/capabilities, `createdByUserId` and `accessRevision`. Local
@@ -1142,7 +1174,7 @@ The shared Settings form accepts email only.
 
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
-| GET | `/deals/{deal_id}/documents` | List current logical documents | PostgreSQL source |
+| GET | `/deals/{deal_id}/documents` | List current logical documents | PostgreSQL source; includes original file `addedAt` and current-version `sizeBytes` |
 | GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
 | POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
@@ -2221,8 +2253,8 @@ thread run endpoint; no client-supplied history or temporary generation endpoint
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
-| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-postgres-dev`; its persistent Docker volume is `<container-name>-data` | Local development identifier; not passed to application runtimes |
-| `QUARRY_HELIX_PORT` | Root launcher | Loopback port for the selected isolated Helix container; defaults to `6970` | Must match the existing container binding; passed as `HELIX_URL` to Axum |
+| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-v3-dev`; its persistent Docker volume is `<container-name>-data` | Local development identifier; not passed to application runtimes |
+| `QUARRY_HELIX_PORT` | Root launcher | Loopback port for the selected isolated Helix container; defaults to `6969` | Must match the existing container binding; passed as `HELIX_URL` to Axum |
 | `QUARRY_POSTGRES_BIN` | Root launcher | PostgreSQL tools directory; defaults to `/Applications/Postgres.app/Contents/Versions/18/bin` | Local path; macOS existing-cluster startup only |
 | `QUARRY_POSTGRES_DATA_DIR` | Root launcher | Existing cluster directory; defaults to `$HOME/Library/Application Support/Postgres/var-18` | Local path; never initialized or replaced by the launcher |
 
@@ -2615,9 +2647,10 @@ These are runtime operations rather than verification gates. They start the back
 known local/disposable data. On macOS the launcher starts an existing Postgres.app 18 cluster
 when stopped, using `pg_ctl` from `QUARRY_POSTGRES_BIN` and the selected
 `QUARRY_POSTGRES_DATA_DIR`. It never initializes a cluster or creates a database. Other PostgreSQL
-installations must already be running if these local tools/storage are unavailable. It then
-checks the configured database connection without changing its schema. PostgreSQL, Docker, and
-Helix remain running after launcher exit; only the API and selected UI are supervised children.
+installations must already be running if these local tools/storage are unavailable. Axum opens
+its PostgreSQL pool during normal bootstrap and exits on connection failure; the launcher performs
+no separate database connection check and starts the UI only after API readiness. PostgreSQL, Docker,
+and Helix remain running after launcher exit; only the API and selected UI are supervised children.
 The launcher opens Docker Desktop when necessary, creates an
 absent configured Helix container from `backend/helix.toml` with disk storage and a persistent
 named volume, and starts it before Axum. Existing memory-backed or incorrectly mounted containers

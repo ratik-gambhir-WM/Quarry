@@ -158,6 +158,8 @@ export type SendQueryEventHandlers = {
 };
 
 export type DealDocumentSummary = {
+  addedAt?: string;
+  sizeBytes?: number;
   uploadedByUserId?: number | null;
   uploadedByName?: string | null;
   attributionOrigin?: "authenticated" | "legacy_unknown";

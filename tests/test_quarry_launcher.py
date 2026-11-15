@@ -36,9 +36,9 @@ elif args[:2] == ["container", "inspect"]:
             print("" if scenario == "memory" else "true")
         elif ".Mounts" in template:
             print({"wrong-volume": "other-data", "unmounted": "", "read-only": ""}
-                  .get(scenario, os.environ["QUARRY_HELIX_CONTAINER_NAME"] + "-data"))
+                  .get(scenario, os.environ.get("QUARRY_HELIX_CONTAINER_NAME", "helix-quarry-v3-dev") + "-data"))
         elif ".HostConfig.PortBindings" in template:
-            print("127.0.0.1:" + os.environ["QUARRY_HELIX_PORT"])
+            print("127.0.0.1:" + os.environ.get("QUARRY_HELIX_PORT", "6969"))
         elif template == "{{.State.Running}}":
             print("false")
         else:
@@ -46,8 +46,8 @@ elif args[:2] == ["container", "inspect"]:
 elif args[0] == "create":
     (folder / "created").touch()
 elif args[0] == "start":
-    # End the test after storage validation, before any product process starts.
-    sys.exit(41)
+    # Only the backend-failure scenario proceeds to application startup.
+    sys.exit(0 if scenario == "backend-failure" else 41)
 elif args != ["info"]:
     sys.exit("unexpected Docker operation")
 '''
@@ -56,7 +56,7 @@ elif args != ["info"]:
 class LauncherTests(unittest.TestCase):
     def run_launcher(
         self, scenario, postgres_status=0, start_status=0,
-        target="web", database_status=0,
+        target="web", backend_status=17, use_defaults=False, config=None,
     ):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -81,15 +81,32 @@ sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
             (folder / "uname").write_text("#!/bin/sh\necho Darwin\n")
             (folder / "uname").chmod(0o755)
             (folder / "cargo").write_text(
-                "#!/bin/sh\nexit " + str(database_status) + "\n")
+                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$QUARRY_TEST_FOLDER/cargo-commands"\n'
+                'exit ' + str(backend_status) + "\n")
+            (folder / "npm").write_text(
+                '#!/bin/sh\ntouch "$QUARRY_TEST_FOLDER/ui-started"\nexit 0\n')
+            (folder / "curl").write_text(
+                '#!/bin/sh\ncase "$*" in *healthz*) exit 0;; *) exit 1;; esac\n')
+            launcher_root = folder / "repo"
+            (launcher_root / "backend").mkdir(parents=True)
+            (launcher_root / "frontend").mkdir()
+            (launcher_root / "quarry").write_text((ROOT / "quarry").read_text())
+            (launcher_root / "backend/helix.toml").write_text(
+                (ROOT / "backend/helix.toml").read_text() if config is None else config)
+            inherited_env = dict(os.environ)
+            for key in ("QUARRY_HELIX_CONTAINER_NAME", "QUARRY_HELIX_PORT"):
+                inherited_env.pop(key, None)
+            selection = {} if use_defaults else {
+                "QUARRY_HELIX_CONTAINER_NAME": CONTAINER,
+                "QUARRY_HELIX_PORT": "6970",
+            }
             result = subprocess.run(
-                ["bash", str(ROOT / "quarry"), target],
-                cwd=ROOT,
+                ["bash", str(launcher_root / "quarry"), target],
+                cwd=launcher_root,
                 env={
-                    **os.environ,
+                    **inherited_env,
+                    **selection,
                     "PATH": f"{folder}:{os.environ['PATH']}",
-                    "QUARRY_HELIX_CONTAINER_NAME": CONTAINER,
-                    "QUARRY_HELIX_PORT": "6970",
                     "QUARRY_POSTGRES_BIN": str(folder),
                     "QUARRY_POSTGRES_DATA_DIR": str(folder),
                     "QUARRY_TEST_POSTGRES_STATUS": str(postgres_status),
@@ -99,7 +116,7 @@ sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
                 },
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=30,
             )
             docker_log = folder / "commands.jsonl"
             commands = (
@@ -110,7 +127,12 @@ sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
                                  (folder / "postgres.jsonl").read_text().splitlines()]
             self.assertEqual(any("start" in c for c in postgres_commands), postgres_status == 3)
             self.assertFalse(any("initdb" in c or "stop" in c for c in postgres_commands))
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            cargo_log = folder / "cargo-commands"
+            cargo_commands = cargo_log.read_text().splitlines() if cargo_log.exists() else []
+            self.assertEqual(cargo_commands, ["run --locked"] if scenario == "backend-failure" else [])
+            self.assertFalse((folder / "ui-started").exists())
+        expected_status = (backend_status or 1) if scenario == "backend-failure" else 1
+        self.assertEqual(result.returncode, expected_status, result.stdout + result.stderr)
         self.assertFalse(any(c[0] in ("rm", "stop", "rename") for c in commands))
         return result, commands
 
@@ -131,10 +153,15 @@ sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
         self.assertIn("could not inspect the existing PostgreSQL", result.stderr)
         self.assertEqual(commands, [])
 
-    def test_database_connection_failure_stops_before_helix(self):
-        result, commands = self.run_launcher("disk", database_status=1)
-        self.assertIn("PostgreSQL is unavailable", result.stderr)
-        self.assertEqual(commands, [])
+    def test_backend_connection_failure_exits_without_preflight_or_ui(self):
+        for target in ("web", "desktop"):
+            for status in (0, 17):
+                with self.subTest(target=target, status=status):
+                    result, commands = self.run_launcher(
+                        "backend-failure", backend_status=status, target=target)
+                    self.assertIn(["start", CONTAINER], commands)
+                    self.assertIn("Axum API exited before becoming ready", result.stderr)
+                    self.assertNotIn("Checking the selected PostgreSQL", result.stdout)
 
     def test_new_container_has_disk_storage_and_named_volume(self):
         result, commands = self.run_launcher("absent")
@@ -150,6 +177,28 @@ sys.exit(int(os.environ["QUARRY_TEST_START_STATUS"]))
         self.assertFalse(any(c[0] == "create" for c in commands))
         self.assertIn(["start", CONTAINER], commands)
         self.assertIn("could not start Helix", result.stderr)
+
+    def test_default_container_matches_existing_v3_store(self):
+        for target in ("web", "desktop"):
+            with self.subTest(target=target):
+                result, commands = self.run_launcher("disk", use_defaults=True, target=target)
+                self.assertIn(["start", "helix-quarry-v3-dev"], commands)
+                self.assertFalse(any(c[0] == "create" for c in commands))
+                self.assertIn("could not start Helix", result.stderr)
+
+    def test_config_with_comments_and_whitespace(self):
+        config = (ROOT / "backend/helix.toml").read_text()
+        config = config.replace("[local.dev]", "  [local.dev] # local runtime")
+        config = config.replace('tag = "latest"', 'tag = "latest" # descriptive tag')
+        result, commands = self.run_launcher("disk", config=config)
+        self.assertIn(["start", CONTAINER], commands)
+        self.assertIn("could not start Helix", result.stderr)
+
+    def test_missing_digest_fails_before_container_changes(self):
+        config = '[local.dev]\nimage = "example/helix"\ntag = "latest"\n'
+        result, commands = self.run_launcher("disk", config=config)
+        self.assertIn("could not read the local Helix image", result.stderr)
+        self.assertEqual(commands, [["info"]])
 
     def test_unsafe_storage_is_rejected_before_start(self):
         for scenario in ("memory", "wrong-volume", "unmounted", "read-only"):

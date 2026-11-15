@@ -1,12 +1,11 @@
 // Adapted from https://www.stealth.pm/ui/follow-button (Stealth registry).
 // Keep its reserved label widths and drawn check; deal roles remain server-owned.
-import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronDown, ShieldCheck } from "lucide-react";
+import { Check, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import type { AssignableDealRole, DealRole } from "../../contracts/dealMemberships";
 import { ease } from "../ui/stealth-date/motion";
-import { Select, SelectItem, SelectPopup } from "../ui/stealth/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 
 export const dealRoleLabels: Record<DealRole, string> = {
   owner: "Owner",
@@ -77,24 +76,24 @@ export function DealMemberPermissions({
     return <span className="deal-permission" data-readonly="true" aria-label={`${dealRoleLabels[role]} permissions for ${username}`}>{content}</span>;
   }
   return (
-    <Select<AssignableDealRole>
-      items={roleOptions}
+    <Select
       value={role}
       disabled={disabled}
-      onValueChange={(next) => { if (next && next !== role) onChange(next); }}
+      onValueChange={(next) => {
+        if ((next === "manager" || next === "contributor" || next === "viewer") && next !== role) onChange(next);
+      }}
     >
-      <SelectPrimitive.Trigger
+      <SelectTrigger
         className="deal-permission"
         aria-label={`Permissions for ${username}`}
         onKeyDown={() => setKeyboard(true)}
         onPointerDown={() => setKeyboard(false)}
       >
         {content}
-        <ChevronDown size={12} aria-hidden="true" className="deal-permission-chevron" />
-      </SelectPrimitive.Trigger>
-      <SelectPopup align="end" alignItemWithTrigger={false} className="min-w-44">
+      </SelectTrigger>
+      <SelectContent align="end" position="popper" className="min-w-44">
         {roleOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-      </SelectPopup>
+      </SelectContent>
     </Select>
   );
 }

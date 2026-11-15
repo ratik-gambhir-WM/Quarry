@@ -11,6 +11,9 @@ describe("DealScopeView", () => {
   it("preserves question text and order, with only the first answer expanded initially", () => {
     const { container } = render(<DealScopeView questions={questions} />);
     expect(screen.getByRole("heading", { level: 1, name: "Key Questions" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Key questions" })).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(questions.length);
+    for (const name of questions) expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
     const triggers = questions.map((name) => screen.getByRole("button", { name }));
     expect(triggers.map((button) => button.getAttribute("aria-expanded"))).toEqual(["true", "false", "false"]);
     const markup = container.textContent ?? "";
