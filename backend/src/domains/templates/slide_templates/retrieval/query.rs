@@ -1,4 +1,4 @@
-use super::super::{providers::SlideEmbedder, TemplateKind, TemplateRepository};
+use super::super::{providers::SlideEmbedder, TemplateKind, TemplateRetrievalRepository};
 use super::metadata::{js_trim, normalize_taxonomy_value, utf16_len};
 use super::{
     cosine_similarity, validate_embedding, RetrievalClassificationRecord, SlideRetrievalMetadata,
@@ -201,7 +201,7 @@ fn validate_taxonomy(
 }
 
 pub struct SlideRetrievalService {
-    pub repository: Arc<dyn TemplateRepository>,
+    pub repository: Arc<dyn TemplateRetrievalRepository>,
     pub embedder: Option<Arc<dyn SlideEmbedder>>,
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<usize>,

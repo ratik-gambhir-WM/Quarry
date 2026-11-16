@@ -643,3 +643,98 @@ fn native_preview_maps_raw_powerpoint_to_a_document_without_domain_imports_in_th
         .unwrap()
         .is_none());
 }
+
+#[tokio::test]
+async fn import_modes_preserve_preview_warnings_metadata_and_hydrated_documents() {
+    let repository = Arc::new(
+        support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
+    let source = pptx::write(&document()).unwrap();
+    let mut deck = document();
+    deck.presentation
+        .slides
+        .push(deck.presentation.slides[0].clone());
+    let batch_source = pptx::write(&deck).unwrap();
+
+    for preview_available in [false, true] {
+        let preview: Arc<dyn TemplatePreviewGenerator> = if preview_available {
+            Arc::new(support::FixturePreview)
+        } else {
+            Arc::new(DisabledTemplatePreviewGenerator)
+        };
+        let service = ImportService::with_preview_generator(repository.clone(), preview);
+        let single = service
+            .import(&source, TemplateKind::Diagram)
+            .await
+            .unwrap();
+        let batch = service
+            .batch_import(&batch_source, TemplateKind::Diagram)
+            .await
+            .unwrap();
+        assert_eq!(
+            single.preview_status,
+            if preview_available {
+                TemplatePreviewStatus::Ready
+            } else {
+                TemplatePreviewStatus::Unavailable
+            }
+        );
+        assert_eq!(
+            single.warnings,
+            if preview_available {
+                vec![]
+            } else {
+                vec!["A preview image could not be generated for this template."]
+            }
+        );
+        assert_eq!(
+            batch.warnings,
+            if preview_available {
+                vec![]
+            } else {
+                vec![
+                    "Slide 1: A preview image could not be generated for this template.",
+                    "Slide 2: A preview image could not be generated for this template.",
+                ]
+            }
+        );
+        let mut batch_timestamps = Vec::new();
+        for imported in &batch.templates {
+            assert_eq!(imported.preview_available, preview_available);
+            let single_slide = &single.template_json.presentation.slides[0];
+            let batch_slide = &imported.template_json.presentation.slides[0];
+            assert_eq!(batch_slide.width, single_slide.width);
+            assert_eq!(batch_slide.height, single_slide.height);
+            assert_eq!(
+                serde_json::to_value(&batch_slide.elements).unwrap(),
+                serde_json::to_value(&single_slide.elements).unwrap()
+            );
+            let metadata = repository
+                .find_metadata(&imported.template_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let single_metadata = repository
+                .find_metadata(&single.template_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(metadata.title, single_metadata.title);
+            assert_eq!(metadata.kind, single_metadata.kind);
+            assert_eq!(metadata.description, single_metadata.description);
+            assert_eq!(
+                repository
+                    .find_preview(&imported.template_id)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                preview_available
+            );
+            batch_timestamps.push(metadata.created_at);
+        }
+        assert_eq!(batch_timestamps.len(), 2);
+        assert_eq!(batch_timestamps[0], batch_timestamps[1]);
+    }
+}

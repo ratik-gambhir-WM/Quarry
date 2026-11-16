@@ -1,6 +1,6 @@
 use super::*;
 use crate::domains::templates::slide_templates::{
-    StoredTemplate, StoredTemplateMetadata, TemplateKind, TemplateSource,
+    StoredTemplate, StoredTemplateMetadata, TemplateCatalogRepository, TemplateKind, TemplateSource,
 };
 use serde_json::json;
 
@@ -24,7 +24,7 @@ fn document(sources: &[&str]) -> CanvasDocument {
 async fn store_assets(
     document: CanvasDocument,
     assets: &[TemplateAsset],
-) -> impl TemplateRepository {
+) -> impl TemplateAssetRepository {
     let repository =
         crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
             .await
@@ -154,4 +154,54 @@ async fn asset_hydration_counts_each_reference_toward_the_embedded_image_limit()
             .code,
         "template_too_large"
     );
+}
+
+struct AssetOnlyRepository(TemplateAsset);
+
+#[async_trait::async_trait]
+impl TemplateAssetRepository for AssetOnlyRepository {
+    async fn find_asset(
+        &self,
+        template_id: &str,
+        asset_id: &str,
+    ) -> Result<Option<TemplateAsset>, crate::shared::error::RepositoryError> {
+        Ok(
+            (template_id == self.0.template_id && asset_id == self.0.asset_id)
+                .then(|| self.0.clone()),
+        )
+    }
+}
+
+#[tokio::test]
+async fn export_only_requires_asset_reads_and_rejects_missing_asset_scope() {
+    use crate::domains::templates::slide_templates::{pptx, ExportService};
+    use std::{io::Cursor, sync::Arc};
+    let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        1,
+        1,
+        image::Rgb([255, 255, 255]),
+    ));
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, image::ImageOutputFormat::Png)
+        .unwrap();
+    let service = ExportService::new(Arc::new(AssetOnlyRepository(TemplateAsset {
+        template_id: "template".into(),
+        asset_id: "image".into(),
+        content_type: "image/png".into(),
+        bytes: png.into_inner(),
+    })));
+    let exported = service
+        .export(serde_json::to_value(document(&["/import/template/assets/image"])).unwrap())
+        .await
+        .unwrap();
+    let imported = pptx::read(&exported.bytes).unwrap();
+    assert!(imported.template_json.presentation.slides[0].elements.iter().any(|element| {
+        matches!(element, Element::Image(image) if image.src.starts_with("data:image/png;base64,"))
+    }));
+    let error = service
+        .export(serde_json::to_value(document(&["/import/other/assets/image"])).unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "template_asset_not_found");
 }

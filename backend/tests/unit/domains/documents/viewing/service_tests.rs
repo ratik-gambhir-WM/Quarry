@@ -109,3 +109,112 @@ fn office_preview_cache_is_bounded_and_evicts_the_oldest_entry() {
         .entries
         .contains_key(&format!("key-{OFFICE_PREVIEW_CACHE_ENTRIES}")));
 }
+
+async fn preview_service() -> StoredDocumentService {
+    StoredDocumentService::new(
+        DocumentStore::new(
+            crate::adapters::postgres::client::PostgresClient::test_database()
+                .await
+                .unwrap(),
+        ),
+        OfficeConverter::new(None),
+    )
+}
+
+fn preview_blob(name: &str, mime: &str, bytes: Vec<u8>) -> StoredDocumentBlob {
+    StoredDocumentBlob {
+        file_id: "preview-fixture".into(),
+        display_name: name.into(),
+        mime_type: mime.into(),
+        file_bytes: bytes,
+    }
+}
+
+#[tokio::test]
+async fn image_and_office_previews_share_cache_and_preserve_shutdown_errors() {
+    let service = preview_service().await;
+    let image = RgbImage::from_pixel(10, 10, image::Rgb([20, 80, 160]));
+    let mut png = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(image)
+        .write_to(&mut png, ImageOutputFormat::Png)
+        .unwrap();
+    let mut docx = Docx::default();
+    docx.document
+        .push(Paragraph::default().push_text("Cached Office fallback"));
+    let inputs = [
+        (
+            preview_blob("image.png", "image/png", png.into_inner()),
+            "Image",
+        ),
+        (
+            preview_blob(
+                "office.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                docx.write(Cursor::new(Vec::new())).unwrap().into_inner(),
+            ),
+            "Office",
+        ),
+    ];
+    let mut rendered = Vec::new();
+    for (document, _) in &inputs {
+        let pdf = service.render_pdf(document.clone()).await.unwrap();
+        validate_pdf_bytes(&pdf, "the converted PDF").unwrap();
+        rendered.push(pdf);
+    }
+    service.preview_semaphore.close();
+    for ((document, _), pdf) in inputs.iter().zip(rendered) {
+        assert_eq!(service.render_pdf(document.clone()).await.unwrap(), pdf);
+    }
+    service.evict_previews().await;
+    for (document, label) in inputs {
+        let error = service.render_pdf_inner(document, None).await.unwrap_err();
+        assert_eq!(
+            error,
+            format!("{label} preview conversion is shutting down")
+        );
+    }
+}
+
+#[tokio::test]
+async fn waiting_preview_rechecks_and_validates_cache_before_starting_conversion() {
+    use std::time::Duration;
+    let service = preview_service().await;
+    // Invalid source bytes ensure any attempt to convert instead of using the cache fails.
+    let document = preview_blob("queued.png", "image/png", b"not an image".to_vec());
+    let cache_key = office_preview_cache_key(
+        &document.mime_type,
+        &document.display_name,
+        &document.file_bytes,
+    );
+    let permits = service
+        .preview_semaphore
+        .acquire_many(MAX_CONCURRENT_OFFICE_PREVIEWS as u32)
+        .await
+        .unwrap();
+    let render = service.render_pdf(document.clone());
+    tokio::pin!(render);
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut render)
+        .await
+        .is_err());
+    let cached = render_text_as_pdf("Cached", "Another conversion finished").unwrap();
+    service
+        .preview_cache
+        .lock()
+        .await
+        .insert(cache_key.clone(), cached.clone());
+    drop(permits);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), &mut render)
+            .await
+            .unwrap()
+            .unwrap(),
+        cached
+    );
+
+    service
+        .preview_cache
+        .lock()
+        .await
+        .insert(cache_key, b"invalid PDF".to_vec());
+    assert!(service.render_pdf(document).await.is_err());
+}

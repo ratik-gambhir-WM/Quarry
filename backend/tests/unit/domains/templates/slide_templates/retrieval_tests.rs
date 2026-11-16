@@ -190,7 +190,7 @@ async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
         .await
         .unwrap();
     let retrieval = SlideRetrievalService {
-        repository: Arc::clone(&repository),
+        repository: repository.clone(),
         embedder: Some(Arc::new(Embedder)),
         embedding_model: Some("embedding".into()),
         embedding_dimensions: Some(2),

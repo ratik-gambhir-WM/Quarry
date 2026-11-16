@@ -30,9 +30,11 @@ pub struct SlideTemplates {
 impl SlideTemplates {
     /// Scope request operations while retaining the global worker and concurrency budgets.
     pub(crate) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
+        let import = Arc::new(self.import.for_user(user_id)?);
+        let export = Arc::new(import.exporter());
         Ok(Self {
-            import: Arc::new(self.import.for_user(user_id)?),
-            export: Arc::new(self.export.for_user(user_id)?),
+            import,
+            export,
             ..self.clone()
         })
     }

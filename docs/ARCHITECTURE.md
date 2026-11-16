@@ -1622,6 +1622,21 @@ state.
 | `adapters/*` | Concrete PostgreSQL, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
+Embedded template persistence exposes asset, catalog/publication, processing-job, and retrieval
+capabilities in `slide_templates/repository/contracts.rs`, all implemented by the same PostgreSQL
+repository. The composite repository retains owner/app scoping and app registration for assembly
+and workflows that need multiple capabilities. Export receives only the asset interface, provider
+services/workers receive the processing interface, and retrieval receives its read interface.
+The facade constructs export from the same owner-scoped repository as import. Template, asset,
+preview, and pending-job publication retains its existing transaction boundaries.
+
+The PowerPoint reader keeps package orchestration and slide traversal in `pptx/reader.rs`, with
+private `reader/{package,theme,text,geometry,drawables}.rs` modules for bounded ZIP/XML loading,
+theme resolution, inherited text styles, transforms, and drawable conversion. The public OOXML
+entry points and parity contracts are unchanged. Document preview rendering uses one conversion
+lifecycle for image and Office formats, retaining cache validation before and after semaphore
+acquisition, blocking-worker admission ownership, and PDF validation before caching.
+
 [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs)
 enforces that
 the removed horizontal roots and global `AppState` do not return, adapters do not import domains,

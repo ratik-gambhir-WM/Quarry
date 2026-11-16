@@ -2,7 +2,7 @@
 
 use super::super::{
     retrieval::{SlideClassificationJob, SlideEmbeddingJob},
-    TemplateRepository,
+    TemplateProcessingRepository,
 };
 use super::{SlideClassificationService, SlideProviderError};
 use crate::shared::on_demand_task::OnDemandTask;
@@ -26,7 +26,7 @@ pub struct SlideClassificationWorkerOptions {
     pub retry_base: Duration,
     pub now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub random: Arc<dyn Fn() -> f64 + Send + Sync>,
-    pub repository: Arc<dyn TemplateRepository>,
+    pub repository: Arc<dyn TemplateProcessingRepository>,
     pub service: Arc<SlideClassificationService>,
     pub import: Arc<super::super::ImportService>,
     pub projection: Option<Arc<super::super::graph::TemplateGraph>>,
@@ -76,7 +76,7 @@ impl Stage {
 
     async fn record_failure(
         self,
-        repository: &dyn TemplateRepository,
+        repository: &dyn TemplateProcessingRepository,
         id: &str,
         code: &str,
         retry: Option<&str>,
