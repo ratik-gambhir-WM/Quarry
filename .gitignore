@@ -11,6 +11,9 @@ backend/.helix/
 backend/data/
 backend/target/
 
+
+
+
 frontend/.env
 frontend/.env.*
 frontend/dist/
