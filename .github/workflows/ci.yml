@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  CodeQL:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.0'
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript,rust
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_USER: quarry_ci
+          POSTGRES_PASSWORD: disposable-ci-password
+          POSTGRES_DB: Quarry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quarry_ci -d Quarry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    # Tests inherit this URL; normal backend runtime configuration is not needed to compile.
+    env:
+      QUARRY_TEST_DATABASE_URL: postgresql://quarry_ci:disposable-ci-password@localhost:5432/Quarry_test
+      RUST_TEST_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Provision the required vector extension
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec -i "$POSTGRES_CONTAINER" psql -U quarry_ci -d Quarry_test -v ON_ERROR_STOP=1 < backend/tools/provision-pgvector.sql
+      - name: Migrate, seed, and exercise PostgreSQL CRUD
+        working-directory: backend
+        run: cargo test --locked --lib database_crud_tests
+      - name: Backend unit and integration tests
+        working-directory: backend
+        run: cargo test --locked --all-targets
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test
+      - name: Desktop boundary tests
+        working-directory: frontend/src-tauri
+        run: cargo test --locked --all-targets
+
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Build backend
+        working-directory: backend
+        run: cargo build --locked --all-targets
+      - name: Build web UI and verify bundles
+        working-directory: frontend
+        run: |
+          npm run build:web
+          npm run check:web-bundle
+          npm run check:bundle-size:web
+          npm run check:notebook-bundle:web
+      - name: Build desktop UI and verify bundles
+        working-directory: frontend
+        run: |
+          npm run build:desktop-ui
+          npm run check:bundle-size:desktop
+          npm run check:notebook-bundle:desktop
+      - name: Build desktop shell
+        working-directory: frontend/src-tauri
+        run: cargo build --locked --all-targets
+
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Rust formatting
+        run: |
+          cargo fmt --all --manifest-path backend/Cargo.toml -- --check
+          cargo fmt --all --manifest-path frontend/src-tauri/Cargo.toml -- --check
+      - name: Backend Clippy
+        working-directory: backend
+        run: cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
+      - name: Desktop Clippy
+        working-directory: frontend/src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: TypeScript and runtime boundaries
+        working-directory: frontend
+        run: |
+          npm run typecheck
+          npm run check:boundaries

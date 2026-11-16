@@ -80,7 +80,7 @@ there is no populated-data migration or automatic reset. See [document storage](
 Quarry is a tested development foundation, not a production-secure deployment. Username/password
 authentication, revocable sessions, private-resource ownership, deal membership capabilities and bounded local auth throttling are
 implemented. Organization tenancy, distributed abuse protection, general multi-instance worker coordination, production
-storage, CI and deployment manifests remain absent. See [authentication](authentication.md).
+storage and deployment manifests remain absent. Pull-request CI is described in section 14.4. See [authentication](authentication.md).
 
 ## 2. System context
 
@@ -2578,6 +2578,48 @@ Backend `cargo run` is a runtime/integration operation, not a harmless compile c
 initializes/validates the selected PostgreSQL schema, requires Helix, and initializes indexes. Use it only with known disposable/local
 configuration. Never use `clear_helix` as verification.
 
+### 14.4 Pull-request CI
+
+[CI](../.github/workflows/ci.yml) runs on pull requests targeting `main` (opened, updated, edited,
+reopened, and marked ready), pushes to `main`, and manual dispatch. It always emits four jobs
+named `CodeQL`, `test`, `build`, and `lint`; there are no path filters or matrix suffixes.
+New commits cancel superseded runs. The shared [setup action](../.github/actions/setup/action.yml)
+uses Node 24, Rust 1.99.0, npm's lockfile, both Cargo lockfiles, and Ubuntu 24.04 Tauri prerequisites.
+
+- `CodeQL` analyzes JavaScript/TypeScript and Rust with CodeQL v4 in buildless mode. Only this
+  job has code-scanning upload permission; PR code is never run through `pull_request_target`.
+- `test` runs backend unit/integration tests, Vitest, and Tauri tests. Its health-checked
+  `pgvector/pgvector:0.8.6-pg18` service creates a dedicated `Quarry_test` database. The existing
+  `backend/tools/provision-pgvector.sql` installs vector 0.8.6 in `quarry_extensions` once.
+  `QUARRY_TEST_DATABASE_URL` selects that disposable database; its credentials are CI-only.
+  Compilation needs no application environment variables: `AppConfig::from_env` runs only when
+  launching the server. Tests construct their own configuration and inherit the test URL.
+  Before the full suite, `cargo test --locked --lib database_crud_tests` applies the actual
+  Rust migration entrypoint to isolated schemas and seeds two identities and two companies
+  through existing helpers/models. Tests cover scoped queries, insert/update/delete round trips,
+  migration restart validation, and stale-revision rejection. Shared test data lives in
+  `backend/tests/integration/database_fixtures.rs`. The existing namespace cleanup drops only
+  test-created schemas; GitHub removes the service after the job, including failed runs.
+- `build` compiles the backend and Tauri targets and both UI variants, including runtime,
+  startup-size, and production notebook-bundle checks before the next build replaces `dist`.
+- `lint` runs Rust formatting and Clippy (including backend redundant-clone checks), both
+  TypeScript targets, and the runtime-boundary check. There is no ESLint/Prettier configuration.
+
+Ignored external Helix/Chromium/visual fixture suites remain explicit opt-ins. CI does not
+start the product server, contact AI providers, or reset a development database. Limit Rust
+suite concurrency to four threads in CI to bound simultaneous PostgreSQL pools.
+
+The active GitHub ruleset `Quarry main CI/CD` targets `main`, requires a pull request and the
+four exact status contexts above on the current base, and has no bypass actors (verified
+2026-11-16). It also requires CodeQL, blocking error-level alerts and high-or-higher security
+alerts. Workflow files alone cannot enforce merges; retain this ruleset when changing CI.
+A successful analysis job means the scan completed; the separate code-scanning rule enforces
+the configured alert thresholds. For private repositories, GitHub Code Security must be enabled
+for CodeQL. CodeQL default setup was still configured at verification. Once this workflow is
+committed and ready to run, switch the repository from default to advanced CodeQL setup;
+GitHub rejects advanced uploads while default setup remains enabled. Keep default scanning
+enabled until the replacement is ready. This change does not publish the workflow automatically.
+
 ## 15. Known gaps and documentation drift
 
 | Area | Current condition | Consequence |
@@ -2598,7 +2640,7 @@ configuration. Never use `clear_helix` as verification.
 | npm dependencies | The 2026-10-19 [dependency check](npm-dependency-health.md) installed compatible fixes; frontend test/CLI tooling and Studio's PowerPoint image dependency retain audit findings | Passing builds/tests do not imply a clean security audit; broader dependency changes remain necessary |
 | API mapping | Handwritten in web and desktop adapters | Drift risk without shared descriptors/generation |
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
-| Deployment | No CI, container, provider, signing, updater, or TLS config | Repository is not independently deployable |
+| Deployment | Pull-request CI exists; no production container, provider, signing, updater, or TLS config | Repository is not independently deployable |
 | Health | Shallow process check | Cannot determine dependency readiness |
 | Plans | Ignored and sometimes stale after implementation | Must not be treated as tracked contract |
 

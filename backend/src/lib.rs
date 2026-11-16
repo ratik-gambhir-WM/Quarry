@@ -77,3 +77,11 @@ mod slide_templates_user_scope_tests;
 #[cfg(test)]
 #[path = "../tests/integration/deal_deletion_http_tests.rs"]
 mod deal_deletion_http_tests;
+
+#[cfg(test)]
+#[path = "../tests/integration/database_fixtures.rs"]
+mod database_fixtures;
+
+#[cfg(test)]
+#[path = "../tests/integration/database_crud_tests.rs"]
+mod database_crud_tests;

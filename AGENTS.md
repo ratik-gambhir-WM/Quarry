@@ -68,9 +68,9 @@ broadly reformat unrelated work.
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
 There is no root workspace manifest or root task runner. Run commands from the correct
-build root. There is currently no CI, deployment manifest, repository-owned container manifest, ESLint/Prettier
-configuration, or repository-pinned Node/Rust version. Do not invent scripts that do
-not exist.
+build root. Pull-request CI lives in `.github/workflows/ci.yml`; its shared setup action selects
+Node 24 and Rust 1.99.0. There is no deployment manifest, repository-owned container manifest, or ESLint/Prettier
+configuration. Do not invent scripts that do not exist.
 
 ### Embedded templates
 
