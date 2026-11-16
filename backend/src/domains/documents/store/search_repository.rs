@@ -108,26 +108,34 @@ impl PreparedChunks {
         self.profile.ensure(tx).await?;
         // A replay must already have the complete, immutable set. Never skip a
         // conflicting chunk INSERT or retain earlier successful batches on error.
-        for batch in self.rows.chunks(128) {
-            let mut rows = Vec::with_capacity(batch.len());
-            for (chunk, embedding, technical) in batch {
-                rows.push(vec![
-                    chunk.chunk_id.clone().into(),
-                    self.profile.id.clone().into(),
-                    chunk.text.clone().into(),
-                    technical.clone().into(),
-                    embedding.clone().into(),
-                    chunk.token_count.into(),
-                    chunk.page_start.into(),
-                    chunk.page_end.into(),
-                    chunk.char_start.into(),
-                    chunk.char_end.into(),
-                    chunk.section_path.clone().into(),
-                    chunk.created_at.clone().into(),
-                ]);
+        let mut chunks = self.rows.into_iter();
+        loop {
+            let rows: Vec<_> = chunks
+                .by_ref()
+                .take(128)
+                .map(|(chunk, embedding, technical)| {
+                    vec![
+                        chunk.chunk_id.into(),
+                        self.profile.id.clone().into(),
+                        chunk.text.into(),
+                        technical.into(),
+                        embedding.into(),
+                        chunk.token_count.into(),
+                        chunk.page_start.into(),
+                        chunk.page_end.into(),
+                        chunk.char_start.into(),
+                        chunk.char_end.into(),
+                        chunk.section_path.into(),
+                        chunk.created_at.into(),
+                    ]
+                })
+                .collect();
+            let expected = rows.len();
+            if expected == 0 {
+                break;
             }
             let affected = tx.write(insert_chunks(rows)).await?.rows_affected;
-            if affected != batch.len() {
+            if affected != expected {
                 return Err(RepositoryError::invalid(
                     "document chunk insert count differs",
                 ));
@@ -319,10 +327,7 @@ pub(crate) fn ranked(
                         },
                         "score",
                     )
-                    .and_where(C::text_prefix(
-                        "document_chunks.search_vector",
-                        body.clone(),
-                    ));
+                    .and_where(C::text_prefix("document_chunks.search_vector", body));
             } else {
                 query = query.expression(
                     E::TextRank {

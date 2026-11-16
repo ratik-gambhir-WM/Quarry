@@ -1,5 +1,5 @@
 use super::{
-    embedding::QueryEmbeddingCache,
+    embedding::QueryEmbeddings,
     fusion,
     model::{HybridResponse, HybridSearch},
     service::DocumentSearchService,
@@ -80,12 +80,12 @@ impl HybridBackend for DocumentSearchService {
 
 pub(super) struct HybridRuntime {
     pub config: SearchConfig,
-    pub embeddings: Option<Arc<QueryEmbeddingCache>>,
+    pub embeddings: Option<Arc<QueryEmbeddings>>,
     active: Semaphore,
     admitted: Semaphore,
 }
 impl HybridRuntime {
-    pub fn new(config: SearchConfig, embeddings: Option<Arc<QueryEmbeddingCache>>) -> Self {
+    pub fn new(config: SearchConfig, embeddings: Option<Arc<QueryEmbeddings>>) -> Self {
         Self {
             active: Semaphore::new(config.active_requests),
             admitted: Semaphore::new(config.active_requests + config.queued_requests),
@@ -158,7 +158,7 @@ impl HybridRuntime {
 
 async fn retrieve(
     backend: &dyn HybridBackend,
-    embeddings: &QueryEmbeddingCache,
+    embeddings: &QueryEmbeddings,
     config: &SearchConfig,
     actor: i64,
     deals: Vec<String>,

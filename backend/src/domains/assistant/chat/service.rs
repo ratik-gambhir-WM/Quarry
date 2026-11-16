@@ -635,7 +635,7 @@ fn bounded_provider_context(
         if user.role != "user" || !visited_message_ids.insert(&user.message_id) {
             break;
         }
-        pairs.push((user.content.clone(), assistant.content.clone()));
+        pairs.push((user.content.as_str(), assistant.content.as_str()));
         assistant_message = user
             .parent_message_id
             .as_deref()
@@ -658,11 +658,11 @@ fn bounded_provider_context(
             [
                 ChatMessageInput {
                     role: ChatRole::User,
-                    content: user,
+                    content: user.to_owned(),
                 },
                 ChatMessageInput {
                     role: ChatRole::Assistant,
-                    content: assistant,
+                    content: assistant.to_owned(),
                 },
             ]
         })

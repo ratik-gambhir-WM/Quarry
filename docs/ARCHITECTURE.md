@@ -1190,6 +1190,10 @@ The shared Settings form accepts email only.
 | POST | `/deals/{deal_id}/documents/search/hybrid` | Same hybrid operation within one authorized deal | `{queryText, limit}`; strict failure policy and final canonical access snapshot |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
+Synchronous document jobs remain request-owned. Maintenance marks expired attempts and unclaimed
+synchronous jobs older than ten minutes failed, fences their tokens and releases active queue
+capacity. Accepted inputs/checkpoints remain retryable for 24 hours; live leases and background
+recovery jobs are preserved. See [document storage](document-storage.md) for the recovery policy.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
 at 25 MB. The presentation-export route raises its scoped JSON body limit to 50 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
 Axum's default 2 MB body limit first; this mismatch remains a known contract gap.
@@ -1964,7 +1968,7 @@ The historical `sqliteCommitted` field means this complete PostgreSQL commit. Se
 | Document jobs | PostgreSQL inputs/attempts/results; polled watch subscriptions | Durable; terminal success default retention 10 minutes, failures 24 hours |
 | Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
 | Duplicate-ingestion identity | Unique SQL input claim and operation replay | Durable until deal deletion; no process-only identity lock |
-| Query embeddings | Private process-local bounded cache; no results or permissions | Five-minute TTL; 512 entries/16 MiB; lost on restart |
+| Query embeddings | Generated independently per search; shared only across deals within that request | Request lifetime; no cache or cross-request coalescing |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
 | Notebook API resources and save jobs | Shared PostgreSQL; Helix projection | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
 | Notebook edit buffers and save tracking | Session-scoped module/external-store memory | Survives routes; clears on reload/auth changes; saved content reloads from PostgreSQL, unsaved edits are lost |
@@ -2067,8 +2071,9 @@ therefore require LibreOffice.
 ### 10.4 Search
 
 Handlers retain legacy keyword/vector shapes and opt-in text-in hybrid endpoints. The server
-derives accessible deals. Query embeddings are private, bounded and cached/coalesced as before;
-provider work completes before SQL snapshots. Document repositories apply membership, live/current
+derives accessible deals. Each hybrid search generates its own private query embedding, reused only
+across deals within that request. No embedding cache or cross-request coalescing remains; provider
+work completes before SQL snapshots. Document repositories apply membership, live/current
 readiness and immutable profile predicates before lexical/vector LIMIT. Hybrid branches share a
 repeatable-read read-only transaction per deal, then deterministic per-deal RRF and global ordering.
 A final bounded canonical membership/current-result check can shorten responses without refill.
@@ -2144,8 +2149,8 @@ pins it to the loopback API.
 | `QUARRY_SEARCH_QUEUED_REQUESTS` | 32; 1–256 additional admitted hybrid waiters |
 | `QUARRY_SEARCH_QUEUE_SECONDS` | 2; 1–30 queue deadline |
 | `QUARRY_SEARCH_TIMEOUT_SECONDS` | 30; 1–110 hybrid operation deadline (outer HTTP timeout can be shorter) |
-| `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` | 0.4 default; selected large/3072 local profile overrides to 0.26 after recall/control measurements; finite 0–1 cosine-similarity floor before fusion; tune against judged queries, not confidence percentages |
-| `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 fixed embedding-flight deadline, including provider queue |
+| `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` | 0.4 default; selected large/3072 local profile overrides to 0.25 by user request; finite 0–1 cosine-similarity floor before fusion; tune against judged queries, not confidence percentages |
+| `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 per-request embedding deadline, including provider queue |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
@@ -2468,7 +2473,8 @@ layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
 Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
 router composition, schema migration and constraints, PostgreSQL transactions/concurrency,
 repositories, services, router contracts, deterministic hybrid overlap/single embedding,
-request/provider/read bounds, immutable-identity freshness, final access and cache cancellation/eviction,
+request/provider/read bounds, immutable-identity freshness, final access, independent query embeddings
+and provider cancellation,
 multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP limits,
 graph-request preflight, Helix query construction and v3 response mapping,
 OpenAI/WM mapping, stored previews, bounded declared and streamed template bodies,
@@ -2551,9 +2557,14 @@ From `backend/`:
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
+
+The backend gate rejects Clippy-detected redundant clones. Ownership review also checks deep
+copies that the lint cannot identify, particularly vectors, blobs, JSON, batches and sort keys.
+Borrow read-only data or move consumed values; retain shared handles and required independent
+owned snapshots. This is an allocation check, not a blanket prohibition on `Clone`.
 
 From `frontend/src-tauri/` when native code or the desktop contract changes:
 

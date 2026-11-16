@@ -323,21 +323,17 @@ async fn get_current_deal_document_blob(
         .and_where(Condition::is_null("quarry_files.deleted_at"))
         .and_where(Condition::equal("quarry_file_versions.is_current", true))
         .build();
-    let row = postgres
-        .read_one_async(query)
-        .await
-        .map_err(|error| format!("failed to load document blob: {error}"))?;
-
-    row.map(|row| {
-        Ok(StoredDocumentBlob {
-            file_id: required_text(&row, "file_id")?,
-            display_name: required_text(&row, "display_name")?,
-            mime_type: required_text(&row, "mime_type")?,
-            file_bytes: required_blob(&row, "file_bytes")?,
+    postgres
+        .read_one_with_async(query, |row| {
+            Ok(StoredDocumentBlob {
+                file_id: row.get("file_id")?,
+                display_name: row.get("display_name")?,
+                mime_type: row.get("mime_type")?,
+                file_bytes: row.get("file_bytes")?,
+            })
         })
-    })
-    .transpose()
-    .map_err(|error: PostgresError| format!("failed to decode document blob: {error}"))
+        .await
+        .map_err(|error| format!("failed to load document blob: {error}"))
 }
 
 async fn find_current_postgres_file_by_content_hash(
@@ -396,7 +392,7 @@ async fn find_current_postgres_file_by_content_hash(
 
 async fn persist_file_blob(
     postgres: &PostgresClient,
-    file_persistence: FilePersistenceInput,
+    mut file_persistence: FilePersistenceInput,
     chunks: super::search_repository::PreparedChunks,
     attempt: Option<crate::domains::documents::ingestion::repository::Attempt>,
 ) -> Result<PersistedFileIdentity, RepositoryError> {
@@ -468,7 +464,7 @@ async fn persist_file_blob(
 
                 clear_current_file_version(transaction, &file_persistence).await?;
                 insert_quarry_file_version(transaction, &file_persistence, version_number).await?;
-                insert_quarry_file_blob(transaction, &file_persistence).await?;
+                insert_quarry_file_blob(transaction, &mut file_persistence).await?;
                 crate::domains::memberships::record_activity(
                     transaction,
                     &file_persistence.deal_id,
@@ -533,10 +529,12 @@ async fn persist_file_blob(
                 let incoming: std::collections::HashSet<_> = chunks
                     .rows
                     .iter()
-                    .map(|(c, _, _)| c.chunk_id.clone())
+                    .map(|(c, _, _)| c.chunk_id.as_str())
                     .collect();
                 if existing_chunks.len() != incoming.len()
-                    || existing_chunks.iter().any(|id| !incoming.contains(id))
+                    || existing_chunks
+                        .iter()
+                        .any(|id| !incoming.contains(id.as_str()))
                 {
                     return Err(RepositoryError::Conflict(
                         "stored document differs from accepted batch".into(),
@@ -706,8 +704,8 @@ async fn verify_idempotent_version_and_blob(
         .column("file_bytes")
         .and_where(Condition::equal("version_id", &existing.version_id))
         .build();
-    let row = transaction
-        .read_one(query)
+    let bytes = transaction
+        .read_one_with(query, |row| row.get::<_, Vec<u8>>("file_bytes"))
         .await
         .map_err(|error| error.context("failed to read existing file blob"))?
         .ok_or_else(|| {
@@ -716,7 +714,7 @@ async fn verify_idempotent_version_and_blob(
                 existing.version_id
             ))
         })?;
-    if required_blob(&row, "file_bytes")? != input.file_bytes {
+    if bytes != input.file_bytes {
         return Err(PostgresError::transaction_aborted(format!(
             "stored blob for version `{}` is corrupt or collided",
             existing.version_id
@@ -832,11 +830,11 @@ async fn insert_quarry_file_version(
 
 async fn insert_quarry_file_blob(
     transaction: &PostgresTransaction,
-    input: &FilePersistenceInput,
+    input: &mut FilePersistenceInput,
 ) -> Result<(), PostgresError> {
     let query = SqlBuilder::insert_into("quarry_file_blobs")
         .value("version_id", &input.version_id)
-        .value("file_bytes", input.file_bytes.clone())
+        .value("file_bytes", std::mem::take(&mut input.file_bytes))
         .build();
     require_one_row(
         transaction
@@ -920,13 +918,6 @@ fn required_integer(row: &SqlRow, column: &str) -> Result<i64, PostgresError> {
     match row.get(column) {
         Some(SqlValue::Integer(value)) => Ok(*value),
         _ => Err(invalid_row_value(column, "INTEGER")),
-    }
-}
-
-fn required_blob(row: &SqlRow, column: &str) -> Result<Vec<u8>, PostgresError> {
-    match row.get(column) {
-        Some(SqlValue::Blob(value)) => Ok(value.clone()),
-        _ => Err(invalid_row_value(column, "BLOB")),
     }
 }
 

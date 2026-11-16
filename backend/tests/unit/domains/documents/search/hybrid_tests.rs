@@ -111,23 +111,25 @@ fn config() -> SearchConfig {
 #[tokio::test]
 async fn hybrid_embeds_once_then_uses_one_snapshot_per_deal() {
     let fake = Arc::new(Fake::new(10));
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let hits = runtime.run(fake.as_ref(), 1, "", request()).await.unwrap();
     assert_eq!(hits.results.len(), 10);
     assert_eq!(fake.prepared.load(Ordering::SeqCst), 10);
     assert_eq!(fake.embeddings.load(Ordering::SeqCst), 1);
     assert!(hits.results.iter().all(|h| h.match_sources.len() == 2));
-    // Same cached embedding, different actor, fresh final authorization.
+    // Each request embeds independently and repeats final authorization.
     assert!(runtime
         .run(fake.as_ref(), 2, "", request())
         .await
         .unwrap()
         .results
         .is_empty());
-    assert_eq!(fake.embeddings.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.embeddings.load(Ordering::SeqCst), 2);
 }
 #[tokio::test]
 async fn hybrid_empty_scope_needs_no_provider_and_stale_or_revoked_hits_are_removed() {
@@ -145,10 +147,12 @@ async fn hybrid_empty_scope_needs_no_provider_and_stale_or_revoked_hits_are_remo
             revoke,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        assert!(HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        assert!(HybridRuntime::new(config(), Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap()
@@ -162,10 +166,12 @@ async fn hybrid_branch_failure_is_not_partial_success_and_releases_admission() {
         fail: true,
         ..Fake::new(1)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let error = runtime
         .run(fake.as_ref(), 1, "", request())
         .await
@@ -190,10 +196,12 @@ async fn hybrid_bounds_deal_snapshots_after_embedding_and_drops_all_request_work
         prepare_gate: Some(gate.clone()),
         ..Fake::new(10)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let mut request = Box::pin(runtime.run(fake.as_ref(), 1, "", request()));
     assert!(futures_util::poll!(&mut request).is_pending());
     assert_eq!(fake.prepared.load(Ordering::SeqCst), 4);
@@ -216,9 +224,11 @@ async fn hybrid_admission_is_bounded_and_deadlines_return_explicit_errors() {
         prepare_gate: Some(Arc::new(Semaphore::new(0))),
         ..Fake::new(1)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
     let runtime = HybridRuntime::new(
         SearchConfig {
             active_requests: 1,
@@ -227,7 +237,7 @@ async fn hybrid_admission_is_bounded_and_deadlines_return_explicit_errors() {
             request_timeout: std::time::Duration::from_millis(10),
             ..config()
         },
-        Some(cache),
+        Some(embeddings),
     );
     let mut active = Box::pin(runtime.run(fake.as_ref(), 1, "", request()));
     assert!(futures_util::poll!(&mut active).is_pending());
@@ -291,10 +301,12 @@ async fn hybrid_does_not_fill_unrelated_queries_with_weak_nearest_neighbors() {
             semantic_distance: distance,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let runtime = HybridRuntime::new(config(), Some(cache));
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let runtime = HybridRuntime::new(config(), Some(embeddings));
         let response = runtime
             .run(
                 fake.as_ref(),
@@ -324,10 +336,12 @@ async fn hybrid_preserves_exact_keyword_hits_and_relevant_semantic_paraphrases()
             semantic_distance: distance,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let response = HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let response = HybridRuntime::new(config(), Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap();
@@ -349,10 +363,12 @@ async fn hybrid_rejects_helix_orthogonal_and_weak_neighbors_instead_of_filling_t
             semantic_distance: distance,
             ..Fake::new(30)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let results = HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let results = HybridRuntime::new(config(), Some(embeddings))
             .run(
                 fake.as_ref(),
                 1,
@@ -391,14 +407,16 @@ async fn hybrid_recovers_measured_concept_matches_without_admitting_judged_contr
             semantic_distance: (1.0 - similarity) / 2.0,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
         let measured_config = SearchConfig {
             min_semantic_similarity: 0.26,
             ..config()
         };
-        let response = HybridRuntime::new(measured_config, Some(cache))
+        let response = HybridRuntime::new(measured_config, Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap();

@@ -29,7 +29,7 @@ use crate::{
         },
         documents::{
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
-            search::{self, service::DocumentSearchService},
+            search::{self, embedding::QueryEmbeddings, service::DocumentSearchService},
             store::repository::DocumentStore,
             viewing::{self, service::StoredDocumentService},
         },
@@ -287,7 +287,7 @@ pub(crate) fn assemble_api_routes(
             wm.graph_rag_application_name.clone(),
         ),
     });
-    let user_directory = UserDirectory::new(users_repository.clone());
+    let user_directory = UserDirectory::new(users_repository);
     let companies = Arc::new(CompanyService::new(
         CompanyRepository::new(postgres.clone()),
         user_directory.clone(),
@@ -344,27 +344,20 @@ pub(crate) fn assemble_api_routes(
         document_ingestion.clone(),
         config.documents.completed_job_retention,
     ));
-    let search_embeddings = config
-        .openai
-        .as_ref()
-        .zip(openai.as_ref())
-        .map(|(settings, client)| {
-            crate::domains::documents::search::embedding::QueryEmbeddingCache::openai(
-                client.clone(),
-                settings.embedding_model.clone(),
-                config.helix.vector_dimension.get(),
-                config.search.embedding_concurrency,
-                config.search.embedding_timeout,
-            )
-            .map(Arc::new)
-        })
-        .transpose()
-        .unwrap_or_else(|_| {
-            tracing::error!(
-                "private search cache initialization failed; semantic search unavailable"
-            );
-            None
-        });
+    let search_embeddings =
+        config
+            .openai
+            .as_ref()
+            .zip(openai.as_ref())
+            .map(|(settings, client)| {
+                Arc::new(QueryEmbeddings::openai(
+                    client.clone(),
+                    settings.embedding_model.clone(),
+                    config.helix.vector_dimension.get(),
+                    config.search.embedding_concurrency,
+                    config.search.embedding_timeout,
+                ))
+            });
     let document_search = Arc::new(
         DocumentSearchService::new(document_search_repository)
             .with_access(access.clone())
@@ -390,7 +383,7 @@ pub(crate) fn assemble_api_routes(
     );
 
     let deletions = deals::deletion::service::DealDeletionService::new(
-        deals::deletion::DeletionRepository::new(postgres.clone()),
+        deals::deletion::DeletionRepository::new(postgres),
         memberships.lifecycle().clone(),
         stored_documents.clone(),
     );

@@ -99,7 +99,7 @@ cargo test <filter>
 # Broad checks.
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 

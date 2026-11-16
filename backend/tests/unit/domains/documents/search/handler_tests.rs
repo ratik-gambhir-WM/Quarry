@@ -105,7 +105,7 @@ async fn hybrid_http_validates_text_limits_path_and_unknown_fields_before_retrie
 async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_reads() {
     use crate::domains::{
         documents::search::{
-            embedding::{EmbeddingProvider, QueryEmbeddingCache},
+            embedding::{EmbeddingProvider, QueryEmbeddings},
             service::DocumentSearchService,
         },
         identity::access::ResourceAccess,
@@ -141,9 +141,11 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
         ))),
     );
     let provider = Arc::new(Provider(Mutex::new(Vec::new())));
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(provider.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        provider.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
     let service = DocumentSearchService::new(crate::domains::documents::test_support::search(
         application.postgres,
     ))
@@ -153,7 +155,7 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
             enabled: true,
             ..Default::default()
         },
-        Some(cache),
+        Some(embeddings),
     );
     let missing = service.clone().with_hybrid(
         crate::app::config::SearchConfig {
@@ -184,7 +186,10 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
             serde_json::json!({"results":[]})
         );
     }
-    assert_eq!(*provider.0.lock().unwrap(), vec!["C++ Query?"]);
+    assert_eq!(
+        *provider.0.lock().unwrap(),
+        vec!["C++ Query?", "C++ Query?"]
+    );
     let app = super::super::route::routes(Arc::new(missing))
         .layer(Extension(crate::integration_support::test_actor()));
     let response = app

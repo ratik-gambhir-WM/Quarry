@@ -24,6 +24,17 @@ Code is the final authority. The root README is a product overview; use
 [`Getting Started.md`](Getting%20Started.md) for developer onboarding. Preserve the implemented
 desktop API gateway; do not reintroduce the older “save command only” model.
 
+## Scope and simplicity
+
+- Follow the requested scope. A storage migration authorizes the storage migration, not an
+  accompanying redesign or unrelated performance work.
+- Do not overengineer. Use the smallest direct implementation that meets the current request.
+  Do not add speculative caches, request coalescing, frameworks, configuration knobs, or generic
+  abstractions for possible future needs. Add them only when explicitly requested or necessary
+  for the requested behavior's correctness; explain that necessity before implementing them.
+- Preserve existing authorization, integrity, and recovery guarantees without expanding them
+  into new infrastructure. Skills and plans guide execution; they do not expand the user's scope.
+
 ## Start every task this way
 
 1. Run `git status --short` from the repository root. Re-run it before handoff.
@@ -192,7 +203,7 @@ request -> router -> handler -> service -> repository/client
   `docs/postgresql-storage.md` for the verified-empty-index case.
 - `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
   drained operational procedure; never use it as verification. Document jobs are durable SQL
-  inputs/attempts/results; query/preview caches remain in memory.
+  inputs/attempts/results; preview caches remain in memory. Query embeddings are not cached.
 - See `docs/postgresql-storage.md` for server-only URL/pool configuration, default existing graph port
   6969, isolated PostgreSQL tests, backups and recovery.
 
@@ -281,6 +292,14 @@ being changed, keep abstractions proportional to its complexity, and preserve un
 
 ## Backend development rules
 
+- Before handoff, review added or touched `.clone()`, `.cloned()`, `.to_owned()` and `.to_vec()`
+  calls through their consumers. Move owned data when its current owner is finished with it;
+  borrow for read-only use. Check vectors, file bytes, JSON, chunk batches and sort comparisons
+  for repeated deep copies. Preserve cheap `Arc`/pool/client handle clones and copies required for
+  independent owned outputs or asynchronous task lifetimes. Do not add lifetime plumbing or new
+  wrappers merely to remove a clone; explain any material copy retained in a changed hot path.
+  Run the backend Clippy gate below with `clippy::redundant_clone`; passing it does not replace
+  this ownership review.
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
 - Keep all backend Rust tests and test-only support code under `backend/tests/`, including
   mock constructors, fixture types, helper functions, and test-only inherent implementations.
@@ -369,7 +388,7 @@ relevant viewport sizes.
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 

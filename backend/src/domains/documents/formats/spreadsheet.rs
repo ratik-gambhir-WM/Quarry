@@ -154,7 +154,7 @@ fn parse_spreadsheet_rows_from_bytes(bytes: &[u8]) -> Result<Vec<SpreadsheetRow>
         .map_err(|_| "invalid Excel workbook".to_string())?;
     let mut rows = Vec::new();
 
-    for sheet_name in workbook.sheet_names().to_owned() {
+    for sheet_name in workbook.sheet_names() {
         let range = workbook
             .worksheet_range(&sheet_name)
             .map_err(|_| "invalid Excel workbook".to_string())?;

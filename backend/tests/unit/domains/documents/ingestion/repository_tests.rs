@@ -16,6 +16,154 @@ fn input(content: &str) -> UploadedDocument {
     }
 }
 #[tokio::test]
+async fn cancelled_sync_requests_expire_release_capacity_and_retry_with_fenced_attempts() {
+    let db = database().await;
+    let jobs = repository(db.clone());
+    let mut abandoned = Vec::new();
+    for n in 0..8 {
+        let request_jobs = jobs.clone();
+        let (accepted, received) = tokio::sync::oneshot::channel();
+        let request = tokio::spawn(async move {
+            let (id, _) = request_jobs
+                .admit(
+                    "DEAL-SQL".into(),
+                    1,
+                    input(&format!("cancelled-{n}")),
+                    false,
+                )
+                .await
+                .unwrap();
+            let attempt = if n % 2 == 0 {
+                Some(
+                    request_jobs
+                        .claim(Some(&id))
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .attempt,
+                )
+            } else {
+                None
+            };
+            accepted
+                .send((id, attempt))
+                .unwrap_or_else(|_| panic!("request receiver dropped"));
+            std::future::pending::<()>().await;
+        });
+        abandoned.push(received.await.unwrap());
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+    }
+    assert!(matches!(
+        jobs.admit("DEAL-SQL".into(), 1, input("new input"), true)
+            .await,
+        Err(RepositoryError::Capacity)
+    ));
+    sqlx::query("UPDATE document_jobs SET updated_at=0, lease_until=CASE WHEN status='processing' THEN 0 ELSE NULL END")
+        .execute(db.pool()).await.unwrap();
+    jobs.prune(600).await.unwrap();
+    jobs.prune(600).await.unwrap();
+    for (id, attempt) in &abandoned {
+        let job = jobs.job(id).await.unwrap();
+        assert_eq!(job.status, "failed");
+        assert_eq!(job.sequence, if attempt.is_some() { 3 } else { 2 });
+        let result = job.result.unwrap();
+        assert!(!result.success);
+        assert!(!result.sqlite_committed);
+        if let Some(attempt) = attempt {
+            assert!(db
+                .transaction_result_async(|tx| async move { attempt.lock_and_check(&tx).await })
+                .await
+                .is_err());
+        }
+    }
+    jobs.admit("DEAL-SQL".into(), 1, input("new input"), true)
+        .await
+        .unwrap();
+    let (retry, _) = jobs
+        .admit("DEAL-SQL".into(), 1, input("cancelled-0"), false)
+        .await
+        .unwrap();
+    assert_eq!(retry, abandoned[0].0);
+    let recovered = jobs.claim(Some(&retry)).await.unwrap().unwrap();
+    assert_eq!(recovered.file.bytes, b"cancelled-0");
+    let original = abandoned.remove(0).1.unwrap();
+    assert_ne!(recovered.attempt.token, original.token);
+    jobs.fail(&original).await.unwrap();
+    assert_eq!(jobs.job(&retry).await.unwrap().status, "processing");
+    let (doc, chunks, bytes) = sample(&recovered.attempt.file_id, "DEAL-SQL", "cancelled-0", 1);
+    persist_document_and_chunks(
+        &DocumentStore::new(db),
+        "DEAL-SQL",
+        1,
+        doc,
+        chunks,
+        bytes,
+        Some(recovered.attempt),
+    )
+    .await
+    .unwrap();
+    assert!(jobs.job(&retry).await.unwrap().result.unwrap().success);
+}
+
+#[tokio::test]
+async fn sync_expiration_preserves_live_and_background_work_and_image_checkpoints() {
+    let db = database().await;
+    let jobs = repository(db.clone());
+    let mut preserved = Vec::new();
+    for (content, background, processing) in [
+        ("live queued", false, false),
+        ("live processing", false, true),
+        ("background queued", true, false),
+        ("background processing", true, true),
+        ("promoted", false, true),
+    ] {
+        let (id, _) = jobs
+            .admit("DEAL-SQL".into(), 1, input(content), background)
+            .await
+            .unwrap();
+        if processing {
+            jobs.claim(Some(&id)).await.unwrap().unwrap();
+        }
+        if background || content == "promoted" {
+            sqlx::query("UPDATE document_jobs SET updated_at=0, lease_until=CASE WHEN status='processing' THEN 0 ELSE NULL END WHERE job_id=$1")
+                .bind(&id).execute(db.pool()).await.unwrap();
+        }
+        if content == "promoted" {
+            jobs.admit("DEAL-SQL".into(), 1, input(content), true)
+                .await
+                .unwrap();
+        }
+        preserved.push((id, if processing { "processing" } else { "queued" }));
+    }
+    let (id, _) = jobs
+        .admit("DEAL-SQL".into(), 1, input("image checkpoint"), false)
+        .await
+        .unwrap();
+    let claim = jobs.claim(Some(&id)).await.unwrap().unwrap();
+    let (document, chunks, _) = sample(&claim.attempt.file_id, "DEAL-SQL", "image checkpoint", 1);
+    let assembly = crate::domains::documents::formats::image::ImageAssembly { document, chunks };
+    let json = serde_json::to_string(&assembly).unwrap();
+    jobs.checkpoint_image(&claim.attempt, json.clone())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE document_jobs SET lease_until=0 WHERE job_id=$1")
+        .bind(&id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    jobs.prune(600).await.unwrap();
+    for (id, status) in preserved {
+        assert_eq!(jobs.job(&id).await.unwrap().status, status);
+    }
+    assert_eq!(jobs.job(&id).await.unwrap().status, "failed");
+    jobs.admit("DEAL-SQL".into(), 1, input("image checkpoint"), false)
+        .await
+        .unwrap();
+    let retry = jobs.claim(Some(&id)).await.unwrap().unwrap();
+    assert_eq!(serde_json::to_string(&retry.image.unwrap()).unwrap(), json);
+}
+#[tokio::test]
 async fn lost_admission_replays_one_job_and_exact_content_has_one_logical_winner() {
     let db = database().await;
     let jobs = repository(db.clone());

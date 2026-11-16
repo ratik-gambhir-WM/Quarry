@@ -607,6 +607,31 @@ fn batch_insert_binds_rows_in_order_without_conflict_skipping() {
 }
 
 #[test]
+fn cosine_expression_moves_the_vector_allocation_into_query_parameters() {
+    let vector =
+        crate::adapters::postgres::vector::CosineVector::new(vec![0.5; 1536], 1536).unwrap();
+    let allocation = vector.as_slice().as_ptr();
+    let query = SqlBuilder::select("chunks")
+        .expression(
+            super::SelectExpression::CosineDistance {
+                column: "embedding".into(),
+                vector,
+            },
+            "distance",
+        )
+        .build()
+        .unwrap();
+    let [SqlValue::Vector(parameter)] = query.parameters() else {
+        panic!("expected one vector parameter");
+    };
+    assert_eq!(parameter.as_slice().as_ptr(), allocation);
+    assert_eq!(
+        query.sql(),
+        "SELECT (\"embedding\" OPERATOR(quarry_extensions.<=>) $1) AS \"distance\" FROM \"chunks\""
+    );
+}
+
+#[test]
 fn grouped_conditions_and_rank_parameters_keep_placeholder_order() {
     let query = SqlBuilder::select("chunks")
         .column("id")

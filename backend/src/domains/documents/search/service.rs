@@ -1,4 +1,4 @@
-use super::fusion::identity;
+use super::fusion::sort_identity;
 use crate::{
     domains::{
         documents::store::{
@@ -25,7 +25,7 @@ impl DocumentSearchService {
     pub fn with_hybrid(
         mut self,
         config: crate::app::config::SearchConfig,
-        embeddings: Option<std::sync::Arc<super::embedding::QueryEmbeddingCache>>,
+        embeddings: Option<std::sync::Arc<super::embedding::QueryEmbeddings>>,
     ) -> Self {
         self.reads = std::sync::Arc::new(tokio::sync::Semaphore::new(config.sql_reads));
         self.hybrid = std::sync::Arc::new(super::hybrid::HybridRuntime::new(config, embeddings));
@@ -118,7 +118,7 @@ impl DocumentSearchService {
         hits.sort_by(|a, b| {
             a.distance
                 .total_cmp(&b.distance)
-                .then_with(|| identity(&a.chunk).cmp(&identity(&b.chunk)))
+                .then_with(|| sort_identity(&a.chunk).cmp(&sort_identity(&b.chunk)))
         });
         hits.dedup_by(|a, b| a.chunk.chunk_id == b.chunk.chunk_id);
         hits.truncate(search.limit);
@@ -169,7 +169,7 @@ impl DocumentSearchService {
         hits.sort_by(|a, b| {
             b.score
                 .total_cmp(&a.score)
-                .then_with(|| identity(&a.chunk).cmp(&identity(&b.chunk)))
+                .then_with(|| sort_identity(&a.chunk).cmp(&sort_identity(&b.chunk)))
         });
         hits.dedup_by(|a, b| a.chunk.chunk_id == b.chunk.chunk_id);
         hits.truncate(search.limit);

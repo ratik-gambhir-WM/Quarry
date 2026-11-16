@@ -78,9 +78,13 @@ checks the attempt token, identity, profile and database-clock expiry, under cur
 and membership authority. An old attempt cannot publish over its replacement.
 
 Synchronous batches use the same admission and atomic publication repository. Their active work
-is request-owned; dropping the request drops its futures. An abandoned synchronous attempt stays
-recoverable by an explicit matching retry after its retained lease expires, rather than automatically
-becoming background work.
+is request-owned; dropping the request drops its futures. Maintenance marks expired synchronous
+attempts failed, clears their attempt tokens and releases their active queue slots. Unclaimed
+synchronous jobs expire after ten minutes without an update. Both transitions run under the same
+mutation and row locks as claims and background promotion; live leases and background jobs remain
+untouched. Failed results, accepted bytes and image checkpoints retain the existing 24-hour retry
+window. An explicit matching retry reuses the job and input with a new attempt token; abandoned
+work never automatically becomes background work.
 An explicit asynchronous replay promotes queued or processing work to durable background execution.
 Promotion preserves the current attempt token and lease; a processing job can be reclaimed only
 after lease expiry. Status polling selects metadata and terminal results without loading accepted
@@ -113,7 +117,7 @@ Legacy vector responses keep flattened snake_case chunks and `(1-cosine)/2` dist
 Hybrid's floor therefore corresponds to similarity `1 - pgvectorDistance`; RRF remains per deal,
 constant 60, deduplicated sources, candidate window `min(100,max(50,limit))` and deterministic
 immutable identity ties. Legacy keyword scores remain reciprocal per-deal ranks. See
-[hybrid search](hybrid-document-search.md) for unchanged client behavior and cache/admission bounds.
+[hybrid search](hybrid-document-search.md) for client behavior and request/provider concurrency bounds.
 
 Deletion cascades SQL chunks, manifests, input claims and jobs while retaining the deal lifecycle
 reservation and receipt. Historical phase strings remain accepted; new cleanup passes through

@@ -182,7 +182,8 @@ without a SQLite runtime dependency. Captured FTS5 ranking fixtures cover techni
 diacritics, prefixes, ties and private/app scopes. Helix template metadata/dual-vector projection
 and startup reconciliation remain. Canonical embedding artifacts still belong to PostgreSQL.
 
-Notebook/document jobs and deletion receipts are durable; query/preview caches remain in memory.
+Notebook/document jobs and deletion receipts are durable; preview caches remain in memory.
+Query embeddings are generated per request without caching.
 The historical wire field `sqliteCommitted` and durable deletion phase `sqlite` now mean canonical
 PostgreSQL commit/cleanup. Their names remain unchanged for client compatibility.
 

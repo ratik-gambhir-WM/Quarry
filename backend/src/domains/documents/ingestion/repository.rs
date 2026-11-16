@@ -44,8 +44,42 @@ pub(crate) struct Job {
 }
 impl DocumentJobRepository {
     pub async fn prune(&self, seconds: u32) -> Result<(), RepositoryError> {
-        self.db.write_async(prune_jobs(seconds)).await?;
-        Ok(())
+        self.db
+            .transaction_result_async(|tx| async move {
+                // Request-owned work has no recovery worker. Expire it under the same
+                // mutation/row locks as claims and promotion, fencing any late owner.
+                let abandoned = tx
+                    .lock_with(
+                        Q::select("document_jobs")
+                            .columns(["job_id", "filename"])
+                            .and_where(abandoned_sync())
+                            .lock(RowLock::Update, LockWait::Wait)
+                            .build(),
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                    )
+                    .await?;
+                for (id, filename) in abandoned {
+                    let result = serde_json::to_string(&failed_result(filename))
+                        .map_err(PostgresError::decode)?;
+                    tx.write(
+                        Q::update("document_jobs")
+                            .set("status", "failed")
+                            .set("stage", "terminal")
+                            .set("result_json", result)
+                            .set("attempt_token", Option::<String>::None)
+                            .set("lease_until", Option::<i64>::None)
+                            .set_epoch_seconds_after("updated_at", 0)
+                            .increment("sequence")
+                            .and_where(C::equal("job_id", id))
+                            .and_where(abandoned_sync())
+                            .build(),
+                    )
+                    .await?;
+                }
+                tx.write(prune_jobs(seconds)).await?;
+                Ok(())
+            })
+            .await
     }
     pub async fn admit(
         &self,
@@ -320,21 +354,36 @@ impl DocumentJobRepository {
             .await
     }
     pub async fn fail(&self, attempt: &Attempt) -> Result<(), RepositoryError> {
-        let result = ProcessedDocument {
-            filename: attempt.filename.clone(),
-            document_id: None,
-            chunk_count: 0,
-            success: false,
-            sqlite_committed: false,
-            skipped: false,
-            error: Some(
-                "Document processing failed. Refresh documents and retry the same file.".into(),
-            ),
-        };
+        let result = failed_result(attempt.filename.clone());
         let query = terminal(attempt, "failed", &result)?;
         self.db.write_async(Ok(query)).await?;
         Ok(())
     }
+}
+fn failed_result(filename: String) -> ProcessedDocument {
+    ProcessedDocument {
+        filename,
+        document_id: None,
+        chunk_count: 0,
+        success: false,
+        sqlite_committed: false,
+        skipped: false,
+        error: Some(
+            "Document processing failed. Refresh documents and retry the same file.".into(),
+        ),
+    }
+}
+fn abandoned_sync() -> C {
+    C::all([
+        C::equal("background", 0),
+        C::any([
+            C::all([C::equal("status", "processing"), C::expired("lease_until")]),
+            C::all([
+                C::equal("status", "queued"),
+                C::older_than("updated_at", 600),
+            ]),
+        ]),
+    ])
 }
 impl Attempt {
     pub async fn lock_and_check(&self, tx: &PostgresTransaction) -> Result<(), RepositoryError> {

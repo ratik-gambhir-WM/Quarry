@@ -22,13 +22,13 @@ keyword/vector endpoints and their snake_case result DTOs remain available.
 ## Ownership and scheduling
 
 Bootstrap injects document repositories, optional OpenAI query embeddings and typed limits.
-Embedding/cache work finishes outside SQL. Bounded deal pipelines then run keyword and semantic
+Embedding work finishes outside SQL. Bounded deal pipelines then run keyword and semantic
 queries sequentially on one retained repeatable-read, read-only transaction per deal. Authorized
 membership, live/current/readiness and profile predicates precede candidate LIMIT. Both branches
 must succeed. Full canonical chunk-ID lists and remote header-verification scans are removed.
 
 Defaults remain four deal pipelines, eight SQL read operations across the service (including
-legacy endpoints), four provider misses, 16 active hybrid requests and 32 queued requests.
+legacy endpoints), four provider requests, 16 active hybrid requests and 32 queued requests.
 `QUARRY_SEARCH_SQL_READS` replaces the old Helix-read setting. Queue, embedding and operation
 deadlines remain two, fifteen and thirty seconds. These are bounds, not measured latency targets.
 Dropping a request drops scheduling and its SQL/provider waiters; no result/permission cache exists.
@@ -52,7 +52,7 @@ rank and full immutable identity ties. A final bounded current-result/member sna
 most 100 returned IDs; revocation can shorten the response without refill. Legacy keyword scores
 remain reciprocal per-deal ranks. Native SQL rank is never added directly to cosine.
 
-## Embedding reuse
+## Query embeddings
 
 The private OpenAI path uses the same server-selected model/dimension profile as ingestion.
 The repository selects matching immutable provider/model/dimension/metric/preparation identity;
@@ -62,19 +62,11 @@ truncation. Model/dimension changes require an explicit compatible schema/profil
 Provider error bodies are never returned. The historical `HELIX_VECTOR_DIMENSION` name remains
 the shared document/notebook dimension setting during the staged rollout.
 
-Each process-local cache is immutable and bound to one provider client/model/dimension tuple.
-The key is SHA-256 of a private random process-cache salt, provider/model/dimension/version
-namespace, and the exact trimmed query; punctuation and case are preserved. Retained keys
-contain no plaintext query. Successful vectors expire five minutes after insertion, never
-extended on reads. Oldest-expiry eviction enforces 512 entries and 16 MiB of retained
-vector/key/entry data with a conservative 256-byte per-entry allowance and an additional 128 KiB table-capacity reserve.
-
-A weak registry coalesces up to 32 unique in-flight keys, at most 64 live waiters per key.
-Shared futures are polled by their callers, without detached tasks or locks across awaits.
-Dropping the last waiter cancels provider/queue work; another live waiter can keep shared
-work running until its original fixed deadline. Errors and cancelled flights are not cached.
-A new configuration/cache instance has a new salt and cannot reuse the old vectors.
-Authorization is repeated for every search, including cache hits and different actors.
+Each hybrid search generates its own query embedding. Vectors are reused only across the
+accessible deals within that request, then released. There is no embedding cache, retained query
+key, eviction policy or sharing of in-flight provider work across requests. Existing provider
+concurrency and deadline limits include waiting for a provider slot. Dropping a request drops
+its provider future or queue wait and releases its slot. Authorization is repeated for every search.
 
 ## Shared UI and rollback
 
@@ -82,7 +74,7 @@ The Data Room panel uses hybrid search through both runtime adapters. Draft text
 send requests. Enter or Search submits; editing, clearing, closing or changing actor/deal
 invalidates prior results. Pending browser requests are aborted; the desktop JSON relay has
 no request cancellation, so late completions are ignored and server work is bounded.
-Focus revalidation repeats the authorized retrieval using the embedding cache. Legacy live
+Focus revalidation repeats the authorized retrieval with a new query embedding. Legacy live
 keyword consumers retain their 250 ms debounce. Query, passage and response bodies are
 omitted from the new HTTP activity-log entries; desktop API logs contain operation metadata.
 
@@ -349,3 +341,10 @@ Cutoff correction verification:
 - Quarry was restored in the existing web launch mode with the selected local override;
   API health and the UI both returned HTTP 200. The six uploaded documents were retained,
   and no re-upload is required for the cutoff change. Architecture notes were re-checked.
+
+### User-selected cutoff update — 2026-11-16
+
+The user subsequently requested a 0.25 cutoff. The ignored local configuration now sets
+`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY=0.25`; the repository default remains 0.4.
+This supersedes the local 0.26 selection above and takes effect after backend restart.
+The recorded relevance measurements remain historical; no new relevance evaluation was run.

@@ -102,8 +102,7 @@ pub fn parse_slide_query_input(value: &Value) -> Result<SlideQueryInput, SlideRe
     {
         return Err(invalid());
     }
-    let mut input: SlideQueryInput =
-        serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+    let mut input: SlideQueryInput = SlideQueryInput::deserialize(value).map_err(|_| invalid())?;
     if ![
         "text", "semantic", "hybrid", "filter", "similar", "by_id", "facets",
     ]

@@ -16,7 +16,7 @@ pub(super) fn identity(c: &FileChunkResult) -> Identity {
     )
 }
 
-fn sort_identity(c: &FileChunkResult) -> (&str, &str, &str, &str, &str, &str, i64) {
+pub(super) fn sort_identity(c: &FileChunkResult) -> (&str, &str, &str, &str, &str, &str, i64) {
     (
         &c.deal_id,
         &c.file_id,

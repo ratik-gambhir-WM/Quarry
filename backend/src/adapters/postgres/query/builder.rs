@@ -543,34 +543,34 @@ pub enum SelectExpression {
     },
 }
 impl SelectExpression {
-    fn render(&self, parameters: &mut Vec<SqlValue>) -> Result<String, SqlBuilderError> {
+    fn render(self, parameters: &mut Vec<SqlValue>) -> Result<String, SqlBuilderError> {
         Ok(match self {
             Self::TextPrefixRank { column, token } => {
-                validate_prefix(token)?;
-                parameters.push(token.clone().into());
-                format!("ts_rank_cd({},to_tsquery('pg_catalog.english',quote_literal(?) || ':*'))::float8",quote_identifier(column)?)
+                validate_prefix(&token)?;
+                parameters.push(token.into());
+                format!("ts_rank_cd({},to_tsquery('pg_catalog.english',quote_literal(?) || ':*'))::float8",quote_identifier(&column)?)
             }
             Self::Count => "COUNT(*)".into(),
             Self::CountWhere(condition) => {
                 let mut predicate = String::new();
-                append_predicate(&mut predicate, condition, parameters)?;
+                append_predicate(&mut predicate, &condition, parameters)?;
                 format!("COUNT(*) FILTER (WHERE {predicate})")
             }
             Self::SumByteLength(column) => format!(
                 "COALESCE(SUM(octet_length({})),0)::bigint",
-                quote_identifier(column)?
+                quote_identifier(&column)?
             ),
             Self::CosineDistance { column, vector } => {
-                parameters.push(vector.clone().into());
+                parameters.push(vector.into());
                 format!(
                     "({} OPERATOR(quarry_extensions.<=>) ?)",
-                    quote_identifier(column)?
+                    quote_identifier(&column)?
                 )
             }
             Self::TextRank { column, text } => {
                 parameters.push(text.clone().into());
-                parameters.push(text.clone().into());
-                format!("ts_rank_cd({},plainto_tsquery('pg_catalog.english',?) || plainto_tsquery('pg_catalog.simple',?))::float8",quote_identifier(column)?)
+                parameters.push(text.into());
+                format!("ts_rank_cd({},plainto_tsquery('pg_catalog.english',?) || plainto_tsquery('pg_catalog.simple',?))::float8",quote_identifier(&column)?)
             }
         })
     }
@@ -747,13 +747,13 @@ impl SelectBuilder {
                 .map(String::as_str)
                 .chain(self.expressions.iter().map(|(_, alias)| alias.as_str())),
         )?;
-        for (expression, alias) in &self.expressions {
+        for (expression, alias) in self.expressions {
             if !columns.is_empty() {
                 columns.push_str(", ");
             }
             columns.push_str(&expression.render(&mut parameters)?);
             columns.push_str(" AS ");
-            columns.push_str(&quote_identifier(alias)?);
+            columns.push_str(&quote_identifier(&alias)?);
         }
         let distinct = if self.distinct { "DISTINCT " } else { "" };
         let mut sql = format!("SELECT {distinct}{columns} FROM {table}");

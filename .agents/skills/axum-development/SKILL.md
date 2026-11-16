@@ -124,7 +124,7 @@ work and preserve necessary guards at the actual operation.
   notebook/template projection boundary. Documents use exact scoped cosine and indexed English/technical lexical search.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
-- Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Query/preview caches remain process-local. Notebook saves/cleanup, template classification
+- Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Preview caches remain process-local; query embeddings are not cached. Notebook saves/cleanup, template classification
   jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
   Durable receipts do not make these workers a distributed queue.
 
@@ -168,7 +168,7 @@ From `backend/`:
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 

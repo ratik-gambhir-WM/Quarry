@@ -43,14 +43,14 @@ fn prepare_document(
     deal_id: &str,
     actor_id: i64,
     document: Document,
-    chunks: Vec<DocumentChunk>,
+    mut chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
     profile: EmbeddingProfile,
 ) -> Result<(FilePersistenceInput, PreparedChunks), String> {
     ensure_document_invariants(&document, &chunks)?;
     let mut input = build_file_persistence_input(deal_id, actor_id, &document, file_bytes)?;
     let mut rows = Vec::with_capacity(chunks.len());
-    for chunk in &chunks {
+    for chunk in &mut chunks {
         let chunk_index = i64::from(chunk.sequence_number);
         let (page_start, page_end) = page_range(chunk)?;
         rows.push((
@@ -81,7 +81,7 @@ fn prepare_document(
                 section_path: chunk.section_title.clone().unwrap_or_default(),
                 created_at: input.timestamp.clone(),
             },
-            chunk.embedding.clone().ok_or("missing chunk embedding")?,
+            chunk.embedding.take().ok_or("missing chunk embedding")?,
         ));
     }
     rows.sort_by_key(|(c, _)| c.chunk_index);
