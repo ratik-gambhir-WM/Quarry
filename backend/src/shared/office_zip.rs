@@ -73,10 +73,11 @@ pub fn validate_office_package(
         if total_uncompressed_bytes > MAX_OFFICE_ZIP_TOTAL_BYTES {
             return Err(OfficePackageError);
         }
-        if entry.name() == kind.required_root() {
+        let entry_name = entry.name().map_err(|_| OfficePackageError)?;
+        if entry_name == kind.required_root() {
             has_required_root = true;
         }
-        if entry.name() == "[Content_Types].xml" {
+        if entry_name == "[Content_Types].xml" {
             if entry_size > MAX_OFFICE_CONTENT_TYPES_BYTES as u64 {
                 return Err(OfficePackageError);
             }

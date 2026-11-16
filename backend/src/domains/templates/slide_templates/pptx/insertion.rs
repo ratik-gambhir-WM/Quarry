@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{ensure, Context};
 use roxmltree::Document;
-use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
 const SLIDE_RELATIONSHIP: &str =
@@ -189,7 +189,7 @@ fn read_package(bytes: &[u8]) -> anyhow::Result<Package> {
         if entry.is_dir() {
             continue;
         }
-        let path = entry.name().to_owned();
+        let path = entry.name()?.into_owned();
         ensure!(
             is_safe_part_path(&path),
             "PowerPoint package contains an unsafe part path"

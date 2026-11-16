@@ -94,7 +94,11 @@ describe("App routes", () => {
     );
 
     expect(
-      await screen.findByText("No template preview input was provided."),
+      await screen.findByText(
+        "No template preview input was provided.",
+        {},
+        lazyRouteWait,
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Quarry" })).toBeNull();
     expect(listDeals).not.toHaveBeenCalled();

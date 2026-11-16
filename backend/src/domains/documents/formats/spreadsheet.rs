@@ -179,7 +179,10 @@ fn validate_spreadsheet_cell_ranges(bytes: &[u8]) -> Result<(), String> {
         let mut entry = archive
             .by_index(index)
             .map_err(|_| "invalid Excel workbook".to_string())?;
-        if !is_worksheet_entry_name(entry.name()) {
+        let entry_name = entry
+            .name()
+            .map_err(|_| "invalid Excel workbook".to_string())?;
+        if !is_worksheet_entry_name(&entry_name) {
             continue;
         }
 

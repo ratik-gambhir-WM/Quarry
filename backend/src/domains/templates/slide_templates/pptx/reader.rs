@@ -6,7 +6,7 @@ use std::{
 use super::super::error::FailureKind;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use roxmltree::{Document, Node};
-use zip_slide::ZipArchive;
+use zip::ZipArchive;
 
 use super::super::{
     ArrowType, CanvasDocument, Conversion, DashStyle, ElbowDirection, Element, HorizontalAlign,
@@ -992,7 +992,7 @@ fn read_package(source: &[u8]) -> SlideResult<HashMap<String, Vec<u8>>> {
     let mut parts = HashMap::with_capacity(archive.len());
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(|_| invalid_powerpoint())?;
-        let name = entry.name().to_owned();
+        let name = entry.name().map_err(|_| invalid_powerpoint())?.into_owned();
         if !safe_part_name(&name) || entry.size() > MAX_ENTRY_BYTES {
             return Err(if entry.size() > MAX_ENTRY_BYTES {
                 powerpoint_too_large()

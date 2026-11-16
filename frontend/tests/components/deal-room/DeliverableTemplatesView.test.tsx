@@ -38,7 +38,10 @@ beforeEach(() => {
   importPptxTemplate.mockReset();
   listTemplatePreviews.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("DeliverableTemplatesView", () => {
   it("shows a labelled carousel skeleton while loading", async () => {
@@ -155,7 +158,7 @@ describe("DeliverableTemplatesView", () => {
       page(1, 2, 1, ["first-template", "second-template"], 10),
     );
     deleteTemplate.mockResolvedValue(undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.stubGlobal("confirm", vi.fn(() => true));
     renderView();
 
     await userEvent.click(
@@ -179,7 +182,7 @@ describe("DeliverableTemplatesView", () => {
   it("opens a selected template while keeping delete as an independent sibling action", async () => {
     listTemplatePreviews.mockResolvedValue(page(1, 1, 1, ["first-template"]));
     deleteTemplate.mockResolvedValue(undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.stubGlobal("confirm", vi.fn(() => true));
     const onSelectSlide = vi.fn();
     renderView({ onSelectSlide });
 
@@ -202,7 +205,7 @@ describe("DeliverableTemplatesView", () => {
   it("keeps the template and shows a sanitized message when deletion fails", async () => {
     listTemplatePreviews.mockResolvedValue(page(1, 1, 1, ["first-template"]));
     deleteTemplate.mockRejectedValue(new Error("private upstream details"));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.stubGlobal("confirm", vi.fn(() => true));
     renderView();
 
     await userEvent.click(

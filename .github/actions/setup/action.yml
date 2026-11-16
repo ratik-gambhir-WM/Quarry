@@ -1,0 +1,28 @@
+name: Set up Quarry checks
+description: Install the shared Node, Rust, and Linux native build prerequisites.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: '1.99.0'
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          backend -> target
+          frontend/src-tauri -> target
+    - name: Install Linux native dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+    - name: Install frontend dependencies
+      shell: bash
+      working-directory: frontend
+      run: npm ci
