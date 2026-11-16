@@ -1,0 +1,159 @@
+/* Step-two content only: the dialog, stepper and edit-deal form keep their layout. */
+.deal-company-step {
+  container-type: inline-size;
+}
+
+.deal-company-step .deal-companies {
+  gap: 16px;
+}
+
+.deal-company-step .deal-companies > legend {
+  margin-bottom: 8px;
+}
+
+.deal-company-step .deal-companies > p {
+  max-width: 70ch;
+  line-height: 1.6;
+}
+
+.deal-company-step :is(input, select, [data-slot="button"]) {
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.deal-company-step input {
+  padding-inline: 12px;
+  box-shadow: none;
+}
+
+.deal-company-step .deal-company-toolbar {
+  display: grid;
+  align-items: end;
+  gap: 12px;
+}
+
+.deal-company-step .deal-company-search input {
+  padding-left: 36px;
+}
+
+.deal-company-step :is(.deal-company-search-icon, .deal-company-create-icon) {
+  display: block;
+}
+
+.deal-company-step .deal-company-create {
+  justify-self: start;
+}
+
+.deal-company-step .deal-company-empty {
+  padding: 20px;
+  border-radius: 8px;
+  background: var(--theme-surface-subtle);
+  line-height: 1.6;
+}
+
+.deal-company-step .deal-company-results ul:empty {
+  display: none;
+}
+
+.deal-company-step .deal-company-results ul {
+  overscroll-behavior: contain;
+  border-radius: 8px;
+}
+
+.deal-company-step .deal-company-results li {
+  padding: 12px;
+}
+
+.deal-company-step .deal-company-pagination {
+  justify-content: space-between;
+}
+
+.deal-company-step .deal-company-role {
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: end;
+  padding: 12px;
+  border-radius: 8px;
+  gap: 12px;
+}
+
+.deal-company-step .deal-company-name {
+  grid-column: 1 / -1;
+  align-self: center;
+}
+
+.deal-company-step .deal-company-role > label {
+  gap: 6px;
+  font-size: 12px;
+}
+
+.deal-company-step .deal-company-role > label:not(.deal-company-notes) {
+  grid-column: 1 / -1;
+}
+
+.deal-company-step .deal-company-remove {
+  justify-self: end;
+  width: 36px;
+  height: 36px;
+  color: var(--theme-error);
+}
+
+.deal-company-step .deal-company-form {
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+}
+
+.deal-company-step .deal-company-form > :is(h3, p, .deal-company-form-actions) {
+  grid-column: 1 / -1;
+}
+
+.deal-company-step .deal-company-field {
+  gap: 8px;
+}
+
+.deal-company-step .deal-company-form-actions {
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--theme-border);
+}
+
+@container (min-width: 480px) {
+  .deal-company-step .deal-company-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .deal-company-step .deal-company-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Shared controls retain their pointer feedback; keyboard changes are immediate. */
+html[data-motion-input="keyboard"] .deal-company-step :is(input, select, button) {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deal-company-step :is(input, select, button) {
+    transition: none;
+  }
+}
+
+@container (min-width: 380px) {
+  .deal-company-step .deal-company-role {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 36px;
+  }
+
+  .deal-company-step .deal-company-role > label:not(.deal-company-notes) {
+    grid-column: auto;
+  }
+}
+
+@container (min-width: 600px) {
+  .deal-company-step .deal-company-role {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.2fr) 36px;
+  }
+
+  .deal-company-step .deal-company-name {
+    grid-column: auto;
+  }
+}

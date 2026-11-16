@@ -21,16 +21,18 @@ indexes. Credentials may instead be supplied through the ignored backend configu
 through `VITE_*`, browser storage, Tauri arguments, screenshots, or logs. The application requires
 an explicit URL; it does not use an old database path or fall back to SQLite.
 
-On macOS, the launcher starts an existing Postgres.app 18 cluster if stopped, then checks
-PostgreSQL connectivity without changing its schema. `QUARRY_POSTGRES_BIN` selects the tools
+On macOS, the launcher starts an existing Postgres.app 18 cluster if stopped. Axum opens
+and retains its PostgreSQL pool during bootstrap, with no separate connection preflight.
+A connection failure exits startup before the UI starts. `QUARRY_POSTGRES_BIN` selects the tools
 (default `/Applications/Postgres.app/Contents/Versions/18/bin`) and `QUARRY_POSTGRES_DATA_DIR`
 selects the existing cluster (default `$HOME/Library/Application Support/Postgres/var-18`). It
 never initializes storage or creates databases. Other installations must be started separately
 when these tools/storage are unavailable. Startup failures leave existing data intact; `pg_ctl`
 writes startup diagnostics to `postgres-server.log` in the selected cluster. The launcher
 supervises Axum and the selected UI; PostgreSQL remains running after it exits.
-The new local graph uses `helix-quarry-postgres-dev`, a separate disk-backed Docker volume, and
-loopback port **6970**, leaving the previous port-6969 graph untouched. `QUARRY_HELIX_CONTAINER_NAME`
+The launcher defaults to the existing `helix-quarry-v3-dev` container, its
+`helix-quarry-v3-dev-data` volume, and loopback port **6969**. It reuses this graph without
+migrating or resetting data. For a fresh PostgreSQL deployment, explicitly select a separate graph. `QUARRY_HELIX_CONTAINER_NAME`
 and `QUARRY_HELIX_PORT` select another isolated local store/port. The launcher passes its selected
 `HELIX_URL` to Axum. For direct backend startup, explicitly match `HELIX_URL` to the selected graph.
 Existing graph credentials, vector dimensions and template embedding settings retain their meaning.
@@ -208,7 +210,7 @@ fresh Helix instance and fixed embeddings; optional real-provider checks remain 
 Back up PostgreSQL with its supported backup tools and retain the matching Helix backup,
 configuration and binary. Drain writers for a coordinated restore. Never delete canonical rows to
 hide a projection failure, reset valuable data, or run `clear_helix` as a test. The previous SQLite
-files and port-6969 graph remain historical stores for the old binary; they are not an automatic
+files remain historical stores for the old binary; they are not an automatic
 rollback/import source for this fresh PostgreSQL deployment.
 
 See [PostgreSQL storage verification](postgresql-storage-verification.md) for recorded branch checks

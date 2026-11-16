@@ -6,6 +6,7 @@ import { DealResourcesDialog } from "../../components/deal-room/DealResourcesDia
 import { useState } from "react";
 import { AddDealModal } from "../../components/hub/sidebar/AddDealModal";
 import { Button } from "../../components/ui/stealth/button";
+import { DealScopeView } from "../../components/deal-room/DealScopeView";
 import { DealSummaryCard } from "../../components/deal-room/DealSummaryCard";
 import { InsightsStrip } from "../../components/hub/InsightsStrip";
 import { WorkspaceMain } from "../../components/hub/WorkspaceLayout";
@@ -32,6 +33,7 @@ export function DealRoomOverviewPage() {
 
   return (
     <WorkspaceMain
+      contentMode={activeOverviewSection === "scope" ? "fill" : "scroll"}
       header={
         <DealRoomHeader
           activeSection={activeOverviewSection}
@@ -52,7 +54,12 @@ export function DealRoomOverviewPage() {
           onClose={() => setAddingResources(false)}
         />
       ) : null}
-      <div ref={contentRef} className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10">
+      <div
+        ref={contentRef}
+        className={activeOverviewSection === "scope"
+          ? "flex h-full min-h-0 min-w-0 flex-col"
+          : "mx-auto flex w-full max-w-[1440px] flex-col gap-6 pb-10"}
+      >
         {activeOverviewSection === "activity" ? (
           deal.persisted ? (
             <DealActivity key={deal.room.id} dealId={deal.room.id} />
@@ -88,6 +95,8 @@ export function DealRoomOverviewPage() {
               <p className="deal-roster-card p-6 text-sm text-muted">Settings are available for saved deals.</p>
             )}
           </section>
+        ) : activeOverviewSection === "scope" ? (
+          <DealScopeView key={deal.room.id} questions={deal.room.keyQuestions} />
         ) : activeOverviewSection === "file-summary" ? (
           <>
             <h1 className="sr-only">{deal.room.name}</h1>
@@ -100,6 +109,7 @@ export function DealRoomOverviewPage() {
         ) : (
           <DealSummaryCard
             deal={deal.room}
+            onEdit={deal.persisted?.capabilities?.edit ? () => setEditing(true) : undefined}
             onAddResources={
               deal.persisted?.capabilities?.edit
                 ? () => setAddingResources(true)

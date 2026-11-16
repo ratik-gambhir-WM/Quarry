@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { useState } from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -27,6 +28,7 @@ vi.mock("@quarry/runtime", () => ({ runtime: { api } }));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  vi.useRealTimers();
 });
 function Editor() {
   const [fields, setFields] = useState<DealFields>(testDealInput());
@@ -275,4 +277,70 @@ it("retains company edits and the displayed revision after a stale-save conflict
   expect((screen.getByLabelText("Company name") as HTMLInputElement).value).toBe("My draft");
   expect(api.updateCompany).toHaveBeenCalledExactlyOnceWith(company.companyId, expect.objectContaining({ name: "My draft", expectedRevision: 7 }));
   expect(api.createCompany).not.toHaveBeenCalled();
+});
+
+
+describe("company search typing", () => {
+  it("debounces requests and retains the input, results, and pagination while typing", async () => {
+    vi.useFakeTimers();
+    api.listCompanies.mockResolvedValue({ companies: [testCompany("Reusable")], hasMore: true });
+    render(<Editor />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const search = screen.getByLabelText("Search company directory");
+    const list = screen.getByRole("list", { name: "Matching companies" });
+    const next = screen.getByRole("button", { name: "More companies" });
+    search.focus();
+    for (const value of ["R", "Re", "Reu", "Reus", "Reusa", "Reusab", "Reusabl"]) {
+      fireEvent.change(search, { target: { value } });
+      await act(() => vi.advanceTimersByTimeAsync(40));
+    }
+    fireEvent.change(search, { target: { value: "Reusable" } });
+    expect(document.activeElement).toBe(search);
+    expect(screen.getByLabelText("Search company directory")).toBe(search);
+    expect(screen.getByRole("list", { name: "Matching companies" })).toBe(list);
+    expect(next.parentElement?.hidden).toBe(false);
+    expect(next.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Add Reusable" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByText("Loading companies…")).toBeNull();
+    expect(api.listCompanies).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(249));
+    expect(api.listCompanies).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(api.listCompanies).toHaveBeenCalledTimes(2);
+    expect(api.listCompanies).toHaveBeenLastCalledWith({ query: "Reusable", limit: 30, offset: 0 });
+    expect(screen.getByRole("list", { name: "Matching companies" })).toBe(list);
+    expect(screen.getByRole("button", { name: "Add Reusable" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("ignores a superseded response and resets pagination for a new search", async () => {
+    vi.useFakeTimers();
+    let finishOld: (page: { companies: ReturnType<typeof testCompany>[]; hasMore: boolean }) => void = () => { throw new Error("Request not started"); };
+    api.listCompanies
+      .mockResolvedValueOnce({ companies: [testCompany("First")], hasMore: true })
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockResolvedValue({ companies: [testCompany("Latest")], hasMore: false });
+    render(<Editor />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(screen.getByRole("button", { name: "More companies" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(api.listCompanies).toHaveBeenLastCalledWith({ query: "", limit: 30, offset: 30 });
+    fireEvent.change(screen.getByLabelText("Search company directory"), { target: { value: "Latest" } });
+    await act(() => vi.advanceTimersByTimeAsync(250));
+    expect(api.listCompanies).toHaveBeenLastCalledWith({ query: "Latest", limit: 30, offset: 0 });
+    expect(screen.getByRole("button", { name: "Add Latest" })).toBeTruthy();
+    await act(async () => { finishOld({ companies: [testCompany("Obsolete")], hasMore: true }); });
+    expect(screen.queryByRole("button", { name: "Add Obsolete" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add Latest" })).toBeTruthy();
+  });
+
+  it("clears a scheduled search when the editor unmounts", async () => {
+    vi.useFakeTimers();
+    api.listCompanies.mockResolvedValue({ companies: [], hasMore: false });
+    const { unmount } = render(<Editor />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.change(screen.getByLabelText("Search company directory"), { target: { value: "Unsubmitted" } });
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(250));
+    expect(api.listCompanies).toHaveBeenCalledTimes(1);
+  });
 });

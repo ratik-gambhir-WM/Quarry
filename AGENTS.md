@@ -191,9 +191,10 @@ request -> router -> handler -> service -> repository/client
   a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
   `docs/postgresql-storage.md` for the verified-empty-index case.
 - `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
-  drained operational procedure; never use it as verification. Document jobs are durable SQL inputs/attempts/results; query/preview caches remain in memory.
-- See `docs/postgresql-storage.md` for server-only URL/pool configuration, fresh local graph port
-  6970, isolated PostgreSQL tests, backups and recovery.
+  drained operational procedure; never use it as verification. Document jobs are durable SQL
+  inputs/attempts/results; query/preview caches remain in memory.
+- See `docs/postgresql-storage.md` for server-only URL/pool configuration, default existing graph port
+  6969, isolated PostgreSQL tests, backups and recovery.
 
 ## Frontend development rules
 
@@ -209,6 +210,14 @@ request -> router -> handler -> service -> repository/client
 - Model loading, empty, error, disabled, stale/cancelled, retry, and success states for async UI.
 - Reuse current primitives, CSS variables, Tailwind 4 conventions, and `components.json` aliases.
   Do not edit generated `dist` output or bypass semantic theme tokens with a parallel style system.
+- Use reusable local shadcn components under `frontend/src/components/ui/` for standard controls
+  and disclosures throughout feature/page code, including registry integrations. Add a missing
+  component to that shared layer instead of composing primitive-library parts in a feature.
+  Keep direct Radix, Base UI, and Ark UI imports inside `components/ui/`; the boundary check
+  enforces this. Specialized shared wrappers may retain their underlying library behavior.
+  Shared components own theme-aware styling, interaction states, accessibility, and motion;
+  callers own feature state and requests. Preserve Quarry's existing colors, typography,
+  spacing, radii, and motion tokens; do not import registry-wide theme defaults or resets.
 - Preserve semantic HTML, accessible names, keyboard/focus behavior, reduced-motion behavior,
   and visible async feedback.
 - Include purposeful motion when building or changing UI. Read
@@ -391,9 +400,10 @@ normal code check.
 ## Change checklists
 
 The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
-embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped, check
-the configured database connection, and ensure Docker Desktop and the configured local Helix
-container are ready. PostgreSQL, Docker, and Helix remain running after the launcher exits.
+embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped and ensure
+Docker Desktop and the configured local Helix container are ready. Axum opens its PostgreSQL pool
+during bootstrap; there is no separate database connection preflight. PostgreSQL, Docker, and Helix
+remain running after the launcher exits.
 
 ### When changing a frontend route or feature
 

@@ -72,6 +72,12 @@ cancel/clean up correctly, and retain complete dependencies.
 
 ## UI and accessibility rules
 
+- Use local shadcn components in `src/components/ui/` for standard controls and disclosures
+  across feature/page code and registry integrations. Add missing components to the shared
+  layer; direct Radix, Base UI, and Ark UI imports belong only inside `components/ui/`.
+  Share styling, interaction states, accessibility, and motion there while feature owners keep
+  their state and requests. Preserve Quarry's current theme tokens, typography, spacing, radii,
+  and motion; never import a registry's global palette or reset as part of adding a component.
 - Reuse `frontend/src/components/ui/`, feature primitives, `components.json` aliases, and semantic
   tokens in `src/index.css` before creating another design system.
 - Preserve light and dark themes, responsive behavior, and `prefers-reduced-motion` behavior.

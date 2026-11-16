@@ -1,4 +1,5 @@
 export type DataRoomTreeNode = {
+  addedAt?: string;
   children?: DataRoomTreeNode[];
   defaultExpanded?: boolean;
   error?: string;
@@ -6,6 +7,7 @@ export type DataRoomTreeNode = {
   kind: "doc" | "folder" | "pdf" | "sheet";
   name: string;
   relativePath?: string;
+  sizeBytes?: number | null;
   storedFileId?: string;
   uploadedByName?: string | null;
 };
@@ -59,8 +61,10 @@ export function isUnconfiguredDataRoomError(error: unknown): boolean {
 
 export function buildStoredDocumentNodes(
   documents: ReadonlyArray<{
+    addedAt?: string;
     displayName: string;
     fileId: string;
+    sizeBytes?: number;
     uploadedByName?: string | null;
   }>,
 ): DataRoomTreeNode[] {
@@ -71,10 +75,12 @@ export function buildStoredDocumentNodes(
   return [
     {
       children: documents.map((document) => ({
+        addedAt: document.addedAt,
         id: `stored-document:${document.fileId}`,
         kind: getStoredDocumentKind(document.displayName),
         name: document.displayName,
         relativePath: `stored-document:${document.fileId}`,
+        sizeBytes: document.sizeBytes,
         storedFileId: document.fileId,
         uploadedByName: document.uploadedByName ?? null,
       })),

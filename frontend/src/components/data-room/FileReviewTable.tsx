@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import type {
   ColumnDef,
   ColumnPinningState,
+  ExpandedState,
   PaginationState,
   SortingState,
 } from "@tanstack/react-table";
 import { useTable } from "@tanstack/react-table";
-import { Search, X } from "lucide-react";
+import { ChevronRight, Search, X } from "lucide-react";
 import { FILE_TYPES } from "@/data/fileTypes";
 import { FileTypeIcon } from "@/components/ui/FileTypeIcon";
 import type { DataRoomFileEntry, DataRoomTreeNode } from "../../data/dataRoom";
@@ -31,6 +32,7 @@ import {
   quarryDataGridTableClassNames,
 } from "../reui/data-grid/quarry-data-grid";
 import { cn } from "../../lib/utils";
+import { formatFileSize, formatShortUtcDate } from "../../lib/formatters";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
@@ -67,6 +69,8 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("All types");
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [expanded, setExpanded] = useState<ExpandedState>({});
+  const reviewId = useId();
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 10,
@@ -128,11 +132,34 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
         ),
         cell: ({ row }) => (
           <div className="flex min-w-0 items-start gap-3">
+            <button
+              aria-controls={row.getIsExpanded() ? `${reviewId}-${encodeURIComponent(row.id)}` : undefined}
+              aria-expanded={row.getIsExpanded()}
+              aria-label={`${row.getIsExpanded() ? "Hide" : "Show"} review for ${row.original.fileName}`}
+              className="file-review-toggle mt-0.5 grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors [@media(hover:hover)]:hover:bg-surface-container-high [@media(hover:hover)]:hover:text-foreground active:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              id={`${reviewId}-toggle-${encodeURIComponent(row.id)}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                row.toggleExpanded();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  row.toggleExpanded(event.key === "ArrowRight");
+                }
+              }}
+              type="button"
+            >
+              <ChevronRight aria-hidden="true" className={cn("file-review-chevron size-4", row.getIsExpanded() && "rotate-90")} />
+            </button>
             <FileTypeIcon filename={row.original.fileName} kind={row.original.node.kind} />
             <div className="min-w-0">
               <button
                 className="block max-w-full whitespace-normal break-words text-left text-xs font-medium leading-5 text-foreground [@media(hover:hover)]:hover:text-primary active:text-primary focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => onSelectFile(row.original.node)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectFile(row.original.node);
+                }}
                 title={`${row.original.fileName} — ${row.original.folderLabel} · ${row.original.fileType}`}
                 type="button"
               >
@@ -140,9 +167,9 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
               </button>
               <span
                 className="mt-1 block truncate text-[11px] leading-4 text-muted-foreground"
-                title={`${row.original.folderLabel} · ${row.original.fileType}${row.original.source === "stored" ? ` · Uploaded by ${row.original.node.uploadedByName ?? "Unknown"}` : ""}`}
+                title={`${row.original.folderLabel}${row.original.source === "stored" ? ` · Uploaded by ${row.original.node.uploadedByName ?? "Unknown"}` : ""}`}
               >
-                {row.original.folderLabel} · {row.original.fileType}
+                {row.original.folderLabel}
                 {row.original.source === "stored"
                   ? ` · Uploaded by ${row.original.node.uploadedByName ?? "Unknown"}`
                   : ""}
@@ -150,16 +177,71 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
             </div>
           </div>
         ),
-        size: 300,
-        minSize: 260,
-        meta: { headerTitle: "File" },
+        size: 360,
+        minSize: 220,
+        meta: {
+          headerTitle: "File",
+          expandedContent: (row: FileReviewRow) => (
+            <FileReviewDetails id={`${reviewId}-${encodeURIComponent(row.id)}`} row={row} />
+          ),
+        },
       },
-      reviewColumn("keyFinding", "Key findings"),
-      reviewColumn("risks", "Risks"),
-      reviewColumn("opportunities", "Opportunities"),
-      reviewColumn("impact", "Key question impact"),
+      {
+        accessorKey: "fileType",
+        header: ({ column }) => <DataGridColumnHeader className={compactHeaderClassName} column={column} title="File type" />,
+        cell: ({ row }) => <span className="text-xs">{row.original.fileType}</span>,
+        size: 130,
+        minSize: 100,
+        meta: { headerTitle: "File type" },
+      },
+      {
+        accessorKey: "sizeBytes",
+        header: ({ column }) => <DataGridColumnHeader className={cn(compactHeaderClassName, "ml-auto")} column={column} title="File size" />,
+        cell: ({ row }) => (
+          <span className="block text-right text-xs tabular-nums">
+            {row.original.sizeBytes === undefined ? "N/A" : formatFileSize(row.original.sizeBytes)}
+          </span>
+        ),
+        sortUndefined: "last",
+        size: 120,
+        minSize: 100,
+        meta: { headerTitle: "File size" },
+      },
+      {
+        id: "category",
+        header: () => <span className={compactHeaderClassName}>File category</span>,
+        cell: () => <span className="text-xs text-muted-foreground">N/A</span>,
+        enableSorting: false,
+        size: 150,
+        minSize: 120,
+        meta: { headerTitle: "File category" },
+      },
+      {
+        id: "addedAt",
+        accessorFn: (row) => row.addedAt ? Date.parse(row.addedAt) : undefined,
+        header: ({ column }) => (
+          <DataGridColumnHeader className={compactHeaderClassName} column={column} title="Date added" />
+        ),
+        cell: ({ row }) => (
+          <span className="text-xs tabular-nums">{formatShortUtcDate(row.original.addedAt)}</span>
+        ),
+        sortFn: "basic",
+        sortUndefined: "last",
+        size: 160,
+        minSize: 140,
+        meta: { headerTitle: "Date added" },
+      },
+      {
+        id: "rlId",
+        header: () => <span className={compactHeaderClassName}>RL ID</span>,
+        cell: () => <span className="text-xs text-muted-foreground">Coming soon</span>,
+        enableSorting: false,
+        size: 150,
+        minSize: 130,
+        meta: { headerTitle: "RL ID" },
+      },
     ],
-    [onSelectFile],
+    [onSelectFile, reviewId],
   );
 
   const table = useTable({
@@ -167,11 +249,14 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
     columns,
     data: visibleRows,
     getRowId: (row) => row.id,
-    state: { columnPinning, pagination, sorting },
+    state: { columnPinning, expanded, pagination, sorting },
+    getRowCanExpand: () => true,
+    onExpandedChange: setExpanded,
     onColumnPinningChange: setColumnPinning,
     onPaginationChange: setPagination,
     onSortingChange: setSorting,
     autoResetPageIndex: false,
+    autoResetExpanded: false,
   });
 
   const resetFilters = () => {
@@ -187,7 +272,7 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   };
 
   return (
-    <section className="glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
+    <section className="file-review-table glass-panel workspace-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-12 shrink-0 items-center gap-4 border-b border-outline-variant bg-[var(--theme-workspace-surface)] px-5">
         <h1 className="min-w-0 flex-1 truncate text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
           File review
@@ -319,6 +404,11 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
         </div>
         <DataGrid
           emptyMessage="No file reviews match these filters."
+          onRowClick={(row: FileReviewRow) => {
+            if (window.getSelection()?.toString()) return;
+            table.getRow(row.id).toggleExpanded();
+            document.getElementById(`${reviewId}-toggle-${encodeURIComponent(row.id)}`)?.focus({ preventScroll: true });
+          }}
           recordCount={visibleRows.length}
           table={table}
           tableClassNames={reviewTableClassNames}
@@ -347,31 +437,23 @@ export function FileReviewTable({ files, onSelectFile }: FileReviewTableProps) {
   );
 }
 
-function reviewColumn(
-  accessorKey: "impact" | "keyFinding" | "opportunities" | "risks",
-  title: string,
-): ColumnDef<DataGridFeatures, FileReviewRow> {
-  return {
-    accessorKey,
-    header: ({ column }) => (
-      <DataGridColumnHeader
-        className={compactHeaderClassName}
-        column={column}
-        title={title}
-      />
-    ),
-    cell: ({ row }) => (
-      <div
-        className="min-w-0 whitespace-normal"
-        title={row.original[accessorKey]}
-      >
-        <span className="whitespace-normal break-words text-xs leading-5">
-          {row.original[accessorKey]}
-        </span>
-      </div>
-    ),
-    size: 240,
-    minSize: 220,
-    meta: { headerTitle: title },
-  };
+function FileReviewDetails({ id, row }: { id: string; row: FileReviewRow }) {
+  return (
+    <section aria-label={`Review for ${row.fileName}`} className="file-review-details whitespace-normal bg-surface-container-low px-4 py-4 sm:px-5" id={id}>
+      <p className="mb-4 text-[11px] text-muted-foreground">Illustrative review · Sample analysis, not generated from this file</p>
+      <dl className="grid gap-x-8 gap-y-5">
+        {([
+          ["Key findings", row.keyFinding],
+          ["Risks", row.risks],
+          ["Opportunities", row.opportunities],
+          ["Key question impact", row.impact],
+        ] as const).map(([label, content]) => (
+          <div className="min-w-0" key={label}>
+            <dt className="mb-1 text-xs font-medium text-foreground">{label}</dt>
+            <dd className="break-words text-xs leading-5 text-muted-foreground">{content}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
 }

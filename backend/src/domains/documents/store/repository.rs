@@ -14,8 +14,10 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealDocumentSummary {
+    pub added_at: String,
     pub file_id: String,
     pub display_name: String,
+    pub size_bytes: i64,
     pub uploaded_by_user_id: Option<i64>,
     pub uploaded_by_name: Option<String>,
     pub attribution_origin: String,
@@ -237,6 +239,8 @@ async fn list_current_deal_documents(
         .columns([
             "quarry_files.file_id",
             "quarry_files.display_name",
+            "quarry_files.created_at",
+            "quarry_file_versions.byte_size",
             "quarry_file_versions.uploaded_by_user_id",
             "users.first_name",
             "users.last_name",
@@ -265,8 +269,10 @@ async fn list_current_deal_documents(
     rows.into_iter()
         .map(|row| {
             Ok(DealDocumentSummary {
+                added_at: required_text(&row, "created_at")?,
                 file_id: required_text(&row, "file_id")?,
                 display_name: required_text(&row, "display_name")?,
+                size_bytes: required_integer(&row, "byte_size")?,
                 uploaded_by_user_id: match row.get("uploaded_by_user_id") {
                     Some(SqlValue::Integer(id)) => Some(*id),
                     _ => None,

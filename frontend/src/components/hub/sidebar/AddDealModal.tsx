@@ -25,6 +25,7 @@ import { Input } from "../../ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { DealStepper, type DealStep, type StepperOrientation } from "./DealStepper";
 import "./deal-stepper.css";
+import "./deal-company-step.css";
 
 import {
   DealCompanyRolesEditor,
@@ -284,7 +285,7 @@ export function AddDealModal({
               </fieldset>
             </div>
             {!initialDeal ? (
-              <div hidden={step !== "companies"}>
+              <div className="deal-company-step" hidden={step !== "companies"}>
                 <fieldset disabled={isSubmitting || step !== "companies"}>
                   <DealCompanyRolesEditor
                     onCompanyFormChange={setCompanyFormOpen}

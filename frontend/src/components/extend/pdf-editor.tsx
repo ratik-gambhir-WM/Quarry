@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 import { createPluginRegistration } from "@embedpdf/core";
 import {
   EmbedPDF,
@@ -156,7 +155,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea as InlineScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -3191,7 +3190,7 @@ function PdfEditorInner({
                       onModeChange={setMode}
                     />
                     <PdfEditorToolbarSeparator className="mx-1.5" />
-                    <InlineScrollArea2
+                    <ScrollArea
                       orientation="horizontal"
                       scrollFade
                       scrollbarOverflowOnly
@@ -3444,7 +3443,7 @@ function PdfEditorInner({
                           </DropdownMenu>
                         </div>
                       </div>
-                    </InlineScrollArea2>
+                    </ScrollArea>
                   </div>
                 </fieldset>
               </TooltipProvider>
@@ -4031,128 +4030,6 @@ export const PDFEditor = React.forwardRef<PDFEditorHandle, PDFEditorProps>(
     );
   },
 );
-function InlineScrollArea2({
-  className,
-  children,
-  orientation = "both",
-  scrollFade = false,
-  scrollbarGutter = false,
-  scrollbarOverflowOnly = false,
-  viewportClassName,
-  viewportProps,
-  viewportRef,
-  ...props
-}: InlineScrollAreaProps) {
-  const {
-    className: viewportPropsClassName,
-    ref: viewportPropsRef,
-    ...resolvedViewportProps
-  } = viewportProps ?? {};
-  const composedViewportRef = React.useMemo(
-    () => InlineComposeRefs(viewportPropsRef, viewportRef),
-    [viewportPropsRef, viewportRef],
-  );
-
-  if (
-    !viewportProps &&
-    !viewportRef &&
-    !viewportClassName &&
-    !scrollFade &&
-    !scrollbarGutter &&
-    !scrollbarOverflowOnly
-  ) {
-    return (
-      <InlineScrollArea
-        {...props}
-        className={cn(
-          "size-full min-h-0",
-          orientation === "horizontal" &&
-            "[&>[data-orientation=vertical]]:hidden",
-          className,
-        )}
-      >
-        {children}
-      </InlineScrollArea>
-    );
-  }
-
-  return (
-    <ScrollAreaPrimitive.Root
-      className={cn(
-        "size-full min-h-0",
-        scrollbarOverflowOnly &&
-          "[&:not(:has([data-slot=scroll-area-viewport][data-has-overflow-x]))_[data-orientation=horizontal]]:hidden [&:not(:has([data-slot=scroll-area-viewport][data-has-overflow-y]))_[data-orientation=vertical]]:hidden",
-        className,
-      )}
-      {...props}
-    >
-      <ScrollAreaPrimitive.Viewport
-        {...resolvedViewportProps}
-        ref={composedViewportRef}
-        className={cn(
-          "h-full rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          scrollFade &&
-            "mask-t-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-start)))] mask-r-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-end)))] mask-b-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-end)))] mask-l-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-start)))] [--fade-size:1.5rem]",
-          scrollbarGutter && orientation !== "vertical" && "pb-3.5",
-          scrollbarGutter && orientation !== "horizontal" && "pe-3.5",
-          viewportPropsClassName,
-          viewportClassName,
-        )}
-        data-slot="scroll-area-viewport"
-      >
-        {children}
-      </ScrollAreaPrimitive.Viewport>
-      {orientation !== "horizontal" ? (
-        <InlineScrollBar orientation="vertical" />
-      ) : null}
-      {orientation !== "vertical" ? (
-        <InlineScrollBar orientation="horizontal" />
-      ) : null}
-      {orientation === "both" ? <ScrollAreaPrimitive.Corner /> : null}
-    </ScrollAreaPrimitive.Root>
-  );
-}
-function InlineScrollBar({
-  className,
-  orientation = "vertical",
-  ...props
-}: ScrollAreaPrimitive.Scrollbar.Props) {
-  return (
-    <ScrollAreaPrimitive.Scrollbar
-      className={cn(
-        "flex touch-none p-px transition-colors select-none",
-        orientation === "vertical" &&
-          "h-full w-2.5 border-l border-l-transparent",
-        orientation === "horizontal" &&
-          "h-2.5 flex-col border-t border-t-transparent",
-        className,
-      )}
-      orientation={orientation}
-      {...props}
-    >
-      <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border" />
-    </ScrollAreaPrimitive.Scrollbar>
-  );
-}
-type InlineScrollAreaProps = Omit<ScrollAreaPrimitive.Root.Props, "style"> & {
-  style?: React.CSSProperties;
-  orientation?: "vertical" | "horizontal" | "both";
-  scrollFade?: boolean;
-  scrollbarGutter?: boolean;
-  scrollbarOverflowOnly?: boolean;
-  viewportClassName?: string;
-  viewportProps?: ScrollAreaPrimitive.Viewport.Props;
-  viewportRef?: React.Ref<HTMLDivElement>;
-};
-function InlineComposeRefs<T>(...refs: Array<React.Ref<T> | undefined>) {
-  return (node: T | null) => {
-    for (const ref of refs) {
-      if (!ref) continue;
-      if (typeof ref === "function") ref(node);
-      else ref.current = node;
-    }
-  };
-}
 function InlineSpinner({ className, ...props }: InlineRegistryIconProps) {
   return (
     <LoaderCircle

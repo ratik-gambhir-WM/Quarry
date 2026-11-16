@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   afterAll,
   afterEach,
@@ -198,10 +198,10 @@ describe("DealRoomPage", () => {
       "Deal Activity",
       "Site Visits",
       "File Summary",
-      "Evidence",
+      "Scope",
       "Findings",
       "Open Items",
-      "Settings",
+      "Team",
       "Search documents",
     ]);
     expect(
@@ -209,10 +209,10 @@ describe("DealRoomPage", () => {
     ).not.toBeNull();
     expect(screen.queryByText("Analyzed Files")).toBeNull();
     expect(
-      screen.getByRole("tab", { name: "Evidence, coming soon" }),
-    ).toHaveProperty("disabled", true);
+      screen.getByRole("tab", { name: "Scope" }),
+    ).toHaveProperty("disabled", false);
 
-    expect(screen.getByRole("tab", { name: "Settings" })).toHaveProperty(
+    expect(screen.getByRole("tab", { name: "Team" })).toHaveProperty(
       "disabled",
       false,
     );
@@ -254,6 +254,47 @@ describe("DealRoomPage", () => {
       screen.queryByText(workspaceDeals[0]?.room.summary ?? ""),
     ).toBeNull();
     expect(document.querySelector('[data-slot="data-grid"]')).not.toBeNull();
+  });
+
+  it("opens Scope directly and preserves the inset and navigation history", async () => {
+    const user = userEvent.setup({ skipHover: true });
+    function HistoryControls() {
+      const navigate = useNavigate();
+      const location = useLocation();
+      return <>
+        <button onClick={() => navigate(-1)}>Back</button>
+        <button onClick={() => navigate(1)}>Forward</button>
+        <output data-testid="route">{location.search}</output>
+      </>;
+    }
+    render(
+      <MemoryRouter initialEntries={["/hub/deals/project-alpha?section=scope&keep=1"]}>
+        <HistoryControls />
+        <Routes>
+          <Route element={<DealRoomPage />} path="/hub/deals/:dealId">
+            <Route index element={<DealRoomOverviewPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    const main = screen.getByRole("main");
+    expect(screen.getByRole("tab", { name: "Scope", selected: true })).toBeTruthy();
+    expect(within(main).getByRole("heading", { name: "Key Questions" })).toBeTruthy();
+    for (const question of workspaceDeals[0]?.room.keyQuestions ?? []) {
+      expect(within(main).getByText(question)).toBeTruthy();
+    }
+    expect(screen.queryByText("Due Diligence Overview")).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(screen.getByRole("main")).toBe(main);
+    expect(screen.queryByRole("heading", { name: "Key Questions" })).toBeNull();
+    expect(screen.getByTestId("route").textContent).toBe("?keep=1");
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("tab", { name: "Scope", selected: true })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Key Questions" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+    expect(screen.getByRole("tab", { name: "Overview", selected: true })).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Scope" }));
+    expect(screen.getByTestId("route").textContent).toBe("?keep=1&section=scope");
   });
 
   it("opens Site Visits from a direct link and preserves calendar edits across tabs", async () => {
