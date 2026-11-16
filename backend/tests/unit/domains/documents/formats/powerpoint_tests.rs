@@ -8,6 +8,7 @@ fn run(text: &str) -> Run {
     Run {
         text: text.to_string(),
         formatting: Default::default(),
+        link_target: None,
     }
 }
 
@@ -43,9 +44,11 @@ fn extracts_text_from_slide_elements_in_visual_order() {
                     cells: vec![
                         TableCell {
                             runs: vec![run("Name")],
+                            ..Default::default()
                         },
                         TableCell {
                             runs: vec![run("Amount")],
+                            ..Default::default()
                         },
                     ],
                 }],

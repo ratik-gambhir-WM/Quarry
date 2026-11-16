@@ -207,7 +207,7 @@ fn branding_uses_inherited_layout_and_image_names_do_not_collide_across_duplicat
         .slides
         .push(document.presentation.slides[0].clone());
     let bytes = pptx::write(&document).unwrap();
-    let mut archive = zip_slide::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+    let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
     let mut layout = String::new();
     archive
         .by_name("ppt/slideLayouts/slideLayout1.xml")

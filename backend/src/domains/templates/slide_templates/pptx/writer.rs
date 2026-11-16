@@ -1,7 +1,7 @@
 use std::{fmt::Write as _, io::Write};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::super::{
     ArrowType, CanvasDocument, DashStyle, ElbowDirection, Element, HorizontalAlign, ImageCrop,

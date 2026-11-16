@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn package_rejects_actual_expansion_above_forged_entry_size() {
+fn package_rejects_forged_entry_size_before_the_expansion_limit() {
     use std::io::Write;
-    use zip_slide::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+    use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     for name in [
@@ -36,14 +36,15 @@ fn package_rejects_actual_expansion_above_forged_entry_size() {
     let Err(error) = read_package(&bytes) else {
         panic!("package exceeded the actual decompression limit");
     };
-    assert_eq!(error.kind, FailureKind::TooLarge);
-    assert_eq!(error.code, "powerpoint_too_large");
+    // ZIP 9 rejects expansion past the declared size before Quarry's byte budget.
+    assert_eq!(error.kind, FailureKind::Invalid);
+    assert_eq!(error.code, "invalid_powerpoint");
 
-    // Insertion targets must use the same streaming limits as imports.
+    // Insertion targets must reject the same malformed archive as imports.
     let error = super::super::insertion::insert(&bytes, &bytes, 0).unwrap_err();
     assert_eq!(
         error.downcast_ref::<SlideTemplateError>().unwrap().code,
-        "powerpoint_too_large"
+        "invalid_powerpoint"
     );
 }
 

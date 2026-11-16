@@ -18,7 +18,7 @@ beforeEach(() => {
   api.listDeals.mockResolvedValue([{ dealId: "DEAL-A", dealName: "Alpha" }, { dealId: "DEAL-B", dealName: "Beta" }]);
   api.listDealDocuments.mockImplementation(async (id: string) => [{ fileId: `file-${id}`, displayName: id === "DEAL-A" ? "Architecture.pdf" : "Budget.xlsx" }]);
 });
-function Example({ dealId = null, send = vi.fn() }: { dealId?: string | null; send?: ReturnType<typeof vi.fn> }) {
+function Example({ dealId = null, send = vi.fn() }: { dealId?: string | null; send?: (submission: { value: string; references: readonly ChatFileReference[] }) => void }) {
   const [value, setValue] = useState("");
   const [references, setReferences] = useState<readonly ChatFileReference[]>([]);
   return <PromptInput value={value} onValueChange={setValue} references={references} onReferencesChange={setReferences} scopeDealId={dealId}

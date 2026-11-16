@@ -14,7 +14,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use tower::ServiceExt as _;
-use zip_slide::ZipArchive;
+use zip::ZipArchive;
 
 const POWERPOINT_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.presentationml.presentation";

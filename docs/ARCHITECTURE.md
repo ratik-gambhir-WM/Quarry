@@ -1379,8 +1379,10 @@ their capacity permit until they actually exit. No database guard is held while 
 or provider. ZIP expansion/entry/path checks, JSON/image bounds, and temporary child cleanup remain.
 Imports and insertion enforce the 50 MiB per-part and 250 MiB per-package expansion budgets on
 actual decompressed bytes, independently of ZIP size declarations, stopping after at most one
-byte beyond the remaining budget. Template SVG asset responses retain image rendering but apply
-a CSP sandbox without permissions, deny scripts and network resources, and allow only inline
+byte beyond the remaining budget. ZIP 9 additionally rejects entries that expand past their
+declared size as `invalid_powerpoint` before Quarry's expansion budget is reached. Template SVG
+asset responses retain image rendering but apply a CSP sandbox without permissions, deny scripts
+and network resources, and allow only inline
 styles and embedded data images; direct navigation cannot grant an SVG the API's origin.
 
 PostgreSQL is canonical; see [PostgreSQL storage and Helix](postgresql-storage.md).
@@ -2402,10 +2404,11 @@ API relay does not yet preserve an end-to-end server request/error identity.
 
 ### 14.1 Frontend test model
 
-Vitest runs through the Vite configuration. Pure modules use the default environment; interaction
-tests opt into happy-dom per file. All frontend tests live under `frontend/tests/`, mirroring the
-corresponding paths under `frontend/src/`; both TypeScript targets include that test tree. The
-runtime-boundary check rejects `*.test.*` and `*.spec.*` files placed under `frontend/src/`.
+Vitest 4 runs through the Vite configuration. Pure modules use the default environment; interaction
+tests opt into Happy DOM 21 per file and explicitly stub missing browser dialogs. All frontend
+tests live under `frontend/tests/`, mirroring the corresponding paths under `frontend/src/`;
+both TypeScript targets include that test tree. The runtime-boundary check rejects `*.test.*`
+and `*.spec.*` files placed under `frontend/src/`.
 Coverage currently includes:
 
 - HTTP and Tauri API mappings
@@ -2637,7 +2640,7 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
-| npm dependencies | The 2026-10-19 [dependency check](npm-dependency-health.md) installed compatible fixes; frontend test/CLI tooling and Studio's PowerPoint image dependency retain audit findings | Passing builds/tests do not imply a clean security audit; broader dependency changes remain necessary |
+| Dependency security | The 2026-11-16 updates patch frontend test/build tooling, Rust networking/memory-safety dependencies in both Rust targets, and Quarry's direct ZIP consumers; `docx-rust` still requires ZIP 4, shadcn still requires unpatched `deepmerge`, and Tauri's Linux GTK stack still requires GLib 0.18 | ZIP, deepmerge, and GLib alerts remain; clearing them requires upstream fixes or separately verified dependency replacements, not audit suppressions |
 | API mapping | Handwritten in web and desktop adapters | Drift risk without shared descriptors/generation |
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | Pull-request CI exists; no production container, provider, signing, updater, or TLS config | Repository is not independently deployable |
