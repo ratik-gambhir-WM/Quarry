@@ -1951,7 +1951,10 @@ database-clock attempt fence, current membership and lifecycle guards reject sta
 Accepted immutable input and image descriptions are separate durable checkpoints, not uploaded
 documents. Matching retries reuse the winning identity and accepted text. Terminal SQL status
 reconciles uncertain acknowledgments and survives restarts without repeating committed provider
-work. The historical `sqliteCommitted` field means this complete PostgreSQL commit. See the
+work. Explicit async retries promote queued or processing synchronous jobs to background recovery
+without replacing a live attempt's token or lease; processing work is reclaimed only after expiry.
+Status polling reads metadata/results without loading accepted input bytes or image checkpoints.
+The historical `sqliteCommitted` field means this complete PostgreSQL commit. See the
 [document storage and recovery contract](document-storage.md) for limits and retry policy.
 
 ### 9.4 Ephemeral state

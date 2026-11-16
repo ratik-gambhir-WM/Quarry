@@ -81,7 +81,10 @@ Synchronous batches use the same admission and atomic publication repository. Th
 is request-owned; dropping the request drops its futures. An abandoned synchronous attempt stays
 recoverable by an explicit matching retry after its retained lease expires, rather than automatically
 becoming background work.
-An explicit asynchronous replay can promote queued work to durable background execution.
+An explicit asynchronous replay promotes queued or processing work to durable background execution.
+Promotion preserves the current attempt token and lease; a processing job can be reclaimed only
+after lease expiry. Status polling selects metadata and terminal results without loading accepted
+input bytes or image checkpoints.
 A completed synchronous replay reports a skipped document without repeating provider work.
 
 Terminal successes/skips retain the configured `QUARRY_COMPLETED_JOB_RETENTION_SECONDS`

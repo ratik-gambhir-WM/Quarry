@@ -286,3 +286,93 @@ async fn independent_pools_recover_input_and_replay_committed_result_after_resta
     );
     assert!(third.claim(None).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn asynchronous_retry_promotes_sync_work_without_replacing_a_live_attempt() {
+    for processing in [false, true] {
+        let db = database().await;
+        let jobs = repository(db.clone());
+        let (id, filename) = jobs
+            .admit("DEAL-SQL".into(), 1, input("abandoned"), false)
+            .await
+            .unwrap();
+        let original = if processing {
+            Some(jobs.claim(Some(&id)).await.unwrap().unwrap().attempt)
+        } else {
+            None
+        };
+        let (retry, accepted_filename) = jobs
+            .admit("DEAL-SQL".into(), 1, input("abandoned"), true)
+            .await
+            .unwrap();
+        assert_eq!(retry, id);
+        assert_eq!(accepted_filename, filename);
+        if let Some(original) = &original {
+            // Promotion schedules recovery; it must not steal a live worker's lease.
+            assert!(jobs.claim(None).await.unwrap().is_none());
+            let token: String =
+                sqlx::query_scalar("SELECT attempt_token FROM document_jobs WHERE job_id=$1")
+                    .bind(&id)
+                    .fetch_one(db.pool())
+                    .await
+                    .unwrap();
+            assert_eq!(token, original.token);
+            sqlx::query("UPDATE document_jobs SET lease_until=0 WHERE job_id=$1")
+                .bind(&id)
+                .execute(db.pool())
+                .await
+                .unwrap();
+        }
+        let recovered = jobs.claim(None).await.unwrap().unwrap();
+        assert_eq!(recovered.attempt.id, id);
+        assert_eq!(recovered.file.bytes, b"abandoned");
+        if let Some(original) = original {
+            assert_ne!(original.token, recovered.attempt.token);
+            assert!(db
+                .transaction_result_async(|tx| async move { original.lock_and_check(&tx).await })
+                .await
+                .is_err());
+        }
+        jobs.fail(&recovered.attempt).await.unwrap();
+        assert_eq!(jobs.job(&id).await.unwrap().status, "failed");
+    }
+}
+
+#[tokio::test]
+async fn status_reads_do_not_fetch_accepted_input() {
+    let db = database().await;
+    let jobs = repository(db.clone());
+    let (id, filename) = jobs
+        .admit("DEAL-SQL".into(), 1, input("accepted input"), true)
+        .await
+        .unwrap();
+    let claim = jobs.claim(None).await.unwrap().unwrap();
+    jobs.fail(&claim.attempt).await.unwrap();
+    // A view makes fetching the payload fail, while leaving status columns readable.
+    // This exercises the actual repository query rather than duplicating its SQL.
+    sqlx::raw_sql(
+        "ALTER TABLE document_jobs RENAME TO document_jobs_storage;
+         CREATE FUNCTION reject_job_payload_read() RETURNS bytea LANGUAGE plpgsql STABLE AS $$
+         BEGIN RAISE EXCEPTION 'status polling must not read accepted input'; END $$;
+         CREATE VIEW document_jobs AS
+         SELECT job_id,deal_id,filename,status,sequence,result_json,
+                reject_job_payload_read() AS input_bytes
+         FROM document_jobs_storage;",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert!(sqlx::query("SELECT * FROM document_jobs")
+        .fetch_all(db.pool())
+        .await
+        .is_err());
+    let status = jobs.job(&id).await.unwrap();
+    assert_eq!(status.deal, "DEAL-SQL");
+    assert_eq!(status.filename, filename);
+    assert_eq!(status.status, "failed");
+    assert_eq!(status.sequence, 3);
+    let result = status.result.unwrap();
+    assert!(!result.success);
+    assert!(!result.sqlite_committed);
+    assert_eq!(result.filename, filename);
+}

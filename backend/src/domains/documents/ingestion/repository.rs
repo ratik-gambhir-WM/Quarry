@@ -88,7 +88,8 @@ impl DocumentJobRepository {
                     .await?
                 {
                     if status != "failed" {
-                        if background && status == "queued" {
+                        if background && matches!(status.as_str(), "queued" | "processing") {
+                            // Schedule recovery without replacing a live attempt's token or lease.
                             tx.write(
                                 Q::update("document_jobs")
                                     .set("background", 1)
@@ -246,6 +247,7 @@ impl DocumentJobRepository {
         self.db
             .read_one_with_async(
                 Q::select("document_jobs")
+                    .columns(["deal_id", "filename", "status", "sequence", "result_json"])
                     .and_where(C::equal("job_id", id))
                     .build(),
                 |r| {
