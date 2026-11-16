@@ -220,11 +220,11 @@ fn hybrid_search_rollout_is_opt_in_with_bounded_limits() {
     assert!(!AppConfig::default().search.enabled);
     let config = crate::integration_support::config([
         ("QUARRY_HYBRID_SEARCH_ENABLED", "true"),
-        ("QUARRY_SEARCH_HELIX_READS", "4"),
+        ("QUARRY_SEARCH_SQL_READS", "4"),
     ])
     .unwrap();
     assert!(config.search.enabled);
-    assert_eq!(config.search.helix_reads, 4);
+    assert_eq!(config.search.sql_reads, 4);
     for (key, value) in [
         ("QUARRY_HYBRID_SEARCH_ENABLED", "yes"),
         ("QUARRY_SEARCH_ACTIVE_REQUESTS", "0"),

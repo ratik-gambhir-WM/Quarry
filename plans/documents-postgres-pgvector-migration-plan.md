@@ -1,11 +1,15 @@
 # Plan 1: document chunks, embeddings and search in PostgreSQL
 
-Date: 2026-11-12. Status: design for a future implementation PR; no runtime changes made.
-First of three migrations: [notebooks](notebooks-postgres-pgvector-migration-plan.md), then
+Date: 2026-11-12. Reviewed against `main` at `83071dd` on 2026-11-15.
+Status: design for the **first migration**; no runtime changes made.
+Execution order: **1. Documents (this plan) → 2. Notebooks → 3. Templates and final Helix removal.**
+This document migration runs first, followed by [notebooks](notebooks-postgres-pgvector-migration-plan.md), then
 [templates and final Helix retirement](templates-postgres-pgvector-migration-plan.md).
 Reinspect code/manifests before implementation. Current code, not these proposed names, remains
 authoritative. Relevant baseline: [architecture](../docs/ARCHITECTURE.md),
 [storage](../docs/postgresql-storage.md), [hybrid search](../docs/hybrid-document-search.md).
+The inspected baseline has no pgvector dependency. Documents move to SQL in this migration;
+notebooks/templates and their shared Helix infrastructure remain operational until their turns.
 
 ## 1. Outcome and current behavior
 
@@ -102,6 +106,14 @@ Candidate index DDL and matching query casts must be fixed by migrations/profile
 not request input. Benchmark partial/partitioned indexes only when measured scope skew warrants
 them; do not create one table/index per deal or owner by default. Keep relational scope indexes.
 
+pgvector cosine distance is `1 - cosineSimilarity`, unlike the current Helix-normalized distance
+`(1 - cosineSimilarity) / 2`. Preserve the legacy vector API's `distance` field as pgvector distance
+divided by two, without changing its snake_case flattened chunk DTO. Hybrid uses similarity
+`1 - pgvectorDistance` for its configured relevance floor, before fusion; it must not reuse the old
+Helix conversion on SQL distances. Test aligned, orthogonal, opposite, near-threshold and invalid
+vectors, with pinned float tolerances and deterministic ties. Required nonzero-norm checks apply
+to raw-vector query input too; reject it at the handler before product work.
+
 ### 2.3 Keyword design and evaluated alternatives
 
 GIN on stored `tsvector` is PostgreSQL's native **inverted index**. GIN locates matching lexemes;
@@ -130,6 +142,14 @@ For document/note text choose explicit, versioned `english` body parsing plus a 
 prefix, punctuation and stopword-only inputs. Add a bounded domain normalizer only for demonstrated
 misses; native `simple` parsing alone does not preserve every identifier. Language metadata permits
 future dedicated configurations; do not claim multilingual quality from an English stemmer.
+
+This analyzer/ranker choice intentionally changes current document lexical relevance. Today
+`graph/repository.rs::rank_keywords` matches every distinct lowercased whole token, preserves `+`/`#`
+inside tokens and ranks by occurrences divided by the square root of one plus the word count.
+Native stemming, stopword handling and phrase behavior are not parity with that algorithm. Freeze
+existing identifier/token/no-match fixtures, judge the proposed differences and record acceptance
+before replacing it. Test stopword-only input separately from punctuation-only input and technical
+tokens; the `simple` channel must not silently invent matches or broaden AND queries into OR queries.
 
 Store search text/vector on the chunk, maintained transactionally with explicit configuration,
 not asynchronous triggers or whole-document tsvectors. Pin normalization; reject excessive lexemes/
@@ -210,26 +230,54 @@ Keep existing public event names/identity fields; update partial-failure tests a
 semantics together. An already committed document may fail later response delivery, so stable-ID
 reconciliation still matters. If provider preparation fails, the previous canonical state survives.
 
+Durable job admission, immutable input storage, attempt tokens, sequences and cross-process replay
+are new work: `DocumentJobService` currently uses an in-memory map/watch channels and a new random
+job ID for each start. Specify durable queue capacity, per-actor/global admission limits, input-byte
+budgets and terminal/input retention before implementation. Restart discovery must not depend on
+a local notification. Preserve current member-authorized SSE access and event names `processing`,
+`completed`, `skipped`, `failed`; SQL status remains authoritative. Do not invent a caller
+`operationId` field without coordinated handler/client/adapter changes. If operation IDs remain
+internal, specify reconciliation of a lost admission response through scoped immutable input.
+The synchronous batch endpoint must use the same atomic per-document repository path as workers.
+Client disconnect cancels request-owned work, not durably admitted background jobs.
+
 ## 5. SQL search, viewing and deletion
 
 Replace materialized lists of every canonical chunk ID with scoped SQL joins. Both branches use
 one authorized snapshot of live/current/ready versions; after query embedding (outside SQL), run
-keyword/vector candidates in one read-only snapshot. Scope and profile restrictions precede branch
+keyword/vector candidates in one read-only snapshot on one retained transaction/connection;
+independent pooled reads are not one snapshot. Scope and profile restrictions precede branch
 limits; no cross-user snippets/counts/vectors are returned. Recheck only bounded returned identities
 and session policy immediately before delivery to retain existing revocation behavior.
 
 Preserve `/api/v1/documents/search/{keyword,vector,hybrid}` and deal-scoped equivalents, hybrid opt-in,
-query/result bounds, `{results}`, chunk identities, page spans, `matchSources`, explicit semantic
-unavailability and keyword-only fallback behavior. Rank branches separately and retain deterministic
-RRF/stable tie ordering; do not add raw cosine and lexical scores. Preserve empty/all-stopword behavior
+query/result bounds, chunk identities, page spans and explicit semantic unavailability. Hybrid returns
+camelCase `{results}` with `matchSources`; legacy keyword/vector routes return arrays of flattened
+snake_case chunks plus their existing `score`/`distance` fields. Hybrid requires both branches to
+succeed; a provider/branch failure is an error, never automatic keyword-only success. The UI's
+**Use keyword search** action is an explicit separate request. Preserve empty enabled-scope behavior
+without a provider call and hybrid opt-in disabled by default.
+
+Rank branches separately and retain deterministic RRF/stable tie ordering; do not add raw cosine
+and lexical scores. Preserve per-deal fusion, constant 60, source deduplication and candidate window
+`min(100, max(50, limit))`, followed by global fused ordering, best-source-rank and full immutable
+identity ties. Legacy keyword scores are reciprocal per-deal ranks, not raw PostgreSQL text ranks.
+Apply the configured semantic relevance floor before fusion; weak nearest neighbors cannot fill
+an unrelated query, while exact keyword hits remain eligible. A final revocation check may shorten
+the response without refill. Any changed window or global-versus-per-deal ranking needs explicit
+relevance fixtures. Preserve empty/all-stopword behavior
 explicitly and distinguish unavailable semantic search from an empty successful result.
 Text-query services carry the server-selected embedding profile with their generated vector. The
 existing raw-vector endpoints resolve to their documented server profile; a model cannot be inferred
 from floats or dimensions. Supporting caller-selected profiles would be an explicit coordinated API
 change, not an assertion that a same-size vector proves which model produced it.
 
-Replace `DocumentGraphReader` consumers for raw text/previews/assistant context and `ResourceAccess`
-checks with SQL repositories. Current authority comes from membership/session and canonical rows,
+Replace live `DocumentGraphReader` consumers, including exact-upload retry checks, with SQL
+repositories and replace `ResourceAccess` full chunk snapshots with SQL-scoped selection. Stored
+PDF/raw-text viewing already loads PostgreSQL blobs and converts/parses them outside Tokio workers;
+preserve that path rather than treating it as Helix-owned or reconstructing source text from snippets.
+Audit downstream assistant/context consumers without inventing a graph dependency. Current authority
+comes from membership/session and canonical rows,
 never a cached result or caller-supplied deal list. Keep PDF/page/filename/size/URL contracts intact.
 SQL file/deal deletion cascades through chunks/search metadata under the existing lifecycle barrier.
 Remove document remote fence/purge/verify calls and graph checkpoints only when no document reader/
@@ -255,6 +303,64 @@ injected failures; (4) connect durable jobs and provider preparation; (5) replac
 update architecture/recovery guidance. No permanent dual-write/fallback architecture. A temporary
 offline comparison tool must be explicit, read-only against old data and removable after acceptance.
 
+### 6.1 Mandatory document code and Helix query cleanup — migration 1
+
+Complete this checklist in the document migration PR after moving every document caller to SQL.
+Remove newly unused code rather than disabling it or adding `allow(dead_code)`. The queries are
+Rust SDK DSL builders/macros, not standalone `.hx` files. Recheck definitions and callers against
+the implementation branch; this inventory records the reviewed baseline.
+
+- [ ] Replace and remove `DocumentGraphReader`, `DocumentGraphWriter`, `DocumentGraphSearch`,
+  `PreparedDocumentGraph`, `FileVersionGraphWrite`, graph-only response structs, the document
+  `graph/` module and its exports. Move still-used chunk/search DTOs, identity/range validation and
+  limits into document-owned model/query modules, preserving their serialized contracts.
+- [ ] Remove document index initialization/status queries: `helix.document_indexes.initialize`
+  and `helix.document_indexes.operation_status`, their 14 index specifications and polling helpers.
+- [ ] Remove publication queries `helix.file_version.insert_setup`,
+  `helix.file_version.insert_chunk_batch`, `helix.file_version.publish`, their setup/chunk/publish
+  builders, graph labels/edges and graph request-size/receipt checks. Replace their integrity and
+  batch-size protections with SQL constraints/prepared-batch limits on the same transaction.
+- [ ] Remove read queries `helix.file_version.by_content_hash`, `helix.file_version.current`,
+  `helix.file_version.by_id`, `helix.file_version.chunks`; search queries
+  `helix.file_chunk.search_vector`, `helix.file_chunk.search_keyword`,
+  `helix.file_chunk.current_vector`, `helix.file_chunk.current_keyword`; and the remote
+  `helix.file_chunk.verify_candidates` query. Replace readiness/header checks with SQL complete-set
+  invariants. Preserve current-versus-historical identity rules and exact-byte retry behavior.
+- [ ] Remove document deletion operations `helix.deletion.fence`, `helix.deletion.inspect`,
+  `helix.deletion.purge`, `helix.deletion.verify`, the `QuarryDealLifecycle` remote guard and graph
+  cleanup polling. Keep SQL lifecycle/tombstone/attempt guards, receipts and reserved deleted IDs.
+  Explicitly resolve pre-cutover pending deletion receipts without claiming old remote data was
+  erased; retain historical wire phases, including `sqlite`, with documented SQL-only transitions.
+- [ ] Replace ingestion graph assembly/preflight and `DocumentPersistenceResult` graph receipts;
+  remove graph-specific post-commit errors only after preserving uncertain SQL-commit recovery and
+  the historical `sqliteCommitted` field. Keep immutable accepted image text, parsing, source-byte
+  validation, content hashes, manifest checks, chunk IDs and uploaded activity deduplication.
+- [ ] Replace document graph imports/constructor arguments in bootstrap, ingestion, search,
+  identity/access, deletion and all remaining callers. Remove full canonical-ID materialization,
+  graph verification scans and Rust whole-catalog keyword ranking when SQL replaces them. Update
+  search read permits/log phases from Helix-specific ownership to bounded SQL work; retain query
+  embedding cache/coalescing, provider limits, request admission and final result authorization.
+- [ ] Replace graph serialization/query-only tests with real SQL publication/read/search/delete
+  tests; move useful identity, image-retry, rollback and unauthorized-access assertions first.
+  Update `backend/tests/unit/domains/documents/graph/`, graph writer integration fixtures, mixed
+  Helix compatibility suites and module hooks. Keep still-used notebook/template/shared tests.
+  Reference rankers needed only for parity belong under manually wired `backend/tests/`, not
+  unused production exports. Remove temporary comparison tools after acceptance.
+- [ ] Audit `backend/src/bin/{embedding.rs,helix_query.rs,clear_helix.rs}` and all remaining callers.
+  Retire document-only unused code; retain shared Helix tools only while another live domain needs
+  them. Do not execute a utility, drop an index or delete a store to demonstrate code removal.
+- [ ] Add an architecture regression guard rejecting document Helix imports/call sites. Record a
+  before/after symbol, operation and dependency inventory; require zero live document Helix queries
+  and no newly unused imports/exports. Verify all targets compile and Clippy passes. Intentional
+  historical documentation matches do not count as runtime callers.
+
+Keep template cleanup in migration 3's template plan and notebook cleanup in migration 2's notebook
+plan. This first migration does not remove their live code, the shared Helix adapter/SDK/config,
+Docker/launcher setup or old data volumes. A document-only no-Helix test should instantiate its SQL
+services with fake providers; normal application startup still needs Helix for the other two domains
+until their migrations finish. Preserve global writer ownership and advisory serialization until
+the separate concurrency acceptance gates pass.
+
 ## 7. Rollout, recovery and related concurrency work
 
 The current database was previously reset at the user's direction; do not assume it is still empty.
@@ -268,6 +374,12 @@ Helix chunks while available, or reparse/re-embed canonical bytes with an explic
 Reuse accepted image text; do not silently regenerate descriptions/change IDs. Count/hash/span/profile
 checks and atomic readiness precede switching readers. Mark unrecoverable records incomplete and
 stop cutover with a report. Never acknowledge successful migration with missing documents.
+
+Current `app/migrations.rs` only initializes empty schema 2 or validates its exact checksum/catalog;
+it has no populated-schema upgrade path. Preserving mode needs an explicit versioned upgrade
+procedure/tool with source checksum validation and a rehearsed backup/restore path. Ordinary startup
+must not apply ad hoc DDL or edit schema markers to bless a backfill. Select fresh or preserving
+mode before implementation; later migrations reuse the actual resulting schema/version policy.
 
 Keep old stores intact until backups/readback/restore are verified. No automatic destructive reset,
 Helix container/volume deletion or live re-embedding spend. Rollback drains workers and requires
@@ -297,6 +409,9 @@ Required real PostgreSQL tests, manually wired under `backend/tests/`:
   mismatch, selective ANN filters and exact reference ranking; verify real query plans/index use.
 - Keyword fixture quality/technical tokens/phrases, authorization before limits, stable RRF ties,
   page spans/match offsets and safe snippets. Backend and web/desktop contracts stay compatible.
+- Document cleanup checklist 6.1 is complete, with no live document Helix dependency and no loss of
+  unrelated notebook/template functionality. Legacy distance normalization/response casing and
+  hybrid explicit fallback/failure semantics have focused regression coverage.
 - Explain-analyze and relevance harness: exact top-k is ground truth; proposed ANN gate recall@20
   >= 0.95 for every evaluated scope/selectivity bucket. Record NDCG/MRR, p50/p95, ingest rollback,
   WAL/index size and churn at 10k/100k/1m chunks with a skewed owner/deal distribution. These are

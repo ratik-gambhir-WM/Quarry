@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 // Startup only. Runtime guards are retained separately until worker/remote cutover.
 const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 #[derive(Debug, Error)]
@@ -13,8 +13,23 @@ pub enum MigrationError {
     Database(#[from] sqlx::Error),
     #[error("incompatible PostgreSQL schema; use a fresh dedicated Quarry database")]
     Incompatible,
+    #[error("provision vector 0.8.6 in quarry_extensions using backend/tools/provision-pgvector.sql before startup")]
+    VectorExtension,
+    #[error("storage reset refused: {0}")]
+    ResetRefused(&'static str),
 }
 pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationError> {
+    migrate_with_dimensions(client, 1536).await
+}
+pub(crate) async fn migrate_with_dimensions(
+    client: &PostgresClient,
+    dimensions: usize,
+) -> Result<(), MigrationError> {
+    if !(1..=16000).contains(&dimensions) {
+        return Err(MigrationError::Incompatible);
+    }
+    let schema = SCHEMA.replace("vector(1536)", &format!("vector({dimensions})"));
+    validate_vector_extension(client).await?;
     let mut tx = client.pool().begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
         .bind(SCHEMA_INITIALIZATION_LOCK)
@@ -27,18 +42,9 @@ pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationErro
     )
     .fetch_one(&mut *tx)
     .await?;
-    let checksum = format!("{:x}", Sha256::digest(SCHEMA.as_bytes()));
+    let checksum = format!("{:x}", Sha256::digest(schema.as_bytes()));
     if tables == 0 {
-        sqlx::raw_sql(SCHEMA).execute(&mut *tx).await?;
-        sqlx::raw_sql("CREATE TABLE quarry_schema_version (version BIGINT PRIMARY KEY, checksum TEXT NOT NULL, catalog_fingerprint TEXT NOT NULL)")
-            .execute(&mut *tx).await?;
-        let fingerprint = catalog(&mut tx).await?;
-        sqlx::query("INSERT INTO quarry_schema_version VALUES ($1,$2,$3)")
-            .bind(VERSION)
-            .bind(&checksum)
-            .bind(fingerprint)
-            .execute(&mut *tx)
-            .await?;
+        initialize(&mut tx, &schema, &checksum).await?;
     } else {
         let exists: bool = sqlx::query_scalar(
             "SELECT to_regclass(current_schema() || '.quarry_schema_version') IS NOT NULL",
@@ -60,6 +66,10 @@ pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationErro
             return Err(MigrationError::Incompatible);
         }
     }
+    let indexes_ready: bool=sqlx::query_scalar("SELECT COALESCE(bool_and(i.indisvalid AND i.indisready),true) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relnamespace=current_schema()::regnamespace").fetch_one(&mut *tx).await?;
+    if !indexes_ready {
+        return Err(MigrationError::Incompatible);
+    }
     // Exactly one owner is a transactional workflow invariant beyond the partial unique index.
     let invalid: bool = sqlx::query_scalar(
         "SELECT EXISTS(
@@ -74,6 +84,133 @@ pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationErro
     if invalid {
         return Err(MigrationError::Incompatible);
     }
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn validate_vector_extension(client: &PostgresClient) -> Result<(), MigrationError> {
+    let extension: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='vector' AND e.extversion='0.8.6' AND n.nspname='quarry_extensions') AND to_regtype('quarry_extensions.vector') IS NOT NULL AND to_regoperator('quarry_extensions.<=>(quarry_extensions.vector,quarry_extensions.vector)') IS NOT NULL")
+        .fetch_one(client.pool()).await?;
+    if !extension {
+        return Err(MigrationError::VectorExtension);
+    }
+    Ok(())
+}
+async fn initialize(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    checksum: &str,
+) -> Result<(), MigrationError> {
+    sqlx::raw_sql(schema).execute(&mut **tx).await?;
+    sqlx::raw_sql("CREATE TABLE quarry_schema_version (version BIGINT PRIMARY KEY, checksum TEXT NOT NULL, catalog_fingerprint TEXT NOT NULL)").execute(&mut **tx).await?;
+    let fingerprint = catalog(tx).await?;
+    sqlx::query("INSERT INTO quarry_schema_version VALUES($1,$2,$3)")
+        .bind(VERSION)
+        .bind(checksum)
+        .bind(fingerprint)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Explicit MVP reset: recreate only the recognized Quarry product schema atomically.
+/// Normal startup never calls this operation. Old Helix/SQLite stores are untouched.
+///
+/// # Errors
+/// Refuses unrelated databases/objects and any active application writer. A DDL
+/// failure rolls back both deletion and initialization, preserving the old schema.
+pub async fn reset_product_schema(
+    client: &PostgresClient,
+    dimensions: usize,
+) -> Result<(), MigrationError> {
+    if !(1..=16000).contains(&dimensions) {
+        return Err(MigrationError::Incompatible);
+    }
+    validate_vector_extension(client).await?;
+    let mut tx = client.pool().begin().await?;
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&mut *tx)
+        .await?;
+    if database != "Quarry" && !database.ends_with("_test") {
+        return Err(MigrationError::ResetRefused(
+            "select Quarry or an isolated _test database",
+        ));
+    }
+    let drained: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(),$1))",
+    )
+    .bind(crate::adapters::postgres::client::WRITE_LOCK + 1)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !drained {
+        return Err(MigrationError::ResetRefused(
+            "stop the active Quarry API writer before resetting",
+        ));
+    }
+    // Check ownership before waiting on schema startup: the retained writer
+    // also excludes startup, and must be refused rather than waited out.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
+        .bind(SCHEMA_INITIALIZATION_LOCK)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
+        .bind(crate::adapters::postgres::client::WRITE_LOCK)
+        .execute(&mut *tx)
+        .await?;
+    let allowed: std::collections::HashSet<_> = SCHEMA
+        .lines()
+        .filter_map(|line| line.strip_prefix("CREATE TABLE "))
+        .filter_map(|line| line.split_whitespace().next())
+        .map(|name| name.trim_matches('"'))
+        .chain(std::iter::once("quarry_schema_version"))
+        .collect();
+    let tables:Vec<String>=sqlx::query_scalar("SELECT relname FROM pg_class WHERE relnamespace=current_schema()::regnamespace AND relkind IN ('r','p','v','m','f')").fetch_all(&mut *tx).await?;
+    if tables
+        .iter()
+        .any(|name| !allowed.contains(name.as_str()) && name != "document_search_integrity")
+    {
+        return Err(MigrationError::ResetRefused(
+            "selected schema contains unrelated relations",
+        ));
+    }
+    let functions: Vec<String> = sqlx::query_scalar(
+        "SELECT proname FROM pg_proc WHERE pronamespace=current_schema()::regnamespace",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    if functions.iter().any(|name| {
+        ![
+            "reserve_deal_identity",
+            "retire_deal_identity",
+            "verify_document_search_set",
+        ]
+        .contains(&name.as_str())
+    }) {
+        return Err(MigrationError::ResetRefused(
+            "selected schema contains unrelated functions",
+        ));
+    }
+    sqlx::raw_sql("DROP VIEW IF EXISTS document_search_integrity")
+        .execute(&mut *tx)
+        .await?;
+    let tables: Vec<_> = tables
+        .iter()
+        .filter(|name| name.as_str() != "document_search_integrity")
+        .map(|name| format!("\"{name}\""))
+        .collect();
+    if !tables.is_empty() {
+        sqlx::raw_sql(&format!("DROP TABLE {}", tables.join(",")))
+            .execute(&mut *tx)
+            .await?;
+    }
+    for function in functions {
+        sqlx::raw_sql(&format!("DROP FUNCTION \"{function}\"()"))
+            .execute(&mut *tx)
+            .await?;
+    }
+    let schema = SCHEMA.replace("vector(1536)", &format!("vector({dimensions})"));
+    let checksum = format!("{:x}", Sha256::digest(schema.as_bytes()));
+    initialize(&mut tx, &schema, &checksum).await?;
     tx.commit().await?;
     Ok(())
 }

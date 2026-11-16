@@ -1,12 +1,12 @@
-use super::{fusion::identity, hybrid::HybridBackend};
+use super::fusion::sort_identity;
 use crate::{
     domains::{
-        documents::graph::{
-            query::{
+        documents::store::{
+            chunk::{
                 FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit,
                 VectorFileChunkHit,
             },
-            repository::DocumentGraphSearch,
+            search_repository::DocumentSearchRepository,
         },
         identity::access::ResourceAccess,
         memberships::model::Capability,
@@ -16,7 +16,7 @@ use crate::{
 use futures_util::{stream, StreamExt, TryStreamExt};
 #[derive(Clone)]
 pub struct DocumentSearchService {
-    pub(super) graph: DocumentGraphSearch,
+    pub(super) repository: DocumentSearchRepository,
     reads: std::sync::Arc<tokio::sync::Semaphore>,
     pub(super) hybrid: std::sync::Arc<super::hybrid::HybridRuntime>,
     access: Option<ResourceAccess>,
@@ -25,9 +25,9 @@ impl DocumentSearchService {
     pub fn with_hybrid(
         mut self,
         config: crate::app::config::SearchConfig,
-        embeddings: Option<std::sync::Arc<super::embedding::QueryEmbeddingCache>>,
+        embeddings: Option<std::sync::Arc<super::embedding::QueryEmbeddings>>,
     ) -> Self {
-        self.reads = std::sync::Arc::new(tokio::sync::Semaphore::new(config.helix_reads));
+        self.reads = std::sync::Arc::new(tokio::sync::Semaphore::new(config.sql_reads));
         self.hybrid = std::sync::Arc::new(super::hybrid::HybridRuntime::new(config, embeddings));
         self
     }
@@ -43,22 +43,19 @@ impl DocumentSearchService {
         &self,
         work: impl std::future::Future<Output = Result<T, crate::shared::error::RepositoryError>>,
     ) -> ServiceResult<T> {
-        let _permit = super::hybrid::phase("helix_queue", async {
+        let _permit = super::hybrid::phase("sql_queue", async {
             self.reads
                 .acquire()
                 .await
                 .map_err(|_| ServiceError::unavailable("search unavailable"))
         })
         .await?;
-        super::hybrid::phase("helix_read", async {
-            work.await.map_err(ServiceError::from)
-        })
-        .await
+        super::hybrid::phase("sql_read", async { work.await.map_err(ServiceError::from) }).await
     }
 
-    pub fn new(graph: DocumentGraphSearch) -> Self {
+    pub(crate) fn new(repository: DocumentSearchRepository) -> Self {
         Self {
-            graph,
+            repository,
             access: None,
             reads: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             hybrid: std::sync::Arc::new(super::hybrid::HybridRuntime::new(
@@ -98,104 +95,92 @@ impl DocumentSearchService {
         search: FileChunkVectorSearch,
         actor: i64,
     ) -> ServiceResult<Vec<VectorFileChunkHit>> {
-        let access = self.access()?;
-        let batches: Vec<Vec<_>> = stream::iter(self.deals(actor, &search.deal_id).await?)
+        let deals = self.deals(actor, &search.deal_id).await?;
+        let batches = stream::iter(deals)
             .map(|deal| {
-                let search = &search;
+                let vector = search.query_embedding.clone();
                 async move {
-                    let candidates =
-                        super::hybrid::HybridBackend::prepare(self, actor, &deal).await?;
-                    let hits = self
-                        .read(self.graph.vector_current(
-                            FileChunkVectorSearch {
-                                deal_id: deal.clone(),
-                                ..(*search).clone()
-                            },
-                            candidates,
-                        ))
-                        .await?;
-                    let current = self.fresh(actor, &deal).await?;
-                    Ok::<_, ServiceError>(
-                        hits.into_iter()
-                            .filter(|h| current.contains(&identity(&h.chunk)))
-                            .collect(),
-                    )
+                    self.read(self.repository.branches(
+                        actor,
+                        &deal,
+                        None,
+                        Some(vector),
+                        search.limit,
+                    ))
+                    .await
+                    .map(|(_, v)| v)
                 }
             })
             .buffer_unordered(self.hybrid.config.deal_concurrency)
-            .try_collect()
+            .try_collect::<Vec<_>>()
             .await?;
-        let mut all: Vec<VectorFileChunkHit> = batches.into_iter().flatten().collect();
-        // Cosine distances from the same configured embedding model are directly comparable.
-        all.sort_by(|a, b| {
+        let mut hits: Vec<_> = batches.into_iter().flatten().collect();
+        hits.sort_by(|a, b| {
             a.distance
                 .total_cmp(&b.distance)
-                .then(a.chunk.chunk_id.cmp(&b.chunk.chunk_id))
+                .then_with(|| sort_identity(&a.chunk).cmp(&sort_identity(&b.chunk)))
         });
-        let mut seen = std::collections::HashSet::new();
-        all.retain(|h| seen.insert(h.chunk.chunk_id.clone()));
-        all.truncate(search.limit);
-        let authorized = access
+        hits.dedup_by(|a, b| a.chunk.chunk_id == b.chunk.chunk_id);
+        hits.truncate(search.limit);
+        let allowed = self
+            .access()?
             .current_result_ids(
                 actor,
-                all.iter().map(|hit| hit.chunk.chunk_id.clone()).collect(),
+                hits.iter().map(|h| h.chunk.chunk_id.clone()).collect(),
             )
             .await?;
-        all.retain(|hit| authorized.contains(&hit.chunk.chunk_id));
-        Ok(all)
+        hits.retain(|hit| allowed.contains(&hit.chunk.chunk_id));
+        Ok(hits)
     }
     pub async fn keyword_owned(
         &self,
         search: FileChunkKeywordSearch,
         actor: i64,
     ) -> ServiceResult<Vec<KeywordFileChunkHit>> {
-        let access = self.access()?;
-        let batches: Vec<Vec<_>> = stream::iter(self.deals(actor, &search.deal_id).await?)
+        let deals = self.deals(actor, &search.deal_id).await?;
+        let batches = stream::iter(deals)
             .map(|deal| {
-                let search = &search;
+                let query = &search.query_text;
                 async move {
-                    let candidates =
-                        super::hybrid::HybridBackend::prepare(self, actor, &deal).await?;
-                    let hits = self
-                        .read(self.graph.keyword_current(
-                            FileChunkKeywordSearch {
-                                deal_id: deal.clone(),
-                                ..(*search).clone()
-                            },
-                            candidates,
+                    let (mut keyword, _) = self
+                        .read(self.repository.branches(
+                            actor,
+                            &deal,
+                            Some(query),
+                            None,
+                            search.limit,
                         ))
                         .await?;
-                    let current = self.fresh(actor, &deal).await?;
-                    let mut retained = Vec::new();
-                    for (rank, mut hit) in hits.into_iter().enumerate() {
-                        if current.contains(&identity(&hit.chunk)) {
-                            hit.score = 1.0 / (60.0 + rank as f64 + 1.0);
-                            retained.push(hit);
-                        }
+                    for (rank, hit) in keyword.iter_mut().enumerate() {
+                        hit.score = 1.0
+                            / (61.0
+                                + f64::from(
+                                    u32::try_from(rank)
+                                        .map_err(|_| ServiceError::internal("rank overflow"))?,
+                                ));
                     }
-                    Ok::<_, ServiceError>(retained)
+                    Ok::<_, ServiceError>(keyword)
                 }
             })
             .buffer_unordered(self.hybrid.config.deal_concurrency)
-            .try_collect()
+            .try_collect::<Vec<_>>()
             .await?;
-        let mut all: Vec<KeywordFileChunkHit> = batches.into_iter().flatten().collect();
-        // Reciprocal-rank fusion avoids comparing scores from separate deal corpora. Chunk IDs are globally unique.
-        all.sort_by(|a, b| {
+        let mut hits: Vec<_> = batches.into_iter().flatten().collect();
+        hits.sort_by(|a, b| {
             b.score
                 .total_cmp(&a.score)
-                .then(a.chunk.chunk_id.cmp(&b.chunk.chunk_id))
+                .then_with(|| sort_identity(&a.chunk).cmp(&sort_identity(&b.chunk)))
         });
-        let mut seen = std::collections::HashSet::new();
-        all.retain(|h| seen.insert(h.chunk.chunk_id.clone()));
-        all.truncate(search.limit);
-        let authorized = access
+        hits.dedup_by(|a, b| a.chunk.chunk_id == b.chunk.chunk_id);
+        hits.truncate(search.limit);
+        let allowed = self
+            .access()?
             .current_result_ids(
                 actor,
-                all.iter().map(|hit| hit.chunk.chunk_id.clone()).collect(),
+                hits.iter().map(|h| h.chunk.chunk_id.clone()).collect(),
             )
             .await?;
-        all.retain(|hit| authorized.contains(&hit.chunk.chunk_id));
-        Ok(all)
+        hits.retain(|hit| allowed.contains(&hit.chunk.chunk_id));
+        Ok(hits)
     }
 }

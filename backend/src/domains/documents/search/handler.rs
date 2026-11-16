@@ -7,10 +7,10 @@ use axum::{extract::State, Json};
 use crate::{
     app::http::error::{AppError, AppResult},
     domains::documents::{
-        graph::query::{
+        search::service::DocumentSearchService,
+        store::chunk::{
             FileChunkKeywordSearch, FileChunkVectorSearch, KeywordFileChunkHit, VectorFileChunkHit,
         },
-        search::service::DocumentSearchService,
     },
 };
 use std::sync::Arc;
@@ -28,18 +28,7 @@ pub(super) async fn vector_search_handler(
 ) -> AppResult<Json<Vec<VectorFileChunkHit>>> {
     search.deal_id = path.map(|p| p.0).unwrap_or_default();
     validate_common(search.limit)?;
-    if search.query_embedding.is_empty() || search.query_embedding.len() > 4096 {
-        return Err(AppError::bad_request("queryEmbedding cannot be empty"));
-    }
-    if search
-        .query_embedding
-        .iter()
-        .any(|value| !value.is_finite())
-    {
-        return Err(AppError::bad_request(
-            "queryEmbedding must contain only finite values",
-        ));
-    }
+    validate::validate_vector(&search.query_embedding)?;
     state
         .document_search
         .vector_owned(search, actor.user.id)

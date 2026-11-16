@@ -114,17 +114,20 @@ async fn deletion_http_checks_identity_owner_and_syntax_before_accepting_and_hid
             StatusCode::NOT_FOUND
         );
     }
-    assert_eq!(
-        request(
-            &app,
-            "POST",
-            "/api/v1/deals/DEAL-DELETE-HTTP/archive",
-            Some(1)
-        )
-        .await
-        .0,
-        StatusCode::CONFLICT
-    );
+    let archive_status = request(
+        &app,
+        "POST",
+        "/api/v1/deals/DEAL-DELETE-HTTP/archive",
+        Some(1),
+    )
+    .await
+    .0;
+    // Cleanup runs independently: pending deletion conflicts, and completed
+    // deletion has already removed the deal. Both must reject the mutation.
+    assert!(matches!(
+        archive_status,
+        StatusCode::CONFLICT | StatusCode::NOT_FOUND
+    ));
     assert_eq!(
         request(&app, "GET", "/api/v1/deals", Some(1)).await.2,
         json!([])

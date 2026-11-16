@@ -167,7 +167,7 @@ fn quicklook_enforces_independent_stdout_and_stderr_buffer_limits() {
     // Leave room for process startup under a parallel suite while keeping overflow
     // termination clearly separated from the configured 30-second timeout.
     let overflow_generator = QuickLookTemplatePreviewGenerator::new(
-        generator.executable_path.clone(),
+        generator.executable_path,
         1024,
         100,
         100,

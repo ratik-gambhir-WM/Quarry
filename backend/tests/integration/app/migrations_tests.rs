@@ -13,7 +13,7 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     .fetch_all(client.pool())
     .await
     .unwrap();
-    assert_eq!(tables.len(), 42); // marker-18 inventory + lexical postings + schema metadata
+    assert_eq!(tables.len(), 46); // marker-18 inventory + lexical postings + schema metadata
     for table in [
         "quarry_files",
         "document_identity_manifests",
@@ -74,9 +74,11 @@ async fn schema_constraints_protect_json_safe_ids_and_same_notebook_folders() {
     );
     assert!(sqlx::query("INSERT INTO notebook_notes(note_id,notebook_id,blocks_json,created_at,updated_at) VALUES('bad','n','{}','now','now')").execute(client.pool()).await.is_err());
     assert!(sqlx::query("INSERT INTO notebook_notes(note_id,notebook_id,folder_id,created_at,updated_at) VALUES('bad','n','missing','now','now')").execute(client.pool()).await.is_err());
-    assert!(crate::domains::documents::store::identity::ready(&client)
-        .await
-        .unwrap());
+    assert!(
+        crate::domains::documents::store::identity_repository::ready(&client)
+            .await
+            .unwrap()
+    );
 }
 #[tokio::test]
 async fn concurrent_startup_serializes_schema_inspection_and_creation() {
@@ -183,4 +185,51 @@ async fn previous_schema_version_is_rejected_without_resetting_records() {
         .await
         .unwrap();
     assert_eq!(value, "value");
+}
+
+#[tokio::test]
+async fn explicit_mvp_reset_recreates_owned_schema_and_refuses_a_live_writer() {
+    let client = empty().await;
+    migrate(&client).await.unwrap();
+    sqlx::query("INSERT INTO app_metadata VALUES('old','content')")
+        .execute(client.pool())
+        .await
+        .unwrap();
+    let writer = client.clone().with_writer_lease().await.unwrap();
+    let result = reset_product_schema(&client, 1536).await;
+    assert!(
+        matches!(&result, Err(MigrationError::ResetRefused(_))),
+        "unexpected reset outcome: {result:?}"
+    );
+    drop(writer);
+    // Closing the retained writer session is asynchronous at drop; wait for release.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match reset_product_schema(&client, 1536).await {
+                Ok(()) => break,
+                Err(MigrationError::ResetRefused(_)) => tokio::task::yield_now().await,
+                Err(error) => panic!("{error}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    migrate(&client).await.unwrap();
+    let old: i64 = sqlx::query_scalar("SELECT count(*) FROM app_metadata WHERE key='old'")
+        .fetch_one(client.pool())
+        .await
+        .unwrap();
+    assert_eq!(old, 0);
+    sqlx::query("CREATE TABLE unrelated(id BIGINT)")
+        .execute(client.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        reset_product_schema(&client, 1536).await,
+        Err(MigrationError::ResetRefused(_))
+    ));
+    assert!(sqlx::query("SELECT * FROM unrelated")
+        .fetch_all(client.pool())
+        .await
+        .is_ok());
 }

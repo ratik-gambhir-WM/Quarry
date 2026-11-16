@@ -196,7 +196,7 @@ fn parse_pdf_file_with_metadata(
         .sum();
     let document = IngestionDocument {
         file_id: Uuid::new_v4().to_string(),
-        document_id: document_id.clone(),
+        document_id,
         deal_id: deal_id.to_string(),
         file_name,
         source_type: "pdf".to_string(),

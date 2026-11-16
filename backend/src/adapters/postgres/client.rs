@@ -355,6 +355,21 @@ impl PostgresClient {
     }
 }
 impl PostgresTransaction {
+    /// Validate deferred constraints before a caller's final lease/CAS mutation.
+    ///
+    /// # Errors
+    /// Rejects read-only or finished transactions and propagates constraint errors.
+    pub async fn validate_deferred_constraints(&self) -> Result<(), PostgresError> {
+        self.ensure_writable()?;
+        let mut guard = self.connection.lock().await;
+        let tx = guard
+            .as_mut()
+            .ok_or_else(|| PostgresError::transaction_aborted("transaction finished"))?;
+        sqlx::query("SET CONSTRAINTS ALL IMMEDIATE")
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
     pub async fn read_result_with<T, E>(
         &self,
         query: Result<SqlQuery, PostgresError>,

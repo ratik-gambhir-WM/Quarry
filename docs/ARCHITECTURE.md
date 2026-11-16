@@ -72,14 +72,14 @@ has already been bound by the owning feature. There is no global application sta
 service locator.
 
 PostgreSQL is the canonical store for users, deals, logical files, immutable file versions, and
-file bytes. Helix is the versioned document graph and search projection. Document ingestion
-persists bytes, attribution, immutable identities and activity in PostgreSQL first and then indexes Helix, so cross-store writes are intentionally recoverable
-through an exact-content re-upload today rather than transactionally atomic. A general reindex
-utility is not implemented.
+file bytes. Documents additionally commit chunks, pgvector embeddings, lexical metadata and durable
+processing results atomically in PostgreSQL. Helix remains required for notebook and template
+projections. This MVP cutover uses a fresh schema, with an explicitly invoked guarded reset;
+there is no populated-data migration or automatic reset. See [document storage](document-storage.md).
 
 Quarry is a tested development foundation, not a production-secure deployment. Username/password
 authentication, revocable sessions, private-resource ownership, deal membership capabilities and bounded local auth throttling are
-implemented. Organization tenancy, distributed abuse protection, durable job queues, production
+implemented. Organization tenancy, distributed abuse protection, general multi-instance worker coordination, production
 storage, CI and deployment manifests remain absent. See [authentication](authentication.md).
 
 ## 2. System context
@@ -604,6 +604,10 @@ global state or query-cache library.
   editor engine, and existing annotation snapshots. Eviction preserves tabs and reloads their
   payloads on selection. Closing a tab drops its cached payload and ignores its pending responses;
   leaving the route or refreshing releases all cached payloads. Nothing is persisted to disk.
+- Initial Data Room loads without known files keep the Data Room Vault frame and an accessible
+  loading status until files arrive or the requests settle. An empty file-review grid is never a
+  loading placeholder. Available file content and open previews stay mounted during refreshes; an empty
+  vault or unavailable state appears only after the requests settle.
 - The Data Room uses the controlled Movin browser-tab component adapted to Quarry theme tokens.
   Each document tab has a close button; the plus button opens a New tab file-review picker.
   Selecting an already-open file activates its existing tab. Closing the active tab selects its
@@ -1178,14 +1182,18 @@ The shared Settings form accepts email only.
 | GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
 | POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
-| POST | `/deals/{deal_id}/documents/process_file` | Start one in-memory job | Authenticated owner; same supported formats; returns 202 `{jobId, filename}` |
+| POST | `/deals/{deal_id}/documents/process_file` | Durably admit one processing job | Authenticated owner; same supported formats; returns 202 `{jobId, filename}` |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
-| POST | `/documents/search/vector` | Vector search Helix chunks | Server derives accessible deals; canonical candidates precede cosine ranking |
-| POST | `/documents/search/keyword` | Keyword search Helix chunks | Server derives accessible deals; bounded lexical ranking and rank fusion |
+| POST | `/documents/search/vector` | Exact scoped pgvector chunk search | Server derives accessible deals; authorized current/profile scope precedes cosine limits |
+| POST | `/documents/search/keyword` | GIN-indexed lexical chunk search | Server derives accessible deals; SQL lexical ranking and per-deal rank fusion |
 | POST | `/documents/search/hybrid` | Text-in keyword + semantic passage search | Server-derived accessible deals; camelCase `{results}`; rollout opt-in |
 | POST | `/deals/{deal_id}/documents/search/hybrid` | Same hybrid operation within one authorized deal | `{queryText, limit}`; strict failure policy and final canonical access snapshot |
 
 The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB multipart overhead.
+Synchronous document jobs remain request-owned. Maintenance marks expired attempts and unclaimed
+synchronous jobs older than ten minutes failed, fences their tokens and releases active queue
+capacity. Accepted inputs/checkpoints remain retryable for 24 hours; live leases and background
+recovery jobs are preserved. See [document storage](document-storage.md) for the recovery policy.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
 at 25 MB. The presentation-export route raises its scoped JSON body limit to 50 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
 Axum's default 2 MB body limit first; this mismatch remains a known contract gap.
@@ -1378,11 +1386,11 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 PostgreSQL is canonical; see [PostgreSQL storage and Helix](postgresql-storage.md).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
 fresh final schema, equivalent to former SQLite marker 18; `app/migrations.rs` initializes or
-validates PostgreSQL schema version 2 with checksums and catalog fingerprints. There is no data
+validates PostgreSQL schema version 3 with checksums and catalog fingerprints. There is no data
 migration or startup reset. Unknown or damaged layouts fail without deletion. Templates, image
 bytes, previews, metadata, memberships, classification and both embedding artifacts remain
 transactional. Indexed lexical term frequencies preserve the previous FTS5 weighted BM25 path;
-document search and the Helix template projection remain unchanged. New databases start with an empty catalog; startup no longer seeds built-in templates.
+document search is PostgreSQL-owned and the Helix template projection remains operational. New databases start with an empty catalog; startup no longer seeds built-in templates.
 The retired built-in catalog assets, seeder, and catalog-specific tests have been removed;
 current template behavior tests use imported PPTX fixtures under `backend/tests/fixtures/`.
 Each new import records `templates.owner_user_id` from the verified bearer-session identity.
@@ -1520,8 +1528,7 @@ Bootstrap injects the existing server-side embedding and Helix clients. Completi
 stores to confirm the accepted revision; indexing failure preserves canonical PostgreSQL content and
 reports a failed job with its committed revision. Jobs use leases, pinned pipeline configuration,
 idempotent operation IDs, explicit bounded retries and 30-day retention. SSE sends current durable
-snapshots, monotonic sequences and terminal states with auth revocation/cancellation. Existing
-document jobs remain in memory. No provider calls or database transactions are held across provider work on the HTTP admission
+snapshots, monotonic sequences and terminal states with auth revocation/cancellation. Document jobs also persist accepted inputs and terminal snapshots in PostgreSQL. No provider calls or database transactions are held across provider work on the HTTP admission
 path beyond its short persistence transaction.
 
 The shared contract, browser adapter and validated desktop relay expose every operation. The
@@ -1531,30 +1538,14 @@ routes, DTO/null semantics, bounds, queue/lease policy, pipeline, cleanup, error
 
 ### 7.8 Permanent deal deletion
 
-The authenticated owner can accept asynchronous deletion with `DELETE /deals/{deal_id}` and poll
-`GET /deal-deletions/{deletion_id}`. PostgreSQL receipts immediately hide the deal and fence writes;
-only verified cross-store cleanup becomes completed. Archive remains synchronous and retains data.
-`domains/deals/deletion` owns ledger transactions, cleanup phases in `service.rs`, and on-demand
-scheduling in `worker.rs`; document graph cleanup stays inside `documents/graph`. Acceptance
-commits and notifies in a short-lived task that survives cancellation of the accepting HTTP future.
-Bootstrap requests a recovery scan of durable receipts. The coordinator scans due receipts in
-pages of 16, spawns at most four deal cleanup tasks concurrently, and skips busy deals until a later
-scan without blocking later pages. Each task ends after its cleanup sweep; the coordinator retires
-when no pending/running/retrying receipts remain, including when only blocked/completed receipts
-are retained. One-second checks continue only while unfinished work or a ledger-read error remains,
-preserving delayed retries and drain checks without another request. Helix
-writes retain their shared serialization. A separate Helix `QuarryDealLifecycle` control record and
-unique index fence every prepared setup/chunk/publication inside its remote transaction. Ingestion
-preflight includes these additional clauses. Document identities and existing indexes remain stable.
-
-Cleanup drains active tasks, removes all linked chats across users, detaches private notebook deal
-links, and cascades the canonical deal aggregate. Personal notes/jobs/projections, companies,
-templates, other deals and external originals survive. Minimal receipts/fences reserve deleted IDs;
-content-free temporary target manifests survive until cleanup is verified. Current membership,
-canonical candidate filtering, final-result checks and stream revocation also consult deletion state.
-Chat revocation cancels the provider future independently of stream backpressure. When membership
-loss leaves a private thread intact, the worker saves a terminal cancelled response with its partial
-text before releasing admission. Final persistence still rejects an accepted deletion barrier.
+The authenticated owner accepts deletion with `DELETE /deals/{deal_id}` and polls
+`GET /deal-deletions/{deletion_id}`. Durable receipts immediately hide/fence the deal. The bounded
+on-demand coordinator drains local tasks, deletes linked chats, detaches private notebook links
+and cascades canonical files, versions, chunks, inputs and jobs in SQL. It verifies absence before
+completion and retains lifecycle reservations so deleted IDs cannot be reused. Historical phase
+strings remain compatible; current cleanup uses `sqlite`, `verifying`, `completed` without remote
+document fencing/purge. Existing Helix document data is outside the SQL receipt's erasure claim.
+See [permanent deletion](deal-permanent-deletion.md).
 
 PostgreSQL mutations take a transaction-scoped advisory lock for the selected schema on one
 pooled connection. This preserves aggregate ordering across cooperating processes while row
@@ -1580,7 +1571,7 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v1]
+    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v3]
     Bootstrap --> Helix[Construct Helix and initialize indexes]
     Bootstrap --> Http[Construct shared reqwest client]
     Bootstrap --> Rig[Construct optional Rig OpenAI client]
@@ -1615,9 +1606,9 @@ state.
 | `app/migrations` | PostgreSQL schema creation and migration | Runtime service construction |
 | `app/http` | API compatibility mounts, global Tower layers, and HTTP error mapping | Feature routing or business logic |
 | `domains/*` | Feature routes, private route state, handlers, services, models, and owned persistence ports | Ambient configuration or unrelated domain internals |
-| `domains/documents` | Document formats, canonical document store, ingestion/jobs, Helix graph capabilities, search, and viewing | Summary generation |
+| `domains/documents` | Document formats, canonical document store, ingestion/jobs, SQL chunk/search repositories, durable jobs, and viewing | Summary generation |
 | `domains/assistant::chat` | PostgreSQL thread/message persistence, owner resolution, bounded canonical context, default system-prompt selection, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
-| `domains/summaries` | Summary upload handling, prompting, and generation | Document graph persistence |
+| `domains/summaries` | Summary upload handling, prompting, and generation | Document persistence |
 | `adapters/*` | Concrete PostgreSQL, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
@@ -1658,7 +1649,7 @@ service, model, table, or product capability.
 | `deals` | Implemented typed engagement aggregates, transactional writes, metadata, source selection/extraction, public context/source readers, and durable owner-only permanent deletion |
 | `companies` | Implemented authenticated-owner company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
-| `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and Helix search capabilities |
+| `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and PostgreSQL search capabilities |
 | `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
 | `research` | Implemented WM AI transport workflows when configured; broader product research remains conceptual |
 | `system` | Public shallow health and static capabilities; development diagnostics/demo routes removed |
@@ -1797,14 +1788,20 @@ Use a fresh PostgreSQL database and separate isolated Helix store; leave old SQL
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
 [fresh storage and recovery](postgresql-storage.md).
 
-### 9.1 Shared PostgreSQL schema version 2
+### 9.1 Shared PostgreSQL schema version 3
+
+The pinned pgvector 0.4.2 Rust adapter uses SQLx 0.8.6 and an explicitly provisioned
+`quarry_extensions.vector` 0.8.6 server extension. Types/operators are qualified and vectors are
+validated before/after conversion. Document-owned repositories use the shared typed SQL builder,
+including bounded multi-row INSERTs on a retained transaction. See [document storage](document-storage.md)
+for profile, readiness, queue, rollback, search and deletion contracts.
 
 PostgreSQL enforces foreign keys and parameterized queries through the shared asynchronous pool. The
 schema currently contains:
 
 | Table | Purpose | Active consumer status |
 | --- | --- | --- |
-| `app_metadata` | Application metadata, writer commit-fence generation and completed document scope/index migration checkpoint | Lease registration/commit fencing and explicit drained maintenance |
+| `app_metadata` | Application metadata and writer commit-fence generation | Lease registration and commit fencing |
 | `users` | Public profile, unique username/email, private Argon2id hash | Identity and owner-scoped services |
 | `auth_sessions` | Token digests, owner, expiry/revocation | Durable eight-hour bearer sessions |
 | `assistant_threads` | User-owned thread metadata, nullable immutable deal association, archive state, and recency | Used by Assistant thread list |
@@ -1827,8 +1824,8 @@ schema currently contains:
 | `deal_metadata` | One row per deal with no duplicated owner; string-array key-question JSON, an optional local/SharePoint source, and nullable SOW/fact-sheet/RL links | Used; all link columns are mapped through the deal metadata API |
 | `quarry_files` | Logical file identity, canonical deal scope, soft-delete metadata | Used |
 | `quarry_current_content` | Unique current/live content claims per deal | Serializes upload deduplication |
-| `document_identity_manifests`, `document_chunk_identities` | Derivation version, content ID, active generation and exact chunk IDs/order/hashes | Durable pre-graph checkpoints and legacy retry recovery |
-| `document_image_recovery` | Immutable accepted image document/chunk JSON, without embeddings, keyed by version | Exact-byte recovery before vision or embedding calls |
+| `document_identity_manifests`, `document_chunk_identities` | Derivation version, content ID, active generation and exact chunk IDs/order/hashes | Canonical complete-set identities |
+| `document_image_recovery` | Immutable accepted image document/chunk JSON, without embeddings, keyed by version | Committed image assembly; accepted pre-commit image checkpoints also live in jobs |
 | `quarry_file_versions` | Immutable version identity/hash/current marker and nullable authenticated uploader | Legacy attribution remains unknown |
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
@@ -1837,7 +1834,11 @@ schema currently contains:
 | `template_classification_status` | Classification/embedding progress, attempts, retry times, errors, leases, metadata, fingerprints, subject/capability vectors and model/dimensions | Durable embedded classification worker/retrieval |
 | `slide_classifications_fts` | Lexical fields and token lengths | Embedded keyword retrieval |
 | `template_lexical_terms` | Indexed Unicode 6.1 field frequencies | Compatible weighted BM25/prefix retrieval |
-| `quarry_schema_version` | Source checksum and catalog fingerprint | Schema version 2 validation |
+| `document_embedding_profiles` | Immutable provider/model/dimension/metric/preparation identity | SQL ingestion and profile-scoped retrieval |
+| `document_chunks` | Complete text, vector(D), spans and generated GIN lexical channel | Atomic SQL publication and exact cosine retrieval |
+| `document_jobs` | Bounded immutable inputs, attempts, leases, sequence, image checkpoint and terminal result | Durable worker, exact replay and polled SSE |
+| `document_input_identities` | Unique scoped content-hash claim and winning logical file | Concurrent upload identity convergence |
+| `quarry_schema_version` | Source checksum and catalog fingerprint | Schema version 3 validation |
 
 Key invariants include:
 
@@ -1864,7 +1865,7 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 2 creates the former marker-18 layout plus bounded content revisions
+PostgreSQL schema version 3 creates the former marker-18 layout plus bounded content revisions
 and durable deal lifecycle guards, with
 `bytea` assets, generated numeric IDs and safe-integer checks, C-collated text, preserved serialized
 JSON/timestamps, all existing checks, same-deal composite foreign keys and partial unique indexes.
@@ -1873,12 +1874,18 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates only an empty selected schema inside one transaction, or validates version 2,
-its checksum/catalog, exactly-one-owner invariants and document readiness. Unknown nonempty or
-modified layouts fail without deletion. There is no SQLite export, upgrade chain, backfill,
-automatic reset, fallback or destructive relational utility. Version 1 databases are deliberately
-unsupported by this fresh-schema change and fail without mutation. Recreate a disposable database
-explicitly or select a new empty database; startup never discards data. Historical files remain untouched.
+Startup creates an empty selected schema or validates schema 3, checksum/catalog, owned indexes,
+extension readiness, ownership and complete document search sets. Unknown layouts fail without
+deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
+rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
+objects atomically. It has no old-data backfill and never runs at ordinary startup. Old stores
+remain outside its scope. See [reset and recovery](postgresql-storage.md).
+
+As of 2026-11-15, the MVP schema policy in [the agent guide](../AGENTS.md#persistence-and-indexing)
+allows requested PostgreSQL schema changes to drop/recreate product tables and discard their MVP
+data without preserving migrations or backfills, unless data preservation is explicitly requested.
+This is a temporary development policy to replace when the product matures. Recreation remains an
+explicit operation; normal startup never resets data, and unrelated stores remain outside its scope.
 
 Aggregate reads retain one consistent snapshot; related batches run sequentially on its connection
 without N+1 child reads or multiplying parties by scopes. Mutation authorization, activity and
@@ -1921,110 +1928,53 @@ as well as Axum. Independent-pool integration tests disable only the global advi
 isolated test schema to exercise row coordination and CAS. These tests do not establish distributed
 worker or remote publication safety; the production global write controls remain necessary.
 
-### 9.2 Helix versioned file graph
+### 9.2 Canonical document chunks and search
 
-Helix domain queries and projection writes live in `domains/documents/graph/` (models, queries,
-repository, and writer) and `domains/templates/slide_templates/graph.rs` (template projection).
-The wrappers are named `DocumentGraphReader`, `DocumentGraphWriter`, `DocumentGraphSearch`, and
-`TemplateGraph`; ingestion/search fields and bootstrap bindings use matching graph terminology.
-Their unit/integration test paths mirror the `graph` naming. Database index operations retain
-index terminology; this module naming does not change their stored names or API contracts.
+Document file/version/chunk relationships use SQL foreign keys and joins. There is no document
+Helix module, publication request, index initialization, candidate scan or remote deletion fence.
+`store/repository.rs`, `store/search_repository.rs`, `store/identity_repository.rs`,
+`store/access_repository.rs` and `ingestion/repository.rs` own data access. The shared adapter
+contains reusable mechanisms only.
+Changed-content uploads still create a new logical file; explicit repository version operations
+retain uniqueness and one-current rules. Stable IDs, spans, attribution and original bytes remain.
 
-```text
-QuarryFile
-  ├── HAS_VERSION ───────> FileVersion
-  └── CURRENT_VERSION ───> FileVersion
-FileVersion
-  └── HAS_CHUNK ─────────> FileChunk
-```
+Search uses profile-scoped exact cosine and GIN-indexed English/technical lexical channels.
+Both hybrid branches share a read-only snapshot per deal, followed by bounded final authorization.
+No ANN index is enabled. Notebook and template Helix SDK/index/transport behavior is retained.
+Their dimension conflicts still require an explicitly scoped operational procedure; ordinary
+startup never clears stores or recreates indexes. See [document storage](document-storage.md).
 
-The graph carries canonical deal, file, version, content hash, byte size, index generation, chunk
-hash/order, character/page ranges, section path, text, embedding, and timestamps. Image description
-text is stored as ordinary chunk text with section path `Image description`, and its OpenAI-generated
-embedding is stored on the same chunk. Identity behavior
-in the current upload path is narrower than the versioned graph shape suggests:
+### 9.3 Atomic document publication and durable recovery
 
-- PDF, DOCX, XLSX, PPTX, and image parsers assign a new random `file_id` on each parse.
-- New `document_id` values derive from deal ID plus content hash; migrated versions retain their original content IDs through identity manifests.
-- Ingestion looks up the current PostgreSQL version by deal and exact content hash. A match
-  reuses its `file_id`; otherwise the parsed random `file_id` becomes a new logical file.
-- `version_id` is deterministic from the selected `file_id` plus content hash. Final graph chunk IDs
-  derive from deal, file, version/index generation, chunk order, and chunk hash; migrated chunk IDs are preserved exactly.
-- The repository and schema support later versions when the caller explicitly reuses a `file_id`,
-  but ordinary changed-content upload does not currently identify the earlier logical file and
-  therefore does not create version 2.
-- Helix setup can create the immutable version node and replace the active generation’s chunks, preserving historical generations, but adds its
-  `HAS_VERSION` and `CURRENT_VERSION` edges only in a final publication write after every bounded
-  chunk batch succeeds. A failed graph write therefore leaves the incomplete version unreferenced
-  and preserves an older published version when one exists.
+Provider/parsing work and complete-batch validation precede canonical SQL locks. One transaction
+writes canonical file/version/blob, manifest, every bounded chunk/vector/lexical batch, current
+selection, upload activity and terminal job result. Readiness constraints reject incomplete sets
+at commit; readers see the old complete version until the new complete set commits. The final
+database-clock attempt fence, current membership and lifecycle guards reject stale workers.
 
-Vector and keyword search query this projection.
-
-The adapter uses Helix Rust SDK v3. The configured `HELIX_URL` is the server origin; the SDK owns
-the `/v2/query` path. Read and write operations have separate facade methods: writes are
-process-serialized and request durability acknowledgement, while reads cannot accidentally send a
-write request. SDK transport failures are terminal because the exposed v3 error does not preserve
-an HTTP status suitable for a safe replay decision. Helix metadata needed to construct a graph
-(including display name and byte size) stays in the graph request; it is not passed separately to
-the execution facade or logged as execution metadata. Index bootstrap accepts each DDL receipt and
-waits for every required index operation to report usable before Axum starts.
-
-PostgreSQL remains the recovery source. An incompatible populated graph rollout requires drained
-writers, matching PostgreSQL/Helix backups, and a reviewed recovery and verification procedure.
-Graph clearing is destructive and requires separate explicit authorization; it is not a generic
-response to an index-definition conflict. The one-time deal-scope maintenance tool was removed
-after the selected local cutover. Its matching artifact is retained with the local backups; no
-scope migration or general bulk PostgreSQL-to-Helix reindex command is shipped, so another
-unconverted store requires reviewed offline maintenance. `clear_helix` is not part of normal startup.
-
-Document and notebook vector indexes share `HELIX_VECTOR_DIMENSION`; template vector roles use
-`OPENAI_SLIDE_EMBEDDING_DIMENSIONS` independently. Existing index definitions are durable, so a
-configuration-only dimension change can fail bootstrap with an index-definition conflict. Changing
-populated vectors requires planned re-embedding; the launcher never drops/replaces indexes to hide
-the conflict. Explicitly authorized replacement of verified-empty indexes is an operational action,
-not a schema migration or startup fallback. See [vector dimensions and existing indexes](postgresql-storage.md#vector-dimensions-and-existing-indexes).
-
-### 9.3 Cross-store consistency
-
-Document persistence is not a distributed transaction:
-
-1. Validate parser-derived identities and chunk invariants.
-2. Validate each provider embedding against the configured `HELIX_VECTOR_DIMENSION`, including finite f64/f32 values. The graph writer carries that same dimension for index setup and checks every chunk against it before canonical persistence. After embeddings are attached, build one immutable PostgreSQL/Helix persistence plan with its selected `file_id`, deterministic version ID, and one stable `indexed_at` value. The plan constructs the exact v3 setup request, contiguous chunk-batch requests, and final publication request, and rejects it before PostgreSQL persistence when the setup request, an individual chunk, or publication request cannot fit within the 2 MiB writer cap.
-3. Commit the logical file/version/blob aggregate, identity manifest, and accepted image document/chunks (for image inputs) in PostgreSQL and confirm the returned identity matches the prepared plan.
-4. Submit the retained, already-preflighted setup request and size-bounded chunk-batch writes through the process-serialized Helix client, then publish the version by adding its `HAS_VERSION` and `CURRENT_VERSION` edges.
-5. If Helix fails after that PostgreSQL commit, return an error naming the already committed file/version.
-
-The implemented recovery path is to re-upload the exact same bytes. The content-hash lookup finds
-the committed PostgreSQL version, reuses its `file_id`, and can retry the missing Helix insert.
-An already-published version skips only when its active generation and every canonical chunk
-header match the identity manifest, using the same bounded header check as search. Missing or
-mismatched chunks enter the normal repair path; a failed verification read does not trigger graph
-writes. Once a `file_id` is selected, version and graph-chunk identities are reproducible. Image retries load the
-accepted document/chunk snapshot from `document_image_recovery` before parsing or calling vision,
-then embed that exact text and enforce the existing immutable manifest. The checkpoint commits
-with the file/version/blob and contains no vectors; changed descriptions cannot replace it.
-The former SQLite schema-15 rollout introduced image checkpoints. Those old stores are not
-imported by this runtime; fresh PostgreSQL schema 2 includes the checkpoint table from creation.
-A new AI description cannot recover a lost original checkpoint. General recovery from
-PostgreSQL without the original bytes remains an operational design, not implemented tooling; deleting
-the PostgreSQL record to conceal a Helix failure would violate source ownership. A single oversized
-chunk is rejected before canonical persistence; documents whose individual chunks fit are split
-across Helix graph writes so a large XLSX/PPTX file can still be indexed.
+Accepted immutable input and image descriptions are separate durable checkpoints, not uploaded
+documents. Matching retries reuse the winning identity and accepted text. Terminal SQL status
+reconciles uncertain acknowledgments and survives restarts without repeating committed provider
+work. Explicit async retries promote queued or processing synchronous jobs to background recovery
+without replacing a live attempt's token or lease; processing work is reclaimed only after expiry.
+Status polling reads metadata/results without loading accepted input bytes or image checkpoints.
+The historical `sqliteCommitted` field means this complete PostgreSQL commit. See the
+[document storage and recovery contract](document-storage.md) for limits and retry policy.
 
 ### 9.4 Ephemeral state
 
 | State | Implementation | Lifetime |
 | --- | --- | --- |
-| Document jobs | In-memory map of Tokio watch senders | Lost on process restart; terminal default retention 10 minutes |
+| Document jobs | PostgreSQL inputs/attempts/results; polled watch subscriptions | Durable; terminal success default retention 10 minutes, failures 24 hours |
 | Rendered preview cache | Bounded in-memory cache for Office and image PDFs | Process lifetime; max 16 entries/128 MB |
-| Duplicate-ingestion locks | Weak per-identity async mutexes | Process lifetime |
-| Query embeddings | Private process-local bounded cache; no results or permissions | Five-minute TTL; 512 entries/16 MiB; lost on restart |
+| Duplicate-ingestion identity | Unique SQL input claim and operation replay | Durable until deal deletion; no process-only identity lock |
+| Query embeddings | Generated independently per search; shared only across deals within that request | Request lifetime; no cache or cross-request coalescing |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
 | Notebook API resources and save jobs | Shared PostgreSQL; Helix projection | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
 | Notebook edit buffers and save tracking | Session-scoped module/external-store memory | Survives routes; clears on reload/auth changes; saved content reloads from PostgreSQL, unsaved edits are lost |
 | Frontend activity log | Module store mirrored to `sessionStorage` | Tab/webview session and reloads within it; max 400 entries |
 
-None of these mechanisms supports multi-instance coordination or durable recovery.
+Durable jobs recover across process restarts. Global writer ownership/serialization remains required; this is not general multi-instance support.
 
 ## 10. Core request flows
 
@@ -2056,7 +2006,7 @@ Deal creation has no Helix write. Its entire durable aggregate lives in one
 PostgreSQL transaction, so an invalid reference or failed child insert leaves no deal, metadata,
 assignment, or scope behind. The same applies to scalar/collection replacement on update; metadata
 is retained. Previously and explicitly saved directory companies are independent records. Document
-upload/indexing is a separate operation with the cross-store recovery contract in section 9.3.
+upload/indexing is a separate atomic operation with durable input recovery as described in section 9.3.
 
 The shared add-deal modal has four steps: deal name/details, company directory selection or
 creation and deal-specific roles, an optional team name, then optional SharePoint, SOW, fact-sheet,
@@ -2091,58 +2041,14 @@ submitting links or files entered in the optional metadata step.
 
 ### 10.2 Document ingestion
 
-```mermaid
-sequenceDiagram
-    participant UI as React UI
-    participant API as Axum handler/job service
-    participant Ingestion as Document ingestion service
-    participant Parser as PDF/DOCX/XLSX/PPTX parser + image validator/assembler
-    participant AI as OpenAI vision + embeddings
-    participant SQL as PostgreSQL
-    participant H as Helix
-
-    UI->>API: multipart dealId path + userId + PDF/DOCX/XLSX/PPTX/image
-    API-->>UI: 202 jobId (job path) or waits (batch path)
-    API->>Ingestion: process upload/job
-    Ingestion->>Parser: parse PDF/DOCX/XLSX/PPTX or validate image bytes
-    Parser-->>Ingestion: normalized chunks or validated image
-    Ingestion->>AI: describe validated image bytes (new image inputs only)
-    AI-->>Ingestion: image description
-    Ingestion->>Parser: build image description chunks (image inputs only)
-    Parser-->>Ingestion: document + chunks + content-derived IDs and new file_id
-    Ingestion->>AI: embed chunk text
-    AI-->>Ingestion: embeddings
-    Ingestion->>H: preflight setup, chunk-batch, and publication graph requests
-    Ingestion->>SQL: transactionally persist file/version/blob, manifest, image checkpoint
-    SQL-->>Ingestion: committed file/version identities
-    Ingestion->>H: insert version graph, bounded chunks, then publish it
-    H-->>Ingestion: indexed or recoverable error
-    Ingestion-->>API: processing result
-    API-->>UI: SSE completed/skipped/failed
-```
-
-For an existing image awaiting graph recovery, ingestion loads the accepted PostgreSQL image snapshot
-instead of repeating the parse/vision steps above.
-
-PDF, DOCX, XLSX, PPTX, PNG, JPEG, WebP, and single-frame GIF are connected to this ingestion path.
-Image decoding and document parsing run on blocking workers. XLSX preflights every worksheet's
-actual cell coordinates before Calamine materializes its dense range; total worksheet range area
-is limited to one million cells per workbook. PPTX resolves slide order from validated presentation
-relationships and reads slide XML directly from the uploaded ZIP bytes. A two-permit
-ingestion-local Office gate covers XLSX/PPTX ZIP inspection and parsing. Before either Office parser
-runs, one shared central-directory inspector (also used by chat attachments) requires the expected
-package root and OOXML content-type marker, permits at most 2,048 entries, 16 MiB per declared
-entry, and 128 MiB total declared uncompressed content. Image decoding retains its 20,000-pixel
-per-dimension limit, 256 MiB decoder allocation limit, and 16-million-pixel decoded-image limit
-before OpenAI receives the bytes.
-
-Document chunks use the `cl100k_base` tokenizer used by the configured `text-embedding-3` models.
-Before calling OpenAI, ingestion groups chunks in their original order into requests of at most
-300,000 aggregate tokens and 2,048 inputs. Independent requests run with a service-wide limit of
-two in flight; their returned vectors are assigned to their original chunk ranges before the
-PostgreSQL/Helix persistence plan is built. The plan validates every Helix request before PostgreSQL
-commits, then executes graph setup, chunk batches, and final publication sequentially. Thus an error in any
-embedding request leaves no partial document persistence.
+Authenticated multipart handlers validate names, types and body bounds before admission. The
+job repository retains immutable input/hash and a unique winning file claim. The synchronous
+route owns its active futures; the 202 route leaves admitted background work recoverable.
+The worker parses/describes/embeds outside SQL locks and checkpoints accepted image text before
+embedding. CPU-heavy persistence preparation runs on the blocking pool. One short retained SQL
+transaction authorizes current deal/file/attempt state and publishes the entire aggregate plus
+activity/result. SSE sends durable processing/completed/skipped/failed snapshots and checks access.
+See [document storage](document-storage.md) for database-clock leases, retention and partial failure.
 
 ### 10.3 Stored preview
 
@@ -2164,63 +2070,16 @@ therefore require LibreOffice.
 
 ### 10.4 Search
 
-Global keyword/vector requests derive all accessible deals from the bearer actor. Deal-scoped
-routes authorize the deal path. Both select canonical current/live chunk identities before ranking,
-verify complete projection headers and batch-check canonical identities again before exposing text.
-Vector search uses within-stream cosine ranking. The pinned Helix runtime returns normalized
-cosine distance `(1 - similarity) / 2`; the graph adapter converts it explicitly for hybrid relevance
-policy and leaves legacy distance DTO values unchanged. Keyword search uses bounded lexical ranking and
-reciprocal-rank fusion across deals because the pinned SDK lacks within-stream text ranking.
-Every distinct keyword must match a whole, case-insensitive token in the same passage; punctuation
-separates words while `+` and `#` preserve language names such as `C++` and `C#`. A longer query
-cannot match solely through one common word or through a substring inside an unrelated word.
-Oversized searches and incomplete projections fail explicitly; they do not return silent partial
-results. The limits, algorithms and migration contract are in [shared deal projects](shared-deal-projects.md).
-
-The Deal Room Search documents tab calls these APIs and exposes “This deal” and “All accessible
-deals” scopes. Results count matching passages and show a section heading, page or passage location,
-and a compact whitespace-normalized excerpt around a distinctive matching word. Whole-word matches
-are highlighted as text; result links open the authorized data room.
-Hybrid search adds a strict text-in operation in `domains/documents/search/`. It overlaps one
-query embedding/cache lookup with four bounded deal pipelines, shares canonical preparation,
-retrieves 50–100 candidates per source, rejects weak semantic neighbors before discarding their
-Helix-normalized cosine distances (similarity = `1 - 2 × distance`), refreshes immutable identities,
-fuses ranks per deal and performs the final bounded access snapshot. The default similarity floor
-is 0.4; the selected large/3072 local profile uses a measured 0.26 override. Both branches must
-succeed. Legacy keyword/vector operations share preparation/freshness and bounded scheduling,
-preserving their DTOs and ranking.
-Eight process-service search Helix reads and four provider misses are the trial defaults. Hybrid
-admission permits 16 active and 32 queued requests, with two-second queue, 15-second embedding
-and 30-second request deadlines. First error/drop stops scheduling; accepted remote/blocking work
-may finish. The embedding cache has a five-minute TTL, 512-entry/16 MiB bounds and a private
-salted digest key bound to provider/model/dimensions/preprocessing; 32 in-flight keys and 64 waiters
-per key coalesce misses without detached tasks. No document results or access decisions are cached.
-Bootstrap injects all collaborators and typed limits. `QUARRY_HYBRID_SEARCH_ENABLED` defaults to
-false pending disposable load/relevance measurements. Missing embedding capability or disabled
-rollout returns explicit 503; legacy keyword search still works without OpenAI.
-
-The Data Room floating search panel submits hybrid requests through shared HTTP/Tauri adapters
-on Enter or Search; typing does not call the provider. Draft edits, clearing, closing and actor/deal
-changes invalidate results; focus revalidation repeats authorized retrieval. Browser requests are
-abortable; desktop late completions are suppressed because JSON IPC has no request cancellation.
-Loading, empty and error/retry remain explicit, with **Use keyword search** offered after a 503.
-The selected mode and actual Keyword/Semantic source badges remain visible. The hybrid panel
-offers All results, Keyword, and Semantic views with counts derived from the returned passages.
-Filtering is local and preserves server ranking; a passage matched by both branches appears once
-in All results and in both source views, so source counts can overlap. The preview names its
-match type explicitly. An empty source view can return to All results without another request;
-filters reset for a new submission and are hidden during explicit keyword-only fallback.
-Excerpts highlight only literal whole-token matches as escaped text. The UI maps uploaded-file IDs
-to catalog names and keeps current-document valid-page activation; other documents remain readable
-but cannot activate.
-Cross-document activation and in-PDF highlighting remain deferred. Other live keyword consumers
-retain their 250 ms debounce. The new HTTP operation omits query/response bodies from activity logs.
-
-Indexed lexical ranking and large-deal preparation are not implemented: the pinned text builder
-starts from root top-K, with no verified predicate-aware canonical stream. Current all-token
-scans and 5,000-document/10,000-chunk/200-deal ceilings remain. No schema/index/model migration is
-introduced. See [Hybrid document search](hybrid-document-search.md) for cancellation/cache invariants,
-rollout/rollback, capability evidence and the remaining benchmark and indexed-retrieval gates.
+Handlers retain legacy keyword/vector shapes and opt-in text-in hybrid endpoints. The server
+derives accessible deals. Each hybrid search generates its own private query embedding, reused only
+across deals within that request. No embedding cache or cross-request coalescing remains; provider
+work completes before SQL snapshots. Document repositories apply membership, live/current
+readiness and immutable profile predicates before lexical/vector LIMIT. Hybrid branches share a
+repeatable-read read-only transaction per deal, then deterministic per-deal RRF and global ordering.
+A final bounded canonical membership/current-result check can shorten responses without refill.
+Both branches must succeed. Explicit client keyword fallback, source badges and page targets remain.
+Legacy vector distance is pgvector cosine distance divided by two. See
+[hybrid search](hybrid-document-search.md) and [document storage](document-storage.md).
 
 ### 10.5 Assistant chat
 
@@ -2284,14 +2143,14 @@ pins it to the loopback API.
 | `HELIX_VECTOR_DIMENSION` | `1536`; positive integer shared by the Helix index, ingestion/query embedding request and response validation, and graph write preflight; dimension mismatch fails before PostgreSQL commit |
 | `QUARRY_HYBRID_SEARCH_ENABLED` | `false`; explicit hybrid rollout switch; requires reviewed disposable performance/relevance evidence |
 | `QUARRY_SEARCH_DEAL_CONCURRENCY` | 4; 1–32 active deal pipelines per search |
-| `QUARRY_SEARCH_HELIX_READS` | 8; 1–64 process-service search Helix reads, including legacy operations |
+| `QUARRY_SEARCH_SQL_READS` | 8; 1–64 process-service document SQL reads, including legacy operations |
 | `QUARRY_SEARCH_EMBEDDING_CONCURRENCY` | 4; 1–16 active query embedding misses |
 | `QUARRY_SEARCH_ACTIVE_REQUESTS` | 16; 1–128 active hybrid requests |
 | `QUARRY_SEARCH_QUEUED_REQUESTS` | 32; 1–256 additional admitted hybrid waiters |
 | `QUARRY_SEARCH_QUEUE_SECONDS` | 2; 1–30 queue deadline |
 | `QUARRY_SEARCH_TIMEOUT_SECONDS` | 30; 1–110 hybrid operation deadline (outer HTTP timeout can be shorter) |
-| `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` | 0.4 default; selected large/3072 local profile overrides to 0.26 after recall/control measurements; finite 0–1 cosine-similarity floor before fusion; tune against judged queries, not confidence percentages |
-| `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 fixed embedding-flight deadline, including provider queue |
+| `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` | 0.4 default; selected large/3072 local profile overrides to 0.25 by user request; finite 0–1 cosine-similarity floor before fusion; tune against judged queries, not confidence percentages |
+| `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 per-request embedding deadline, including provider queue |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
 | `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
@@ -2454,16 +2313,16 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- Helix is not optional during bootstrap: the client is always constructed, document-index DDL is
-  submitted, and every required index operation must become usable before the server starts.
+- Helix remains required during bootstrap for notebook/template projections. Document startup
+  validates PostgreSQL vector profiles and indexes and submits no Helix document-index DDL.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
   `HELIX_VECTOR_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
   generated vectors use one configured size. Known v3 model maxima are checked at configuration
   parsing: 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
-  A model/dimension change requires compatible empty/rebuilt document and notebook vector indexes;
-  changing configuration cannot convert existing vectors. The selected local 3072-dimensional
-  trial and its backed-up, explicitly authorized document reset are recorded in
+  A model/dimension change requires a compatible document SQL schema/profile and a separately
+  scoped notebook index procedure; changing configuration cannot convert existing vectors.
+  The historical local 3072-dimensional trial and its authorized Helix document reset are recorded in
   [Hybrid document search](hybrid-document-search.md). Repository defaults remain small/1536.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
   parse or wire them into the product application.
@@ -2614,7 +2473,8 @@ layout guard rejects Rust test bodies under `frontend/src-tauri/src/`.
 Coverage includes configuration, secret redaction, modular dependency boundaries, feature-state
 router composition, schema migration and constraints, PostgreSQL transactions/concurrency,
 repositories, services, router contracts, deterministic hybrid overlap/single embedding,
-request/provider/read bounds, immutable-identity freshness, final access and cache cancellation/eviction,
+request/provider/read bounds, immutable-identity freshness, final access, independent query embeddings
+and provider cancellation,
 multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP limits,
 graph-request preflight, Helix query construction and v3 response mapping,
 OpenAI/WM mapping, stored previews, bounded declared and streamed template bodies,
@@ -2697,9 +2557,14 @@ From `backend/`:
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
+
+The backend gate rejects Clippy-detected redundant clones. Ownership review also checks deep
+copies that the lint cannot identify, particularly vectors, blobs, JSON, batches and sort keys.
+Borrow read-only data or move consumed values; retain shared handles and required independent
+owned snapshots. This is an allocation check, not a blanket prohibition on `Clone`.
 
 From `frontend/src-tauri/` when native code or the desktop contract changes:
 
@@ -2721,11 +2586,11 @@ configuration. Never use `clear_helix` as verification.
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 2, equivalent to former SQLite marker 18; no old-data migration or reset | No old SQLite data import, profile conversion or automatic cross-catalog transfer |
-| Search | Helix required; non-atomic with PostgreSQL | Exact-content re-upload can retry a partial failure |
+| Persistence | Fresh PostgreSQL schema 3 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
+| Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
-| Jobs | In-memory map and SSE | Lost on restart; not multi-instance |
+| Document jobs | SQL inputs, attempt fencing, terminal replay and polled SSE | Uncheckpointed provider calls may repeat after restart; global writer controls remain |
 | Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Embedded imports are private to their authenticated owner and survive restart; unassigned older records are preserved but hidden; startup reconciles Helix from canonical PostgreSQL |
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
@@ -2773,7 +2638,7 @@ current-state reference.
 | Backend handler | route, extractor, error mapping, service call | focused route test, backend fmt/Clippy/tests |
 | Domain service/repository | domain facade, constructor, bootstrap, architecture tests, failure mapping | focused unit tests and full backend gates |
 | PostgreSQL schema | `app/migrations`, owning domain store/repository, state tests, recovery documentation | disposable database tests; never real local data |
-| Helix graph/query | document graph models/query/writer/repository, documented reindex policy | graph/query tests and explicit integration plan |
+| Document storage/search | document repositories, schema/profile/readiness and typed SQL mechanisms | rollback/snapshot/attempt/auth tests and relevance/load evidence |
 | Config | parser/default/example/bootstrap | config tests, secret redaction, startup plan with disposable config |
 | Styling/theme | semantic tokens, light/dark, reduced motion, affected primitives | typecheck/tests plus visual/keyboard inspection |
 
@@ -2811,7 +2676,7 @@ current-state reference.
 | Template service | Native template engine inside Axum, backed by shared PostgreSQL and Helix |
 | Composition root | Vite/runtime selection on the client; `bootstrap.rs` on the server |
 | Canonical store | PostgreSQL records and blobs used for recovery and product persistence |
-| Search projection | Helix graph/index intended to be recoverable from canonical file versions; bulk rebuild tooling is not implemented |
+| Search storage | PostgreSQL document chunks and indexes; notebook/template Helix projections remain recoverable-domain concerns |
 | Logical file | A `quarry_files` record that can own immutable versions; changed-content upload currently creates a new one |
 | Current version | The version marked current in canonical PostgreSQL; Helix should project it but can be absent or stale after a partial indexing failure |
 | Document job | Process-local ingestion task exposed through an SSE event stream |

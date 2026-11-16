@@ -34,6 +34,12 @@ pub enum SqlBuilderError {
     UnexpectedCrossJoinCondition(String),
     #[error("row locking cannot be combined with DISTINCT or COUNT")]
     InvalidLockingSelect,
+    #[error("invalid INSERT batch dimensions or parameter count")]
+    InvalidInsertBatch,
+    #[error("condition group cannot be empty")]
+    EmptyConditionGroup,
+    #[error("text prefix must contain only letters and numbers")]
+    InvalidTextPrefix,
 }
 
 /// Explicit PostgreSQL resource locks. Ordinary reads never use these modes.
@@ -156,6 +162,28 @@ impl JoinCondition {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Predicate {
+    TextPrefix {
+        column: String,
+        token: String,
+    },
+    Group {
+        conditions: Vec<Condition>,
+        all: bool,
+    },
+    Columns {
+        left: String,
+        right: String,
+    },
+    OlderThan {
+        column: String,
+        seconds: u32,
+    },
+    TextMatches {
+        column: String,
+        text: String,
+        english: bool,
+        phrase: bool,
+    },
     EpochDeadline {
         column: String,
         expired: bool,
@@ -184,6 +212,58 @@ enum Predicate {
 pub struct Condition(Predicate);
 
 impl Condition {
+    pub fn text_prefix(column: impl Into<String>, token: impl Into<String>) -> Self {
+        Self(Predicate::TextPrefix {
+            column: column.into(),
+            token: token.into(),
+        })
+    }
+
+    pub fn all(conditions: impl IntoIterator<Item = Condition>) -> Self {
+        Self(Predicate::Group {
+            conditions: conditions.into_iter().collect(),
+            all: true,
+        })
+    }
+    pub fn any(conditions: impl IntoIterator<Item = Condition>) -> Self {
+        Self(Predicate::Group {
+            conditions: conditions.into_iter().collect(),
+            all: false,
+        })
+    }
+    pub fn columns_equal(left: impl Into<String>, right: impl Into<String>) -> Self {
+        Self(Predicate::Columns {
+            left: left.into(),
+            right: right.into(),
+        })
+    }
+    pub fn older_than(column: impl Into<String>, seconds: u32) -> Self {
+        Self(Predicate::OlderThan {
+            column: column.into(),
+            seconds,
+        })
+    }
+    pub fn text_matches(column: impl Into<String>, text: impl Into<String>) -> Self {
+        Self(Predicate::TextMatches {
+            column: column.into(),
+            text: text.into(),
+            english: false,
+            phrase: false,
+        })
+    }
+
+    pub fn english_text_matches(
+        column: impl Into<String>,
+        text: impl Into<String>,
+        phrase: bool,
+    ) -> Self {
+        Self(Predicate::TextMatches {
+            column: column.into(),
+            text: text.into(),
+            english: true,
+            phrase,
+        })
+    }
     /// Compare an integer epoch-second deadline with the database clock.
     pub fn expired(column: impl Into<String>) -> Self {
         Self(Predicate::EpochDeadline {
@@ -360,6 +440,18 @@ impl SortDirection {
 pub struct SqlBuilder;
 
 impl SqlBuilder {
+    pub fn insert_batch(
+        table: impl Into<String>,
+        columns: impl IntoIterator<Item = impl Into<String>>,
+        rows: Vec<Vec<SqlValue>>,
+    ) -> super::bulk::BatchInsertBuilder {
+        super::bulk::BatchInsertBuilder::new(
+            table.into(),
+            columns.into_iter().map(Into::into).collect(),
+            rows,
+        )
+    }
+
     pub fn select(table: impl Into<String>) -> SelectBuilder {
         SelectBuilder::new(table)
     }
@@ -431,9 +523,63 @@ enum InsertConflict {
     DoUpdate(ConflictUpdate),
 }
 
+/// Closed expression set: no raw SQL expression or operator escape hatch.
+#[derive(Debug, Clone)]
+pub enum SelectExpression {
+    TextPrefixRank {
+        column: String,
+        token: String,
+    },
+    Count,
+    CountWhere(Condition),
+    SumByteLength(String),
+    CosineDistance {
+        column: String,
+        vector: super::super::vector::CosineVector,
+    },
+    TextRank {
+        column: String,
+        text: String,
+    },
+}
+impl SelectExpression {
+    fn render(self, parameters: &mut Vec<SqlValue>) -> Result<String, SqlBuilderError> {
+        Ok(match self {
+            Self::TextPrefixRank { column, token } => {
+                validate_prefix(&token)?;
+                parameters.push(token.into());
+                format!("ts_rank_cd({},to_tsquery('pg_catalog.english',quote_literal(?) || ':*'))::float8",quote_identifier(&column)?)
+            }
+            Self::Count => "COUNT(*)".into(),
+            Self::CountWhere(condition) => {
+                let mut predicate = String::new();
+                append_predicate(&mut predicate, &condition, parameters)?;
+                format!("COUNT(*) FILTER (WHERE {predicate})")
+            }
+            Self::SumByteLength(column) => format!(
+                "COALESCE(SUM(octet_length({})),0)::bigint",
+                quote_identifier(&column)?
+            ),
+            Self::CosineDistance { column, vector } => {
+                parameters.push(vector.into());
+                format!(
+                    "({} OPERATOR(quarry_extensions.<=>) ?)",
+                    quote_identifier(&column)?
+                )
+            }
+            Self::TextRank { column, text } => {
+                parameters.push(text.clone().into());
+                parameters.push(text.into());
+                format!("ts_rank_cd({},plainto_tsquery('pg_catalog.english',?) || plainto_tsquery('pg_catalog.simple',?))::float8",quote_identifier(&column)?)
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectBuilder {
     count_rows: bool,
+    expressions: Vec<(SelectExpression, String)>,
     table: String,
     table_alias: Option<String>,
     columns: Vec<String>,
@@ -452,6 +598,7 @@ impl SelectBuilder {
             table: table.into(),
             table_alias: None,
             count_rows: false,
+            expressions: Vec::new(),
             columns: Vec::new(),
             distinct: false,
             joins: Vec::new(),
@@ -463,6 +610,10 @@ impl SelectBuilder {
         }
     }
 
+    pub fn expression(mut self, expression: SelectExpression, alias: impl Into<String>) -> Self {
+        self.expressions.push((expression, alias.into()));
+        self
+    }
     /// Select a row count while retaining joins and bound predicates.
     pub fn count_rows(mut self) -> Self {
         self.count_rows = true;
@@ -570,14 +721,17 @@ impl SelectBuilder {
     }
 
     pub fn build(self) -> Result<SqlQuery, PostgresError> {
-        if self.row_lock.is_some() && (self.distinct || self.count_rows) {
+        if self.row_lock.is_some()
+            && (self.distinct || self.count_rows || !self.expressions.is_empty())
+        {
             return Err(SqlBuilderError::InvalidLockingSelect.into());
         }
         let table = quote_table(&self.table, self.table_alias.as_deref())?;
         ensure_unique_columns(self.columns.iter().map(String::as_str))?;
-        let columns = if self.count_rows {
+        let mut parameters = Vec::new();
+        let mut columns = if self.count_rows {
             "COUNT(*)".to_owned()
-        } else if self.columns.is_empty() {
+        } else if self.columns.is_empty() && self.expressions.is_empty() {
             "*".to_string()
         } else {
             self.columns
@@ -587,9 +741,22 @@ impl SelectBuilder {
                 .join(", ")
         };
 
+        ensure_unique_columns(
+            self.columns
+                .iter()
+                .map(String::as_str)
+                .chain(self.expressions.iter().map(|(_, alias)| alias.as_str())),
+        )?;
+        for (expression, alias) in self.expressions {
+            if !columns.is_empty() {
+                columns.push_str(", ");
+            }
+            columns.push_str(&expression.render(&mut parameters)?);
+            columns.push_str(" AS ");
+            columns.push_str(&quote_identifier(&alias)?);
+        }
         let distinct = if self.distinct { "DISTINCT " } else { "" };
         let mut sql = format!("SELECT {distinct}{columns} FROM {table}");
-        let mut parameters = Vec::new();
         append_joins(&mut sql, &self.joins, &mut parameters)?;
         append_conditions(&mut sql, &self.conditions, &mut parameters)?;
 
@@ -1051,7 +1218,6 @@ fn append_conditions(
     if conditions.is_empty() {
         return Ok(());
     }
-
     sql.push_str(" WHERE ");
     for (index, connected) in conditions.iter().enumerate() {
         if index > 0 {
@@ -1060,52 +1226,111 @@ fn append_conditions(
                 ConditionConnector::Or => " OR ",
             });
         }
-
         sql.push('(');
-        match &connected.condition.0 {
-            Predicate::EpochDeadline { column, expired } => {
-                sql.push_str(&quote_identifier(column)?);
-                sql.push_str(if *expired { " <= " } else { " > " });
-                sql.push_str(EPOCH_SECONDS);
-            }
-            Predicate::LiteralSubstring { column, text } => {
-                sql.push_str(&ascii_lower(&quote_identifier(column)?));
-                sql.push_str(" LIKE translate(?::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE '\\'");
-                let escaped = text
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_");
-                parameters.push(format!("%{escaped}%").into());
-            }
-            Predicate::Comparison {
-                column,
-                operator,
-                value,
-            } => {
-                append_comparison(sql, column, *operator, value, parameters)?;
-            }
-            Predicate::In {
-                column,
-                values,
-                negated,
-            } => {
-                if values.is_empty() {
-                    return Err(SqlBuilderError::EmptyInValues(column.clone()));
-                }
-                sql.push_str(&quote_identifier(column)?);
-                sql.push_str(if *negated { " NOT IN (" } else { " IN (" });
-                sql.push_str(&vec!["?"; values.len()].join(", "));
-                sql.push(')');
-                parameters.extend(values.iter().cloned());
-            }
-            Predicate::Null { column, negated } => {
-                sql.push_str(&quote_identifier(column)?);
-                sql.push_str(if *negated { " IS NOT NULL" } else { " IS NULL" });
-            }
-        }
+        append_predicate(sql, &connected.condition, parameters)?;
         sql.push(')');
     }
-
+    Ok(())
+}
+fn append_predicate(
+    sql: &mut String,
+    condition: &Condition,
+    parameters: &mut Vec<SqlValue>,
+) -> Result<(), SqlBuilderError> {
+    match &condition.0 {
+        Predicate::TextPrefix { column, token } => {
+            validate_prefix(token)?;
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(" @@ to_tsquery('pg_catalog.english',quote_literal(?) || ':*')");
+            parameters.push(token.clone().into());
+        }
+        Predicate::Group { conditions, all } => {
+            if conditions.is_empty() {
+                return Err(SqlBuilderError::EmptyConditionGroup);
+            }
+            sql.push('(');
+            for (index, condition) in conditions.iter().enumerate() {
+                if index > 0 {
+                    sql.push_str(if *all { " AND " } else { " OR " });
+                }
+                sql.push('(');
+                append_predicate(sql, condition, parameters)?;
+                sql.push(')');
+            }
+            sql.push(')');
+        }
+        Predicate::Columns { left, right } => {
+            sql.push_str(&quote_identifier(left)?);
+            sql.push_str(" = ");
+            sql.push_str(&quote_identifier(right)?);
+        }
+        Predicate::OlderThan { column, seconds } => {
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(" < ");
+            sql.push_str(EPOCH_SECONDS);
+            sql.push_str(" - ?");
+            parameters.push(i64::from(*seconds).into());
+        }
+        Predicate::TextMatches {
+            column,
+            text,
+            english,
+            phrase,
+        } => {
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(" @@ ");
+            sql.push_str(if *phrase {
+                "phraseto_tsquery("
+            } else {
+                "plainto_tsquery("
+            });
+            sql.push_str(if *english {
+                "'pg_catalog.english',?)"
+            } else {
+                "'pg_catalog.simple',?)"
+            });
+            parameters.push(text.clone().into());
+        }
+        Predicate::EpochDeadline { column, expired } => {
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(if *expired { " <= " } else { " > " });
+            sql.push_str(EPOCH_SECONDS);
+        }
+        Predicate::LiteralSubstring { column, text } => {
+            sql.push_str(&ascii_lower(&quote_identifier(column)?));
+            sql.push_str(" LIKE translate(?::text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE '\\'");
+            let escaped = text
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            parameters.push(format!("%{escaped}%").into());
+        }
+        Predicate::Comparison {
+            column,
+            operator,
+            value,
+        } => {
+            append_comparison(sql, column, *operator, value, parameters)?;
+        }
+        Predicate::In {
+            column,
+            values,
+            negated,
+        } => {
+            if values.is_empty() {
+                return Err(SqlBuilderError::EmptyInValues(column.clone()));
+            }
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(if *negated { " NOT IN (" } else { " IN (" });
+            sql.push_str(&vec!["?"; values.len()].join(", "));
+            sql.push(')');
+            parameters.extend(values.iter().cloned());
+        }
+        Predicate::Null { column, negated } => {
+            sql.push_str(&quote_identifier(column)?);
+            sql.push_str(if *negated { " IS NOT NULL" } else { " IS NULL" });
+        }
+    }
     Ok(())
 }
 
@@ -1171,7 +1396,7 @@ fn append_comparison(
     Ok(())
 }
 
-fn quote_identifier(identifier: &str) -> Result<String, SqlBuilderError> {
+pub(super) fn quote_identifier(identifier: &str) -> Result<String, SqlBuilderError> {
     if identifier.is_empty() || identifier.split('.').any(str::is_empty) {
         return Err(SqlBuilderError::EmptyIdentifier);
     }
@@ -1206,4 +1431,11 @@ fn quote_table(table: &str, alias: Option<&str>) -> Result<String, SqlBuilderErr
 
 fn ascii_lower(expression: &str) -> String {
     format!("translate({expression}, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')")
+}
+
+fn validate_prefix(token: &str) -> Result<(), SqlBuilderError> {
+    if token.is_empty() || !token.chars().all(char::is_alphanumeric) {
+        return Err(SqlBuilderError::InvalidTextPrefix);
+    }
+    Ok(())
 }

@@ -293,13 +293,16 @@ impl Cdp {
     fn call(&mut self, method: &str, params: Value) -> anyhow::Result<Value> {
         let id = self.send(method, params)?;
         loop {
-            let event = self.receive(method)?;
+            let mut event = self.receive(method)?;
             if event["id"].as_u64() == Some(id) {
                 ensure!(
                     event.get("error").is_none(),
                     "browser protocol command failed: {method}"
                 );
-                return Ok(event["result"].clone());
+                return Ok(event
+                    .get_mut("result")
+                    .map(Value::take)
+                    .unwrap_or(Value::Null));
             }
         }
     }
@@ -368,7 +371,7 @@ impl Cdp {
         }
     }
     fn evaluate(&mut self, expression: &str, await_promise: bool) -> anyhow::Result<Value> {
-        let result = self.call(
+        let mut result = self.call(
             "Runtime.evaluate",
             json!({"expression":expression,"returnByValue":true,"awaitPromise":await_promise}),
         )?;
@@ -376,7 +379,10 @@ impl Cdp {
             result.get("exceptionDetails").is_none(),
             "preview script failed"
         );
-        Ok(result["result"]["value"].clone())
+        Ok(result
+            .pointer_mut("/result/value")
+            .map(Value::take)
+            .unwrap_or(Value::Null))
     }
 }
 

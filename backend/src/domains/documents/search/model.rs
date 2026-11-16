@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domains::documents::graph::query::FileChunkResult;
+use crate::domains::documents::store::chunk::FileChunkResult;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -30,8 +30,8 @@ fn default_finding_limit() -> usize {
 }
 
 fn parse_finding_input(value: &Value) -> Result<FindingInput, SlideRetrievalError> {
-    let mut input: FindingInput = serde_json::from_value(value.clone())
-        .map_err(|_| SlideRetrievalError::new("invalid_query"))?;
+    let mut input: FindingInput =
+        FindingInput::deserialize(value).map_err(|_| SlideRetrievalError::new("invalid_query"))?;
     input.markdown = super::js_trim(&input.markdown).to_owned();
     if input.markdown.is_empty()
         || super::utf16_len(&input.markdown) > 20_000

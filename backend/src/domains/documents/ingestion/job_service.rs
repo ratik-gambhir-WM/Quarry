@@ -1,137 +1,135 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use tokio::sync::{watch, RwLock};
-use uuid::Uuid;
-
-use crate::{
-    domains::documents::ingestion::{
-        jobs::DocumentJobEvent,
-        service::{DocumentIngestionService, UploadedDocument},
-    },
-    shared::error::{ServiceError, ServiceResult},
+//! Durable document workers and database-polled SSE snapshots.
+use super::{
+    jobs::DocumentJobEvent,
+    repository::{DocumentJobRepository, Job},
+    service::{DocumentIngestionService, UploadedDocument},
 };
-
+use crate::shared::error::ServiceResult;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::watch;
 #[derive(Debug)]
 pub struct StartedDocumentJob {
     pub job_id: String,
     pub filename: String,
 }
-
-type OwnedJobs = HashMap<String, (String, i64, watch::Sender<DocumentJobEvent>)>;
-
 #[derive(Clone)]
 pub struct DocumentJobService {
     ingestion: Arc<DocumentIngestionService>,
-    jobs: Arc<RwLock<OwnedJobs>>,
-    completed_retention: Duration,
+    queue: DocumentJobRepository,
 }
-
 impl DocumentJobService {
-    pub(crate) async fn evict_deal(&self, deal: &str) {
-        self.jobs.write().await.retain(|_, (id, _, _)| id != deal);
+    pub fn new(ingestion: Arc<DocumentIngestionService>, retention: Duration) -> Self {
+        let queue = ingestion.queue();
+        let weak = Arc::downgrade(&ingestion);
+        let worker = queue.clone();
+        tokio::spawn(async move {
+            let mut maintenance = tokio::time::Instant::now();
+            loop {
+                let Some(ingestion) = weak.upgrade() else {
+                    break;
+                };
+                if tokio::time::Instant::now() >= maintenance {
+                    let seconds = u32::try_from(retention.as_secs()).unwrap_or(u32::MAX);
+                    if worker.prune(seconds).await.is_err() {
+                        tracing::warn!(category = "storage", "document retention unavailable");
+                    }
+                    maintenance = tokio::time::Instant::now() + Duration::from_secs(60);
+                }
+                match worker.claim(None).await {
+                    Ok(Some(claim)) => {
+                        let _ = ingestion.process_claim(claim).await;
+                    }
+                    Ok(None) => {}
+                    Err(_) => tracing::warn!(category = "storage", "document claim unavailable"),
+                }
+                drop(ingestion);
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
+        Self { ingestion, queue }
     }
-    pub fn new(ingestion: Arc<DocumentIngestionService>, completed_retention: Duration) -> Self {
-        Self {
-            ingestion,
-            jobs: Arc::new(RwLock::new(HashMap::new())),
-            completed_retention,
-        }
-    }
-
     pub async fn start(
         &self,
         deal_id: String,
         user_id: i64,
         file: UploadedDocument,
     ) -> ServiceResult<StartedDocumentJob> {
-        let _registration = self.ingestion.admit_deal(&deal_id).await;
-        self.ingestion.authorize_upload(&deal_id, user_id).await?;
-        let filename = file.filename.clone();
-        let job_id = Uuid::new_v4().to_string();
-        let (sender, _) = watch::channel(DocumentJobEvent::processing(
-            job_id.clone(),
-            filename.clone(),
-        ));
-        self.jobs
-            .write()
-            .await
-            .insert(job_id.clone(), (deal_id.clone(), user_id, sender));
-
-        let service = self.clone();
-        let worker_job_id = job_id.clone();
-        let worker_filename = filename.clone();
-        tokio::spawn(async move {
-            let event = match service
-                .ingestion
-                .process(&deal_id, user_id, vec![file])
-                .await
-            {
-                Ok(response) => match response.documents.into_iter().next() {
-                    Some(document) if document.skipped => DocumentJobEvent::skipped(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document.document_id,
-                    ),
-                    Some(document) if document.success => DocumentJobEvent::completed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document.document_id,
-                        document.chunk_count,
-                    ),
-                    Some(document) => DocumentJobEvent::failed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        document.error.unwrap_or_else(|| {
-                            "Document processing failed. Refresh documents and retry.".into()
-                        }),
-                    ),
-                    None => DocumentJobEvent::failed(
-                        worker_job_id.clone(),
-                        worker_filename.clone(),
-                        "document processing returned no result".to_string(),
-                    ),
-                },
-                Err(_error) => DocumentJobEvent::failed(
-                    worker_job_id.clone(),
-                    worker_filename.clone(),
-                    "Document processing failed. Refresh documents and retry.".into(),
-                ),
-            };
-            if let Some((_, _, sender)) = service.jobs.read().await.get(&worker_job_id) {
-                sender.send_replace(event);
-            }
-            tokio::time::sleep(service.completed_retention).await;
-            service.jobs.write().await.remove(&worker_job_id);
-        });
-
+        let (job_id, filename) = self.queue.admit(deal_id, user_id, file, true).await?;
         Ok(StartedDocumentJob { job_id, filename })
     }
-
+    pub async fn authorize_job(&self, id: &str, actor: i64) -> ServiceResult<()> {
+        let job = self.queue.job(id).await?;
+        self.ingestion.authorize_read(&job.deal, actor).await
+    }
     pub async fn subscribe_owned(
         &self,
-        job_id: &str,
+        id: &str,
         actor: i64,
     ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
-        let (deal, _, sender) = self
-            .jobs
-            .read()
-            .await
-            .get(job_id)
-            .cloned()
-            .ok_or_else(|| ServiceError::not_found("document job not found"))?;
-        self.ingestion.authorize_read(&deal, actor).await?;
-        Ok(sender.subscribe())
+        self.authorize_job(id, actor).await?;
+        let job = self.queue.job(id).await?;
+        let initial = event(id, &job);
+        let (sender, receiver) = watch::channel(initial);
+        let service = self.clone();
+        let id = id.to_owned();
+        tokio::spawn(async move {
+            let mut sequence = job.sequence;
+            while !sender.is_closed() {
+                tokio::select! {_=sender.closed()=>break,_=tokio::time::sleep(Duration::from_millis(200))=>{}}
+                if service.authorize_job(&id, actor).await.is_err() {
+                    break;
+                }
+                let Ok(job) = service.queue.job(&id).await else {
+                    break;
+                };
+                if job.sequence != sequence {
+                    sequence = job.sequence;
+                    let snapshot = event(&id, &job);
+                    let terminal = snapshot.is_terminal();
+                    sender.send_replace(snapshot);
+                    if terminal {
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(receiver)
     }
-    pub async fn authorize_job(&self, job_id: &str, actor: i64) -> ServiceResult<()> {
-        let deal = self
-            .jobs
-            .read()
-            .await
-            .get(job_id)
-            .map(|(d, _, _)| d.clone())
-            .ok_or_else(|| ServiceError::not_found("document job not found"))?;
-        self.ingestion.authorize_read(&deal, actor).await
+}
+fn event(id: &str, job: &Job) -> DocumentJobEvent {
+    if let Some(result) = &job.result {
+        if result.skipped {
+            return DocumentJobEvent::skipped(
+                id.into(),
+                job.filename.clone(),
+                result.document_id.clone(),
+            );
+        }
+        if result.success {
+            return DocumentJobEvent::completed(
+                id.into(),
+                job.filename.clone(),
+                result.document_id.clone(),
+                result.chunk_count,
+            );
+        }
+        return DocumentJobEvent::failed(
+            id.into(),
+            job.filename.clone(),
+            result
+                .error
+                .clone()
+                .unwrap_or_else(|| "Document processing failed. Retry the same file.".into()),
+        );
     }
+    if job.status == "failed" {
+        return DocumentJobEvent::failed(
+            id.into(),
+            job.filename.clone(),
+            "Document processing failed. Retry the same file.".into(),
+        );
+    }
+    DocumentJobEvent::processing(id.into(), job.filename.clone())
 }
 
 #[cfg(test)]

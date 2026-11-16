@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
+import type { ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
 import type { DocumentSearchResult } from "./document-search/documentSearchModel";
 import type { DocumentPreviewPanelHandle } from "./DocumentPreviewPanel";
 import { flattenDataRoomFiles, type DataRoomTreeNode } from "../../data/dataRoom";
@@ -147,7 +149,21 @@ export function DataRoomWorkspace({
         tabIndex={-1}
         className="workspace-main-surface relative m-2 flex min-h-0 min-w-0 flex-1 gap-0 overflow-hidden p-0 lg:ml-0"
       >
-        {contents.isUnavailable ? (
+        {contents.isLoading && !contents.hasFiles && documents.length === 0 ? (
+          <DataRoomStateLayout>
+            <div
+              aria-label="Loading data room files"
+              className="flex items-center gap-3 text-sm text-muted"
+              role="status"
+            >
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-5 animate-spin motion-reduce:animate-none"
+              />
+              <span>Loading files…</span>
+            </div>
+          </DataRoomStateLayout>
+        ) : contents.isUnavailable ? (
           <UnavailableDataRoomState
             onConnectToSharePoint={onConnectToSharePoint}
             onRetry={contents.reloadAll}
@@ -275,13 +291,7 @@ function DocumentPreviewFallback({
   );
 }
 
-function EmptyDataRoomState({
-  onConnectToSharePoint,
-  onUploadFiles,
-}: {
-  onConnectToSharePoint?: () => void;
-  onUploadFiles?: () => void;
-}) {
+function DataRoomStateLayout({ children }: { children: ReactNode }) {
   return (
     <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
       <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
@@ -290,36 +300,50 @@ function EmptyDataRoomState({
         </h1>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">
-        <EmptyState
-          action={
-            onUploadFiles
-              ? { label: "Upload files", onClick: onUploadFiles }
-              : undefined
-          }
-          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
-          description={
-            onUploadFiles
-              ? "Add deal documents from your device."
-              : "No documents have been uploaded. A contributor can upload documents to this deal."
-          }
-          frame="dashed"
-          headingLevel={2}
-          secondaryAction={
-            onConnectToSharePoint
-              ? {
-                  label: "Connect SharePoint",
-                  onClick: onConnectToSharePoint,
-                }
-              : undefined
-          }
-          size="lg"
-          title={
-            onUploadFiles ? "Upload your first file" : "No shared documents yet"
-          }
-          variant="first-use"
-        />
+        {children}
       </div>
     </section>
+  );
+}
+
+function EmptyDataRoomState({
+  onConnectToSharePoint,
+  onUploadFiles,
+}: {
+  onConnectToSharePoint?: () => void;
+  onUploadFiles?: () => void;
+}) {
+  return (
+    <DataRoomStateLayout>
+      <EmptyState
+        action={
+          onUploadFiles
+            ? { label: "Upload files", onClick: onUploadFiles }
+            : undefined
+        }
+        className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+        description={
+          onUploadFiles
+            ? "Add deal documents from your device."
+            : "No documents have been uploaded. A contributor can upload documents to this deal."
+        }
+        frame="dashed"
+        headingLevel={2}
+        secondaryAction={
+          onConnectToSharePoint
+            ? {
+                label: "Connect SharePoint",
+                onClick: onConnectToSharePoint,
+              }
+            : undefined
+        }
+        size="lg"
+        title={
+          onUploadFiles ? "Upload your first file" : "No shared documents yet"
+        }
+        variant="first-use"
+      />
+    </DataRoomStateLayout>
   );
 }
 
@@ -331,32 +355,25 @@ function UnavailableDataRoomState({
   onRetry: () => void;
 }) {
   return (
-    <section className="glass-panel workspace-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-none border-y-0">
-      <header className="flex h-12 shrink-0 items-center border-b border-outline-variant bg-background px-5">
-        <h1 className="text-[1rem] font-bold text-text-main [font-family:var(--font-heading)]">
-          Data Room Vault
-        </h1>
-      </header>
-      <div className="flex flex-1 items-center justify-center p-8">
-        <EmptyState
-          action={{ label: "Try again", onClick: onRetry }}
-          className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
-          description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
-          frame="card"
-          headingLevel={2}
-          secondaryAction={
-            onConnectToSharePoint
-              ? {
-                  label: "Connect SharePoint",
-                  onClick: onConnectToSharePoint,
-                }
-              : undefined
-          }
-          size="lg"
-          title="Data room unavailable"
-          variant="error"
-        />
-      </div>
-    </section>
+    <DataRoomStateLayout>
+      <EmptyState
+        action={{ label: "Try again", onClick: onRetry }}
+        className="w-full max-w-[36rem] border-outline-variant/80 bg-surface-container-lowest/70 px-8 py-16"
+        description="We couldn’t load the files for this data room. Try again in a moment, or connect SharePoint to restore access."
+        frame="card"
+        headingLevel={2}
+        secondaryAction={
+          onConnectToSharePoint
+            ? {
+                label: "Connect SharePoint",
+                onClick: onConnectToSharePoint,
+              }
+            : undefined
+        }
+        size="lg"
+        title="Data room unavailable"
+        variant="error"
+      />
+    </DataRoomStateLayout>
   );
 }

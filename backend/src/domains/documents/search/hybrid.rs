@@ -1,17 +1,13 @@
 use super::{
-    embedding::QueryEmbeddingCache,
-    fusion::{self, Identity},
+    embedding::QueryEmbeddings,
+    fusion,
     model::{HybridResponse, HybridSearch},
     service::DocumentSearchService,
 };
 use crate::{
     app::config::SearchConfig,
-    domains::{
-        documents::graph::query::{
-            helix_cosine_similarity, FileChunkKeywordSearch, FileChunkResult,
-            FileChunkVectorSearch, VectorFileChunkHit,
-        },
-        identity::access::CanonicalChunk,
+    domains::documents::store::chunk::{
+        legacy_cosine_similarity, FileChunkResult, VectorFileChunkHit,
     },
     shared::error::{ServiceError, ServiceResult},
 };
@@ -25,30 +21,14 @@ use tokio::{
 /// Narrow orchestration port also used by deterministic concurrency/race tests.
 pub(super) trait HybridBackend: Send + Sync {
     fn deals<'a>(&'a self, actor: i64, deal: &'a str) -> BoxFuture<'a, ServiceResult<Vec<String>>>;
-    fn prepare<'a>(
+    fn branches<'a>(
         &'a self,
         actor: i64,
         deal: &'a str,
-    ) -> BoxFuture<'a, ServiceResult<Vec<String>>>;
-    fn keyword<'a>(
-        &'a self,
-        deal: &'a str,
-        ids: Vec<String>,
         query: &'a str,
-        limit: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<FileChunkResult>>>;
-    fn vector<'a>(
-        &'a self,
-        deal: &'a str,
-        ids: Vec<String>,
         vector: Arc<Vec<f32>>,
         limit: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<VectorFileChunkHit>>>;
-    fn fresh<'a>(
-        &'a self,
-        actor: i64,
-        deal: &'a str,
-    ) -> BoxFuture<'a, ServiceResult<HashSet<Identity>>>;
+    ) -> BoxFuture<'a, ServiceResult<(Vec<FileChunkResult>, Vec<VectorFileChunkHit>)>>;
     fn final_ids(
         &self,
         actor: i64,
@@ -56,111 +36,29 @@ pub(super) trait HybridBackend: Send + Sync {
     ) -> BoxFuture<'_, ServiceResult<HashSet<String>>>;
 }
 
-pub(super) fn canonical_identities(deal: &str, chunks: Vec<CanonicalChunk>) -> HashSet<Identity> {
-    chunks
-        .into_iter()
-        .map(|c| {
-            (
-                deal.to_owned(),
-                c.file_id,
-                c.version_id,
-                c.identity.chunk_id,
-                c.identity.index_generation,
-                c.identity.chunk_sha256,
-                c.identity.chunk_index,
-            )
-        })
-        .collect()
-}
-
 impl HybridBackend for DocumentSearchService {
     fn deals<'a>(&'a self, actor: i64, deal: &'a str) -> BoxFuture<'a, ServiceResult<Vec<String>>> {
         self.deals(actor, deal).boxed()
     }
-    fn prepare<'a>(
+    fn branches<'a>(
         &'a self,
         actor: i64,
         deal: &'a str,
-    ) -> BoxFuture<'a, ServiceResult<Vec<String>>> {
-        async move {
-            let candidates = phase(
-                "candidate_snapshot",
-                self.access()?.current_chunks(actor, deal),
-            )
-            .await?;
-            phase(
-                "header_verification",
-                self.read(self.graph.verify_candidates(
-                    deal.to_owned(),
-                    candidates.iter().map(|c| c.identity.clone()).collect(),
-                )),
-            )
-            .await?;
-            Ok(candidates
-                .into_iter()
-                .map(|c| c.identity.chunk_id)
-                .collect())
-        }
-        .boxed()
-    }
-    fn keyword<'a>(
-        &'a self,
-        deal: &'a str,
-        ids: Vec<String>,
         query: &'a str,
-        limit: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<FileChunkResult>>> {
-        async move {
-            let hits = phase(
-                "keyword",
-                self.read(self.graph.keyword_current(
-                    FileChunkKeywordSearch {
-                        deal_id: deal.into(),
-                        query_text: query.into(),
-                        limit,
-                    },
-                    ids,
-                )),
-            )
-            .await?;
-            Ok(hits.into_iter().map(|h| h.chunk).collect())
-        }
-        .boxed()
-    }
-    fn vector<'a>(
-        &'a self,
-        deal: &'a str,
-        ids: Vec<String>,
         vector: Arc<Vec<f32>>,
         limit: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<VectorFileChunkHit>>> {
+    ) -> BoxFuture<'a, ServiceResult<(Vec<FileChunkResult>, Vec<VectorFileChunkHit>)>> {
         async move {
-            let hits = phase(
-                "vector",
-                self.read(self.graph.vector_current(
-                    FileChunkVectorSearch {
-                        deal_id: deal.into(),
-                        query_embedding: vector.as_ref().clone(),
-                        limit,
-                    },
-                    ids,
-                )),
-            )
-            .await?;
-            Ok(hits)
-        }
-        .boxed()
-    }
-    fn fresh<'a>(
-        &'a self,
-        actor: i64,
-        deal: &'a str,
-    ) -> BoxFuture<'a, ServiceResult<HashSet<Identity>>> {
-        async move {
-            Ok(canonical_identities(
-                deal,
-                phase("freshness", self.access()?.current_chunks(actor, deal)).await?,
-            ))
+            let (keyword, vector) = self
+                .read(self.repository.branches(
+                    actor,
+                    deal,
+                    Some(query),
+                    Some(vector.as_ref().clone()),
+                    limit,
+                ))
+                .await?;
+            Ok((keyword.into_iter().map(|hit| hit.chunk).collect(), vector))
         }
         .boxed()
     }
@@ -182,12 +80,12 @@ impl HybridBackend for DocumentSearchService {
 
 pub(super) struct HybridRuntime {
     pub config: SearchConfig,
-    pub embeddings: Option<Arc<QueryEmbeddingCache>>,
+    pub embeddings: Option<Arc<QueryEmbeddings>>,
     active: Semaphore,
     admitted: Semaphore,
 }
 impl HybridRuntime {
-    pub fn new(config: SearchConfig, embeddings: Option<Arc<QueryEmbeddingCache>>) -> Self {
+    pub fn new(config: SearchConfig, embeddings: Option<Arc<QueryEmbeddings>>) -> Self {
         Self {
             active: Semaphore::new(config.active_requests),
             admitted: Semaphore::new(config.active_requests + config.queued_requests),
@@ -260,63 +158,39 @@ impl HybridRuntime {
 
 async fn retrieve(
     backend: &dyn HybridBackend,
-    embeddings: &QueryEmbeddingCache,
+    embeddings: &QueryEmbeddings,
     config: &SearchConfig,
     actor: i64,
     deals: Vec<String>,
     search: HybridSearch,
 ) -> ServiceResult<HybridResponse> {
     let budget = search.limit.clamp(50, 100);
-    // Shared request-owned future: keyword never waits for embedding; each vector branch polls
-    // the same provider/cache outcome. First error drops the stream and every remaining waiter.
-    let embedding = embeddings
-        .embed(&search.query_text)
-        .map(|r| r.map_err(Arc::new))
-        .shared();
-    let pipelines = async {
-        stream::iter(deals)
-            .map(|deal| {
-                let embedding = embedding.clone();
-                let query = &search.query_text;
-                async move {
-                    let ids = backend.prepare(actor, &deal).await?;
-                    let keyword = backend.keyword(&deal, ids.clone(), query, budget);
-                    let semantic = async {
-                        let vector = embedding
-                            .await
-                            .map_err(|e| ServiceError::unavailable(e.to_string()))?;
-                        backend.vector(&deal, ids, vector, budget).await
-                    };
-                    let (mut keyword, semantic) = tokio::try_join!(keyword, semantic)?;
-                    // Nearest neighbors are candidates, not proof of relevance. Filter before
-                    // RRF discards distances; weak neighbors must not fill an otherwise empty list.
-                    let mut semantic: Vec<_> = semantic
-                        .into_iter()
-                        .filter(|hit| {
-                            relevant_semantic_distance(hit.distance, config.min_semantic_similarity)
-                        })
-                        .map(|hit| hit.chunk)
-                        .collect();
-                    let current = backend.fresh(actor, &deal).await?;
-                    keyword.retain(|c| current.contains(&fusion::identity(c)));
-                    semantic.retain(|c| current.contains(&fusion::identity(c)));
-                    // Enforce branch budgets even if a collaborator returns excess candidates.
-                    keyword.truncate(budget);
-                    semantic.truncate(budget);
-                    Ok::<_, ServiceError>(fusion::fuse(keyword, semantic))
-                }
-            })
-            .buffer_unordered(config.deal_concurrency)
-            .try_collect::<Vec<_>>()
-            .await
-    };
-    let shared_embedding = embedding.clone();
-    let drive_embedding = async {
-        shared_embedding
-            .await
-            .map_err(|e| ServiceError::unavailable(e.to_string()))
-    };
-    let (_, batches) = tokio::try_join!(drive_embedding, pipelines)?;
+    // Provider work completes outside SQL. Both branches then run on one
+    // retained repeatable-read transaction per deal, with scope before LIMIT.
+    let vector = embeddings.embed(&search.query_text).await?;
+    let batches = stream::iter(deals)
+        .map(|deal| {
+            let vector = vector.clone();
+            let query = &search.query_text;
+            async move {
+                let (mut keyword, semantic) = backend
+                    .branches(actor, &deal, query, vector, budget)
+                    .await?;
+                let mut semantic: Vec<_> = semantic
+                    .into_iter()
+                    .filter(|hit| {
+                        relevant_semantic_distance(hit.distance, config.min_semantic_similarity)
+                    })
+                    .map(|hit| hit.chunk)
+                    .collect();
+                keyword.truncate(budget);
+                semantic.truncate(budget);
+                Ok::<_, ServiceError>(fusion::fuse(keyword, semantic))
+            }
+        })
+        .buffer_unordered(config.deal_concurrency)
+        .try_collect::<Vec<_>>()
+        .await?;
     let mut results = phase("fusion", async {
         Ok(fusion::top(
             batches.into_iter().flatten().collect(),
@@ -333,7 +207,7 @@ async fn retrieve(
 }
 
 fn relevant_semantic_distance(distance: f64, min_similarity: f64) -> bool {
-    helix_cosine_similarity(distance).is_some_and(|similarity| similarity >= min_similarity)
+    legacy_cosine_similarity(distance).is_some_and(|similarity| similarity >= min_similarity)
 }
 
 pub(super) async fn phase<T>(

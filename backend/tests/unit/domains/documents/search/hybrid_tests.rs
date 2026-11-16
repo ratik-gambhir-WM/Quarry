@@ -6,7 +6,6 @@ struct Fake {
     prepared: AtomicUsize,
     keywords: AtomicUsize,
     embeddings: AtomicUsize,
-    keyword_started: tokio::sync::Notify,
     revoke: bool,
     stale: bool,
     fail: bool,
@@ -21,7 +20,6 @@ impl Fake {
             prepared: AtomicUsize::new(0),
             keywords: AtomicUsize::new(0),
             embeddings: AtomicUsize::new(0),
-            keyword_started: Default::default(),
             revoke: false,
             stale: false,
             fail: false,
@@ -38,7 +36,6 @@ impl EmbeddingProvider for Fake {
     fn embed<'a>(&'a self, _: &'a str) -> BoxFuture<'a, ServiceResult<Vec<f32>>> {
         async move {
             self.embeddings.fetch_add(1, Ordering::SeqCst);
-            self.keyword_started.notified().await;
             Ok(vec![1.0, 0.0])
         }
         .boxed()
@@ -48,65 +45,39 @@ impl HybridBackend for Fake {
     fn deals<'a>(&'a self, _: i64, _: &'a str) -> BoxFuture<'a, ServiceResult<Vec<String>>> {
         async move { Ok((0..self.deals).map(|i| format!("DEAL-{i}")).collect()) }.boxed()
     }
-    fn prepare<'a>(&'a self, _: i64, deal: &'a str) -> BoxFuture<'a, ServiceResult<Vec<String>>> {
+    fn branches<'a>(
+        &'a self,
+        _actor: i64,
+        deal: &'a str,
+        _query: &'a str,
+        _vector: Arc<Vec<f32>>,
+        limit: usize,
+    ) -> BoxFuture<'a, ServiceResult<(Vec<FileChunkResult>, Vec<VectorFileChunkHit>)>> {
         async move {
+            assert_eq!(limit, 50);
             self.prepared.fetch_add(1, Ordering::SeqCst);
             if let Some(gate) = &self.prepare_gate {
                 gate.acquire().await.unwrap().forget();
             }
-            Ok(vec![deal.into()])
-        }
-        .boxed()
-    }
-    fn keyword<'a>(
-        &'a self,
-        deal: &'a str,
-        _: Vec<String>,
-        _: &'a str,
-        limit: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<FileChunkResult>>> {
-        async move {
-            assert_eq!(limit, 50);
             self.keywords.fetch_add(1, Ordering::SeqCst);
-            self.keyword_started.notify_one();
             if self.fail {
-                Err(ServiceError::internal("private upstream diagnostic"))
-            } else {
-                Ok(if self.keyword_empty {
-                    Vec::new()
-                } else {
-                    vec![Self::chunk(deal)]
-                })
+                return Err(ServiceError::internal("private upstream diagnostic"));
             }
-        }
-        .boxed()
-    }
-    fn vector<'a>(
-        &'a self,
-        deal: &'a str,
-        _: Vec<String>,
-        _: Arc<Vec<f32>>,
-        _: usize,
-    ) -> BoxFuture<'a, ServiceResult<Vec<VectorFileChunkHit>>> {
-        async move {
-            Ok(vec![VectorFileChunkHit {
-                chunk: Self::chunk(deal),
-                distance: self.semantic_distance,
-            }])
-        }
-        .boxed()
-    }
-    fn fresh<'a>(
-        &'a self,
-        _: i64,
-        deal: &'a str,
-    ) -> BoxFuture<'a, ServiceResult<HashSet<Identity>>> {
-        async move {
-            let mut chunk = Self::chunk(deal);
             if self.stale {
-                chunk.index_generation = "replacement".into();
+                return Ok((vec![], vec![]));
             }
-            Ok(HashSet::from([fusion::identity(&chunk)]))
+            let keyword = if self.keyword_empty {
+                vec![]
+            } else {
+                vec![Self::chunk(deal)]
+            };
+            Ok((
+                keyword,
+                vec![VectorFileChunkHit {
+                    chunk: Self::chunk(deal),
+                    distance: self.semantic_distance,
+                }],
+            ))
         }
         .boxed()
     }
@@ -138,25 +109,27 @@ fn config() -> SearchConfig {
     }
 }
 #[tokio::test]
-async fn hybrid_overlaps_keyword_with_one_embedding_and_prepares_once_per_deal() {
+async fn hybrid_embeds_once_then_uses_one_snapshot_per_deal() {
     let fake = Arc::new(Fake::new(10));
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let hits = runtime.run(fake.as_ref(), 1, "", request()).await.unwrap();
     assert_eq!(hits.results.len(), 10);
     assert_eq!(fake.prepared.load(Ordering::SeqCst), 10);
     assert_eq!(fake.embeddings.load(Ordering::SeqCst), 1);
     assert!(hits.results.iter().all(|h| h.match_sources.len() == 2));
-    // Same cached embedding, different actor, fresh final authorization.
+    // Each request embeds independently and repeats final authorization.
     assert!(runtime
         .run(fake.as_ref(), 2, "", request())
         .await
         .unwrap()
         .results
         .is_empty());
-    assert_eq!(fake.embeddings.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.embeddings.load(Ordering::SeqCst), 2);
 }
 #[tokio::test]
 async fn hybrid_empty_scope_needs_no_provider_and_stale_or_revoked_hits_are_removed() {
@@ -174,10 +147,12 @@ async fn hybrid_empty_scope_needs_no_provider_and_stale_or_revoked_hits_are_remo
             revoke,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        assert!(HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        assert!(HybridRuntime::new(config(), Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap()
@@ -191,10 +166,12 @@ async fn hybrid_branch_failure_is_not_partial_success_and_releases_admission() {
         fail: true,
         ..Fake::new(1)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let error = runtime
         .run(fake.as_ref(), 1, "", request())
         .await
@@ -213,16 +190,18 @@ async fn hybrid_branch_failure_is_not_partial_success_and_releases_admission() {
 }
 
 #[tokio::test]
-async fn hybrid_bounds_deal_pipelines_starts_embedding_during_preparation_and_drops_all_work() {
+async fn hybrid_bounds_deal_snapshots_after_embedding_and_drops_all_request_work() {
     let gate = Arc::new(Semaphore::new(0));
     let fake = Arc::new(Fake {
         prepare_gate: Some(gate.clone()),
         ..Fake::new(10)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
-    let runtime = HybridRuntime::new(config(), Some(cache));
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
+    let runtime = HybridRuntime::new(config(), Some(embeddings));
     let mut request = Box::pin(runtime.run(fake.as_ref(), 1, "", request()));
     assert!(futures_util::poll!(&mut request).is_pending());
     assert_eq!(fake.prepared.load(Ordering::SeqCst), 4);
@@ -245,9 +224,11 @@ async fn hybrid_admission_is_bounded_and_deadlines_return_explicit_errors() {
         prepare_gate: Some(Arc::new(Semaphore::new(0))),
         ..Fake::new(1)
     });
-    let cache = Arc::new(
-        QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-    );
+    let embeddings = Arc::new(QueryEmbeddings::new(
+        fake.clone(),
+        4,
+        std::time::Duration::from_secs(1),
+    ));
     let runtime = HybridRuntime::new(
         SearchConfig {
             active_requests: 1,
@@ -256,7 +237,7 @@ async fn hybrid_admission_is_bounded_and_deadlines_return_explicit_errors() {
             request_timeout: std::time::Duration::from_millis(10),
             ..config()
         },
-        Some(cache),
+        Some(embeddings),
     );
     let mut active = Box::pin(runtime.run(fake.as_ref(), 1, "", request()));
     assert!(futures_util::poll!(&mut active).is_pending());
@@ -281,16 +262,12 @@ async fn hybrid_admission_is_bounded_and_deadlines_return_explicit_errors() {
 
 #[tokio::test]
 async fn hybrid_search_read_limit_is_shared_across_service_clones_and_released_on_drop() {
-    use crate::{
-        adapters::helix::client::HelixClient,
-        domains::documents::graph::repository::DocumentGraphSearch,
-    };
-    let graph = DocumentGraphSearch::new(Arc::new(
-        HelixClient::with_config("http://127.0.0.1:1", None).unwrap(),
-    ));
-    let service = DocumentSearchService::new(graph).with_hybrid(
+    let repository = crate::domains::documents::test_support::search(
+        crate::domains::documents::test_support::database().await,
+    );
+    let service = DocumentSearchService::new(repository).with_hybrid(
         SearchConfig {
-            helix_reads: 2,
+            sql_reads: 2,
             ..Default::default()
         },
         None,
@@ -324,10 +301,12 @@ async fn hybrid_does_not_fill_unrelated_queries_with_weak_nearest_neighbors() {
             semantic_distance: distance,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let runtime = HybridRuntime::new(config(), Some(cache));
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let runtime = HybridRuntime::new(config(), Some(embeddings));
         let response = runtime
             .run(
                 fake.as_ref(),
@@ -357,10 +336,12 @@ async fn hybrid_preserves_exact_keyword_hits_and_relevant_semantic_paraphrases()
             semantic_distance: distance,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let response = HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let response = HybridRuntime::new(config(), Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap();
@@ -382,10 +363,12 @@ async fn hybrid_rejects_helix_orthogonal_and_weak_neighbors_instead_of_filling_t
             semantic_distance: distance,
             ..Fake::new(30)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
-        let results = HybridRuntime::new(config(), Some(cache))
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
+        let results = HybridRuntime::new(config(), Some(embeddings))
             .run(
                 fake.as_ref(),
                 1,
@@ -424,14 +407,16 @@ async fn hybrid_recovers_measured_concept_matches_without_admitting_judged_contr
             semantic_distance: (1.0 - similarity) / 2.0,
             ..Fake::new(1)
         });
-        let cache = Arc::new(
-            QueryEmbeddingCache::new(fake.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
-        );
+        let embeddings = Arc::new(QueryEmbeddings::new(
+            fake.clone(),
+            4,
+            std::time::Duration::from_secs(1),
+        ));
         let measured_config = SearchConfig {
             min_semantic_similarity: 0.26,
             ..config()
         };
-        let response = HybridRuntime::new(measured_config, Some(cache))
+        let response = HybridRuntime::new(measured_config, Some(embeddings))
             .run(fake.as_ref(), 1, "", request())
             .await
             .unwrap();

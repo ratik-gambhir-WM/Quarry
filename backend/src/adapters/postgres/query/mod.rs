@@ -6,6 +6,7 @@
 //! without executing SQL, so its result can be passed directly to the client.
 
 mod builder;
+mod bulk;
 pub(crate) mod lexical;
 mod statement;
 mod unicode61;
@@ -13,9 +14,10 @@ mod value;
 
 pub use builder::{
     ComparisonOperator, Condition, ConflictUpdate, DeleteBuilder, InsertBuilder, JoinClause,
-    JoinCondition, JoinType, LockWait, RowLock, SelectBuilder, SortDirection, SqlBuilder,
-    SqlBuilderError, UpdateBuilder,
+    JoinCondition, JoinType, LockWait, RowLock, SelectBuilder, SelectExpression, SortDirection,
+    SqlBuilder, SqlBuilderError, UpdateBuilder,
 };
+pub use bulk::BatchInsertBuilder;
 pub use statement::{QueryKind, SqlQuery};
 pub use value::SqlValue;
 

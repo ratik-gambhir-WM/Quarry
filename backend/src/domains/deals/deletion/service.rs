@@ -5,35 +5,26 @@ use super::{
 };
 use crate::shared::on_demand_task::OnDemandTask;
 use crate::{
-    domains::documents::{
-        graph::repository::DocumentGraphWriter, ingestion::job_service::DocumentJobService,
-        viewing::service::StoredDocumentService,
-    },
+    domains::documents::viewing::service::StoredDocumentService,
     shared::error::{RepositoryError, ServiceResult},
 };
 use std::sync::Arc;
 
 pub(crate) struct DealDeletionService {
     pub(super) repository: DeletionRepository,
-    graph: DocumentGraphWriter,
     lifecycle: DealLifecycle,
-    jobs: Arc<DocumentJobService>,
     previews: Arc<StoredDocumentService>,
     pub(super) task: OnDemandTask,
 }
 impl DealDeletionService {
     pub(crate) fn new(
         repository: DeletionRepository,
-        graph: DocumentGraphWriter,
         lifecycle: DealLifecycle,
-        jobs: Arc<DocumentJobService>,
         previews: Arc<StoredDocumentService>,
     ) -> Arc<Self> {
         Arc::new(Self {
             repository,
-            graph,
             lifecycle,
-            jobs,
             previews,
             task: OnDemandTask::default(),
         })
@@ -99,36 +90,19 @@ impl DealDeletionService {
         let Some(_drained) = self.lifecycle.try_drain(&op.deal_id).await else {
             return Ok(());
         };
-        if matches!(
+        if !matches!(
             op.phase,
-            DeletionPhase::Draining | DeletionPhase::Fencing | DeletionPhase::Sqlite
+            DeletionPhase::Verifying | DeletionPhase::Completed
         ) {
             self.repository
-                .checkpoint(op.deletion_id.clone(), DeletionPhase::Fencing)
+                .checkpoint(op.deletion_id.clone(), DeletionPhase::Sqlite)
                 .await?;
-            self.graph.fence_deal(&op.deal_id).await?;
             self.repository.snapshot_and_purge(op.clone()).await?;
-        } else {
-            // Reconcile the fence after restart/ambiguous acknowledgement before any purge.
-            self.graph.fence_deal(&op.deal_id).await?;
         }
-        self.jobs.evict_deal(&op.deal_id).await;
         self.previews.evict_previews().await;
-        let files = self.repository.files(op.deletion_id.clone()).await?;
-        if !files.is_empty() {
-            for file in files {
-                if self.graph.purge_deal_file(&op.deal_id, &file).await? {
-                    self.repository
-                        .purged_file(op.deletion_id.clone(), file)
-                        .await?;
-                }
-            }
-            return Ok(());
-        }
         self.repository
             .checkpoint(op.deletion_id.clone(), DeletionPhase::Verifying)
             .await?;
-        self.graph.verify_deal_absent(&op.deal_id).await?;
         self.repository.complete(op.deletion_id.clone()).await
     }
 }

@@ -1,10 +1,20 @@
 use super::*;
+use crate::{
+    adapters::postgres::query::{Condition, SqlBuilder},
+    shared::error::RepositoryError,
+};
 use crate::{app::migrations, domains::memberships::repository::MembershipRepository};
 
 #[tokio::test]
 async fn final_search_snapshot_excludes_foreign_deleted_historical_and_revoked_results() {
     let postgres = PostgresClient::test_database().await.unwrap();
     migrations::migrate(&postgres).await.unwrap();
+    sqlx::query(
+        "ALTER TABLE document_identity_manifests DISABLE TRIGGER verify_document_search_set",
+    )
+    .execute(postgres.pool())
+    .await
+    .unwrap();
     postgres.with_connection(async |connection| {
         connection.execute("INSERT INTO users(id,username,email,first_name,last_name,password_hash) VALUES(1,'actor','actor@example.test','Test','Actor','unusable'),(2,'other','other@example.test','Test','Other','unusable')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
         for (deal,actor) in [("DEAL-OWN",1),("DEAL-FOREIGN",2)] {
@@ -21,11 +31,58 @@ async fn final_search_snapshot_excludes_foreign_deleted_historical_and_revoked_r
         ] {
             connection.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at,deleted_at) VALUES(?1,?2,'synthetic.docx','{}','now','now',?3)",crate::pg_params![file,deal,deleted.then_some("now")]).await?;
             connection.execute("INSERT INTO quarry_file_versions(version_id,file_id,version_number,original_filename,mime_type,content_sha256,byte_size,is_current,created_at) VALUES(?1,?1,1,'synthetic.docx','application/octet-stream',?2,1,?3,'now')",crate::pg_params![file,"a".repeat(64),current]).await?;
-            connection.execute("INSERT INTO document_identity_manifests(version_id,derivation_version,document_id,active_generation,chunk_count,graph_migrated) VALUES(?1,2,?1,'active',1,1)",[file]).await?;
+            connection.execute("INSERT INTO document_identity_manifests(version_id,derivation_version,document_id,active_generation,chunk_count,search_ready) VALUES(?1,2,?1,'active',1,0)",[file]).await?;
             connection.execute("INSERT INTO document_chunk_identities(chunk_id,version_id,index_generation,chunk_index,chunk_sha256) VALUES(?1,?1,?2,1,?3)",crate::pg_params![file,generation,"b".repeat(64)]).await?;
         }
         Ok(())
      }).await.unwrap();
+    let profile = crate::domains::documents::store::search_repository::EmbeddingProfile::new(
+        "text-embedding-3-small".into(),
+        1536,
+    );
+    postgres
+        .transaction_result_async::<_, RepositoryError, _, _>(|tx| async move {
+            profile.ensure(&tx).await
+        })
+        .await
+        .unwrap();
+    let profile = crate::domains::documents::store::search_repository::EmbeddingProfile::new(
+        "text-embedding-3-small".into(),
+        1536,
+    );
+    for file in [
+        "current",
+        "foreign",
+        "deleted",
+        "historical-version",
+        "historical-generation",
+    ] {
+        postgres
+            .write_async(
+                SqlBuilder::insert_into("document_chunks")
+                    .value("chunk_id", file)
+                    .value("profile_id", &profile.id)
+                    .value("text", "Synthetic evidence")
+                    .value("technical_text", "")
+                    .value(
+                        "embedding",
+                        crate::adapters::postgres::vector::CosineVector::new(vec![0.5; 1536], 1536)
+                            .unwrap(),
+                    )
+                    .value("token_count", 2)
+                    .value("char_start", 0)
+                    .value("char_end", 18)
+                    .value("section_path", "")
+                    .value("created_at", "now")
+                    .build(),
+            )
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE document_identity_manifests SET search_ready=1")
+        .execute(postgres.pool())
+        .await
+        .unwrap();
     let policy = Arc::new(DealAccessService::new(MembershipRepository::new(
         postgres.clone(),
     )));
@@ -69,7 +126,7 @@ async fn final_search_snapshot_excludes_foreign_deleted_historical_and_revoked_r
             1,
             vec![
                 "current".into();
-                crate::domains::documents::graph::query::MAX_FILE_CHUNK_SEARCH_LIMIT + 1
+                crate::domains::documents::store::chunk::MAX_FILE_CHUNK_SEARCH_LIMIT + 1
             ]
         )
         .await
