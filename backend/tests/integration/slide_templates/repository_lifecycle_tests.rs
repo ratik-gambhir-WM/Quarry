@@ -681,8 +681,8 @@ async fn independent_template_pools_reject_stale_replacement_and_deletion() {
         .await
         .unwrap();
     let (first, second) = tokio::join!(
-        TemplateRepository::update(&ra, &record.template, &[]),
-        TemplateRepository::update(&rb, &record.template, &[])
+        TemplateCatalogRepository::update(&ra, &record.template, &[]),
+        TemplateCatalogRepository::update(&rb, &record.template, &[])
     );
     assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
     assert!(matches!(
@@ -690,7 +690,7 @@ async fn independent_template_pools_reject_stale_replacement_and_deletion() {
         Some(crate::shared::error::RepositoryError::Conflict(_))
     ));
     assert!(matches!(
-        TemplateRepository::delete(&ra, "cas-template", 1).await,
+        TemplateCatalogRepository::delete(&ra, "cas-template", 1).await,
         Err(crate::shared::error::RepositoryError::Conflict(_))
     ));
     assert_eq!(
@@ -701,7 +701,7 @@ async fn independent_template_pools_reject_stale_replacement_and_deletion() {
             .revision,
         2
     );
-    TemplateRepository::delete(&rb, "cas-template", 2)
+    TemplateCatalogRepository::delete(&rb, "cas-template", 2)
         .await
         .unwrap();
     assert!(ra.find_by_id("cas-template").await.unwrap().is_none());

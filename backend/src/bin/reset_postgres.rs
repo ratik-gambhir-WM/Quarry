@@ -13,6 +13,6 @@ async fn main() -> Result<()> {
     let client = PostgresClient::connect(&config.postgres).await?;
     reset_product_schema(&client, config.helix.vector_dimension.get()).await?;
     client.close().await;
-    println!("Recreated Quarry PostgreSQL schema 3");
+    println!("Recreated Quarry PostgreSQL product schema");
     Ok(())
 }

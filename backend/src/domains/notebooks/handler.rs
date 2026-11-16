@@ -371,3 +371,21 @@ mod tests;
 pub(super) struct DeleteRevision {
     expected_revision: i64,
 }
+
+pub(super) async fn search(
+    State(s): State<NotebookHttpState>,
+    Extension(actor): Extension<AuthenticatedUser>,
+    ids: Ids,
+    Input(input): Input<SearchInput>,
+) -> AppResult<Json<SearchResults>> {
+    validate::search(&input)?;
+    // Ownership precedes query embedding; a shared deal never grants access to this notebook.
+    s.service
+        .get_notebook(actor.user.id, ids.notebook())
+        .await?;
+    Ok(Json(
+        s.service
+            .search(actor.user.id, ids.notebook(), input)
+            .await?,
+    ))
+}

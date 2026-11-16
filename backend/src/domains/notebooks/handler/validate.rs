@@ -138,3 +138,15 @@ pub(super) fn list_options(query: Option<String>, kind: &str) -> AppResult<ListO
     }
     Ok(options)
 }
+
+pub(super) fn search(input: &super::super::model::SearchInput) -> AppResult<()> {
+    if input.query_text.trim().is_empty()
+        || input.query_text.chars().count() > 2000
+        || !(1..=50).contains(&input.limit)
+    {
+        return Err(AppError::bad_request(
+            "invalid notebook search query or limit",
+        ));
+    }
+    Ok(())
+}

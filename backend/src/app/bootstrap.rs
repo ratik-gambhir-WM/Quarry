@@ -73,8 +73,6 @@ pub enum BootstrapError {
     HttpClient(reqwest::Error),
     #[error("failed to construct Helix client: {0}")]
     HelixClient(String),
-    #[error("failed to initialize Helix notebook indexes: {0}")]
-    HelixIndexes(String),
 }
 
 pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError> {
@@ -104,25 +102,10 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
         .await
         .map_err(BootstrapError::Postgres)?;
 
-    let helix =
-        Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    NotebookPipeline::new(
-        helix.clone(),
-        None,
-        config.helix.vector_dimension,
-        config
-            .openai
-            .as_ref()
-            .map(|c| c.embedding_model.clone())
-            .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.into()),
-    )
-    .initialize()
-    .await
-    .map_err(BootstrapError::HelixIndexes)?;
     let http = reqwest::Client::builder()
         .build()
         .map_err(BootstrapError::HttpClient)?;
-    let (api, templates) = assemble_api(&config, postgres, helix, http, prompts).await?;
+    let (api, templates) = assemble_api(&config, postgres, http, prompts).await?;
     let bind_address = config.http.bind_address;
     let router = create_router(api, &config.http);
     Ok(Application {
@@ -135,7 +118,6 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 async fn assemble_api(
     config: &AppConfig,
     postgres: PostgresClient,
-    helix: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
 ) -> Result<(Router, Arc<templates::slide_templates::SlideTemplates>), BootstrapError> {
@@ -188,6 +170,8 @@ async fn assemble_api(
         ))
     });
     let dimensions = settings.embedding_dimensions;
+    let helix =
+        Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
     let graph = Arc::new(graph::TemplateGraph::new(helix.clone(), dimensions));
     graph.initialize().await.map_err(|_| {
         BootstrapError::SlideTemplates("Helix template indexes failed to initialize".into())
@@ -206,21 +190,13 @@ async fn assemble_api(
         )
     })?;
     embedded.resume_pending_jobs();
-    let api = assemble_api_routes(
-        config,
-        postgres,
-        helix,
-        http,
-        prompts,
-        Some(embedded.clone()),
-    );
+    let api = assemble_api_routes(config, postgres, http, prompts, Some(embedded.clone()));
     Ok((api, embedded))
 }
 
 pub(crate) fn assemble_api_routes(
     config: &AppConfig,
     postgres: PostgresClient,
-    helix: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
@@ -258,7 +234,6 @@ pub(crate) fn assemble_api_routes(
     let notebooks = NotebookService::new(
         NotebookRepository::new(postgres.clone()),
         Arc::new(NotebookPipeline::new(
-            helix,
             openai.clone(),
             config.helix.vector_dimension,
             config

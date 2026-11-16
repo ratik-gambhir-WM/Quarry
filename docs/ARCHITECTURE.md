@@ -23,6 +23,8 @@ The backend topology described here includes the live domain-modularization chan
 
 The root [README](../README.md) provides the product overview, feature status, and roadmap direction;
 [Getting Started](../Getting%20Started.md) covers dependencies, setup, commands, and verification.
+The [key dependency map](dependencies.md) links backend/frontend libraries to their upstream
+documentation and the directories where Quarry integrates them.
 The current code has a broader Tauri
 boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
 Tauri IPC before reaching the same Axum API used by the browser. This document records that
@@ -73,7 +75,7 @@ service locator.
 
 PostgreSQL is the canonical store for users, deals, logical files, immutable file versions, and
 file bytes. Documents additionally commit chunks, pgvector embeddings, lexical metadata and durable
-processing results atomically in PostgreSQL. Helix remains required for notebook and template
+processing results atomically in PostgreSQL. Helix remains required for template
 projections. This MVP cutover uses a fresh schema, with an explicitly invoked guarded reset;
 there is no populated-data migration or automatic reset. See [document storage](document-storage.md).
 
@@ -794,7 +796,7 @@ operational failures.
 | Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas shares authenticated deal-linked threads and explicit current-room file references; there is no automatic document retrieval; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | PostgreSQL-backed multi-thread chat with current-turn uploads and scoped `@` file references, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, automatic retrieval, citations, organization tenancy, provider quotas or moderation |
 | Summarization APIs | Authenticated upload summary contract in both adapters; retained presentation components | No active product route; arbitrary server-path summaries are disabled |
-| Notebook | Durable authenticated backend API, save jobs, revision protection, Markdown/embedding/Helix pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
+| Notebook | Durable authenticated backend API, save jobs, revision protection, atomic Markdown/embedding/PostgreSQL pipeline and web/desktop adapters; native editor with explicit Save, saved-note reload, job feedback and revision conflict handling | Folder organization UI remains deferred; no notebook global search, collaboration, attachments or offline sync |
 | Global Vault | File/folder staging UI | Summary behavior is placeholder |
 | Initiative Vault | Page-embedded ReUI library table without an outer card, with an explicit Sample data label, category counts, local text search, project filtering, result counts, and filter reset; project, practice area, and creator metadata are separate, with unavailable values shown as a dash | Data remains fixture-derived; filters are page-local and do not query the API. Empty categories show no matches; file opening, favorites, and category-specific creation are not implemented |
 | Logs | View/export/clear bounded activity log | Session-local only |
@@ -1522,21 +1524,34 @@ creates return 201; note POST/PATCH durably admit a save job and return 202 with
 Jobs expose GET status, POST retry and GET events below
 `/notebooks/{notebook_id}/save-jobs/{job_id}`. Every access proves owner and full parent membership.
 Optional deal links require current membership in the linked deal; notebook contents remain private. Folder deletion relocates notes to root and bumps
-revisions atomically; notebook deletion cascades; deletions fence jobs and enqueue durable cleanup.
+revisions atomically; notebook deletion cascades; deletions fence jobs and cascade SQL artifacts while releasing admission slots.
 
-`notebooks` owns concrete PostgreSQL persistence, native BlockNote validation, deterministic Markdown,
-bounded chunking, durable workers/recovery, and a namespaced Helix revision/chunk projection.
-Bootstrap injects the existing server-side embedding and Helix clients. Completion requires both
-stores to confirm the accepted revision; indexing failure preserves canonical PostgreSQL content and
-reports a failed job with its committed revision. Jobs use leases, pinned pipeline configuration,
-idempotent operation IDs, explicit bounded retries and 30-day retention. SSE sends current durable
-snapshots, monotonic sequences and terminal states with auth revocation/cancellation. Document jobs also persist accepted inputs and terminal snapshots in PostgreSQL. No provider calls or database transactions are held across provider work on the HTTP admission
-path beyond its short persistence transaction.
+`notebooks` owns native BlockNote validation, deterministic lossy Markdown, bounded preparation,
+durable save jobs, immutable PostgreSQL search sets/chunks and private content search. Bootstrap
+injects the server embedder only; notebook Helix publication/readback/index initialization/cleanup
+have been retired. Four bounded workers export/chunk/embed outside SQL transactions. A final
+transaction commits native title/blocks/location/revision, every chunk/vector/lexical batch, active
+set replacement, terminal job result and slot release together. Any failure retains the old saved
+note/search state; new notes have no visible placeholder. Folder-only changes reuse exact content/
+profile fingerprints. Empty artifacts complete without embedding. Database-clock attempts and
+parent/folder/revision guards fence late work. Admission uses user-row/parent/job/free-slot order,
+with 32 active saves per user and 256 independently claimable SQL slots. Global write controls remain.
 
-The shared contract, browser adapter and validated desktop relay expose every operation. The
-Notebook editor supports explicit Save, lazy saved-note loading and job/conflict feedback; folder
-organization controls remain deferred. See [notebook API and recovery](notebook-api.md) for exact
-routes, DTO/null semantics, bounds, queue/lease policy, pipeline, cleanup, errors and schema rollout.
+`POST /api/v1/notebooks/{notebook_id}/search` exposes keyword, semantic and hybrid search through the
+shared typed web/desktop adapters and validated Tauri POST relay. Strict 2000-scalar query and 1–50
+limit validation and private ownership precede embedding. GIN English/technical search and exact
+profile-pinned cosine rank only active owner-scoped sets. Hybrid branches share a read snapshot
+and deterministic RRF; bounded final revision/set/owner and HTTP session rechecks precede delivery.
+Quoted phrases use separate GIN-indexed title/content vectors that preserve the positions of
+hashed technical tokens alongside English words, including stemming and stop-word gaps. Synthetic
+chunk heading context is excluded from phrase positions. Unicode prefixes accept combining marks.
+The `phrases-v1` notebook pipeline and updated schema-4 checksum require a fresh schema or explicit
+guarded MVP reset for older schema-4 installations; startup refuses them intact and never resets them.
+There is no ANN index, semantic sidebar integration or editor-offset mapping. The existing sidebar
+metadata filter and explicit-save edit buffers remain unchanged. Pending jobs no longer assign a
+canonical ID to unsaved drafts. SSE names/stages remain compatible; `sqliteCommitted` becomes true
+only after the complete save transaction commits. See [notebook API and recovery](notebook-api.md)
+for payloads, bounds, attempts, failure semantics and schema-4 rollout.
 
 ### 7.8 Permanent deal deletion
 
@@ -1614,6 +1629,21 @@ state.
 | `adapters/*` | Concrete PostgreSQL, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
+Embedded template persistence exposes asset, catalog/publication, processing-job, and retrieval
+capabilities in `slide_templates/repository/contracts.rs`, all implemented by the same PostgreSQL
+repository. The composite repository retains owner/app scoping and app registration for assembly
+and workflows that need multiple capabilities. Export receives only the asset interface, provider
+services/workers receive the processing interface, and retrieval receives its read interface.
+The facade constructs export from the same owner-scoped repository as import. Template, asset,
+preview, and pending-job publication retains its existing transaction boundaries.
+
+The PowerPoint reader keeps package orchestration and slide traversal in `pptx/reader.rs`, with
+private `reader/{package,theme,text,geometry,drawables}.rs` modules for bounded ZIP/XML loading,
+theme resolution, inherited text styles, transforms, and drawable conversion. The public OOXML
+entry points and parity contracts are unchanged. Document preview rendering uses one conversion
+lifecycle for image and Office formats, retaining cache validation before and after semaphore
+acquisition, blocking-worker admission ownership, and PDF validation before caching.
+
 [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs)
 enforces that
 the removed horizontal roots and global `AppState` do not return, adapters do not import domains,
@@ -1664,7 +1694,7 @@ service, model, table, or product capability.
 | `workspaces` | Organization tenancy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
 | `templates::{slide_templates}` | Five stable facade operations use authenticated owner scopes; the embedded engine provides native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared PostgreSQL canonical store, and Helix template/metadata/dual-vector projection |
-| `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, Markdown/embedding/Helix projection; web/desktop transports and explicit-save editor implemented; folder UI deferred |
+| `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, atomic Markdown/embedding/PostgreSQL search; web/desktop transports and explicit-save editor implemented; folder UI deferred |
 | `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
 
@@ -1812,7 +1842,8 @@ schema currently contains:
 | `notebook_folders` | Single-level notebook folders | API implemented |
 | `notebook_notes` | Native blocks, schema version and optimistic revision | API implemented |
 | `notebook_save_jobs` | Immutable accepted snapshots, idempotency, leases, checkpoints and terminal results | Durable save worker and SSE/status/retry |
-| `notebook_cleanup` | Independent deletion tombstones and retry schedule | Recoverable Helix deletion |
+| `notebook_search_sets`, `notebook_chunks`, `notebook_embedding_profiles` | Immutable complete artifacts, pgvector/GIN and exact profile identities | SQL-only notebook search |
+| `notebook_admission_users`, `notebook_save_slots` | Serialized per-user admission and 256 global slots | Durable queue bounds; terminal/cascade release |
 | `reminders` | Reminder records | No current service/route consumer |
 | `deals` | Engagement/transaction/status codes, optional deal code/dates, immutable creator and audit/archive timestamps | Used |
 | `deal_lifecycle_guards` | Active/deleting/deleted identity reservation retained after purge | Shared mutation/exclusive authority coordination |
@@ -1867,8 +1898,8 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 3 creates the former marker-18 layout plus bounded content revisions
-and durable deal lifecycle guards, with
+PostgreSQL schema version 4 includes the former marker-18 layout, bounded content revisions,
+durable deal lifecycle guards, and complete document/notebook search artifacts, with
 `bytea` assets, generated numeric IDs and safe-integer checks, C-collated text, preserved serialized
 JSON/timestamps, all existing checks, same-deal composite foreign keys and partial unique indexes.
 `slide_classifications_fts` stores lexical documents/lengths and `template_lexical_terms` indexes
@@ -1876,8 +1907,8 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates an empty selected schema or validates schema 3, checksum/catalog, owned indexes,
-extension readiness, ownership and complete document search sets. Unknown layouts fail without
+Startup creates an empty selected schema or validates schema 4, checksum/catalog, owned indexes,
+extension readiness, ownership and complete document/notebook search sets. Unknown layouts fail without
 deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
 rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
 objects atomically. It has no old-data backfill and never runs at ordinary startup. Old stores
@@ -1942,7 +1973,7 @@ retain uniqueness and one-current rules. Stable IDs, spans, attribution and orig
 
 Search uses profile-scoped exact cosine and GIN-indexed English/technical lexical channels.
 Both hybrid branches share a read-only snapshot per deal, followed by bounded final authorization.
-No ANN index is enabled. Notebook and template Helix SDK/index/transport behavior is retained.
+No ANN index is enabled. Template Helix SDK/index/transport behavior is retained; notebooks use SQL search sets.
 Their dimension conflicts still require an explicitly scoped operational procedure; ordinary
 startup never clears stores or recreates indexes. See [document storage](document-storage.md).
 
@@ -1972,7 +2003,7 @@ The historical `sqliteCommitted` field means this complete PostgreSQL commit. Se
 | Duplicate-ingestion identity | Unique SQL input claim and operation replay | Durable until deal deletion; no process-only identity lock |
 | Query embeddings | Generated independently per search; shared only across deals within that request | Request lifetime; no cache or cross-request coalescing |
 | Tauri authorized local roots | In-memory canonical path set | Desktop process lifetime |
-| Notebook API resources and save jobs | Shared PostgreSQL; Helix projection | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
+| Notebook API resources, artifacts and save jobs | Shared PostgreSQL with pgvector/GIN | Durable canonical content and accepted input; explicit retry/recovery; 30-day job retention |
 | Notebook edit buffers and save tracking | Session-scoped module/external-store memory | Survives routes; clears on reload/auth changes; saved content reloads from PostgreSQL, unsaved edits are lost |
 | Frontend activity log | Module store mirrored to `sessionStorage` | Tab/webview session and reloads within it; max 400 entries |
 
@@ -2060,7 +2091,7 @@ See [document storage](document-storage.md) for database-clock leases, retention
    persisted derivative; image previews preserve aspect ratio on one portrait or landscape
    letter-sized page and share that bounded cache.
 3. A text request parses the stored PDF/DOCX into canonical raw text. Image descriptions are
-   searchable Helix chunk text, not exposed by this raw-text endpoint.
+   searchable SQL chunk text, not exposed by this raw-text endpoint.
 4. The frontend's Extend UI editor renders the bytes through EmbedPDF/PDFium and keeps annotation
    snapshots in frontend memory only.
 5. The selected-file header can open a panel-scoped search overlay while the editor stays mounted;
@@ -2142,7 +2173,7 @@ pins it to the loopback API.
 | `QUARRY_PROMPTS_DIR` | `prompts`; relative to the backend process working directory; must contain the four startup-validated catalog assets |
 | `HELIX_URL` | `http://127.0.0.1:6970`; origin only (no `/v2/query` path, credentials, query, or fragment) |
 | `HELIX_API_KEY` | optional secret |
-| `HELIX_VECTOR_DIMENSION` | `1536`; positive integer shared by the Helix index, ingestion/query embedding request and response validation, and graph write preflight; dimension mismatch fails before PostgreSQL commit |
+| `HELIX_VECTOR_DIMENSION` | `1536`; positive integer shared by document/notebook PostgreSQL vector columns and ingestion/query embedding validation; the name is retained for compatibility. Template Helix dimensions are independent; changes require a fresh/reset SQL target or an explicitly scoped data-preserving operation |
 | `QUARRY_HYBRID_SEARCH_ENABLED` | `false`; explicit hybrid rollout switch; requires reviewed disposable performance/relevance evidence |
 | `QUARRY_SEARCH_DEAL_CONCURRENCY` | 4; 1–32 active deal pipelines per search |
 | `QUARRY_SEARCH_SQL_READS` | 8; 1–64 process-service document SQL reads, including legacy operations |
@@ -2315,15 +2346,15 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- Helix remains required during bootstrap for notebook/template projections. Document startup
+- Helix remains required during bootstrap for template projections. Document startup
   validates PostgreSQL vector profiles and indexes and submits no Helix document-index DDL.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
   `HELIX_VECTOR_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
   generated vectors use one configured size. Known v3 model maxima are checked at configuration
   parsing: 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
-  A model/dimension change requires a compatible document SQL schema/profile and a separately
-  scoped notebook index procedure; changing configuration cannot convert existing vectors.
+  A model/dimension change requires compatible document/notebook SQL schemas and exact profiles;
+  changing configuration cannot convert existing vectors.
   The historical local 3072-dimensional trial and its authorized Helix document reset are recorded in
   [Hybrid document search](hybrid-document-search.md). Repository defaults remain small/1536.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
@@ -2631,7 +2662,7 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 3 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
+| Persistence | Fresh PostgreSQL schema 4 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
 | Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
@@ -2640,7 +2671,7 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
-| Dependency security | The 2026-11-16 updates patch frontend test/build tooling, Rust networking/memory-safety dependencies in both Rust targets, and Quarry's direct ZIP consumers; `docx-rust` still requires ZIP 4, shadcn still requires unpatched `deepmerge`, and Tauri's Linux GTK stack still requires GLib 0.18 | ZIP, deepmerge, and GLib alerts remain; clearing them requires upstream fixes or separately verified dependency replacements, not audit suppressions |
+| Dependency security | The 2026-11-16 updates patch frontend test/build tooling, Rust networking/memory-safety dependencies in both Rust targets, and all ZIP consumers. A source-preserving private Git dependency based on published `docx-rust` 0.1.11 uses ZIP 9.6.0, propagates fallible names and rejects inconsistent local/central headers before parsing; shared OOXML validation also checks header consistency | The requested ZIP alerts #5/#6 are removed from the local dependency graph. The separate dependency patch must be maintained until upstream supports ZIP >=9.0.5; shadcn's `deepmerge` and Tauri Linux's GLib 0.18 remain separate known gaps |
 | API mapping | Handwritten in web and desktop adapters | Drift risk without shared descriptors/generation |
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | Pull-request CI exists; no production container, provider, signing, updater, or TLS config | Repository is not independently deployable |
@@ -2721,8 +2752,37 @@ current-state reference.
 | Template service | Native template engine inside Axum, backed by shared PostgreSQL and Helix |
 | Composition root | Vite/runtime selection on the client; `bootstrap.rs` on the server |
 | Canonical store | PostgreSQL records and blobs used for recovery and product persistence |
-| Search storage | PostgreSQL document chunks and indexes; notebook/template Helix projections remain recoverable-domain concerns |
+| Search storage | PostgreSQL document chunks and indexes; template Helix projections remain recoverable-domain concerns |
 | Logical file | A `quarry_files` record that can own immutable versions; changed-content upload currently creates a new one |
 | Current version | The version marked current in canonical PostgreSQL; Helix should project it but can be absent or stale after a partial indexing failure |
 | Document job | Process-local ingestion task exposed through an SSE event stream |
 | Development fixture | Static UI data used for demos/fallbacks, not server authority |
+
+### DOCX dependency security patch
+
+Quarry consumes the separate private [docx-rust-quarry](https://github.com/ratik-gambhir-WM/docx-rust-quarry)
+repository at exact commit `c63f575c792d1f1bad173dd98d8d23d80d5b4a5d`. It retains the MIT-licensed
+published 0.1.11 model/API while requiring patched ZIP >=9.0.5; the lockfile has only ZIP 9.6.0.
+The library source is not vendored into Quarry. Cargo fetches it using Git/SSH and builds it as a
+normal dependency. Developers need GitHub SSH read access to that private repository;
+`backend/.cargo/config.toml` selects the Git CLI transport.
+
+The patch adapts ZIP 9's fallible filename iterator and validates every part's local/central
+header before parsing. Shared OOXML validation rejects inconsistent headers before DOCX, XLSX or
+PPTX parsing. No archive extraction is introduced. See the dependency repository's
+[patch provenance and removal criteria](https://github.com/ratik-gambhir-WM/docx-rust-quarry/blob/c63f575c792d1f1bad173dd98d8d23d80d5b4a5d/QUARRY-PATCH.md).
+Quarry retains DOCX roundtrip and adversarial regression tests under `backend/tests/`.
+
+CI's `test`, `build` and `lint` jobs load a read-only, dependency-repository-only deploy key from
+`DOCX_RUST_DEPENDENCY_KEY` through `.github/actions/setup-docx-dependency`. Its pinned GitHub SSH
+host keys were read from GitHub's HTTPS metadata API; host checking stays strict. No account token
+or private key is committed. Secretless fork jobs cannot fetch this private dependency; an authorized
+maintainer run is required. The local changes do not dispatch CI or dismiss the Dependabot alerts;
+GitHub will re-evaluate the dependency graph when Quarry's changes reach the default branch.
+
+The separate repository also distributes the verified private Cargo source archive as
+[release `v0.1.11-quarry.1`](https://github.com/ratik-gambhir-WM/docx-rust-quarry/releases/tag/v0.1.11-quarry.1),
+with `SHA256SUMS`. This appears under GitHub Releases; GitHub Packages does not provide a Cargo
+registry. Its Rust source matches the tested patch; package metadata gives the fork a distinct
+version and declares Rust 1.88 for ZIP 9.6. Quarry continues consuming its existing exact Git pin,
+and no library source or package archive is stored in this repository.

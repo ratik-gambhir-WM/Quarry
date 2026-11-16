@@ -63,6 +63,7 @@ const operations: [
     "GET",
     "/api/v1/notebooks?dealId=none&limit=1&offset=2",
   ],
+  ["search notebook", (a) => a.searchNotebook(n, { queryText: "C++", mode: "hybrid", limit: 5 }), "POST", `/api/v1/notebooks/${n}/search`, { queryText: "C++", mode: "hybrid", limit: 5 }],
   ["get notebook", (a) => a.getNotebook(n), "GET", `/api/v1/notebooks/${n}`],
   [
     "patch notebook",

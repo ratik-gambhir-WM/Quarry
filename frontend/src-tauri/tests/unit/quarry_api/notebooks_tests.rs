@@ -44,3 +44,20 @@ fn notebook_relay_preserves_split_utf8_crlf_and_rejects_oversized_events() {
     );
     assert!(parser.push(&vec![b'x'; 65537]).is_err());
 }
+
+#[test]
+fn notebook_search_requires_canonical_path_and_bounded_strict_payload() {
+    let path = "/api/v1/notebooks/00000000-0000-4000-8000-000000000001/search";
+    let valid = serde_json::json!({"queryText":"C++ café","mode":"hybrid","limit":50});
+    assert!(validate_search(path, &valid).is_ok());
+    for body in [
+        serde_json::json!({"queryText":" ","mode":"keyword","limit":1}),
+        serde_json::json!({"queryText":"x","mode":"other","limit":1}),
+        serde_json::json!({"queryText":"x","mode":"semantic","limit":51}),
+        serde_json::json!({"queryText":"x","mode":"keyword","limit":1,"owner":1}),
+    ] {
+        assert!(validate_search(path, &body).is_err());
+    }
+    assert!(validate_search(&format!("{path}?owner=1"), &valid).is_err());
+    assert!(validate_search("/api/v1/notebooks/not-canonical/search", &valid).is_err());
+}

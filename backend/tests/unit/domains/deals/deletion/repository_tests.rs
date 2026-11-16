@@ -15,7 +15,11 @@ async fn fixture() -> DeletionRepository {
     INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at) VALUES('owned-file','DELETE-A','synthetic','{}','now','now'),('other-file','KEEP-B','synthetic','{}','now','now');
     INSERT INTO assistant_threads(thread_id,user_id,deal_id,title) VALUES('owned-thread',1,'DELETE-A','synthetic'),('private-thread',2,'DELETE-A','synthetic'),('free-thread',2,NULL,'synthetic'),('other-thread',2,'KEEP-B','synthetic');
     INSERT INTO notebooks(notebook_id,user_id,deal_id,title,created_at,updated_at) VALUES('private-book',2,'DELETE-A','synthetic','now','now');
-    INSERT INTO notebook_notes(note_id,notebook_id,title,blocks_json,created_at,updated_at) VALUES('private-note','private-book','synthetic','[]','now','now');
+    BEGIN;
+    INSERT INTO notebook_embedding_profiles VALUES('fixture-profile','fixture',1536);
+    INSERT INTO notebook_notes(note_id,notebook_id,title,blocks_json,active_set_id,created_at,updated_at) VALUES('private-note','private-book','synthetic','[]','fixture-set','now','now');
+    INSERT INTO notebook_search_sets(set_id,note_id,profile_id,dimensions,source_hash,markdown,chunk_count) VALUES('fixture-set','private-note','fixture-profile',1536,repeat('a',64),'',0);
+    COMMIT;
     INSERT INTO notebook_save_jobs(job_id,user_id,notebook_id,note_id,operation_id,request_hash,input_json,status,stage,created_at,updated_at) VALUES('save-job',2,'private-book','private-note','operation','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','{}','queued','persisting','now','now');
     ").await }).await.unwrap();
     DeletionRepository::new(postgres)

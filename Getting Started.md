@@ -9,6 +9,8 @@ This guide covers local development for Quarry's browser and desktop application
 For a product overview and upcoming features, see the [README](README.md).
 The [architecture guide](docs/ARCHITECTURE.md) is the detailed reference for configuration,
 runtime boundaries, data recovery, and verification.
+For the main backend/frontend libraries, upstream documentation and their source locations in
+Quarry, see the [key dependency map](docs/dependencies.md).
 
 Run commands from the repository root unless a section names a different directory.
 

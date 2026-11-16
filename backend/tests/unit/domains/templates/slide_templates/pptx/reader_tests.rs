@@ -1,4 +1,9 @@
+use super::text::{text_from_runs, text_runs};
 use super::*;
+use crate::domains::templates::slide_templates::{
+    ArrowType, HorizontalAlign, ImageFit, LineType, ShapeElement, TextSpacing, VerticalAlign,
+};
+use std::io::{Cursor, Read};
 
 #[test]
 fn package_rejects_forged_entry_size_before_the_expansion_limit() {
@@ -303,7 +308,7 @@ const TABLE_XML: &str = r#"
 
 #[test]
 fn table_import_preserves_theme_colors_fonts_and_merged_assignments() {
-    let theme = ThemeColors::from_xml(THEME_XML);
+    let theme = theme_colors_from_xml(THEME_XML);
     let document = Document::parse(TABLE_XML).expect("table fixture should be valid XML");
     let elements = parse_table(
         document.root_element(),
@@ -414,7 +419,7 @@ fn placeholder_typography_inherits_from_layout_and_master_styles() {
         "rId1".to_owned(),
         "ppt/slideLayouts/slideLayout1.xml".to_owned(),
     )]);
-    let theme = ThemeColors::from_xml(THEME_XML);
+    let theme = theme_colors_from_xml(THEME_XML);
     let text_styles = InheritedTextStyles::for_slide(&parts, &relationships, &theme);
 
     let body_document = Document::parse(BODY_PLACEHOLDER_XML).expect("body placeholder fixture");
@@ -466,7 +471,7 @@ fn elements_fully_beyond_the_slide_boundary_are_removed() {
 
 #[test]
 fn color_transforms_are_applied_after_theme_resolution() {
-    let theme = ThemeColors::from_xml(THEME_XML);
+    let theme = theme_colors_from_xml(THEME_XML);
     let document = Document::parse(
             r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:schemeClr val="dk1"><a:tint val="50000"/></a:schemeClr></a:solidFill>"#,
         )
@@ -479,7 +484,7 @@ fn color_transforms_are_applied_after_theme_resolution() {
 
 #[test]
 fn elbow_connector_import_preserves_geometry_and_inherited_line_style() {
-    let theme = ThemeColors::from_xml(CONNECTOR_THEME_XML);
+    let theme = theme_colors_from_xml(CONNECTOR_THEME_XML);
     let document =
         Document::parse(ELBOW_CONNECTOR_XML).expect("connector fixture should be valid XML");
     let line = parse_line(document.root_element(), 1, &theme);
@@ -783,4 +788,11 @@ fn sequential_and_parallel_reads_preserve_slide_and_warning_order() {
         );
         assert_eq!(parallel.warnings, sequential.warnings, "{fixture}");
     }
+}
+
+fn theme_colors_from_xml(xml: &str) -> ThemeColors {
+    ThemeColors::for_slide(
+        &HashMap::from([("ppt/theme/theme1.xml".to_owned(), xml.as_bytes().to_vec())]),
+        &HashMap::new(),
+    )
 }

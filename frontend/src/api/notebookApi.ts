@@ -35,6 +35,7 @@ function query(options: object = {}) {
 export function createNotebookApi(transport: NotebookTransport): NotebookApi {
   const send = transport.request.bind(transport);
   return {
+    searchNotebook: (n, input) => send("POST", `${root(n)}/search`, input),
     createNotebook: (input) => send("POST", "/api/v1/notebooks", input),
     listNotebooks: (options) =>
       send("GET", `/api/v1/notebooks${query(options)}`),

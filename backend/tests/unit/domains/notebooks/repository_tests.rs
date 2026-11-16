@@ -14,10 +14,7 @@ async fn saved(
     let job = repo.admit(1, book.into(), None, input).await.unwrap();
     let claim = repo.claim().await.unwrap().unwrap();
     assert_eq!(job.job_id, claim.job.job_id);
-    repo.persist(&claim).await.unwrap();
-    repo.checkpoint(&claim, "indexing", Some("test".into()), true)
-        .await
-        .unwrap();
+    repo.commit_test(&claim).await.unwrap();
     repo.get_note(1, book.into(), job.note_id).await.unwrap()
 }
 #[tokio::test]
@@ -65,7 +62,11 @@ async fn notebook_repository_lifecycle_ownership_relocation_and_cascades() {
         .await
         .is_err());
     assert!(repo.get(2, other.notebook_id).await.is_ok());
-    assert_eq!(repo.cleanup_batch().await.unwrap().len(), 1);
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM notebook_search_sets")
+        .fetch_one(repo.postgres.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
 }
 #[tokio::test]
 async fn notebook_revision_races_active_jobs_idempotence_and_content_clear() {
@@ -122,10 +123,7 @@ async fn notebook_revision_races_active_jobs_idempotence_and_content_clear() {
         .await
         .is_err());
     let claim = repo.claim().await.unwrap().unwrap();
-    repo.persist(&claim).await.unwrap();
-    repo.checkpoint(&claim, "indexing", None, true)
-        .await
-        .unwrap();
+    repo.commit_test(&claim).await.unwrap();
     let loaded = repo
         .get_note(1, book.clone(), note.summary.note_id.clone())
         .await
@@ -134,17 +132,19 @@ async fn notebook_revision_races_active_jobs_idempotence_and_content_clear() {
     assert_eq!(loaded.blocks, test_support::blocks());
     let mut stale = test_support::input("Stale");
     stale.expected_revision = PatchField::Value(1);
-    assert!(repo
-        .admit(1, book.clone(), Some(note.summary.note_id.clone()), stale)
+    repo.admit(1, book.clone(), Some(note.summary.note_id.clone()), stale)
         .await
-        .is_err());
+        .unwrap();
+    let stale_claim = repo.claim().await.unwrap().unwrap();
+    assert!(repo.commit_test(&stale_claim).await.is_err());
+    repo.fail(&stale_claim, "revision_conflict").await.unwrap();
     let mut clear = test_support::input("");
     clear.expected_revision = PatchField::Value(2);
     repo.admit(1, book.clone(), Some(note.summary.note_id.clone()), clear)
         .await
         .unwrap();
     let claim = repo.claim().await.unwrap().unwrap();
-    repo.persist(&claim).await.unwrap();
+    repo.commit_test(&claim).await.unwrap();
     let cleared = repo.get_note(1, book, note.summary.note_id).await.unwrap();
     assert_eq!(cleared.blocks, serde_json::json!([]));
     assert_eq!(cleared.summary.revision, 3);

@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read};
 
-use zip::ZipArchive;
+use zip::{read::ZipReadOptions, ZipArchive};
 
 /// Maximum number of members accepted in an OOXML package.
 pub const MAX_OFFICE_ZIP_ENTRIES: usize = 2_048;
@@ -41,7 +41,7 @@ impl OfficeDocumentKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OfficePackageError;
 
-/// Checks an OOXML central directory without extracting arbitrary members.
+/// Checks OOXML central/local header consistency without extracting arbitrary members.
 ///
 /// This validates the package family, declared expansion limits, and a bounded
 /// content-types manifest before a format parser touches the archive.
@@ -62,7 +62,12 @@ pub fn validate_office_package(
     let mut has_required_root = false;
     let mut content_types = None;
     for index in 0..archive.len() {
-        let entry = archive.by_index(index).map_err(|_| OfficePackageError)?;
+        let entry = archive
+            .by_index_with_options(
+                index,
+                ZipReadOptions::new().enforce_header_consistency(true),
+            )
+            .map_err(|_| OfficePackageError)?;
         let entry_size = entry.size();
         if entry_size > MAX_OFFICE_ZIP_ENTRY_BYTES {
             return Err(OfficePackageError);

@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 pub(super) const MAX_REVISION: i64 = 9_007_199_254_740_991;
-pub(super) const PIPELINE: &str = "notebook-markdown-v1/chunks-v1";
+pub(super) const PIPELINE: &str = "notebook-markdown-v1/chunks-v1/phrases-v1";
 
 #[derive(Debug, Default, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -184,3 +184,35 @@ pub(super) fn now() -> String {
 #[cfg(test)]
 #[path = "../../../tests/unit/domains/notebooks/model_tests.rs"]
 mod tests;
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum SearchMode {
+    Keyword,
+    Semantic,
+    Hybrid,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SearchInput {
+    pub query_text: String,
+    pub mode: SearchMode,
+    pub limit: usize,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SearchHit {
+    pub notebook_id: String,
+    pub note_id: String,
+    pub revision: i64,
+    pub chunk_ordinal: i64,
+    pub title: String,
+    pub excerpt: String,
+    pub match_sources: Vec<&'static str>,
+    #[serde(skip)]
+    pub set_id: String,
+}
+#[derive(Serialize)]
+pub(super) struct SearchResults {
+    pub hits: Vec<SearchHit>,
+}

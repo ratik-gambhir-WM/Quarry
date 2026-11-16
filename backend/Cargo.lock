@@ -94,9 +94,6 @@ name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
-]
 
 [[package]]
 name = "arg_enum_proc_macro"
@@ -488,7 +485,7 @@ dependencies = [
  "log",
  "quick-xml 0.42.0",
  "serde",
- "zip 9.6.0",
+ "zip",
 ]
 
 [[package]]
@@ -776,17 +773,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7eed2c4702fa172d1ce21078faa7c5203e69f5394d48cc436d25928394a867a2"
 
 [[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "derive_more"
 version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,14 +821,13 @@ dependencies = [
 [[package]]
 name = "docx-rust"
 version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "384002ebe1137c2602121f43e7c1329b88cb5d78074e4a13b041db360b4e57f1"
+source = "git+ssh://git@github.com/ratik-gambhir-WM/docx-rust-quarry.git?rev=c63f575c792d1f1bad173dd98d8d23d80d5b4a5d#c63f575c792d1f1bad173dd98d8d23d80d5b4a5d"
 dependencies = [
  "derive_more",
  "hard-xml",
  "log",
  "thiserror 1.0.69",
- "zip 4.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -2482,7 +2467,7 @@ dependencies = [
  "quick-xml 0.41.0",
  "rayon",
  "thiserror 2.0.19",
- "zip 9.6.0",
+ "zip",
 ]
 
 [[package]]
@@ -2625,7 +2610,7 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
- "zip 9.6.0",
+ "zip",
 ]
 
 [[package]]
@@ -4868,20 +4853,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "zip"
-version = "4.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "flate2",
- "indexmap",
- "memchr",
- "zopfli",
 ]
 
 [[package]]

@@ -152,6 +152,9 @@ impl QuarryApiService {
         }
         if resource_path == "/api/v1/notebooks" || resource_path.starts_with("/api/v1/notebooks/") {
             super::notebooks::validate_body(&body)?;
+            if resource_path.ends_with("/search") {
+                super::notebooks::validate_search(path, &body)?;
+            }
         }
         self.client.post(path, body).await
     }

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::super::{
     CanvasDocument, Element, FailureKind, SlideResult, SlideTemplateError, TemplateAsset,
-    TemplateRepository,
+    TemplateAssetRepository,
 };
 use super::document_too_large;
 
@@ -70,7 +70,7 @@ fn externalize_assets_with(
 
 pub(super) async fn hydrate_template_assets(
     document: &mut CanvasDocument,
-    repository: &dyn TemplateRepository,
+    repository: &dyn TemplateAssetRepository,
 ) -> SlideResult<()> {
     let mut assets = HashMap::new();
     let mut bytes = 0usize;

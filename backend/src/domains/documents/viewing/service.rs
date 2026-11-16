@@ -148,92 +148,108 @@ impl StoredDocumentService {
 
         let pdf_bytes = if document.mime_type == "application/pdf" {
             document.file_bytes
-        } else if infer_supported_image_mime_type(std::path::Path::new(&document.display_name))
-            == Some(document.mime_type.as_str())
-        {
-            let cache_key = office_preview_cache_key(
-                &document.mime_type,
-                &document.display_name,
-                &document.file_bytes,
-            );
-            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
-                validate_pdf_bytes(&cached, "the cached PDF preview")?;
-                return Ok(cached);
-            }
-
-            let _permit = self
-                .preview_semaphore
-                .acquire()
-                .await
-                .map_err(|_| "Image preview conversion is shutting down".to_string())?;
-            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
-                validate_pdf_bytes(&cached, "the cached PDF preview")?;
-                return Ok(cached);
-            }
-
-            let display_name = document.display_name;
-            let mime_type = document.mime_type;
-            let bytes = document.file_bytes;
-            let converted = tokio::task::spawn_blocking(move || {
-                let _admission = admission;
-                render_image_bytes_as_pdf(&display_name, &mime_type, &bytes)
-            })
-            .await
-            .map_err(|error| format!("image preview worker failed: {error}"))??;
-            validate_pdf_bytes(&converted, "the converted PDF preview")?;
-            self.preview_cache
-                .lock()
-                .await
-                .insert(cache_key, converted.clone());
-            converted
         } else {
-            let extension = office_extension_for_mime_type(&document.mime_type).ok_or_else(|| {
-            format!(
-                "Preview is unsupported for `{}` ({}). Supported formats are PDF, PNG, JPEG, WebP, GIF, DOC, DOCX, XLS, XLSX, PPT, and PPTX.",
-                document.display_name, document.mime_type
-            )
-        })?;
-            let cache_key = office_preview_cache_key(
-                &document.mime_type,
-                &document.display_name,
-                &document.file_bytes,
-            );
-            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
-                validate_pdf_bytes(&cached, "the cached PDF preview")?;
-                return Ok(cached);
-            }
-
-            let _permit = self
-                .preview_semaphore
-                .acquire()
-                .await
-                .map_err(|_| "Office preview conversion is shutting down".to_string())?;
-            if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
-                validate_pdf_bytes(&cached, "the cached PDF preview")?;
-                return Ok(cached);
-            }
-
-            let display_name = document.display_name;
-            let bytes = document.file_bytes;
-            let office = self.office.clone();
-            let converted = tokio::task::spawn_blocking(move || {
-                let _admission = admission;
-                render_office_bytes_as_pdf(extension, &display_name, &bytes, |extension, bytes| {
-                    office.convert_bytes(extension, bytes)
-                })
-            })
-            .await
-            .map_err(|error| format!("document preview worker failed: {error}"))??;
-            validate_pdf_bytes(&converted, "the converted PDF preview")?;
-            self.preview_cache
-                .lock()
-                .await
-                .insert(cache_key, converted.clone());
-            converted
+            let conversion = PreviewConversion::for_document(&document)?;
+            self.convert_preview(document, conversion, admission)
+                .await?
         };
 
         validate_pdf_bytes(&pdf_bytes, "the PDF preview")?;
         Ok(pdf_bytes)
+    }
+
+    async fn convert_preview(
+        &self,
+        document: StoredDocumentBlob,
+        conversion: PreviewConversion,
+        admission: Option<DealAdmission>,
+    ) -> Result<Vec<u8>, String> {
+        let cache_key = office_preview_cache_key(
+            &document.mime_type,
+            &document.display_name,
+            &document.file_bytes,
+        );
+        if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+            validate_pdf_bytes(&cached, "the cached PDF preview")?;
+            return Ok(cached);
+        }
+
+        let _permit =
+            self.preview_semaphore.acquire().await.map_err(|_| {
+                format!("{} preview conversion is shutting down", conversion.label())
+            })?;
+        if let Some(cached) = self.preview_cache.lock().await.get(&cache_key) {
+            validate_pdf_bytes(&cached, "the cached PDF preview")?;
+            return Ok(cached);
+        }
+
+        let office = self.office.clone();
+        let converted = tokio::task::spawn_blocking(move || {
+            let _admission = admission;
+            match conversion {
+                PreviewConversion::Image => render_image_bytes_as_pdf(
+                    &document.display_name,
+                    &document.mime_type,
+                    &document.file_bytes,
+                ),
+                PreviewConversion::Office(extension) => render_office_bytes_as_pdf(
+                    extension,
+                    &document.display_name,
+                    &document.file_bytes,
+                    |extension, bytes| office.convert_bytes(extension, bytes),
+                ),
+            }
+        })
+        .await
+        .map_err(|error| {
+            format!(
+                "{} preview worker failed: {error}",
+                conversion.worker_label()
+            )
+        })??;
+        validate_pdf_bytes(&converted, "the converted PDF preview")?;
+        // The cache and response each retain an independently owned PDF.
+        self.preview_cache
+            .lock()
+            .await
+            .insert(cache_key, converted.clone());
+        Ok(converted)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PreviewConversion {
+    Image,
+    Office(&'static str),
+}
+
+impl PreviewConversion {
+    fn for_document(document: &StoredDocumentBlob) -> Result<Self, String> {
+        if infer_supported_image_mime_type(std::path::Path::new(&document.display_name))
+            == Some(document.mime_type.as_str())
+        {
+            return Ok(Self::Image);
+        }
+        office_extension_for_mime_type(&document.mime_type)
+            .map(Self::Office)
+            .ok_or_else(|| format!(
+                "Preview is unsupported for `{}` ({}). Supported formats are PDF, PNG, JPEG, WebP, GIF, DOC, DOCX, XLS, XLSX, PPT, and PPTX.",
+                document.display_name, document.mime_type
+            ))
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Image => "Image",
+            Self::Office(_) => "Office",
+        }
+    }
+
+    fn worker_label(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Office(_) => "document",
+        }
     }
 }
 

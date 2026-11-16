@@ -48,7 +48,6 @@ async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
     let api = assemble_api_routes(
         &config,
         postgres.clone(),
-        Arc::new(HelixClient::from_config(&config.helix).unwrap()),
         reqwest::Client::new(),
         integration_support::prompt_catalog(),
         Some(studio.clone()),

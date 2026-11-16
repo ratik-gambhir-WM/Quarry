@@ -21,11 +21,56 @@ use super::{
     normalize, pptx, BatchImportResponse, BatchImportTemplate, CanvasDocument, Conversion,
     DisabledTemplatePreviewGenerator, Element, ExportedPowerPoint, ImportResponse,
     InsertPowerPointInput, Presentation, SlideResult, SlideTemplateError, StoredTemplate,
-    StoredTemplateMetadata, StoredTemplatePreview, TemplateAsset, TemplateInsert, TemplateKind,
-    TemplateListItem, TemplateListResponse, TemplatePreviewGenerator, TemplatePreviewListItem,
-    TemplatePreviewListResponse, TemplatePreviewPageMetadata, TemplatePreviewStatus,
-    TemplateRepository, TemplateResponse, TemplateSource,
+    StoredTemplateMetadata, StoredTemplatePreview, TemplateAsset, TemplateAssetRepository,
+    TemplateInsert, TemplateKind, TemplateListItem, TemplateListResponse, TemplatePreviewGenerator,
+    TemplatePreviewListItem, TemplatePreviewListResponse, TemplatePreviewPageMetadata,
+    TemplatePreviewStatus, TemplateRepository, TemplateResponse, TemplateSource,
 };
+
+/// Build the canonical record and the hydrated response from the same asset set.
+/// Callers own preview policy, warnings, cancellation, and response-size bounds.
+fn prepare_import_record(
+    template_json: CanvasDocument,
+    generated_preview: Option<super::preview::GeneratedTemplatePreview>,
+    kind: TemplateKind,
+    created_at: i64,
+) -> SlideResult<(TemplateInsert, CanvasDocument)> {
+    let template_id = Uuid::new_v4().to_string();
+    let (template_json, assets) = externalize_assets(&template_id, template_json)?;
+    // Storage retains asset references; the response owns a hydrated document.
+    let hydrated_json = hydrate_canvas_assets(template_json.clone(), &assets)?;
+    let metadata = StoredTemplateMetadata {
+        template_id: template_id.clone(),
+        kind,
+        title: template_json.presentation.title.clone(),
+        description: "Imported PowerPoint template".to_owned(),
+        source: TemplateSource::Import,
+        created_at,
+        catalog_version: None,
+        catalog_checksum: None,
+    };
+    let preview = generated_preview.map(|preview| StoredTemplatePreview {
+        revision: 1,
+        template_id: template_id.clone(),
+        content_type: "image/png".to_owned(),
+        bytes: preview.bytes,
+        width: preview.width,
+        height: preview.height,
+    });
+    Ok((
+        TemplateInsert {
+            template: StoredTemplate {
+                revision: 1,
+                template_id,
+                template_json,
+            },
+            assets,
+            metadata,
+            preview,
+        },
+        hydrated_json,
+    ))
+}
 
 const MAX_JSON_DEPTH: usize = 100;
 const MAX_JSON_NODES: usize = 100_000;
@@ -34,33 +79,13 @@ pub const TEMPLATE_PREVIEW_PAGE_SIZE: usize = 10;
 /// Converts presentation JSON into downloadable `.pptx` bytes.
 #[derive(Clone)]
 pub struct ExportService {
-    repository: Arc<dyn TemplateRepository>,
+    repository: Arc<dyn TemplateAssetRepository>,
 }
 
 impl ExportService {
-    pub(super) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
-        Ok(Self {
-            repository: self
-                .repository
-                .for_user(user_id)
-                .map_err(SlideTemplateError::internal)?,
-        })
-    }
-
     #[must_use]
-    pub fn new(repository: Arc<dyn TemplateRepository>) -> Self {
+    pub fn new(repository: Arc<dyn TemplateAssetRepository>) -> Self {
         Self { repository }
-    }
-
-    pub async fn for_app(&self, app_id: &str) -> SlideResult<Self> {
-        Ok(Self {
-            repository: self
-                .repository
-                .for_app(app_id)
-                .await
-                .map_err(SlideTemplateError::internal)?
-                .unwrap_or_else(|| Arc::clone(&self.repository)),
-        })
     }
 
     /// Normalizes, validates, hydrates, and renders a presentation.
@@ -147,6 +172,10 @@ pub struct ImportService {
 }
 
 impl ImportService {
+    pub(super) fn exporter(&self) -> ExportService {
+        ExportService::new(self.repository.clone())
+    }
+
     pub(super) fn for_user(&self, user_id: i64) -> SlideResult<Self> {
         Ok(Self {
             repository: self
@@ -310,47 +339,22 @@ impl ImportService {
             warnings.push("A preview image could not be generated for this template.".to_owned());
         }
         repair_canvas_dimensions(&mut template_json);
-        let template_id = Uuid::new_v4().to_string();
-        let (template_json, assets) = externalize_assets(&template_id, template_json)?;
-        let template = StoredTemplate {
-            revision: 1,
-            template_id: template_id.clone(),
+        let (record, hydrated_template_json) = prepare_import_record(
             template_json,
-        };
-        let metadata = StoredTemplateMetadata {
-            template_id: template_id.clone(),
+            generated_preview,
             kind,
-            title: template.template_json.presentation.title.clone(),
-            description: "Imported PowerPoint template".to_owned(),
-            source: TemplateSource::Import,
-            created_at: current_unix_millis(),
-            catalog_version: None,
-            catalog_checksum: None,
-        };
-        let preview = generated_preview.map(|preview| StoredTemplatePreview {
-            revision: 1,
-            template_id: template_id.clone(),
-            content_type: "image/png".to_owned(),
-            bytes: preview.bytes,
-            width: preview.width,
-            height: preview.height,
-        });
-        let hydrated_template_json =
-            hydrate_canvas_assets(template.template_json.clone(), &assets)?;
+            current_unix_millis(),
+        )?;
         super::facade::bound_json(&super::compact_document(&hydrated_template_json))?;
         check_cancelled(cancellation)?;
-        let preview_status = if preview.is_some() {
+        let template_id = record.template.template_id.clone();
+        let preview_status = if record.preview.is_some() {
             TemplatePreviewStatus::Ready
         } else {
             TemplatePreviewStatus::Unavailable
         };
         Ok((
-            TemplateInsert {
-                template,
-                assets,
-                metadata,
-                preview,
-            },
+            record,
             ImportResponse {
                 template_id,
                 template_json: hydrated_template_json,
@@ -517,43 +521,17 @@ impl ImportService {
                     ));
                 }
 
-                let template_id = Uuid::new_v4().to_string();
-                let (stored_json, assets) = externalize_assets(&template_id, template_json)?;
-                let hydrated_json = hydrate_canvas_assets(stored_json.clone(), &assets)?;
+                let (record, hydrated_json) =
+                    prepare_import_record(template_json, generated_preview, kind, created_at)?;
                 response_bytes = response_bytes.saturating_add(super::facade::json_size(
                     &super::compact_document(&hydrated_json),
                 )?);
                 if response_bytes > super::super::model::MAX_TEMPLATE_DOCUMENT_BYTES {
                     return Err(document_too_large());
                 }
-                let preview = generated_preview.map(|preview| StoredTemplatePreview {
-                    revision: 1,
-                    template_id: template_id.clone(),
-                    content_type: "image/png".to_owned(),
-                    bytes: preview.bytes,
-                    width: preview.width,
-                    height: preview.height,
-                });
-                let preview_available = preview.is_some();
-                records.push(TemplateInsert {
-                    template: StoredTemplate {
-                        revision: 1,
-                        template_id: template_id.clone(),
-                        template_json: stored_json,
-                    },
-                    assets,
-                    metadata: StoredTemplateMetadata {
-                        template_id: template_id.clone(),
-                        kind,
-                        title: hydrated_json.presentation.title.clone(),
-                        description: "Imported PowerPoint template".to_owned(),
-                        source: TemplateSource::Import,
-                        created_at,
-                        catalog_version: None,
-                        catalog_checksum: None,
-                    },
-                    preview,
-                });
+                let preview_available = record.preview.is_some();
+                let template_id = record.template.template_id.clone();
+                records.push(record);
                 templates.push(BatchImportTemplate {
                     template_id,
                     preview_available,

@@ -126,6 +126,11 @@ pub(crate) async fn authenticate(
             }
         }
     }
+    let notebook_search = parts.method == axum::http::Method::POST
+        && (parts.uri.path().starts_with("/notebooks/")
+            || parts.uri.path().starts_with("/api/v1/notebooks/")
+            || parts.uri.path().starts_with("/api/notebooks/"))
+        && parts.uri.path().ends_with("/search");
     let is_read = parts.method == axum::http::Method::GET
         || parts.uri.path().contains("/documents/search/")
         || parts.uri.path().ends_with("/data-room/preview");
@@ -144,6 +149,13 @@ pub(crate) async fn authenticate(
         })),
     );
 
+    if notebook_search {
+        // Query embedding may outlive a session; final result delivery needs fresh authority.
+        boundary
+            .identity
+            .authenticate_hash(actor.token_hash.clone())
+            .await?;
+    }
     if is_read {
         if let Some(deal) = &stream_deal {
             boundary.access.deal(deal.clone(), actor.user.id).await?;

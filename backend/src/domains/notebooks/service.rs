@@ -1,4 +1,4 @@
-use super::{graph::SavePipeline, model::*, repository::NotebookRepository, save_jobs};
+use super::{model::*, pipeline::SavePipeline, repository::NotebookRepository, save_jobs};
 use crate::shared::error::{ServiceError, ServiceResult};
 use std::sync::Arc;
 
@@ -6,6 +6,7 @@ pub(crate) struct NotebookService {
     pub(super) repository: NotebookRepository,
     pub(super) pipeline: Arc<dyn SavePipeline>,
     pub(super) wake: tokio::sync::Notify,
+    query_permits: tokio::sync::Semaphore,
 }
 impl NotebookService {
     pub(crate) fn new(
@@ -22,9 +23,48 @@ impl NotebookService {
             repository,
             pipeline,
             wake: tokio::sync::Notify::new(),
+            query_permits: tokio::sync::Semaphore::new(4),
         });
         save_jobs::start(&service);
         service
+    }
+    pub(super) async fn search(
+        &self,
+        owner: i64,
+        notebook: String,
+        input: SearchInput,
+    ) -> ServiceResult<SearchResults> {
+        let _permit = if input.mode != SearchMode::Keyword {
+            Some(self.query_permits.try_acquire().map_err(|_| {
+                ServiceError::unavailable("notebook query embedding capacity exhausted")
+            })?)
+        } else {
+            None
+        };
+        let vector = if input.mode != SearchMode::Keyword {
+            let inputs = [input.query_text.clone()];
+            let mut vectors = tokio::time::timeout(
+                std::time::Duration::from_secs(45),
+                self.pipeline.embed(&inputs),
+            )
+            .await
+            .map_err(|_| ServiceError::internal("notebook query embedding timed out"))?
+            .map_err(|_| ServiceError::unavailable("notebook query embedding unavailable"))?;
+            if vectors.len() != 1 {
+                return Err(ServiceError::internal("invalid notebook query embedding"));
+            }
+            let vector = vectors.remove(0);
+            if vector.as_slice().len() != self.pipeline.dimensions() {
+                return Err(ServiceError::internal("invalid notebook query embedding"));
+            }
+            Some(vector)
+        } else {
+            None
+        };
+        Ok(self
+            .repository
+            .search(owner, notebook, self.pipeline.fingerprint(), input, vector)
+            .await?)
     }
     pub(super) async fn create(
         &self,

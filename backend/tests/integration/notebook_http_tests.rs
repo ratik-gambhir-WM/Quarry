@@ -433,3 +433,142 @@ async fn notebook_http_queue_capacity_returns_retry_after_without_losing_admitte
     assert_eq!(headers["retry-after"], "1");
     assert_eq!(error, json!({"error":"save queue capacity exhausted"}));
 }
+
+#[tokio::test]
+async fn notebook_search_validates_and_authorizes_before_embedding() {
+    use std::sync::atomic::Ordering;
+    let app = test_support::application().await;
+    let id = book(&app).await;
+    let path = format!("/api/v1/notebooks/{id}/search");
+    for payload in [
+        json!({"queryText":" ","mode":"semantic","limit":1}),
+        json!({"queryText":"x","mode":"hybrid","limit":51}),
+        json!({"queryText":"x","mode":"other","limit":1}),
+        json!({"queryText":"x","mode":"semantic","limit":1,"owner":1}),
+    ] {
+        assert_eq!(call(&app, "POST", &path, Some(payload), 1).await.0, 400);
+    }
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &path,
+            Some(json!({"queryText":"private","mode":"semantic","limit":1})),
+            2
+        )
+        .await
+        .0,
+        404
+    );
+    assert_eq!(app.pipeline.embeds.load(Ordering::SeqCst), 0);
+    let job=save(&app,&format!("/api/v1/notebooks/{id}/notes"),"POST",json!({"operationId":uuid::Uuid::new_v4().to_string(),"title":"Revenue retention","blocks":[],"contentSchemaVersion":1})).await;
+    for mode in ["keyword", "semantic", "hybrid"] {
+        let (status, _, results) = call(
+            &app,
+            "POST",
+            &path,
+            Some(json!({"queryText":"revenue","mode":mode,"limit":5})),
+            1,
+        )
+        .await;
+        assert_eq!(status, 200, "{results}");
+        assert_eq!(results["hits"][0]["noteId"], job["noteId"]);
+        assert!(results["hits"][0].get("setId").is_none());
+        assert!(results["hits"][0].get("embedding").is_none());
+    }
+    app.pipeline.fail.store(true, Ordering::SeqCst);
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &path,
+            Some(json!({"queryText":"revenue","mode":"semantic","limit":5})),
+            1
+        )
+        .await
+        .0,
+        503
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &path,
+            Some(json!({"queryText":"revenue","mode":"keyword","limit":5})),
+            1
+        )
+        .await
+        .0,
+        200
+    );
+}
+
+#[tokio::test]
+async fn notebook_search_revalidates_session_after_paused_provider() {
+    use std::sync::atomic::Ordering;
+    let app = test_support::application().await;
+    let id = book(&app).await;
+    app.pipeline.blocked.store(true, Ordering::SeqCst);
+    let router = app.router.clone();
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/notebooks/{id}/search"))
+        .header("authorization", format!("Bearer {}", "a".repeat(43)))
+        .header("x-user-id", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"queryText":"revenue","mode":"semantic","limit":5}).to_string(),
+        ))
+        .unwrap();
+    let pending = tokio::spawn(async move { router.oneshot(request).await.unwrap() });
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while app.pipeline.embeds.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    sqlx::query("UPDATE auth_sessions SET revoked_at=1 WHERE user_id=1")
+        .execute(app.postgres.pool())
+        .await
+        .unwrap();
+    app.pipeline.gate.notify_one();
+    assert_eq!(pending.await.unwrap().status(), 401);
+}
+
+#[tokio::test]
+async fn notebook_search_phrase_order_and_unicode_prefix_work_over_http() {
+    let app = test_support::application().await;
+    let id = book(&app).await;
+    let job = save(
+        &app,
+        &format!("/api/v1/notebooks/{id}/notes"),
+        "POST",
+        json!({
+            "operationId": uuid::Uuid::new_v4().to_string(), "title": "C++ API_v2 cafe\u{301}",
+            "blocks": [], "contentSchemaVersion": 1,
+        }),
+    )
+    .await;
+    for (query, count) in [
+        ("\"C++ API_v2\"", 1),
+        ("\"API_v2 C++\"", 0),
+        ("cafe\u{301}*", 1),
+    ] {
+        let (status, _, results) = call(
+            &app,
+            "POST",
+            &format!("/api/v1/notebooks/{id}/search"),
+            Some(json!({
+                "queryText": query, "mode": "keyword", "limit": 5,
+            })),
+            1,
+        )
+        .await;
+        assert_eq!(status, 200, "{query}: {results}");
+        assert_eq!(results["hits"].as_array().unwrap().len(), count, "{query}");
+        if count > 0 {
+            assert_eq!(results["hits"][0]["noteId"], job["noteId"]);
+        }
+    }
+}

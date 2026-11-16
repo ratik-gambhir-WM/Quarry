@@ -1,6 +1,7 @@
 use super::{
-    graph::SavePipeline, model::*, repository::NotebookRepository, service::NotebookService,
+    model::*, pipeline::SavePipeline, repository::NotebookRepository, service::NotebookService,
 };
+use crate::adapters::postgres::vector::CosineVector;
 use crate::{
     adapters::postgres::client::PostgresClient,
     app::{
@@ -20,12 +21,9 @@ use crate::{
 };
 use axum::{routing::get, Router};
 use futures_util::future::BoxFuture;
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
 };
 
 #[derive(Default)]
@@ -34,30 +32,18 @@ pub(crate) struct FakePipeline {
     pub blocked: AtomicBool,
     pub embeds: AtomicUsize,
     pub gate: tokio::sync::Notify,
-    pub published: Mutex<HashSet<(String, i64)>>,
 }
 impl SavePipeline for FakePipeline {
     fn fingerprint(&self) -> String {
         PIPELINE.into()
     }
-    fn published<'a>(
-        &'a self,
-        _owner: i64,
-        note: &'a Note,
-        _hash: &'a str,
-    ) -> BoxFuture<'a, Result<bool, &'static str>> {
-        Box::pin(async move {
-            Ok(self
-                .published
-                .lock()
-                .unwrap()
-                .contains(&(note.summary.note_id.clone(), note.summary.revision)))
-        })
+    fn dimensions(&self) -> usize {
+        1536
     }
     fn embed<'a>(
         &'a self,
         chunks: &'a [String],
-    ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, &'static str>> {
+    ) -> BoxFuture<'a, Result<Vec<CosineVector>, &'static str>> {
         Box::pin(async move {
             if !chunks.is_empty() {
                 self.embeds.fetch_add(1, Ordering::SeqCst);
@@ -68,30 +54,10 @@ impl SavePipeline for FakePipeline {
             if self.fail.load(Ordering::SeqCst) {
                 return Err("embedding_failed");
             }
-            Ok(chunks.iter().map(|_| vec![0.5, 0.5]).collect())
-        })
-    }
-    fn publish<'a>(
-        &'a self,
-        _owner: i64,
-        note: &'a Note,
-        _hash: &'a str,
-        chunks: &'a [String],
-        vectors: Vec<Vec<f32>>,
-    ) -> BoxFuture<'a, Result<(), &'static str>> {
-        Box::pin(async move {
-            assert_eq!(chunks.len(), vectors.len());
-            self.published
-                .lock()
-                .unwrap()
-                .insert((note.summary.note_id.clone(), note.summary.revision));
-            Ok(())
-        })
-    }
-    fn delete(&self, _owner: i64, note: String) -> BoxFuture<'_, Result<(), &'static str>> {
-        Box::pin(async move {
-            self.published.lock().unwrap().retain(|(id, _)| *id != note);
-            Ok(())
+            Ok(chunks
+                .iter()
+                .map(|_| CosineVector::new(vec![0.5; 1536], 1536).unwrap())
+                .collect())
         })
     }
 }

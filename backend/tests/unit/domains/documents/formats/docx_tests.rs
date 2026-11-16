@@ -122,3 +122,42 @@ fn docx_bytes_assembly_supports_no_local_path() {
     assert_eq!(assembly.chunks[0].text, "Generated DOCX body.");
     assert!(assembly.chunks[0].page_numbers.is_none());
 }
+
+#[test]
+fn docx_rejects_cloaked_local_header_before_parsing_native_parts() {
+    let mut document = Docx::default();
+    document
+        .document
+        .push(Paragraph::default().push_text("Safe roundtrip content"));
+    let bytes = document
+        .write(Cursor::new(Vec::new()))
+        .unwrap()
+        .into_inner();
+    assert!(parse_docx_file_from_bytes(bytes.clone()).is_ok());
+    let mut cloaked = bytes;
+    let header = cloaked
+        .windows(4)
+        .enumerate()
+        .find_map(|(index, signature)| {
+            (signature == b"PK\x03\x04"
+                && cloaked.get(index + 30..index + 47) == Some(b"word/document.xml".as_slice()))
+            .then_some(index)
+        })
+        .expect("generated DOCX contains local document header");
+    cloaked[header + 30..header + 47].copy_from_slice(b"word/payloadx.xml");
+    assert!(parse_docx_file_from_bytes(cloaked.clone()).is_err());
+    assert!(crate::shared::office_zip::validate_office_package(
+        &cloaked,
+        crate::shared::office_zip::OfficeDocumentKind::Word
+    )
+    .is_err());
+}
+
+#[test]
+fn docx_rejects_tiny_symlink_archive_without_unbounded_allocation() {
+    use base64::Engine;
+    // Advisory's 112-byte ZIP64 symlink declares a 2^62-byte target. No extraction is used.
+    let bytes=base64::engine::general_purpose::STANDARD.decode("UEsDBC0AAAAAAAAAAAAAAAAAAAAAAP////8BAAAAYVBLAQItAy0AAAAAAAAAAAAAAAAAAAAAAP////8BAAwAAAAAAAAAAAD/oQAAAABhAQAIAAAAAAAAAABAUEsFBgAAAAABAAEAOwAAAB8AAAAAAA==").unwrap();
+    assert_eq!(bytes.len(), 112);
+    assert!(parse_docx_file_from_bytes(bytes).is_err());
+}

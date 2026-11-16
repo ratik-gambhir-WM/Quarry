@@ -3,7 +3,7 @@
 mod worker;
 pub use worker::*;
 
-use super::{retrieval::*, TemplateRepository};
+use super::{retrieval::*, TemplateProcessingRepository};
 use serde_json::Value;
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
@@ -145,7 +145,7 @@ pub struct SlideClassificationServiceOptions {
     pub embedding_max_text_bytes: usize,
     pub embedding_model: String,
     pub input_limits: SlideClassificationInputLimits,
-    pub repository: Arc<dyn TemplateRepository>,
+    pub repository: Arc<dyn TemplateProcessingRepository>,
 }
 
 struct EmbeddingPair {

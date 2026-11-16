@@ -115,3 +115,114 @@ notes and root agent schema guidance. [Notebook API and recovery](notebook-api.m
 routes, bounds, durable checkpoints/leases/retention, completion semantics, independent deletion
 cleanup and additive schema 12 → 13 rollback. This distinguishes durable notebook jobs from existing
 in-memory document jobs and durable APIs from the session-only editor.
+
+## Schema 4 atomic SQL cutover — 2026-11-16
+
+The notebook worker now prepares outside SQL and publishes native content, the complete active
+pgvector/GIN set, terminal job revision/set/sequence and slot release in one retained transaction.
+The private keyword/semantic/hybrid search API is wired through both adapters and the validated
+Tauri POST relay. The sidebar remains a metadata filter. Rollout uses a fresh schema or explicit
+guarded MVP reset after draining old workers; no development database reset, backfill, live provider
+call or retained Helix mutation was performed during implementation.
+
+Verification from the owning build roots:
+
+| Command | Result |
+| --- | --- |
+| Backend `cargo fmt --all`, then `cargo fmt --all -- --check` | Passed |
+| Backend `cargo check --locked --all-targets` | Passed |
+| Backend `cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone` | Passed |
+| Backend `QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets` | 539 passed, 0 failed, 8 opt-in tests ignored |
+| Frontend `npm run typecheck` | Both targets passed |
+| Frontend `npm run check:boundaries` | Passed |
+| Frontend `npm test` | 689 passed across 102 files; focused notebook adapter/persistence tests also passed |
+| Frontend `npm run build:web` and `npm run build:desktop-ui` | Passed |
+| Frontend `npm run check:web-bundle` | Passed after the web build |
+| Both matching `check:bundle-size:*` and `check:notebook-bundle:*` | Passed before dist changed targets |
+| Tauri `cargo fmt --all`, then `cargo fmt --all -- --check` | Passed |
+| Tauri `cargo clippy --locked --all-targets -- -D warnings` | Passed |
+| Tauri `cargo test --locked --all-targets` | 27 passed |
+
+PostgreSQL checks used only random schemas in the explicitly selected `_test` database with the
+already provisioned shared pgvector extension. The sandbox initially denied database/loopback
+access; those suites passed with the required local-network permission. No application server,
+container or volume was started for verification. Test fixtures own/clean their schemas/listeners.
+
+Coverage includes later-batch and deferred-constraint rollback, final attempt-fence loss after
+chunk insertion, new-note invisibility, zero-chunk completion, old/new repeatable-read snapshots,
+exact artifact reuse after folder changes, stale revision/parent deletion, expired-token recovery,
+completed replay, and 32-per-user/256-global admission across independent pools. Existing full-suite
+gates cover writer-lease lifetime/loss, independent reads and bounded pool failures, resource CAS,
+document complete-set recovery and captured template lexical parity. Global production write guards
+remain; test-only independent pools do not establish multi-instance deployment support.
+
+Search checks cover malformed/private requests before embedding, current-set/revision joins,
+Unicode/phrase/prefix/technical tokens, exact cosine reference score, actual EXPLAIN execution and
+GIN index validity, explicit provider failure, and session revocation during a paused query.
+Exact cosine remains the baseline. No ANN, large-corpus relevance/recall, production latency or
+load claim is made; those need representative corpus evaluation before an ANN rollout.
+
+Review covered state/architecture, transaction/authorization placement, bounded requests, SQL
+ownership, cross-runtime transports and manual ownership/clone analysis. Repeated deep claim copies
+were removed and checked vectors now move into SQL parameters; one native snapshot copy remains
+necessary for the owned blocking export task. Small profile/title copies belong to independent
+bound rows. No required review finding remains. The removed Helix implementation and compatibility
+tests were retired with their callers; no alternate notebook backend or unused cleanup worker remains.
+Visual styles, controls, motion and focus were unchanged; no manual browser/theme walkthrough was
+run. Existing editor tests cover save/retry/newer-edit/reload behavior. Architecture and recovery
+documentation and repository guidance were updated for schema 4 and the new commit boundary.
+
+One full frontend run during concurrent backend compilation timed out in the unchanged slide-editor
+lazy-load fixture. That fixture passed alone, then the entire 689-test suite passed without concurrent
+compilation. Its implementation and timeout were not changed.
+
+### Follow-up ZIP security fix and external dependency
+
+After the notebook migration, the user requested Dependabot #5/#6 remediation and asked that the
+DOCX library source remain outside Quarry. The patched published 0.1.11 source first passed the
+full backend gate: **541 passed, 0 failed, 8 opt-in tests ignored**, including the two new adversarial
+DOCX regressions. It was then published to the separate private
+[docx-rust-quarry repository](https://github.com/ratik-gambhir-WM/docx-rust-quarry), and Quarry now
+pins `c63f575c792d1f1bad173dd98d8d23d80d5b4a5d` as a normal Cargo Git dependency. No vendored
+library remains in Quarry. Cargo resolved only ZIP 9.6.0; ZIP 4.6.1 and its exclusive derive helper
+were removed without unrelated upgrades. The package retains the MIT license and release checksum
+provenance; only ZIP compatibility/header checks and one explicit lifetime differ from upstream.
+
+After switching to the Git source:
+
+- `cargo check --all-targets` fetched and compiled the pinned dependency successfully.
+- `cargo test --locked --lib docx -- --nocapture`: **11 passed**, including parsing, ingestion,
+  viewing, valid roundtrips, conflicting local/central names and the 112-byte symlink archive.
+- `cargo fmt --all -- --check` and the backend Clippy gate passed.
+- `cargo tree --locked -i zip`: every consumer, including DOCX, resolves to ZIP 9.6.0.
+- `cargo audit --json`: **0 vulnerabilities**, with existing unmaintained/yanked warnings.
+- Workflow and composite-action YAML parsed successfully. The exact CI SSH setup script loaded
+  the dependency-only read-only deploy key and authenticated a strict-host-checked `git ls-remote`
+  of the pinned commit; its temporary agent was stopped. The new key was stored only in the
+  repository's encrypted Actions secret. No private key is committed.
+
+The CI workflow changes are local until Quarry's changes are pushed. No Actions run was dispatched,
+and no Dependabot alert was dismissed; GitHub will re-evaluate after default-branch publication.
+Developers need SSH read access to the private dependency; secretless forks need an authorized CI
+run. The temporary local vendor tree was removed after the Git fetch succeeded. Architecture docs
+record the external dependency, auth mechanism and upstream-removal criteria.
+
+### Private DOCX source-package release — 2026-11-16
+
+At the user's request, the separate private DOCX repository published prerelease
+[`v0.1.11-quarry.1`](https://github.com/ratik-gambhir-WM/docx-rust-quarry/releases/tag/v0.1.11-quarry.1)
+at commit `b9b6a04dd6dc75a003cc13d4fb1cbd14d48ac128`. The `.crate` archive and `SHA256SUMS` are
+GitHub Release assets, not a Cargo registry publication. Repository privacy and Quarry's existing
+Git pin were preserved. Release changes are package version/compiler metadata and distribution
+documentation; `git diff c63f575 -- src` confirmed the Rust source is unchanged.
+
+`cargo package` successfully extracted and rebuilt the archive; `cargo test --lib` passed all
+72 library tests. The final archive was rebuilt from the clean release commit, inspected for
+expected paths/license/version/VCS provenance, uploaded, independently downloaded, and verified
+with `shasum -a 256 -c SHA256SUMS`. GitHub's asset digest also matched. Package SHA-256:
+`9e62ecd0ac566d448e2a8c66d0718b99a06ef3ae869c8efb35d8ad7458920506`.
+
+The upstream-source `cargo fmt --check` reports existing formatting differences in two unchanged
+Rust files; no formatting churn was added. Quarry's runtime gates were not repeated for this
+external metadata/release operation; its dependency/source/lockfile remain unchanged. Architecture
+documentation records the release/distribution boundary, and `git diff --check` passed.

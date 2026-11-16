@@ -81,7 +81,7 @@ configuration. Do not invent scripts that do not exist.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
 - `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 3, checksums and catalog fingerprints.
+  `app/migrations.rs` initializes/validates version 4, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
   schemas. Old SQLite files and Helix stores remain outside schema initialization; no import/fallback exists.
@@ -172,13 +172,15 @@ request -> router -> handler -> service -> repository/client
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
 - Documents own chunks, pgvector embeddings, GIN lexical metadata, original bytes, identities,
-  activity and durable job results in PostgreSQL schema 3. One retained transaction publishes the
+  activity and durable job results in PostgreSQL schema 4. One retained transaction publishes the
   complete document; accepted input/image checkpoints are separate from canonical commit.
   See `docs/document-storage.md` for profiles, readiness, limits, attempts and recovery.
-- Helix remains required at startup for notebook/template projections. There is no live document
+- Notebook native snapshots, active pgvector/GIN artifacts and terminal save jobs commit atomically;
+  accepted snapshots never establish a saved revision. Preserve private owner scoping and 256/32 slots.
+- Helix remains required at startup for template projections. There is no live document or notebook
   Helix query, index initialization or deletion call. Never clear retained stores for verification.
-- Startup initializes an empty selected schema or validates schema 3, checksums, catalog/indexes,
-  vector extension readiness and document complete-set invariants. It never drops data. Unknown
+- Startup initializes an empty selected schema or validates schema 4, checksums, catalog/indexes,
+  vector extension readiness and document/notebook complete-set invariants. It never drops data. Unknown
   nonempty layouts fail intact; there is no populated-schema upgrade, import or fallback. An MVP
   reset follows the dated MVP policy above and uses the guarded reset utility, never an automatic retry.
 - One application writer lease is retained by the pool's dedicated session through router and
@@ -196,7 +198,7 @@ request -> router -> handler -> service -> repository/client
   template Helix projection/search contracts remain unchanged; document retrieval is SQL-owned.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
-- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook indexes. Template vector
+- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook PostgreSQL vector columns. Template vector
   dimensions are configured independently. A configuration change does not resize existing indexes;
   do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
   a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
@@ -400,7 +402,7 @@ Real vector codec tests additionally require pgvector 0.8.6 provisioned once in 
 `quarry_extensions` schema of the selected `_test` database. Use the explicit
 `backend/tools/provision-pgvector.sql` procedure in `docs/postgresql-storage.md`; tests and
 application startup never install or drop the extension. Document storage/search and durable
-jobs now use schema 3.
+jobs now use schema 4.
 
 Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and connects to Helix. Tests never reset the development database.
 
