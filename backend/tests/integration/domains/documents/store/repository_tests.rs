@@ -4,11 +4,7 @@ use std::path::Path;
 use crate::{
     adapters::postgres::client::PostgresClient,
     app::migrations::migrate,
-    domains::documents::{
-        graph::repository::{map_document_version_response, HelixDocumentVersionResponse},
-        ingestion::persistence::build_file_persistence_input,
-        model::Document,
-    },
+    domains::documents::{ingestion::persistence::build_file_persistence_input, model::Document},
     shared::ids::{document_id_from_content, file_version_id, sha256_hex},
 };
 
@@ -89,9 +85,21 @@ async fn persist_file_blob(
             chunks: Vec::new(),
         },
     );
-    super::persist_file_blob(postgres, file_persistence)
-        .await
-        .map_err(|e| format!("{e:?}"))
+    super::persist_file_blob(
+        postgres,
+        file_persistence,
+        super::super::search_repository::PreparedChunks::new(
+            super::super::search_repository::EmbeddingProfile::new(
+                "text-embedding-3-small".into(),
+                1536,
+            ),
+            vec![],
+        )
+        .unwrap(),
+        None,
+    )
+    .await
+    .map_err(|e| format!("{e:?}"))
 }
 
 async fn table_counts(state: &PostgresClient) -> (i64, i64, i64) {
@@ -644,89 +652,6 @@ async fn concurrent_new_versions_receive_sequential_version_numbers() {
     assert_eq!(current_count, 1);
 }
 
-#[test]
-fn maps_an_empty_document_response_to_none() {
-    let response: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": [],
-        "version": []
-    }))
-    .unwrap();
-
-    assert_eq!(
-        map_document_version_response(response, OWNER, None, None, None).unwrap(),
-        None
-    );
-}
-
-#[test]
-fn maps_a_v3_single_element_document_response() {
-    let response: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": [{
-            "deal_id": OWNER,
-            "file_id": "file-1",
-            "display_name": "report.pdf"
-        }],
-        "version": [{
-            "deal_id": OWNER,
-            "file_id": "file-1",
-            "version_id": "version-1",
-            "mime_type": "application/pdf",
-            "content_sha256": "hash",
-            "byte_size": 1,
-            "index_generation": "version-1",
-            "indexed_at": "2026-08-26T00:00:00Z"
-        }]
-    }))
-    .unwrap();
-
-    let document = map_document_version_response(
-        response,
-        OWNER,
-        Some("file-1"),
-        Some("version-1"),
-        Some("hash"),
-    )
-    .unwrap()
-    .expect("the direct v3 arrays contain one document");
-
-    assert_eq!(document.file.display_name, "report.pdf");
-    assert_eq!(document.version.byte_size, 1);
-}
-
-#[test]
-fn rejects_partial_and_mismatched_document_responses() {
-    let partial: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": [{
-            "deal_id": OWNER,
-            "file_id": "file-1",
-            "display_name": "report.pdf"
-        }],
-        "version": []
-    }))
-    .unwrap();
-    assert!(map_document_version_response(partial, OWNER, None, None, None).is_err());
-
-    let mismatch: HelixDocumentVersionResponse = serde_json::from_value(serde_json::json!({
-        "file": [{
-            "deal_id": OWNER,
-            "file_id": "file-1",
-            "display_name": "report.pdf"
-        }],
-        "version": [{
-            "deal_id": OWNER,
-            "file_id": "file-2",
-            "version_id": "version-1",
-            "mime_type": "application/pdf",
-            "content_sha256": "hash",
-            "byte_size": 1,
-            "index_generation": "version-1",
-            "indexed_at": "2026-08-26T00:00:00Z"
-        }]
-    }))
-    .unwrap();
-    assert!(map_document_version_response(mismatch, OWNER, None, None, None).is_err());
-}
-
 #[tokio::test]
 async fn collaborators_keep_attribution_and_upload_activity_on_idempotent_retry() {
     use crate::domains::memberships::{model::DealRole, repository::MembershipRepository};
@@ -820,5 +745,19 @@ async fn accepted_upload_activity_failure_rolls_back_bytes_manifest_and_claim() 
             .unwrap()
             .unwrap();
         assert_eq!(count, 0);
+    }
+}
+
+impl DocumentStore {
+    pub(crate) async fn persist(
+        &self,
+        input: FilePersistenceInput,
+    ) -> Result<PersistedFileIdentity, RepositoryError> {
+        self.persist_complete(
+            input,
+            super::super::search_repository::PreparedChunks::new(self.profile().clone(), vec![])?,
+            None,
+        )
+        .await
     }
 }

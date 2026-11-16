@@ -5,6 +5,7 @@ pub enum SqlValue {
     Real(f64),
     Text(String),
     Blob(Vec<u8>),
+    Vector(super::super::vector::CosineVector),
 }
 
 impl From<bool> for SqlValue {
@@ -89,6 +90,9 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for SqlValue {
             Self::Real(_) => Some(<f64 as Type<sqlx::Postgres>>::type_info()),
             Self::Text(_) => Some(<String as Type<sqlx::Postgres>>::type_info()),
             Self::Blob(_) => Some(<Vec<u8> as Type<sqlx::Postgres>>::type_info()),
+            Self::Vector(_) => Some(<super::super::vector::CosineVector as Type<
+                sqlx::Postgres,
+            >>::type_info()),
         }
     }
     fn encode_by_ref(
@@ -101,7 +105,14 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for SqlValue {
             Self::Real(v) => v.encode_by_ref(buf),
             Self::Text(v) => v.encode_by_ref(buf),
             Self::Blob(v) => v.encode_by_ref(buf),
+            Self::Vector(v) => v.encode_by_ref(buf),
         }
+    }
+}
+
+impl From<super::super::vector::CosineVector> for SqlValue {
+    fn from(value: super::super::vector::CosineVector) -> Self {
+        Self::Vector(value)
     }
 }
 

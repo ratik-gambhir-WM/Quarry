@@ -298,14 +298,14 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
         "document authorization must use the canonical membership transaction policy"
     );
     let store = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/postgres.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/repository.rs"),
     )
     .unwrap();
     assert!(store.contains("transaction_result_async") && store.contains("require_deal"));
 
     let behavior_tests = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/integration/domains/documents/store/postgres_tests.rs"),
+            .join("tests/integration/domains/documents/store/repository_tests.rs"),
     )
     .unwrap();
     assert!(
@@ -393,6 +393,39 @@ fn openai_provider_calls_use_rig_without_a_product_http_client() {
             assert!(
                 !source.contains(forbidden),
                 "{file} bypasses Rig with {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn document_data_access_is_repository_owned_and_has_no_helix_dependency() {
+    for (path, source) in rust_sources("src/domains/documents") {
+        for forbidden in [
+            "helix_db",
+            "adapters::helix",
+            "DocumentGraphReader",
+            "DocumentGraphWriter",
+            "helix.file_",
+            "helix.document_indexes",
+            "helix.deletion",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path}: document Helix dependency {forbidden}"
+            );
+        }
+    }
+    for (path, source) in rust_sources("src/adapters/postgres") {
+        for table in [
+            "document_chunks",
+            "document_jobs",
+            "document_identity_manifests",
+            "quarry_file_versions",
+        ] {
+            assert!(
+                !source.contains(table),
+                "{path}: feature SQL belongs in a document repository"
             );
         }
     }

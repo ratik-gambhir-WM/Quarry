@@ -1,275 +1,4 @@
 use super::*;
-
-#[tokio::test]
-async fn retries_repair_published_versions_before_skipping() {
-    use crate::{
-        adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
-        domains::{
-            documents::{
-                formats::docx::parse_docx_chunks_from_bytes, graph::query::FileChunkKeywordSearch,
-                graph::repository::DocumentGraphSearch, search::service::DocumentSearchService,
-            },
-            identity::access::ResourceAccess,
-            memberships::{repository::MembershipRepository, service::DealAccessService},
-        },
-    };
-    use axum::{http::StatusCode, routing::post, Json, Router};
-    use docx_rust::{document::Paragraph, Docx};
-    use serde_json::{json, Value};
-    use std::{collections::VecDeque, io::Cursor};
-
-    let replies = Arc::new(Mutex::new(VecDeque::from(vec![
-        (
-            StatusCode::OK,
-            json!({"deletion_fence": []})
-        );
-        3
-    ])));
-    let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let queue = replies.clone();
-    let requests = captured.clone();
-    let app = Router::new()
-        .route(
-            "/v2/query",
-            post(move |Json(body): Json<Value>| {
-                let queue = queue.clone();
-                let requests = requests.clone();
-                async move {
-                    requests.lock().await.push(body);
-                    let (status, body) = queue
-                        .lock()
-                        .await
-                        .pop_front()
-                        .expect("unexpected graph request");
-                    (status, Json(body))
-                }
-            }),
-        )
-        .route(
-            "/embeddings",
-            post(|Json(body): Json<Value>| async move {
-                assert_eq!(body["dimensions"], 2);
-                let data = body["input"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| json!({"index": index, "embedding": [0.25, 0.75]}))
-                    .collect::<Vec<_>>();
-                Json(json!({
-                    "data": data,
-                    "usage": {"prompt_tokens": 1, "total_tokens": 1}
-                }))
-            }),
-        );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let application = crate::integration_support::authenticated_test_application()
-        .await
-        .unwrap();
-    let postgres: PostgresClient = application.postgres;
-    let files = DocumentStore::new(postgres.clone());
-    let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
-    let writer = DocumentGraphWriter::new(helix.clone(), std::num::NonZeroUsize::new(2).unwrap());
-    let mut source = Docx::default();
-    source
-        .document
-        .push(Paragraph::default().push_text("Synthetic architecture evidence."));
-    let bytes = source.write(Cursor::new(Vec::new())).unwrap().into_inner();
-    let mut assembly = parse_docx_chunks_from_bytes(bytes.clone(), None, "DEAL-TEST").unwrap();
-    assembly.document.file_name = "evidence.docx".into();
-    for chunk in &mut assembly.chunks {
-        chunk.embedding = Some(vec![0.25, 0.75]);
-    }
-    let accepted = persist_document_and_chunks(
-        &files,
-        &writer,
-        "DEAL-TEST",
-        1,
-        assembly.document.clone(),
-        assembly.chunks.clone(),
-        bytes.clone(),
-    )
-    .await
-    .unwrap();
-    let version = accepted.insert_blob_result.version_id;
-    let manifest = files.manifest(version.clone()).await.unwrap().unwrap();
-    let attribution = files.list_for_deal("DEAL-TEST").await.unwrap();
-    let published = json!({
-        "file": [{"deal_id": "DEAL-TEST", "file_id": assembly.document.file_id, "display_name": "evidence.docx"}],
-        "version": [{"deal_id": "DEAL-TEST", "file_id": assembly.document.file_id,
-            "version_id": version, "content_sha256": assembly.document.content_hash,
-            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "byte_size": bytes.len(), "index_generation": manifest.active_generation, "indexed_at": "now"}]
-    });
-    let search = DocumentSearchService::new(DocumentGraphSearch::new(helix.clone())).with_access(
-        ResourceAccess::new(
-            postgres.clone(),
-            Arc::new(DealAccessService::new(MembershipRepository::new(postgres))),
-        ),
-    );
-    let service = DocumentIngestionService::new(
-        files.clone(),
-        DocumentGraphReader::new(helix),
-        writer,
-        Some(Arc::new(OpenAiClient::with_embeddings_url(
-            format!("http://{address}/embeddings"),
-            crate::integration_support::prompt_catalog(),
-            std::num::NonZeroUsize::new(2).unwrap(),
-        ))),
-        "test".into(),
-        "unused".into(),
-        1,
-    );
-
-    // Search must reject a missing chunk, and the public ingestion workflow must repair it.
-    replies
-        .lock()
-        .await
-        .push_back((StatusCode::OK, json!({"chunks": []})));
-    assert!(search
-        .keyword_owned(
-            FileChunkKeywordSearch {
-                deal_id: "DEAL-TEST".into(),
-                query_text: "architecture".into(),
-                limit: 10,
-            },
-            1
-        )
-        .await
-        .is_err());
-    let mut corrupt = manifest.chunks.clone();
-    corrupt[0].chunk_sha256 = "f".repeat(64);
-    let mut stale_version = published.clone();
-    stale_version["version"][0]["version_id"] = json!("stale-version");
-    let mut stale_generation = published.clone();
-    stale_generation["version"][0]["index_generation"] = json!("stale-generation");
-    for (current, headers) in [
-        (published.clone(), Some(json!({"chunks": []}))),
-        (published.clone(), Some(json!({"chunks": corrupt}))),
-        (json!({"file": [], "version": []}), None),
-        (stale_version, None),
-        (stale_generation, Some(json!({"chunks": manifest.chunks}))),
-    ] {
-        let mut queue = replies.lock().await;
-        queue.push_back((StatusCode::OK, current));
-        if let Some(headers) = headers {
-            queue.push_back((StatusCode::OK, headers));
-        }
-        queue.extend([
-            (StatusCode::OK, json!({"deletion_fence": []})),
-            (StatusCode::OK, json!({"deletion_fence": []})),
-            (StatusCode::OK, json!({"deletion_fence": []})),
-        ]);
-        drop(queue);
-        let result = service
-            .process(
-                "DEAL-TEST",
-                1,
-                vec![UploadedDocument {
-                    filename: "renamed.docx".into(),
-                    bytes: bytes.clone(),
-                }],
-            )
-            .await
-            .unwrap();
-        assert_eq!(result.succeeded, 1);
-        assert_eq!(result.skipped, 0);
-        assert_eq!(
-            files.manifest(version.clone()).await.unwrap().unwrap(),
-            manifest
-        );
-        assert_eq!(files.list_for_deal("DEAL-TEST").await.unwrap(), attribution);
-        let last = captured.lock().await.last().unwrap().to_string();
-        assert!(last.contains("added_current_version"));
-        let requests = captured.lock().await;
-        let chunk_write = requests[requests.len() - 2].to_string();
-        for chunk in &manifest.chunks {
-            assert!(chunk_write.contains(&chunk.chunk_id));
-            assert!(chunk_write.contains(&chunk.chunk_sha256));
-        }
-    }
-    let chunk = &assembly.chunks[0];
-    let identity = &manifest.chunks[0];
-    let indexed_chunk = json!({
-        "deal_id": "DEAL-TEST", "file_id": assembly.document.file_id, "version_id": version,
-        "chunk_id": identity.chunk_id, "index_generation": identity.index_generation,
-        "chunk_index": identity.chunk_index, "chunk_sha256": identity.chunk_sha256,
-        "text": chunk.text, "token_count": chunk.token_count, "page_start": null,
-        "page_end": null, "char_start": chunk.start_offset, "char_end": chunk.end_offset,
-        "section_path": "", "created_at": "now",
-    });
-    replies.lock().await.extend([
-        (StatusCode::OK, json!({"chunks": manifest.chunks})),
-        (StatusCode::OK, json!({"chunks": [indexed_chunk]})),
-    ]);
-    let hits = search
-        .keyword_owned(
-            FileChunkKeywordSearch {
-                deal_id: "DEAL-TEST".into(),
-                query_text: "architecture".into(),
-                limit: 10,
-            },
-            1,
-        )
-        .await
-        .unwrap();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].chunk.chunk_id, identity.chunk_id);
-    assert_eq!(hits[0].chunk.text, chunk.text);
-    // A complete projection still skips, preserving idempotency and avoiding another embedding/write.
-    replies.lock().await.extend([
-        (StatusCode::OK, published.clone()),
-        (StatusCode::OK, json!({"chunks": manifest.chunks})),
-    ]);
-    let result = service
-        .process(
-            "DEAL-TEST",
-            1,
-            vec![UploadedDocument {
-                filename: "evidence.docx".into(),
-                bytes: bytes.clone(),
-            }],
-        )
-        .await
-        .unwrap();
-    assert_eq!(result.skipped, 1);
-    assert_eq!(
-        result.documents[0].document_id.as_ref(),
-        Some(&manifest.document_id)
-    );
-
-    // An unavailable graph is not evidence of missing chunks: fail without rewriting it.
-    replies.lock().await.extend([
-        (StatusCode::OK, published),
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({"error": "unavailable"}),
-        ),
-    ]);
-    let result = service
-        .process(
-            "DEAL-TEST",
-            1,
-            vec![UploadedDocument {
-                filename: "evidence.docx".into(),
-                bytes,
-            }],
-        )
-        .await
-        .unwrap();
-    assert_eq!(result.failed, 1);
-    assert_eq!(result.skipped, 0);
-    assert!(replies.lock().await.is_empty());
-    server.abort();
-    let _ = server.await;
-    assert!(tokio::net::TcpStream::connect(address).await.is_err());
-}
-
 fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     DocumentChunk {
         chunk_id: "chunk-id".to_string(),
@@ -289,7 +18,7 @@ fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
 
 #[tokio::test]
 async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batches() {
-    use crate::adapters::{helix::client::HelixClient, postgres::client::PostgresClient};
+    use crate::adapters::postgres::client::PostgresClient;
     use axum::{routing::post, Json, Router};
     use serde_json::{json, Value};
     use std::num::NonZeroUsize;
@@ -333,11 +62,16 @@ async fn embedding_attaches_reordered_vectors_to_the_correct_chunks_across_batch
             crate::integration_support::prompt_catalog(),
             dimensions,
         );
-        let helix = Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap());
         let service = DocumentIngestionService::new(
-            DocumentStore::new(PostgresClient::test_database().await.unwrap()),
-            DocumentGraphReader::new(helix.clone()),
-            DocumentGraphWriter::new(helix, dimensions),
+            DocumentStore::new(PostgresClient::test_database().await.unwrap())
+                .with_profile("test".into(), 2),
+            super::super::repository::DocumentJobRepository {
+                db: PostgresClient::test_database().await.unwrap(),
+                profile: crate::domains::documents::store::search_repository::EmbeddingProfile::new(
+                    "test".into(),
+                    2,
+                ),
+            },
             None,
             "test".into(),
             "unused".into(),
@@ -485,213 +219,6 @@ fn upload_content_hash_is_stable_until_document_bytes_change() {
     assert_ne!(original_hash, uploaded_document_content_hash(&changed));
 }
 
-#[test]
-fn shared_upload_errors_disclose_only_recovery_state() {
-    let failed = failed_document(
-        "synthetic.pdf".into(),
-        IngestionError::BeforeCommit(
-            "provider failure containing secret details and after PostgreSQL committed".into(),
-        ),
-    );
-    assert!(!failed.sqlite_committed);
-    assert!(!failed.error.unwrap().contains("secret"));
-    let committed = failed_document(
-        "synthetic.pdf".into(),
-        IngestionError::AfterCommit("private integrity failure without a magic phrase".into()),
-    );
-    assert!(committed.sqlite_committed);
-    let error = committed.error.unwrap();
-    assert!(error.contains("stored"));
-    assert!(error.contains("retry the same file"));
-    assert!(!error.contains("secret"));
-}
-
-#[tokio::test]
-async fn image_recovery_reuses_accepted_text_after_graph_failure_and_sqlite_reopen() {
-    use crate::{
-        adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
-        app::migrations::migrate,
-    };
-    use axum::{routing::post, Json, Router};
-    use serde_json::{json, Value};
-    use std::io::Cursor;
-
-    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let captured = Arc::clone(&requests);
-    let app = Router::new().route(
-        "/v2/query",
-        post(move |Json(body): Json<Value>| {
-            let captured = Arc::clone(&captured);
-            async move {
-                let mut requests = captured.lock().await;
-                requests.push(body);
-                if requests.len() == 1 {
-                    (
-                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                        Json(json!({"error":"unavailable"})),
-                    )
-                } else {
-                    (
-                        axum::http::StatusCode::OK,
-                        Json(json!({"deletion_fence": []})),
-                    )
-                }
-            }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    let writer = DocumentGraphWriter::new(
-        Arc::new(HelixClient::with_config(&format!("http://{address}"), None).unwrap()),
-        std::num::NonZeroUsize::new(2).unwrap(),
-    );
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("image-recovery.sqlite");
-    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
-    migrate(&postgres).await.unwrap();
-    crate::integration_support::seed_identity(&postgres, "image-test@example.com", 'i').await;
-    postgres.with_connection(async |c| {
-        c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,status,created_at,updated_at,engagement_type,transaction_type) VALUES('DEAL-IMAGE',1,'Image recovery','prepare','now','now','buy_side','unknown');
-        INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-IMAGE',1,'owner','now','now');
-        INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-IMAGE');").await
-     }).await.unwrap();
-    let mut bytes = Cursor::new(Vec::new());
-    image::DynamicImage::new_rgb8(1, 1)
-        .write_to(&mut bytes, image::ImageOutputFormat::Png)
-        .unwrap();
-    let bytes = bytes.into_inner();
-    let accepted_text = "A factory floor with three assembly lines.";
-    let mut accepted = build_image_assembly(
-        bytes.clone(),
-        None,
-        "evidence.png".into(),
-        "DEAL-IMAGE",
-        accepted_text,
-    )
-    .unwrap();
-    for chunk in &mut accepted.chunks {
-        chunk.embedding = Some(vec![0.25, 0.5]);
-    }
-    let version = crate::shared::ids::file_version_id(
-        &accepted.document.file_id,
-        &accepted.document.content_hash,
-    );
-    let files = DocumentStore::new(postgres.clone());
-    let failure = persist_document_and_chunks(
-        &files,
-        &writer,
-        "DEAL-IMAGE",
-        1,
-        accepted.document.clone(),
-        accepted.chunks.clone(),
-        bytes.clone(),
-    )
-    .await
-    .unwrap_err();
-    assert!(failure
-        .to_string()
-        .contains("Helix indexing failed after PostgreSQL committed"));
-    assert!(failure.sqlite_committed());
-    let manifest = files.manifest(version.clone()).await.unwrap().unwrap();
-    drop(files);
-    drop(postgres);
-
-    let postgres = PostgresClient::test_database_at(&path).await.unwrap();
-    migrate(&postgres).await.unwrap();
-    let files = DocumentStore::new(postgres);
-    let recovery = files.image_assembly(&version).await.unwrap().unwrap();
-    assert!(recovery.chunks.iter().all(|c| c.embedding.is_none()));
-    let mut alternative = build_image_assembly(
-        bytes.clone(),
-        None,
-        "evidence.png".into(),
-        "DEAL-IMAGE",
-        "Three assembly lines are visible inside a factory.",
-    )
-    .unwrap();
-    assert_ne!(
-        accepted.chunks[0].content_hash,
-        alternative.chunks[0].content_hash
-    );
-    alternative
-        .document
-        .file_id
-        .clone_from(&accepted.document.file_id);
-    for chunk in &mut alternative.chunks {
-        chunk.embedding = Some(vec![0.25, 0.5]);
-    }
-    let changed = persist_document_and_chunks(
-        &files,
-        &writer,
-        "DEAL-IMAGE",
-        1,
-        alternative.document,
-        alternative.chunks,
-        bytes.clone(),
-    )
-    .await
-    .unwrap_err();
-    assert!(changed
-        .to_string()
-        .contains("parser chunk differs from immutable identity manifest"));
-    let client = OpenAiClient::new(
-        "unused-test-key",
-        crate::integration_support::prompt_catalog(),
-    );
-    // An empty model would fail before any vision request if recovery tried describing again.
-    let mut retry = parse_document(
-        UploadedDocument {
-            filename: "renamed.png".into(),
-            bytes,
-        },
-        "DEAL-IMAGE".into(),
-        &client,
-        "",
-        Arc::new(Semaphore::new(2)),
-        Some(recovery),
-    )
-    .await
-    .unwrap();
-    assert_eq!(retry.chunks[0].text, accepted_text);
-    for chunk in &mut retry.chunks {
-        chunk.embedding = Some(vec![0.75, 0.5]);
-    }
-    persist_document_and_chunks(
-        &files,
-        &writer,
-        "DEAL-IMAGE",
-        1,
-        retry.document,
-        retry.chunks,
-        retry.file_bytes,
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        files.manifest(version.clone()).await.unwrap().unwrap(),
-        manifest
-    );
-    assert_eq!(
-        files
-            .image_assembly(&version)
-            .await
-            .unwrap()
-            .unwrap()
-            .chunks[0]
-            .text,
-        accepted_text
-    );
-    let requests = requests.lock().await;
-    assert_eq!(requests.len(), 4);
-    assert!(requests[2].to_string().contains(accepted_text));
-    server.abort();
-    let _ = server.await;
-    assert!(tokio::net::TcpStream::connect(address).await.is_err());
-}
-
 #[tokio::test]
 async fn parsing_keeps_docx_available_when_office_parsing_is_shut_down() {
     use docx_rust::{document::Paragraph, Docx};
@@ -761,4 +288,104 @@ async fn failed_office_parsing_releases_its_concurrency_permit() {
     .await;
     assert!(result.is_err());
     assert_eq!(semaphore.available_permits(), 1);
+}
+
+#[tokio::test]
+async fn sql_image_retry_reuses_checkpointed_vision_text_and_never_calls_helix() {
+    use axum::{routing::post, Json, Router};
+    use serde_json::{json, Value};
+    use std::{
+        io::Cursor,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    let visions = Arc::new(AtomicUsize::new(0));
+    let embeddings = Arc::new(AtomicUsize::new(0));
+    let v = visions.clone();
+    let e = embeddings.clone();
+    let app=Router::new().route("/responses",post(move||{let v=v.clone();async move{v.fetch_add(1,Ordering::SeqCst);Json(json!({"object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A factory floor with three assembly lines."}]}]}))}}))
+  .route("/embeddings",post(move|Json(body):Json<Value>|{let e=e.clone();async move{
+    let first=e.fetch_add(1,Ordering::SeqCst)==0;
+    let vectors=body["input"].as_array().unwrap().iter().enumerate().map(|(index,_)|json!({"index":index,"embedding":if first{vec![0.0;1536]}else{vec![0.5;1536]}})).collect::<Vec<_>>();
+    Json(json!({"data":vectors,"usage":{"prompt_tokens":1,"total_tokens":1}}))
+  }}));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let db = crate::domains::documents::test_support::database().await;
+    let files = DocumentStore::new(db.clone());
+    let queue = super::super::repository::DocumentJobRepository {
+        db: db.clone(),
+        profile: files.profile().clone(),
+    };
+    let provider = Arc::new(OpenAiClient::with_embeddings_url(
+        format!("http://{address}/embeddings"),
+        crate::integration_support::prompt_catalog(),
+        std::num::NonZeroUsize::new(1536).unwrap(),
+    ));
+    let service = DocumentIngestionService::new(
+        files,
+        queue,
+        Some(provider),
+        "text-embedding-3-small".into(),
+        "test-vision".into(),
+        1,
+    );
+    let mut image = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(1, 1)
+        .write_to(&mut image, image::ImageOutputFormat::Png)
+        .unwrap();
+    let bytes = image.into_inner();
+    let first = service
+        .process(
+            "DEAL-SQL",
+            1,
+            vec![UploadedDocument {
+                filename: "evidence.png".into(),
+                bytes: bytes.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+    let second = service
+        .process(
+            "DEAL-SQL",
+            1,
+            vec![UploadedDocument {
+                filename: "evidence.png".into(),
+                bytes: bytes.clone(),
+            }],
+        )
+        .await
+        .unwrap();
+    let replay = service
+        .process(
+            "DEAL-SQL",
+            1,
+            vec![UploadedDocument {
+                filename: "evidence.png".into(),
+                bytes,
+            }],
+        )
+        .await
+        .unwrap();
+    stop.send(()).unwrap();
+    server.await.unwrap();
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    assert!(!first.documents[0].sqlite_committed);
+    assert!(!first.documents[0].success);
+    assert!(second.documents[0].sqlite_committed);
+    assert!(second.documents[0].success);
+    assert!(replay.documents[0].success);
+    assert_eq!(visions.load(Ordering::SeqCst), 1);
+    assert_eq!(embeddings.load(Ordering::SeqCst), 2);
+    let records:(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM quarry_files),(SELECT count(*) FROM deal_activity_events WHERE kind='document_uploaded')").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(records, (1, 1));
 }

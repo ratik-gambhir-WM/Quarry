@@ -1,215 +1,121 @@
-use super::error::IngestionError;
-
-use crate::domains::documents::{
-    graph::{
-        model::{FileChunkNode, FileNode, FileVersionNode},
-        repository::{DocumentGraphWriter, PreparedDocumentGraph},
+use super::repository::Attempt;
+use crate::{
+    domains::documents::{
+        model::{Document, DocumentChunk},
+        store::{
+            chunk::FileChunkResult,
+            identity::{ChunkIdentity, IdentityManifest},
+            model::{FilePersistenceInput, PersistedFileIdentity},
+            repository::DocumentStore,
+            search_repository::{EmbeddingProfile, PreparedChunks},
+        },
     },
-    model::{Document, DocumentChunk},
-    store::{
-        model::{FilePersistenceInput, PersistedFileIdentity},
-        postgres::DocumentStore,
+    shared::{
+        error::RepositoryError,
+        file_policy::{infer_supported_image_mime_type, infer_supported_mime_type},
+        ids::{document_id_from_content, file_version_id, sha256_hex},
     },
 };
-use crate::shared::file_policy::{infer_supported_image_mime_type, infer_supported_mime_type};
-use crate::shared::ids::{document_id_from_content, file_version_id, sha256_hex};
 use chrono::{SecondsFormat, Utc};
-use serde_json::{json, Value};
-use std::collections::HashSet;
-use std::path::Path;
-
-#[derive(Debug)]
-pub struct DocumentPersistenceResult {
-    pub insert_blob_result: PersistedFileIdentity,
-    pub insert_document_chunk_result: Value,
-}
-
-/// Immutable PostgreSQL input and graph request prepared before canonical
-/// persistence. The graph request is built once, with one timestamp, and has
-/// already passed the writer's exact serialized-size preflight.
-struct PreparedDocumentPersistence {
-    expected_identity: PersistedFileIdentity,
-    file_persistence: FilePersistenceInput,
-    graph: PreparedDocumentGraph,
-}
+use serde_json::json;
+use std::{collections::HashSet, path::Path};
 
 pub(crate) async fn persist_document_and_chunks(
     files: &DocumentStore,
-    graph_writer: &DocumentGraphWriter,
     deal_id: &str,
     actor_id: i64,
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
-) -> Result<DocumentPersistenceResult, IngestionError> {
-    let mut prepared = prepare_document_persistence(
-        graph_writer,
-        deal_id,
-        actor_id,
-        &document,
-        &chunks,
-        file_bytes,
-    )?;
-    if let Some(manifest) = files
-        .manifest(prepared.expected_identity.version_id.clone())
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        // Legacy versions keep exact IDs. A changed parser must never invent replacements.
-        let mut nodes = prepared.graph.chunk_nodes.clone();
-        let active = manifest
-            .chunks
-            .iter()
-            .filter(|c| c.index_generation == manifest.active_generation)
-            .collect::<Vec<_>>();
-        if nodes.len() != active.len() {
-            return Err("parser output differs from immutable identity manifest; maintenance recovery required".into());
-        }
-        for node in &mut nodes {
-            let identity = active
-                .iter()
-                .find(|c| c.chunk_index == node.chunk_index && c.chunk_sha256 == node.chunk_sha256)
-                .ok_or("parser chunk differs from immutable identity manifest")?;
-            node.chunk_id.clone_from(&identity.chunk_id);
-            node.index_generation.clone_from(&identity.index_generation);
-        }
-        let mut version = prepared.graph.version_node.clone();
-        version
-            .index_generation
-            .clone_from(&manifest.active_generation);
-        prepared.graph = graph_writer
-            .preflight_graph(prepared.graph.file_node.clone(), version, nodes)
-            .map_err(|e| e.to_string())?;
-        let mut metadata: Value = serde_json::from_str(&prepared.file_persistence.metadata_json)
-            .map_err(|e| e.to_string())?;
-        metadata["documentId"] = Value::String(manifest.document_id.clone());
-        prepared.file_persistence.metadata_json =
-            serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
-        prepared.file_persistence.manifest = Some(manifest);
-    }
-    persist_prepared_document_and_chunks(files, graph_writer, prepared).await
+    attempt: Option<Attempt>,
+) -> Result<PersistedFileIdentity, RepositoryError> {
+    let profile = files.profile().clone();
+    let deal = deal_id.to_owned();
+    let (input, batch) = tokio::task::spawn_blocking(move || {
+        prepare_document(&deal, actor_id, document, chunks, file_bytes, profile)
+    })
+    .await
+    .map_err(|_| RepositoryError::BlockingWorker("document preparation interrupted".into()))?
+    .map_err(RepositoryError::invalid)?;
+    files.persist_complete(input, batch, attempt).await
 }
-
-fn prepare_document_persistence(
-    graph_writer: &DocumentGraphWriter,
+fn prepare_document(
     deal_id: &str,
     actor_id: i64,
-    document: &Document,
-    chunks: &[DocumentChunk],
+    document: Document,
+    chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
-) -> Result<PreparedDocumentPersistence, String> {
-    ensure_document_graph_invariants(document, chunks)?;
-    let mut file_persistence =
-        build_file_persistence_input(deal_id, actor_id, document, file_bytes)?;
+    profile: EmbeddingProfile,
+) -> Result<(FilePersistenceInput, PreparedChunks), String> {
+    ensure_document_invariants(&document, &chunks)?;
+    let mut input = build_file_persistence_input(deal_id, actor_id, &document, file_bytes)?;
+    let mut rows = Vec::with_capacity(chunks.len());
+    for chunk in &chunks {
+        let chunk_index = i64::from(chunk.sequence_number);
+        let (page_start, page_end) = page_range(chunk)?;
+        rows.push((
+            FileChunkResult {
+                chunk_id: sha256_hex(
+                    format!(
+                        "{}\0{}\0{}\0{}\0{chunk_index}\0{}",
+                        deal_id,
+                        document.file_id,
+                        input.version_id,
+                        input.version_id,
+                        chunk.content_hash
+                    )
+                    .as_bytes(),
+                ),
+                deal_id: deal_id.into(),
+                file_id: document.file_id.clone(),
+                version_id: input.version_id.clone(),
+                index_generation: input.version_id.clone(),
+                chunk_index,
+                text: chunk.text.clone(),
+                chunk_sha256: chunk.content_hash.clone(),
+                token_count: i64::from(chunk.token_count),
+                page_start,
+                page_end,
+                char_start: usize_to_i64(chunk.start_offset, "char_start")?,
+                char_end: usize_to_i64(chunk.end_offset, "char_end")?,
+                section_path: chunk.section_title.clone().unwrap_or_default(),
+                created_at: input.timestamp.clone(),
+            },
+            chunk.embedding.clone().ok_or("missing chunk embedding")?,
+        ));
+    }
+    rows.sort_by_key(|(c, _)| c.chunk_index);
+    input.manifest = Some(IdentityManifest {
+        derivation_version: 2,
+        document_id: document.document_id.clone(),
+        active_generation: input.version_id.clone(),
+        chunks: rows
+            .iter()
+            .map(|(c, _)| ChunkIdentity {
+                chunk_id: c.chunk_id.clone(),
+                index_generation: c.index_generation.clone(),
+                chunk_index: c.chunk_index,
+                chunk_sha256: c.chunk_sha256.clone(),
+            })
+            .collect(),
+    });
     if infer_supported_image_mime_type(Path::new(&document.file_name)).is_some() {
-        let mut chunks = chunks.to_vec();
-        for chunk in &mut chunks {
+        let mut accepted = chunks;
+        for chunk in &mut accepted {
             chunk.embedding = None;
         }
-        file_persistence.image_assembly_json = Some(
+        input.image_assembly_json = Some(
             serde_json::to_string(&crate::domains::documents::formats::image::ImageAssembly {
-                document: document.clone(),
-                chunks,
+                document,
+                chunks: accepted,
             })
             .map_err(|e| e.to_string())?,
         );
     }
-    let expected_identity = PersistedFileIdentity {
-        file_id: file_persistence.file_id.clone(),
-        deal_id: file_persistence.deal_id.clone(),
-        display_name: file_persistence.display_name.clone(),
-        version_id: file_persistence.version_id.clone(),
-    };
-    let (file_node, version_node, chunk_nodes) = build_helix_graph_nodes_at(
-        &expected_identity,
-        document,
-        chunks,
-        &file_persistence.timestamp,
-    )?;
-    file_persistence.manifest = Some(
-        crate::domains::documents::store::identity::IdentityManifest {
-            derivation_version: 2,
-            document_id: document.document_id.clone(),
-            active_generation: version_node.index_generation.clone(),
-            chunks: chunk_nodes
-                .iter()
-                .map(
-                    |c| crate::domains::documents::store::identity::ChunkIdentity {
-                        chunk_id: c.chunk_id.clone(),
-                        index_generation: c.index_generation.clone(),
-                        chunk_index: c.chunk_index,
-                        chunk_sha256: c.chunk_sha256.clone(),
-                    },
-                )
-                .collect(),
-        },
-    );
-    let graph = graph_writer
-        .preflight_graph(file_node, version_node, chunk_nodes)
-        .map_err(|error| error.to_string())?;
-    Ok(PreparedDocumentPersistence {
-        expected_identity,
-        file_persistence,
-        graph,
-    })
+    let batch = PreparedChunks::new(profile, rows).map_err(|e| e.to_string())?;
+    Ok((input, batch))
 }
 
-async fn persist_prepared_document_and_chunks(
-    files: &DocumentStore,
-    graph_writer: &DocumentGraphWriter,
-    prepared: PreparedDocumentPersistence,
-) -> Result<DocumentPersistenceResult, IngestionError> {
-    let insert_blob_result = files
-        .persist(prepared.file_persistence)
-        .await
-        .map_err(|error| error.to_string())?;
-    verify_committed_identity(
-        &prepared.expected_identity,
-        &prepared.graph,
-        &insert_blob_result,
-    )?;
-    let insert_document_chunk_result = graph_writer
-        .insert_prepared_graph(prepared.graph)
-        .await
-        .map_err(|error| error.to_string())
-    .map_err(|error| {
-        IngestionError::AfterCommit(format!(
-            "Helix indexing failed after PostgreSQL committed file_id `{}` and version_id `{}`: {error}",
-            insert_blob_result.file_id, insert_blob_result.version_id
-        ))
-    })?;
-
-    Ok(DocumentPersistenceResult {
-        insert_blob_result,
-        insert_document_chunk_result,
-    })
-}
-
-// These guards need the actual result of the canonical transaction, so they remain after commit.
-fn verify_committed_identity(
-    expected: &PersistedFileIdentity,
-    graph: &PreparedDocumentGraph,
-    committed: &PersistedFileIdentity,
-) -> Result<(), IngestionError> {
-    if committed != expected {
-        return Err(IngestionError::AfterCommit(
-            "committed PostgreSQL identity does not match the prepared ingestion plan".into(),
-        ));
-    }
-    if !graph.matches_identity(
-        &committed.deal_id,
-        &committed.file_id,
-        &committed.display_name,
-        &committed.version_id,
-    ) {
-        return Err(IngestionError::AfterCommit(
-            "prepared Helix graph identity does not match the committed PostgreSQL identity".into(),
-        ));
-    }
-    Ok(())
-}
-
-// These are persistence invariants over parser-derived data, not HTTP request validation.
 pub(crate) fn build_file_persistence_input(
     deal_id: &str,
     actor_id: i64,
@@ -299,131 +205,10 @@ pub(crate) fn build_file_persistence_input(
     })
 }
 
-fn build_helix_graph_nodes_at(
-    insert_blob_result: &PersistedFileIdentity,
-    document: &Document,
-    chunks: &[DocumentChunk],
-    indexed_at: &str,
-) -> Result<(FileNode, FileVersionNode, Vec<FileChunkNode>), String> {
-    ensure_document_graph_invariants(document, chunks)?;
-    if insert_blob_result.deal_id != document.deal_id
-        || insert_blob_result.file_id != document.file_id
-        || insert_blob_result.display_name != document.file_name
-    {
-        return Err(
-            "committed PostgreSQL file identity does not match the ingestion document".to_string(),
-        );
-    }
-    let expected_version_id = file_version_id(&document.file_id, &document.content_hash);
-    if insert_blob_result.version_id != expected_version_id {
-        return Err(
-            "committed PostgreSQL version identity does not match the ingestion document"
-                .to_string(),
-        );
-    }
-
-    let file_node = build_file_node(insert_blob_result);
-    let version_node = build_file_version_node_at(insert_blob_result, document, indexed_at)?;
-    let chunk_nodes = chunks
-        .iter()
-        .map(|chunk| build_file_chunk_node(insert_blob_result, &version_node, chunk))
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok((file_node, version_node, chunk_nodes))
-}
-
-fn build_file_node(insert_blob_result: &PersistedFileIdentity) -> FileNode {
-    FileNode {
-        deal_id: insert_blob_result.deal_id.clone(),
-        file_id: insert_blob_result.file_id.clone(),
-        display_name: insert_blob_result.display_name.clone(),
-    }
-}
-
-fn build_file_version_node_at(
-    insert_blob_result: &PersistedFileIdentity,
-    document: &Document,
-    indexed_at: &str,
-) -> Result<FileVersionNode, String> {
-    let mime_type = document_mime_type(Path::new(&document.file_name))
-        .ok_or_else(|| format!("unsupported file type for `{}`", document.file_name))?
-        .to_string();
-    let byte_size = i64::try_from(document.file_size_bytes)
-        .map_err(|_| "document byte size does not fit in i64".to_string())?;
-
-    Ok(FileVersionNode {
-        deal_id: insert_blob_result.deal_id.clone(),
-        file_id: insert_blob_result.file_id.clone(),
-        version_id: insert_blob_result.version_id.clone(),
-        mime_type,
-        content_sha256: document.content_hash.clone(),
-        byte_size,
-        index_generation: insert_blob_result.version_id.clone(),
-        indexed_at: indexed_at.to_string(),
-    })
-}
-
 fn document_mime_type(path: &Path) -> Option<&'static str> {
     infer_supported_mime_type(path).or_else(|| infer_supported_image_mime_type(path))
 }
-
-fn build_file_chunk_node(
-    insert_blob_result: &PersistedFileIdentity,
-    version_node: &FileVersionNode,
-    chunk: &DocumentChunk,
-) -> Result<FileChunkNode, String> {
-    let chunk_index = i64::from(chunk.sequence_number);
-    let (page_start, page_end) = page_range(chunk)?;
-
-    Ok(FileChunkNode {
-        chunk_id: deterministic_file_chunk_id(
-            &insert_blob_result.deal_id,
-            &insert_blob_result.file_id,
-            &insert_blob_result.version_id,
-            &version_node.index_generation,
-            chunk_index,
-            &chunk.content_hash,
-        ),
-        deal_id: insert_blob_result.deal_id.clone(),
-        file_id: insert_blob_result.file_id.clone(),
-        version_id: insert_blob_result.version_id.clone(),
-        index_generation: version_node.index_generation.clone(),
-        chunk_index,
-        text: chunk.text.clone(),
-        embedding: chunk
-            .embedding
-            .clone()
-            .ok_or_else(|| format!("chunk `{}` does not contain an embedding", chunk.chunk_id))?,
-        chunk_sha256: chunk.content_hash.clone(),
-        token_count: i64::from(chunk.token_count),
-        page_start,
-        page_end,
-        char_start: usize_to_i64(chunk.start_offset, "char_start")?,
-        char_end: usize_to_i64(chunk.end_offset, "char_end")?,
-        section_path: chunk.section_title.clone().unwrap_or_default(),
-        created_at: version_node.indexed_at.clone(),
-    })
-}
-
-fn deterministic_file_chunk_id(
-    deal_id: &str,
-    file_id: &str,
-    version_id: &str,
-    index_generation: &str,
-    chunk_index: i64,
-    chunk_sha256: &str,
-) -> String {
-    sha256_hex(
-        format!(
-            "{deal_id}\0{file_id}\0{version_id}\0{index_generation}\0{chunk_index}\0{chunk_sha256}"
-        )
-        .as_bytes(),
-    )
-}
-
-fn ensure_document_graph_invariants(
-    document: &Document,
-    chunks: &[DocumentChunk],
-) -> Result<(), String> {
+fn ensure_document_invariants(document: &Document, chunks: &[DocumentChunk]) -> Result<(), String> {
     let mut chunk_indices = HashSet::with_capacity(chunks.len());
     let mut embedding_dimension = None;
     for chunk in chunks {

@@ -103,19 +103,13 @@ async fn hybrid_http_validates_text_limits_path_and_unknown_fields_before_retrie
 
 #[tokio::test]
 async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_reads() {
-    use crate::{
-        adapters::helix::client::HelixClient,
-        domains::{
-            documents::{
-                graph::repository::DocumentGraphSearch,
-                search::{
-                    embedding::{EmbeddingProvider, QueryEmbeddingCache},
-                    service::DocumentSearchService,
-                },
-            },
-            identity::access::ResourceAccess,
-            memberships::{repository::MembershipRepository, service::DealAccessService},
+    use crate::domains::{
+        documents::search::{
+            embedding::{EmbeddingProvider, QueryEmbeddingCache},
+            service::DocumentSearchService,
         },
+        identity::access::ResourceAccess,
+        memberships::{repository::MembershipRepository, service::DealAccessService},
     };
     use axum::{
         body::{to_bytes, Body},
@@ -133,7 +127,7 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
         ) -> BoxFuture<'a, crate::shared::error::ServiceResult<Vec<f32>>> {
             Box::pin(async move {
                 self.0.lock().unwrap().push(q.into());
-                Ok(vec![1.0, 0.0])
+                Ok(vec![0.5; 1536])
             })
         }
     }
@@ -143,16 +137,16 @@ async fn hybrid_http_trims_once_and_missing_provider_is_explicit_without_graph_r
     let access = ResourceAccess::new(
         application.postgres.clone(),
         Arc::new(DealAccessService::new(MembershipRepository::new(
-            application.postgres,
+            application.postgres.clone(),
         ))),
     );
     let provider = Arc::new(Provider(Mutex::new(Vec::new())));
     let cache = Arc::new(
         QueryEmbeddingCache::new(provider.clone(), 4, std::time::Duration::from_secs(1)).unwrap(),
     );
-    let service = DocumentSearchService::new(DocumentGraphSearch::new(Arc::new(
-        HelixClient::with_config("http://127.0.0.1:1", None).unwrap(),
-    )))
+    let service = DocumentSearchService::new(crate::domains::documents::test_support::search(
+        application.postgres,
+    ))
     .with_access(access)
     .with_hybrid(
         crate::app::config::SearchConfig {

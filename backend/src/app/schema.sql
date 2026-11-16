@@ -251,7 +251,7 @@ CREATE TABLE document_identity_manifests (
     document_id TEXT COLLATE "C" NOT NULL,
     active_generation TEXT COLLATE "C" NOT NULL CHECK(length(active_generation) > 0),
     chunk_count BIGINT NOT NULL CHECK(chunk_count >= 0),
-    graph_migrated BIGINT NOT NULL DEFAULT 0 CHECK(graph_migrated IN (0,1))
+    search_ready BIGINT NOT NULL DEFAULT 0 CHECK(search_ready IN (0,1))
 );
 
 CREATE TABLE document_chunk_identities (
@@ -520,3 +520,93 @@ CREATE TRIGGER reserve_deal_identity BEFORE INSERT ON deals
     FOR EACH ROW EXECUTE FUNCTION reserve_deal_identity();
 CREATE TRIGGER retire_deal_identity AFTER DELETE ON deals
     FOR EACH ROW EXECUTE FUNCTION retire_deal_identity();
+
+
+-- Document search is one canonical PostgreSQL aggregate, independent of Helix.
+CREATE TABLE document_embedding_profiles (
+    profile_id TEXT COLLATE "C" PRIMARY KEY,
+    provider TEXT COLLATE "C" NOT NULL CHECK(provider='openai'),
+    model TEXT COLLATE "C" NOT NULL CHECK(length(model) BETWEEN 1 AND 200),
+    dimensions BIGINT NOT NULL CHECK(dimensions BETWEEN 1 AND 16000),
+    metric TEXT COLLATE "C" NOT NULL CHECK(metric='cosine'),
+    preparation_version BIGINT NOT NULL CHECK(preparation_version=1)
+);
+CREATE TABLE document_chunks (
+    chunk_id TEXT COLLATE "C" PRIMARY KEY REFERENCES document_chunk_identities(chunk_id) ON DELETE CASCADE,
+    profile_id TEXT COLLATE "C" NOT NULL REFERENCES document_embedding_profiles(profile_id),
+    text TEXT COLLATE "C" NOT NULL CHECK(octet_length(text) BETWEEN 1 AND 131072),
+    technical_text TEXT COLLATE "C" NOT NULL CHECK(octet_length(technical_text)<=131072),
+    embedding quarry_extensions.vector(1536) NOT NULL CHECK(quarry_extensions.vector_norm(embedding)>0)
+        CHECK((embedding OPERATOR(quarry_extensions.<=>) embedding) BETWEEN 0 AND 0.00001),
+    token_count BIGINT NOT NULL CHECK(token_count>=0),
+    page_start BIGINT, page_end BIGINT,
+    char_start BIGINT NOT NULL CHECK(char_start>=0),
+    char_end BIGINT NOT NULL CHECK(char_end>=char_start),
+    section_path TEXT COLLATE "C" NOT NULL CHECK(octet_length(section_path)<=8192),
+    created_at TEXT COLLATE "C" NOT NULL,
+    search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('pg_catalog.english'::regconfig,text),'A') ||
+        setweight(to_tsvector('pg_catalog.simple'::regconfig,technical_text),'B')
+    ) STORED,
+    CHECK ((page_start IS NULL AND page_end IS NULL) OR
+           (page_start IS NOT NULL AND page_end IS NOT NULL AND page_start>0 AND page_end>=page_start))
+);
+CREATE INDEX idx_document_chunks_lexical ON document_chunks USING gin(search_vector);
+CREATE INDEX idx_document_chunks_profile ON document_chunks(profile_id,chunk_id);
+CREATE TABLE document_jobs (
+    job_id TEXT COLLATE "C" PRIMARY KEY,
+    deal_id TEXT COLLATE "C" NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    actor_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    input_hash TEXT COLLATE "C" NOT NULL CHECK(length(input_hash)=64),
+    filename TEXT COLLATE "C" NOT NULL,
+    input_bytes BYTEA CHECK(octet_length(input_bytes) BETWEEN 1 AND 52428800),
+    file_id TEXT COLLATE "C" NOT NULL,
+    profile_id TEXT COLLATE "C" NOT NULL,
+    status TEXT COLLATE "C" NOT NULL CHECK(status IN ('queued','processing','completed','skipped','failed')),
+    background BIGINT NOT NULL DEFAULT 1 CHECK(background IN (0,1)),
+    stage TEXT COLLATE "C" NOT NULL DEFAULT 'accepted',
+    sequence BIGINT NOT NULL DEFAULT 1 CHECK(sequence BETWEEN 1 AND 9007199254740991),
+    attempt_token TEXT COLLATE "C",
+    lease_until BIGINT,
+    image_assembly_json TEXT COLLATE "C" CHECK(image_assembly_json IS NULL OR image_assembly_json IS JSON),
+    result_json TEXT COLLATE "C" CHECK(result_json IS NULL OR result_json IS JSON),
+    created_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,
+    updated_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,
+    UNIQUE(deal_id,actor_id,input_hash),
+    CHECK((status='processing') = (attempt_token IS NOT NULL AND lease_until IS NOT NULL))
+);
+CREATE INDEX idx_document_jobs_recovery ON document_jobs(status,lease_until,created_at);
+CREATE INDEX idx_document_jobs_actor ON document_jobs(actor_id,status);
+CREATE TABLE document_input_identities (
+    deal_id TEXT COLLATE "C" NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
+    input_hash TEXT COLLATE "C" NOT NULL CHECK(length(input_hash)=64),
+    file_id TEXT COLLATE "C" NOT NULL UNIQUE,
+    PRIMARY KEY(deal_id,input_hash)
+);
+
+-- Search readiness is published only with an exact, contiguous immutable set.
+CREATE VIEW document_search_integrity AS
+SELECT v.version_id
+FROM quarry_file_versions v
+LEFT JOIN document_identity_manifests m ON m.version_id=v.version_id
+LEFT JOIN document_chunk_identities i ON i.version_id=v.version_id
+LEFT JOIN document_chunks c ON c.chunk_id=i.chunk_id
+LEFT JOIN document_embedding_profiles p ON p.profile_id=c.profile_id
+GROUP BY v.version_id,m.version_id,m.search_ready,m.chunk_count,m.active_generation
+HAVING m.version_id IS NULL OR m.search_ready<>1
+    OR count(i.chunk_id)<>m.chunk_count OR count(c.chunk_id)<>m.chunk_count
+    OR (m.chunk_count>0 AND (min(i.chunk_index)<>1 OR max(i.chunk_index)<>m.chunk_count OR count(DISTINCT c.profile_id)<>1))
+    OR bool_or(i.index_generation<>m.active_generation)
+    OR bool_or(p.dimensions<>quarry_extensions.vector_dims(c.embedding))
+    OR bool_or(i.chunk_sha256<>encode(sha256(convert_to(c.text,'UTF8')),'hex'));
+CREATE FUNCTION verify_document_search_set() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM document_search_integrity WHERE version_id=NEW.version_id) THEN
+        RAISE EXCEPTION 'document search set is incomplete or incompatible' USING ERRCODE='23514';
+    END IF;
+    RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER verify_document_search_set
+AFTER INSERT OR UPDATE ON document_identity_manifests
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_document_search_set();

@@ -1,11 +1,13 @@
 import { testDeal } from "@/test/fixtures/deals";
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DataRoomTreeNode } from "@/data/dataRoom";
+import type { DealDataRoom } from "@/data/dataRoomPreview";
+import type { DealDocumentSummary } from "@/contracts/quarryApi";
 import { workspaceDeals } from "@/fixtures/workspace/portfolio";
 import { DataRoomPage } from "@/pages/DataRoomPage";
 
@@ -110,6 +112,20 @@ vi.mock("@/components/data-room/DocumentPreviewPanel", () => ({
 
 afterEach(cleanup);
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {
+    throw new Error("Promise not initialized");
+  };
+  let reject: (error: Error) => void = () => {
+    throw new Error("Promise not initialized");
+  };
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("DataRoomPage", () => {
   beforeEach(() => {
     listDealDataRoom.mockReset();
@@ -137,6 +153,74 @@ describe("DataRoomPage", () => {
       sourceKind: "native",
     });
   });
+
+  it.each(["empty", "files", "error"] as const)(
+    "waits for file sources before showing the %s state",
+    async (outcome) => {
+      const local = deferred<DealDataRoom>();
+      const stored = deferred<DealDocumentSummary[]>();
+      listDealDataRoom.mockReturnValueOnce(local.promise);
+      listDealDocuments.mockReturnValueOnce(stored.promise);
+      render(
+        <MemoryRouter>
+          <DataRoomPage />
+        </MemoryRouter>,
+      );
+
+      expect(
+        screen.getByRole("status", { name: "Loading data room files" }),
+      ).not.toBeNull();
+      expect(
+        screen.getByRole("heading", { name: "Data Room Vault" }),
+      ).not.toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Open test document" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("heading", { name: "Upload your first file" }),
+      ).toBeNull();
+
+      await act(async () => local.resolve({
+        dealId: "project-alpha",
+        rootName: "Data Room",
+        rootPath: "",
+        tree: [],
+      }));
+      expect(
+        screen.getByRole("status", { name: "Loading data room files" }),
+      ).not.toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Open test document" }),
+      ).toBeNull();
+
+      await act(async () => {
+        if (outcome === "error") stored.reject(new Error("Files unavailable"));
+        else stored.resolve(
+          outcome === "files"
+            ? [{ fileId: "stored-1", displayName: "test.pdf" }]
+            : [],
+        );
+      });
+
+      expect(
+        screen.queryByRole("status", { name: "Loading data room files" }),
+      ).toBeNull();
+      if (outcome === "files") {
+        expect(
+          screen.getByRole("button", { name: "Open test document" }),
+        ).not.toBeNull();
+      } else {
+        expect(screen.getByRole("heading", {
+          name: outcome === "empty"
+            ? "Upload your first file"
+            : "Data room unavailable",
+        })).not.toBeNull();
+        expect(
+          screen.queryByRole("button", { name: "Open test document" }),
+        ).toBeNull();
+      }
+    },
+  );
 
   it("renders the selected-document explorer and opens its upload dialog", async () => {
     const user = userEvent.setup({ skipHover: true });
@@ -180,6 +264,10 @@ describe("DataRoomPage", () => {
       screen.getByRole("navigation", { name: "Data room tools" }),
     ).not.toBeNull();
 
+    await screen.findByRole("button", { name: "Close preview" });
+    const viewer = screen.getByRole("region", {
+      name: "Selected document preview",
+    });
     await user.click(screen.getByRole("button", { name: "Upload files" }));
     expect(
       (await screen.findByRole("dialog", { name: "Upload files" })).dataset
@@ -189,8 +277,18 @@ describe("DataRoomPage", () => {
       document.activeElement,
     );
 
+    const refresh = deferred<DealDocumentSummary[]>();
+    listDealDocuments.mockReturnValueOnce(refresh.promise);
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(listDealDocuments).toHaveBeenCalledTimes(2);
+    expect(
+      screen.getByRole("region", { name: "Selected document preview" }),
+    ).toBe(viewer);
+    expect(
+      screen.queryByRole("status", { name: "Loading data room files" }),
+    ).toBeNull();
+    await act(async () => refresh.resolve([]));
 
     await user.click(screen.getByRole("button", { name: "Close preview" }));
     expect(screen.queryByText("Data room explorer")).toBeNull();

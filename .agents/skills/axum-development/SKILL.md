@@ -95,18 +95,19 @@ work and preserve necessary guards at the actual operation.
 ## Persistence and graph rules
 
 - PostgreSQL is canonical for users, deals, logical files, versions, and blobs.
-- Helix is the versioned search projection. PostgreSQL commits before Helix indexing; re-uploading the
-  same bytes can find the committed version by hash and retry indexing. There is no general
-  PostgreSQL-to-Helix reindex command today.
-- Preserve content hashes, exact-content idempotency, foreign keys, one-current-version uniqueness,
-  and transaction rollback behavior. Document IDs are content-derived; version and final chunk IDs
-  are deterministic after a logical `file_id` is selected.
-- Parsers create a new random `file_id`, and the normal ingestion path reuses one only for an exact
-  content-hash match. Changed content currently becomes a new logical file even though repository
-  tests can create later versions by supplying the same `file_id` explicitly.
-- PostgreSQL schema 2 adds resource revisions and lifecycle guards to the former marker-18 layout. Initialize only an empty
+- Document chunks, full pgvector embeddings, GIN lexical metadata and durable jobs are PostgreSQL-owned.
+  Accepted input/image checkpoints precede canonical publication; one retained transaction commits
+  file/version/blob, identities, every chunk/vector/lexical batch, current selection, activity and
+  terminal job result. No document Helix read/write/index/deletion remains.
+- Keep feature data access in `repository.rs` or specific `*_repository.rs` modules, including
+  table names, joins, authorization scope and query composition. Reuse the generic typed SQL builder
+  for grouped predicates, ranking and bounded multi-row INSERTs. Never add feature SQL to adapters.
+- Preserve exact-content input claims, deterministic version/chunk IDs, one-current uniqueness,
+  immutable accepted image text, profile compatibility and rollback. Changed bytes create a new
+  logical file; admission chooses one winning file identity before random parser IDs can diverge.
+- PostgreSQL schema 3 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
   selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
-  restart. Unknown layouts fail without deletion. There is no SQLite import, fallback or reset.
+  restart. Unknown layouts fail without deletion. There is no import, fallback or automatic reset. The explicitly invoked guarded MVP reset requires user authorization; it is not verification.
 - Bootstrap retains a dedicated-session application writer lease through all client clones; database
   writes fail closed on ownership loss. Writes additionally serialize with a schema-scoped
   transaction advisory lock at READ COMMITTED, preserving guards/activity/revisions/leases. Aggregate
@@ -120,10 +121,10 @@ work and preserve necessary guards at the actual operation.
   independent reads or test-only transactions that bypass the global guard.
 - Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
   owner/app scoping and stable ties. Its captured fixtures must continue to pass. Helix remains the
-  document/template graph projection and search boundary.
+  notebook/template projection boundary. Documents use exact scoped cosine and indexed English/technical lexical search.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
-- Document jobs and caches are process-local. Notebook saves/cleanup, template classification
+- Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Query/preview caches remain process-local. Notebook saves/cleanup, template classification
   jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
   Durable receipts do not make these workers a distributed queue.
 
@@ -200,3 +201,13 @@ Server configuration requires redacted `QUARRY_DATABASE_URL`; the dedicated deve
 ending in `_test`, use isolated random schemas and clean only namespaces they created. Match fresh
 PostgreSQL data with a separate fresh Helix store; the launcher defaults to the new port-6970 store
 and leaves older port-6969 data alone. See `docs/postgresql-storage.md` for setup/recovery.
+
+## Document vector prerequisite
+
+Provision vector 0.8.6 once per database in `quarry_extensions` using the explicit procedure in
+`docs/postgresql-storage.md`. Startup validates it; tests never install/drop the shared extension.
+Document repositories use the same SQLx pool, qualified official vector codec and retained
+transactions. Preserve per-deal read snapshots and bounded final authorization. Numeric checks
+and immutable provider/model/dimension/preparation profiles are separate requirements. Exact
+cosine is the default; no ANN index or measured relevance/scale claim is implied. Keep the global
+writer lease and mutation serialization. See `docs/document-storage.md` for current limits/recovery.

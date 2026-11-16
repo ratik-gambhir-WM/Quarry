@@ -1,10 +1,14 @@
 # Plan 3: template retrieval in PostgreSQL and complete Helix removal
 
-Date: 2026-11-12. Status: proposed implementation PR, not a runtime change.
+Date: 2026-11-12. Reviewed against `main` at `83071dd` on 2026-11-15.
+Status: proposed implementation PR, not a runtime change.
 Depends on [Plan 1's shared storage/search contract](documents-postgres-pgvector-migration-plan.md#2-common-storage-and-search-decisions-for-all-three-plans)
 and follows [the notebook migration](notebooks-postgres-pgvector-migration-plan.md).
 This PR owns final removal of Helix only after all three domains have stopped using it.
 Baseline: [template ownership](../docs/template-ownership.md) and [architecture](../docs/ARCHITECTURE.md).
+The inspected baseline still requires Helix and has no pgvector dependency. Plans 1 and 2 are
+proposals, not completed prerequisites; recheck their merged implementation and schema before
+starting this work. Template-only retirement must not delete live document/notebook dependencies.
 
 ## 1. What is actually being migrated
 
@@ -13,9 +17,11 @@ publication, deletion and rebuild dependencies. No template graph mirror or reco
 is needed when canonical content and search artifacts live in the same PostgreSQL transaction.
 
 Templates already store JSON, image assets, previews, app memberships, classification metadata,
-subject/capability embedding BYTEA and lexical terms/frequencies in PostgreSQL. Public retrieval
-also loads classification records and computes some cosine ranking in Rust. Helix is a recoverable
-root/part/subject/capability projection; it is not the authority for private template ownership.
+subject/capability embedding BYTEA and lexical terms/frequencies in PostgreSQL. In-process retrieval
+loads classification records and computes cosine ranking in Rust; there is no public template
+search endpoint. Public retrieval-inspection routes expose processing status and gated artifacts.
+Helix is a recoverable root/part/subject/capability projection; it is not the authority for private
+template ownership.
 
 Therefore this migration is not a bulk copy of the whole catalog out of Helix. Replace opaque vector
 blobs with typed pgvector values, move semantic top-k into bounded authorized SQL, preserve existing
@@ -36,6 +42,11 @@ notebooks. Enforce template identity/profile/FKs, unique roles, finite/nonzero v
 bounded revision. A ready active embedding set requires both roles for exactly the same current
 content/classification fingerprint and profile. Use one authoritative active-set reference or
 transactional readiness predicate; do not maintain conflicting active pointers in several tables.
+Define whether the existing public `templates.revision` is also the content generation or a separate
+generation is needed. Classification/embedding progress must not invalidate a client's displayed
+delete revision merely because enrichment finished. App attachment and metadata-only operations
+must not re-embed unchanged input. Enforce the chosen content/profile relationship with composite
+keys/FKs or equivalent transactional checks, not unrelated valid IDs alone.
 
 Metadata/status rows retain classification/embedding progress separately. The embedding documents
 may remain there if that is the single canonical prepared input; avoid duplicating independently
@@ -68,11 +79,12 @@ Unicode/BM25 behavior with `english` stemming, four generic tsvector weights, fu
 `ts_rank_cd` and call it parity. Plan 1's BM25-extension comparison can inform a separate intentional
 relevance change, with scored fixture differences and approval of that product behavior.
 
-Move expensive lexical aggregation into a bounded owner/app-scoped SQL query where appropriate,
-preserving the precise existing corpus/scoring semantics verified by fixtures. Document whether
-corpus statistics currently include rows outside the visible subset; do not silently change scores
-or claim score-frequency isolation not established by that contract. Compute candidate corpus and
-results in one snapshot; no singleton corpus counter or per-import shared row hotspot.
+The current `adapters/postgres/query/lexical.rs` deliberately computes document frequency, total
+corpus size and average length over the complete lexical corpus, then filters results by owner/app.
+Preserve those scoring semantics and captured fixtures unless a separately reviewed relevance/privacy
+change is accepted. Scope candidate authorization before result limits without silently redefining
+the scoring corpus; do not claim score-frequency isolation from owner-filtered results. Compute
+corpus and results in one snapshot; no singleton corpus counter or per-import shared row hotspot.
 
 Use indexed term equality/prefix ranges and relational filter indexes, and inspect real query plans
 for broad queries/large catalogs. Any normalized facet JSON must have measured containment/index
@@ -142,11 +154,33 @@ semantic target `subject`/`capability`/`both`, stable ties and finding retrieval
 embedding calls happen before the SQL snapshot; missing providers fail only invoked semantic work.
 Keyword/filter/catalog operations remain usable without an embedding provider.
 
+Freeze the actual mode-specific behavior in `retrieval/query.rs` before replacing it. Hybrid currently
+returns lexical results with a `semantic_unavailable` warning when semantic ranking is unavailable;
+other semantic failures propagate. Semantic with no compatible records returns an empty list before
+calling a provider. `similar` ranks stored source vectors and needs no query embedding provider;
+source lookup is owner/app-scoped independently of destination metadata filters, and excludes the
+source from results. Preserve these cases explicitly rather than imposing one provider rule on all
+modes. This migration does not add a public search endpoint or broaden native routes.
+
 For `similar`, authorize and load the source template/current profile without disclosing a foreign
 source, then SQL-rank the permitted catalog. A `both` request ranks each role independently and
 retains the existing tested combination/fusion policy; retain existing score polarity and output
 shape. Hybrid combines ranks, not raw lexical and cosine values. Exact SQL parity with current Rust
 cosine/combination fixtures is the baseline; approximation is an explicitly measured optimization.
+
+Do not truncate each vector branch to the requested output limit and claim exact fusion parity.
+Current semantic `both` and `similar` use reciprocal-rank fusion with constant 60 over complete
+compatible role rankings; hybrid fuses lexical and semantic ranks. Finding retrieval adds lexical,
+subject and capability reciprocal ranks plus metadata boosts (`exact_finding_boost * 0.005`), and
+derives topic matches from the scoped catalog. Preserve those boosts and authorized topic discovery
+without hydrating every vector/metadata record into Rust. Exact SQL may rank the scoped corpus within
+a deadline while returning bounded rows; an approximate candidate budget needs explicit relevance
+evidence, including winners below individual branch cutoffs. Capture the current lexical 200-hit
+candidate cap separately from the final output limit. Filter-before-limit fixes must have explicit
+regression expectations rather than being hidden as parity. Test recency/ID ties, including non-ASCII
+IDs: Rust uses English ICU collation for vector/fusion ties, while lexical SQL uses `COLLATE "C"`.
+Set numeric comparison tolerances for SQL versus reference cosine scores before acceptance; storage
+precision and near-tie behavior must be tested, not hidden behind a bit-for-bit float equality claim.
 
 Return only requested metadata/fields; avoid vector/BLOB/preview fetches before limits. Facets use
 authorized current metadata and documented filters; semantic result counts do not reveal a foreign
@@ -156,8 +190,9 @@ revocation. Keep provider and SQL calls cancellable and their pool/admission bou
 ## 6. Populated data and staged rollout
 
 First verify actual schema/version, catalog counts, classification/profile fingerprints and old vector
-byte lengths. For each template, decode both BYTEA values with explicit f32 validation and insert the
-current typed pair in one transaction. Compare round-tripped values and reference cosine results;
+byte lengths. The existing codec stores little-endian f32 elements and exposes them as f64 values;
+decode that format, not native-endian bytes or f64 words. For each template, validate both values
+and insert the current typed pair in one transaction. Compare round-tripped values and reference cosine results;
 missing/malformed/mismatched artifacts remain not ready with a repair report. No zero-vector fill,
 padding/truncation, silent model substitution or automatic provider spend.
 
@@ -165,6 +200,11 @@ A fresh development target may skip old-data import, using explicitly selected e
 new schema version. Do not assume the recent reset means data is still empty. Preserving mode drains
 writers, applies validated DDL/backfill and verifies every retained record before readers switch.
 Remove old BYTEA fields only when the pinned migration/schema policy and readback evidence permit it.
+Current `app/migrations.rs` only initializes empty schema 2 or validates its exact checksum/catalog;
+it does not upgrade a populated schema. A preserving rollout therefore requires an explicit versioned
+upgrade tool/procedure, source-version/checksum validation, rehearsal and restore evidence before
+cutover. Never edit the schema marker/checksum to bless a backfill or imply ordinary startup already
+supports it. Select the rollout mode before implementation and reuse Plan 1's actual migration policy.
 Old Helix content is not needed to reconstruct valid PostgreSQL template artifacts; any discrepancy
 is reported, not resolved by making the graph authoritative.
 
@@ -190,6 +230,50 @@ inventory is reconciled. Replacing three log messages is not sufficient.
 | All server embedding configuration | Replace Helix-named document dimension/search-limit settings with domain/PostgreSQL names; map documents/notebooks to the same explicit embedding profile. Keep independent template dimensions. Coordinate deployment configuration before startup; never silently fall back from an old configured dimension to a different default. |
 | API/client contracts and error tests | Remove remote-projection failure outcomes only where no longer possible; preserve `/api/v1`, camelCase, revision errors, SSE names and historical `sqliteCommitted`/deletion phase `sqlite` values. Audit other retained phase strings and document compatible SQL-only transitions. |
 | Architecture/onboarding/storage/verification/project guidance | Describe PostgreSQL+pgvector as the only canonical/search store, actual keyword policy, extension provisioning, atomic document/note writes, current stage semantics and recovery. Label old Helix reports historical; do not present old graph tests as current evidence. |
+
+### 7.1 Mandatory template code and query cleanup
+
+Remove newly unused template code in the same implementation PR as the SQL cutover; do not leave
+a disabled Helix path, optional constructor switch, compatibility shim or `allow(dead_code)` behind.
+The current queries are Rust SDK DSL builders in `slide_templates/graph.rs`, not standalone `.hx`
+query files. Inventory actual definitions and callers again at implementation time.
+
+- Delete the template graph module and its `mod.rs` export after replacing its callers. This includes
+  `TemplateGraph`, `TemplateProjectionRecord`, `TemplatePreviewDescriptor`, `prepare_record`,
+  `scoped`, `bounded`, projection-only serialization/fragment hashing and size limits, and labels
+  `SlideTemplate`, `SlideTemplatePart`, `SlideTemplateSubject`, `SlideTemplateCapability`.
+  Retire every operation: `helix.templates.indexes`, `helix.templates.index_status`,
+  `helix.templates.publish`, `helix.templates.delete`, and all four label reads under
+  `helix.templates.reconcile`. No replacement graph query or graph reconciliation worker is needed.
+- Remove `ImportService::projection_record` in `service.rs`; facade `projection`, `project`,
+  `reconcile`, `projection_failure` and the impossible `template_projection_failed` outcome; and
+  worker projection publication, its projection-only `import` option and mutex plumbing. Update
+  constructors, bootstrap index/reconcile calls and every test fixture that supplies those arguments.
+  Preserve the shared engine, worker lifecycle, preview/conversion/admission bounds and SQL guards.
+- Audit `retrieval/vector.rs`, `retrieval/query.rs`, repository classification mapping and exports.
+  Remove obsolete normal-runtime BYTEA encoding/decoding and full-catalog Rust vector ranking when
+  SQL owns them. Keep a legacy decoder only in an explicitly owned migration path if preserving
+  backfill still uses it. Put reference cosine/fusion helpers needed only for parity in the manually
+  wired `backend/tests/` tree; retain any production helper with a verified live caller. Keep provider
+  vector validation, public numeric inspection serialization and classification input preparation.
+- Remove projection-only `graph_tests.rs` and its module hook after moving useful pair-atomicity,
+  failure and authorization assertions to SQL tests. Replace graph-failure expectations in
+  `integration_tests.rs` and `user_scope_tests.rs`; preserve denial/no-resurrection coverage.
+  Review architecture checks that name `TemplateGraph::new`, shared mock Helix support, bootstrap
+  fixtures and ignored live graph tests. Update guards to reject reintroduced dependencies rather
+  than retaining obsolete string checks or deleting unrelated security tests.
+- After Plans 1 and 2 and the complete consumer audit, retire shared Helix SDK/client/config/binaries,
+  launcher setup, unused dependencies/imports, test modules and exports. Until then, shared document/
+  notebook code stays. Never delete SQL lexical postings, native conversion, Microsoft Graph code,
+  old data stores or Docker volumes as part of template dead-code cleanup.
+
+Acceptance requires a before/after symbol and caller inventory, no template Helix operations or
+projection-only types/callers in live source/tests, no newly unused exports/dependencies, and passing
+all-target compilation/Clippy. Add an architecture regression guard for the retired template dependency.
+Use `rg` over maintained source/tests/manifests, excluding generated/local outputs; explain intentional
+historical documentation matches. Tests must run the SQL template path with Helix absent, not merely
+mock or disable the old projection. Global Helix removal additionally requires the full three-domain
+no-Helix acceptance matrix. Do not execute query binaries or drop remote indexes to prove removal.
 
 A deployment without a running Helix server or Docker daemon must boot, import/search documents,
 save/search notes, import/classify/retrieve templates and permanently delete resources successfully.
@@ -217,7 +301,9 @@ Required evidence:
 - Native/facade private owner/app behavior, foreign `similar` denial, facets, selected fields,
   delete CAS, app/builtin races and old Unicode/weighted BM25 captured fixture parity.
 - SQL cosine and dual-role/finding/hybrid rankings match reference exact fixtures, stable ties and
-  score polarity; profile/input mismatch is rejected. Selective ANN follows Plan 1's recall gate.
+  score polarity, including fusion candidates below individual branch limits and finding boosts;
+  mode-specific unavailable-provider warnings/errors and provider-free `similar` are preserved.
+  Profile/input mismatch is rejected. Selective ANN follows Plan 1's recall gate.
 - Pause providers around delete/refresh, steal attempt, crash around commit/ack and reconnect:
   stale success/failure cannot publish/reset, jobs recover on another process and no graph cleanup
   or process-local mutex is required for correctness.
@@ -226,6 +312,8 @@ Required evidence:
 - Run all three domains with Helix absent, fake providers and real pgvector; verify normal startup
   and launcher require no Docker/Helix. Check code/manifests/commands contain no live Helix client,
   graph startup, old vector BLOB ranking scan, remote call or automatic old-store deletion.
+- Complete section 7.1's template symbol/query/caller inventory and retire obsolete tests/support;
+  record remaining shared consumers before removing any cross-domain Helix infrastructure.
 - Relevance, filter selectivity, p50/p95, write/rollback latency, index/storage/WAL, vacuum and
   update/delete churn benchmarks on representative template/deck sizes; no claimed measurements
   until collected. Pin extension/server/library versions in the verification report.

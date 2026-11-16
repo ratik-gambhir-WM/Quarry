@@ -28,10 +28,9 @@ use crate::{
             DealContextReader,
         },
         documents::{
-            graph::repository::{DocumentGraphReader, DocumentGraphSearch, DocumentGraphWriter},
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
             search::{self, service::DocumentSearchService},
-            store::postgres::DocumentStore,
+            store::repository::DocumentStore,
             viewing::{self, service::StoredDocumentService},
         },
         identity::{
@@ -74,7 +73,7 @@ pub enum BootstrapError {
     HttpClient(reqwest::Error),
     #[error("failed to construct Helix client: {0}")]
     HelixClient(String),
-    #[error("failed to initialize Helix document indexes: {0}")]
+    #[error("failed to initialize Helix notebook indexes: {0}")]
     HelixIndexes(String),
 }
 
@@ -85,9 +84,21 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let postgres = PostgresClient::connect(&config.postgres)
         .await
         .map_err(BootstrapError::Postgres)?;
-    migrations::migrate(&postgres)
+    if config.helix.vector_dimension.get() == 1536 {
+        migrations::migrate(&postgres)
+            .await
+            .map_err(BootstrapError::Migration)?;
+    } else {
+        migrations::migrate_with_dimensions(&postgres, config.helix.vector_dimension.get())
+            .await
+            .map_err(BootstrapError::Migration)?;
+    }
+    if !crate::domains::documents::store::identity_repository::ready(&postgres)
         .await
-        .map_err(BootstrapError::Migration)?;
+        .map_err(|_| BootstrapError::Migration(MigrationError::Incompatible))?
+    {
+        return Err(BootstrapError::Migration(MigrationError::Incompatible));
+    }
     let postgres = postgres
         .with_writer_lease()
         .await
@@ -95,19 +106,6 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
 
     let helix =
         Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    if !crate::domains::documents::store::identity::ready(&postgres)
-        .await
-        .map_err(|e| BootstrapError::HelixIndexes(e.to_string()))?
-    {
-        return Err(BootstrapError::HelixIndexes(
-            "document scope checkpoint incomplete; keep writers drained and restore the matching verified PostgreSQL/Helix backup before startup".into(),
-        ));
-    }
-    DocumentGraphWriter::new(helix.clone(), config.helix.vector_dimension)
-        .initialize()
-        .await
-        .map_err(|error| BootstrapError::HelixIndexes(error.to_string()))?;
-
     NotebookPipeline::new(
         helix.clone(),
         None,
@@ -222,7 +220,7 @@ async fn assemble_api(
 pub(crate) fn assemble_api_routes(
     config: &AppConfig,
     postgres: PostgresClient,
-    document_graph: Arc<HelixClient>,
+    helix: Arc<HelixClient>,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
@@ -240,11 +238,19 @@ pub(crate) fn assemble_api_routes(
     let access = ResourceAccess::new(postgres.clone(), memberships.clone());
     let users_repository = UserRepository::new(postgres.clone());
     let deals_repository = DealRepository::new(postgres.clone());
-    let document_files = DocumentStore::new(postgres.clone());
-    let document_graph_reader = DocumentGraphReader::new(document_graph.clone());
-    let document_graph_writer =
-        DocumentGraphWriter::new(document_graph.clone(), config.helix.vector_dimension);
-    let document_graph_search = DocumentGraphSearch::new(document_graph.clone());
+    let document_files = DocumentStore::new(postgres.clone()).with_profile(
+        config
+            .openai
+            .as_ref()
+            .map(|c| c.embedding_model.clone())
+            .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.into()),
+        config.helix.vector_dimension.get(),
+    );
+    let document_search_repository =
+        crate::domains::documents::store::search_repository::DocumentSearchRepository::new(
+            postgres.clone(),
+            document_files.profile().clone(),
+        );
     let openai = config
         .openai
         .as_ref()
@@ -252,7 +258,7 @@ pub(crate) fn assemble_api_routes(
     let notebooks = NotebookService::new(
         NotebookRepository::new(postgres.clone()),
         Arc::new(NotebookPipeline::new(
-            document_graph.clone(),
+            helix,
             openai.clone(),
             config.helix.vector_dimension,
             config
@@ -315,8 +321,10 @@ pub(crate) fn assemble_api_routes(
     let document_ingestion = Arc::new(
         DocumentIngestionService::new(
             document_files.clone(),
-            document_graph_reader,
-            document_graph_writer.clone(),
+            crate::domains::documents::ingestion::repository::DocumentJobRepository {
+                db: postgres.clone(),
+                profile: document_files.profile().clone(),
+            },
             openai.clone(),
             config
                 .openai
@@ -358,7 +366,7 @@ pub(crate) fn assemble_api_routes(
             None
         });
     let document_search = Arc::new(
-        DocumentSearchService::new(document_graph_search)
+        DocumentSearchService::new(document_search_repository)
             .with_access(access.clone())
             .with_hybrid(config.search.clone(), search_embeddings),
     );
@@ -383,9 +391,7 @@ pub(crate) fn assemble_api_routes(
 
     let deletions = deals::deletion::service::DealDeletionService::new(
         deals::deletion::DeletionRepository::new(postgres.clone()),
-        document_graph_writer,
         memberships.lifecycle().clone(),
-        document_jobs.clone(),
         stored_documents.clone(),
     );
     deletions.resume_pending();

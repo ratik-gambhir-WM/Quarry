@@ -67,3 +67,4 @@ argon2 = "0.5"
 getrandom = "0.3"
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 async-trait = "=0.1.92"
+pgvector = { version = "=0.4.2", features = ["sqlx"] }

@@ -338,7 +338,7 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
             documents::{
                 store::{
                     identity::IdentityManifest, model::FilePersistenceInput,
-                    postgres::DocumentStore,
+                    repository::DocumentStore,
                 },
                 viewing::service::StoredDocumentService,
             },

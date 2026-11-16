@@ -57,19 +57,10 @@ fn validate_vector(mut vectors: Vec<Vec<f64>>, dimensions: usize) -> ServiceResu
     if vectors.len() != 1 || dimensions == 0 || vectors[0].len() != dimensions {
         return Err(unavailable());
     }
-    vectors
-        .pop()
-        .expect("one vector checked")
-        .into_iter()
-        .map(|v| {
-            let narrowed = v as f32;
-            if v.is_finite() && narrowed.is_finite() {
-                Ok(narrowed)
-            } else {
-                Err(unavailable())
-            }
-        })
-        .collect()
+    let values = vectors.pop().expect("one vector checked");
+    crate::adapters::postgres::vector::CosineVector::from_f64(&values, dimensions)
+        .map(|vector| vector.as_slice().to_vec())
+        .map_err(|_| unavailable())
 }
 fn unavailable() -> ServiceError {
     ServiceError::unavailable("semantic search unavailable; retry or use keyword search")

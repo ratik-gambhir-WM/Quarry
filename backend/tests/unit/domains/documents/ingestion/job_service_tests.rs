@@ -1,16 +1,13 @@
 use super::*;
 use crate::{
-    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
+    adapters::postgres::client::PostgresClient,
     app::migrations::migrate,
     domains::{
         deals::{
             model::DealFields,
             repository::{CreateDealRecord, DealRepository},
         },
-        documents::{
-            graph::repository::{DocumentGraphReader, DocumentGraphWriter},
-            store::postgres::DocumentStore,
-        },
+        documents::store::repository::DocumentStore,
         memberships::{model::DealRole, repository::MembershipRepository},
     },
 };
@@ -59,11 +56,15 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
         )
         .await
         .unwrap();
-    let helix = Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap());
     let ingestion = Arc::new(DocumentIngestionService::new(
         DocumentStore::new(db.clone()),
-        DocumentGraphReader::new(helix.clone()),
-        DocumentGraphWriter::new(helix, std::num::NonZeroUsize::new(2).unwrap()),
+        super::super::repository::DocumentJobRepository {
+            db: db.clone(),
+            profile: crate::domains::documents::store::search_repository::EmbeddingProfile::new(
+                "text-embedding-3-small".into(),
+                1536,
+            ),
+        },
         None,
         "test".into(),
         "test".into(),
@@ -73,16 +74,21 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
         ingestion.clone(),
         Duration::from_secs(60),
     ));
-    let (sender, _) = watch::channel(DocumentJobEvent::processing(
-        "job-test".into(),
-        "shared.pdf".into(),
-    ));
-    jobs.jobs
-        .write()
+    let (id, _) = jobs
+        .queue
+        .admit(
+            "DEAL-JOBS".into(),
+            1,
+            UploadedDocument {
+                filename: "shared.pdf".into(),
+                bytes: b"accepted input".to_vec(),
+            },
+            false,
+        )
         .await
-        .insert("job-test".into(), ("DEAL-JOBS".into(), 1, sender.clone()));
-    assert!(jobs.subscribe_owned("job-test", 2).await.is_ok());
-    assert!(jobs.subscribe_owned("job-test", 3).await.is_err());
+        .unwrap();
+    assert!(jobs.subscribe_owned(&id, 2).await.is_ok());
+    assert!(jobs.subscribe_owned(&id, 3).await.is_err());
     assert!(jobs.subscribe_owned("foreign-job", 2).await.is_err());
     let actor = crate::domains::identity::model::AuthenticatedUser {
         user: crate::domains::users::repository::UserRepository::new(db)
@@ -99,7 +105,7 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
             document_ingestion: ingestion,
             document_jobs: jobs.clone(),
         }),
-        axum::extract::Path("job-test".into()),
+        axum::extract::Path(id.clone()),
     )
     .await
     .unwrap();
@@ -115,31 +121,9 @@ async fn current_members_can_observe_shared_jobs_and_revocation_stops_event_deli
         .remove_member("DEAL-JOBS".into(), 1, 2, 1)
         .await
         .unwrap();
-    sender.send_replace(DocumentJobEvent::completed(
-        "job-test".into(),
-        "shared.pdf".into(),
-        Some("content".into()),
-        1,
-    ));
     assert!(tokio::time::timeout(Duration::from_secs(2), stream.next())
         .await
         .unwrap()
         .is_none());
-    assert!(jobs.authorize_job("job-test", 2).await.is_err());
-}
-
-impl DocumentJobService {
-    pub async fn subscribe(
-        &self,
-        job_id: &str,
-    ) -> ServiceResult<watch::Receiver<DocumentJobEvent>> {
-        self.jobs
-            .read()
-            .await
-            .get(job_id)
-            .map(|(_, _, sender)| sender.subscribe())
-            .ok_or_else(|| {
-                ServiceError::not_found(format!("document job `{job_id}` was not found"))
-            })
-    }
+    assert!(jobs.authorize_job(&id, 2).await.is_err());
 }

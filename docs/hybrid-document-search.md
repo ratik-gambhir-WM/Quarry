@@ -1,12 +1,9 @@
 # Hybrid document search
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
-SQLite marker upgrades are historical and are not executed by this runtime.
-
-Updated 2026-11-06. The initial bounded-scan implementation is available behind
-`QUARRY_HYBRID_SEARCH_ENABLED=false` (default). It requires no additional change to PostgreSQL schema 2,
-Helix publication, stored embeddings, or the model used for ingestion.
+Updated 2026-11-15. Documents use PostgreSQL schema 3, exact pgvector cosine and GIN lexical
+retrieval. Hybrid remains opt-in (`QUARRY_HYBRID_SEARCH_ENABLED=false` by default).
+Notebook/template Helix infrastructure remains required. See [document storage](document-storage.md)
+for profiles, durable jobs, atomic readiness and the explicitly fresh MVP cutover.
 
 ## Request and result contract
 
@@ -24,53 +21,46 @@ keyword/vector endpoints and their snake_case result DTOs remain available.
 
 ## Ownership and scheduling
 
-`DocumentSearchService` shares canonical preparation/freshness helpers with the legacy
-operations. Bootstrap injects optional OpenAI query embeddings and typed limits from
-`AppConfig`. Services never read environment variables. Each hybrid request starts one
-embedding/cache lookup concurrently with bounded deal preparation. A prepared deal starts
-keyword retrieval immediately; its vector retrieval awaits the same shared embedding.
-Preparation verifies the entire canonical projection once per deal. Both branches must succeed.
+Bootstrap injects document repositories, optional OpenAI query embeddings and typed limits.
+Embedding/cache work finishes outside SQL. Bounded deal pipelines then run keyword and semantic
+queries sequentially on one retained repeatable-read, read-only transaction per deal. Authorized
+membership, live/current/readiness and profile predicates precede candidate LIMIT. Both branches
+must succeed. Full canonical chunk-ID lists and remote header-verification scans are removed.
 
-Defaults are four concurrent deal pipelines per request, eight search Helix reads across the
-service (including legacy endpoints), four provider misses, 16 active hybrid requests and
-32 queued requests. Queue wait is two seconds, embedding work 15 seconds, and the hybrid
-operation 30 seconds. These are trial limits, not measured performance targets. Existing
-client timeouts/retry policy remain unchanged. Admission is nonblocking when full. Request
-futures own all orchestration; error, disconnect/drop or timeout stops further scheduling.
-Already accepted remote reads and blocking lexical ranking can finish after cancellation.
+Defaults remain four deal pipelines, eight SQL read operations across the service (including
+legacy endpoints), four provider misses, 16 active hybrid requests and 32 queued requests.
+`QUARRY_SEARCH_SQL_READS` replaces the old Helix-read setting. Queue, embedding and operation
+deadlines remain two, fifteen and thirty seconds. These are bounds, not measured latency targets.
+Dropping a request drops scheduling and its SQL/provider waiters; no result/permission cache exists.
 
-Vector retrieval preserves Helix-normalized cosine distance until the service applies a relevance floor:
-`QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY` defaults to 0.4 (finite 0–1); the historical large/3072
-local trial used the measured 0.26 override described below. The floor admits distances
-in `0..=(1 - minimumSimilarity) / 2`. The pinned server normalizes cosine distance:
-`distance = (1 - cosineSimilarity) / 2`, so similarity is `1 - 2 × distance`. Identical vectors
-return 0, orthogonal vectors 0.5, and opposite vectors 1. The old `1 - distance` interpretation
-incorrectly admitted unrelated candidates. Nonfinite/out-of-range distances are rejected. This prevents
-nearest-neighbor retrieval from automatically filling no-match queries with weak candidates.
-It is a tunable initial guardrail, not a confidence percentage or a calibrated relevance guarantee;
-measure it against the configured embedding model and judged queries. Exact keyword hits are
-retained even if their semantic distance fails the floor, with only the Keyword source badge.
-Strong semantic-only paraphrases remain eligible. Legacy vector APIs retain their existing contract.
+Cosine SQL distance is `1-cosineSimilarity`. Legacy flattened vector DTOs divide it by two,
+retaining the existing 0/0.5/1 aligned/orthogonal/opposite contract. Hybrid's relevance threshold
+is therefore similarity `1-pgvectorDistance`, equivalently `1-2*legacyDistance` after DTO conversion.
+The configured floor applies before fusion; weak neighbors cannot fill an unrelated query.
+Exact keyword hits remain eligible. Nonfinite/out-of-range distances are rejected.
 
-Both lists are filtered against a refreshed full immutable identity before per-deal RRF:
-`sum(1 / (60 + one-based source rank))`. Each source is deduplicated before assigning ranks.
-The source window is `min(100, max(50, limit))`. Combined deals are sorted by fused score,
-best source rank and stable deal/file/version/chunk/generation/hash/index identity. A final bounded
-canonical cross-deal membership/current-result snapshot checks the top 100 or fewer IDs;
-revocation can reduce the response without refill. No results or permissions are cached.
+English body parsing supports stemming and quoted natural-language phrases. A separate simple
+technical-token channel distinguishes C++, C#, .NET and identifiers with bounded opaque lexemes.
+Natural and technical requirements combine with AND. A single natural token ending in `*` uses
+a validated bound prefix. Stopword-only and punctuation-only lexical requests return no hits.
+Native rank intentionally differs from the historical Rust occurrence ranker; fixtures cover
+these changes, while representative judged BM25 comparison remains a release gate.
+
+Per-deal RRF remains `sum(1/(60+one-based source rank))`, deduplicated before ranking, using
+`min(100,max(50,limit))` candidates per source. Global ordering retains fused score, best source
+rank and full immutable identity ties. A final bounded current-result/member snapshot checks at
+most 100 returned IDs; revocation can shorten the response without refill. Legacy keyword scores
+remain reciprocal per-deal ranks. Native SQL rank is never added directly to cosine.
 
 ## Embedding reuse
 
-The private OpenAI path uses the ingestion model and the same `HELIX_VECTOR_DIMENSION`
-injected into index initialization and document graph writes. The OpenAI adapter validates every
-response against its requested dimension and finite f64/f32 representation; the graph writer
-independently rejects dimension mismatch before the canonical PostgreSQL commit. Stored vectors are
-copied into typed f32 array properties without truncation/padding. Configuration tests cover both
-the default 1536 and an alternate dimension; disposable Helix tests read synthetic embeddings back
-and verify exact values/dimensions before querying them. It rejects multiple/empty vectors, dimensional mismatch, nonfinite f64 values
-and overflowing f32 conversion. Provider error bodies are not exposed. Historical embedding
-model compatibility still depends on operating the index with its ingestion model; changing
-that model requires a reviewed reindex and remains outside this feature.
+The private OpenAI path uses the same server-selected model/dimension profile as ingestion.
+The repository selects matching immutable provider/model/dimension/metric/preparation identity;
+equal dimensions do not infer a model. Provider vectors validate finite f64 and f32 values,
+nonzero norms and profile dimensions. Stored values remain full f32 vectors without padding or
+truncation. Model/dimension changes require an explicit compatible schema/profile operation.
+Provider error bodies are never returned. The historical `HELIX_VECTOR_DIMENSION` name remains
+the shared document/notebook dimension setting during the staged rollout.
 
 Each process-local cache is immutable and bound to one provider client/model/dimension tuple.
 The key is SHA-256 of a private random process-cache salt, provider/model/dimension/version
@@ -114,53 +104,27 @@ returning focus to the query input. Other search consumers retain their existing
 To roll back, disable `QUARRY_HYBRID_SEARCH_ENABLED`; the panel reports unavailability and
 retains explicit keyword fallback. No data rollback or destructive reset is needed.
 
-## Indexed capability decision and remaining release gates
+## Remaining measurement gates
 
-The pinned `helix-db 3.0.0` re-exports `helix-ast 0.1.0`. Its text-search builders
-(`text_search_nodes[_with]`) are root source operations accepting label/property/query/K and
-an optional tenant. They do not accept the canonical current identity stream before top-K.
-The maintained authorized lexical path therefore remains the bounded all-token scan.
-Root BM25 followed by filtering or arbitrary overfetch is not an acceptable substitute.
-No SDK upgrade, second lexical store, schema migration or ceiling increase is introduced.
-
-This source inspection is not a client/server capability spike or performance proof. The
-indexed milestone still requires an explicitly selected disposable Helix instance, eligible
-matches below historical/deleted/unpublished distractors, analyzer parity (including C++/C#),
-query-plan/index-readiness evidence and bounded text transfer. If unavailable, separately
-review a narrow upstream extension or a separately designed PostgreSQL document lexical index with durability/backfill/recovery guarantees.
-Template lexical parity already uses PostgreSQL; it does not provide a document lexical index.
-The 5,000-current-document, 10,000-canonical-chunk and 200-deal ceilings remain explicit.
-Large-deal indexed preparation/publication verification is a separate design milestone.
-
-The feature stays disabled by default pending disposable baseline/load and judged relevance
-review. Compare legacy sequential scheduling (a configured deal concurrency of one), overlap,
-and cold/warm cache with identical candidate windows; isolate any future indexed improvement.
-Measure p50/p95/p99, throughput, provider calls, transferred text bytes and memory for
-1/10/200 deals and corpus sizes through and beyond the ceilings. Evaluate exact identifiers,
-whole-token punctuation, paraphrases, duplicates across deals and mixed document formats with
-Recall@K, MRR/nDCG and excerpt usefulness. No live provider/load measurements are claimed.
-Set release targets and tune the trial queue/deadlines before enablement.
-
-Structured phase logs record scope, queue waits, candidate snapshots, header verification,
-embedding hit/miss duration, keyword transfer/ranking, vector reads, freshness, fusion,
-final access and total duration, with counts/bytes/success only. They exclude query text,
-passage text, vectors, keys, email and provider bodies.
+Exact scoped cosine is enabled; ANN is not configured. Native English/simple GIN lexical
+retrieval is the sole runtime lexical engine. Representative NDCG/MRR, filtered p50/p95,
+common-term cost, WAL/index bytes, churn and 10k/100k/1m load comparisons remain to be collected.
+The selected server has pgvector but no pg_textsearch/pg_search installation, so their comparative
+BM25 evaluation has not run. No exact-recall/latency promise is inferred from source tests.
+Hybrid remains disabled by default pending judged relevance and load acceptance.
 
 ## Verification
 
-Deterministic tests under `backend/tests/unit/domains/documents/search/` cover overlap,
-single embedding across ten deals, preparation bounds, drop/timeout/overload, stale generation
-and final access filtering, cross-actor cache reuse, cache coalescing/cancellation/eviction,
-DTO validation and fusion ties. The existing ignored shared-search compatibility suite also
-exercises hybrid via a synthetic embedding provider; run it only against an explicitly
-selected disposable Helix instance under the established compatibility procedure.
-
-Frontend tests cover HTTP/Tauri mapping, explicit submission, stale responses, actor/deal
-reset, source labels, literal highlights, unavailable fallback and page activation. Native
-relay code/capabilities are unchanged: its existing validated `/api/v1/` JSON transport carries
-the additive routes. Use the existing frontend and backend gates from the architecture.
+Real isolated PostgreSQL tests cover complete-set rollback, snapshots/cancellation, current and
+foreign scopes, profiles, cosine normalization, English/technical/phrase search, RRF, final
+revocation and explicit fallback/failure policy. They preserve web/desktop wire contracts.
+Run the backend fmt/check/Clippy/full-test gates in [verification](ARCHITECTURE.md#14-verification-architecture).
+No frontend implementation or transport changes are required for this storage replacement.
 
 ## Historical verification records
+
+The following 2026-11-06 Helix measurements describe the retired implementation. They do not
+measure current PostgreSQL relevance, latency, index readiness or operational behavior.
 
 The dated November 6 records below describe the former SQLite deployment and its local model
 trial. They do not describe the current PostgreSQL database or authorize repeating any cleanup.

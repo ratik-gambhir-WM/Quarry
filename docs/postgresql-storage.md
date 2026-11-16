@@ -37,35 +37,78 @@ Existing graph credentials, vector dimensions and template embedding settings re
 
 ## Vector dimensions and existing indexes
 
-`HELIX_VECTOR_DIMENSION` controls document and notebook embeddings and their Helix vector indexes;
-the code default is 1536. Existing indexes retain their created dimension across restarts. Changing
-configuration does not resize them: a conflicting definition stops bootstrap before the API binds.
-`text-embedding-3-large` supports the selected local 3072-dimensional configuration. Template
-subject/capability vectors have their own `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` setting and are not
-changed by the document setting.
-
-Keep application writers stopped during an explicitly authorized dimension change. Verify canonical
-document versions, notes and save jobs as well as Helix document/notebook projection counts. When
-all are empty, replace only the document `FileChunk.embedding` (partition `deal_id`) and notebook
-`QuarryNotebookChunk.embedding` (partition `owner_id`) vector definitions, retaining cosine distance,
-and wait for each drop/build operation to succeed. Preserve unrelated nodes, indexes and volumes.
-For populated projections, retain matching backups and plan re-embedding/publication with the target
-model; vectors cannot be resized by padding or truncation. No automatic migration or general
-reindex command is provided. Never use `clear_helix` to resolve a dimension conflict.
+During the staged migration, `HELIX_VECTOR_DIMENSION` still supplies the common document/notebook
+embedding dimension (default 1536). Document SQL uses checksummed `vector(D)` DDL and immutable
+model profiles; notebook Helix indexes retain their existing definitions. A changed D requires
+an explicitly compatible fresh SQL schema and a separately scoped notebook index procedure.
+The reset command reads the configured D without exposing server credentials. It never pads,
+truncates or automatically rebuilds vectors. Templates retain independent dimension settings.
+Do not use `clear_helix` to resolve conflicts. Old document Helix indexes are no longer used.
 
 ## Schema and adapter
 
-`backend/src/app/schema.sql` creates schema 2: the former marker-18 layout plus bounded deal,
-metadata, company and template revisions and retained deal lifecycle guards.
-PostgreSQL schema version **2**, its source checksum and a live catalog fingerprint are recorded
-in `quarry_schema_version`. Startup serializes schema inspection/creation, initializes an empty
-selected schema transactionally, or validates and reuses version 2. Unknown nonempty layouts,
-changed DDL/checks/indexes and unsupported versions fail without deleting records. There is no
-SQLite upgrade chain, reset binary, data backfill, standalone template database or dual write.
-Version 1 is intentionally unsupported; select a fresh empty database or explicitly recreate a
-disposable database. Startup never deletes data. Exactly-one-owner and document identity/graph
-readiness checks still run before serving traffic. Schema initialization uses a dedicated startup-only
-advisory transaction lock, separate from runtime mutation locking.
+### pgvector adapter prerequisite
+
+The vector adapter pins the official `pgvector` Rust crate at 0.4.2 with
+its SQLx feature, using the existing SQLx 0.8.6 pool. `CosineVector` checks dimensions
+1–16,000 independently of ANN limits, finite values and finite nonzero norms before
+and after provider f64-to-f32 conversion. Vector values are omitted from Debug output.
+Its qualified type and operator usage does not require the extension schema in the
+product search path. Domain repositories must additionally enforce model/profile identity;
+matching vector dimensions alone do not prove compatibility.
+
+Postgres.app 18 includes the server extension files. Provision the pinned extension
+explicitly with a migration role, once per selected database. From the repository root,
+for the disposable test database:
+
+```sh
+/Applications/Postgres.app/Contents/Versions/18/bin/psql -X -d Quarry_test \
+  -f backend/tools/provision-pgvector.sql
+```
+
+The script creates `quarry_extensions` and extension `vector` version 0.8.6, revokes
+public CREATE on that schema and refuses an existing mismatched version/location.
+It never moves, upgrades or drops an existing extension. With a separate application
+role, grant that role USAGE on the extension schema through deployment role management.
+Do not grant application DDL privileges. Other server installations need the approved
+server extension package first; a Cargo dependency does not install server binaries.
+Tests create/drop only their own isolated product schemas, retaining the shared extension.
+
+This prerequisite is exercised by the codec tests, including 1,536/3,072-dimensional
+round trips, schema shadowing, cosine normalization, rollback and read-only enforcement.
+Normal startup validates this extension before initializing or validating schema 3. Document
+chunks/search now use SQL; notebook/template projections still require Helix.
+
+### Current product schema
+
+`backend/src/app/schema.sql` owns schema 3, extending the previous aggregate/revision/lifecycle
+layout with document embedding profiles, complete chunk/search rows, durable accepted jobs and
+input identity claims. A deferred complete-set constraint and integrity view protect readiness.
+Startup validates the rendered dimension-pinned source checksum, catalog, owned index readiness,
+extension prerequisites, owners and document integrity. Unknown nonempty layouts fail intact.
+There is no populated-data migration or automatic reset. See [document storage](document-storage.md).
+
+### Explicit MVP reset
+
+The user-selected rollout recreates existing product tables rather than importing schema-2 data.
+After stopping the API writer and provisioning pgvector in the selected database, from `backend/`:
+
+```sh
+cargo run --locked --bin reset_postgres -- --confirm-reset
+```
+
+This explicit destructive operation loads the normal server configuration (without printing it),
+requires the dedicated `Quarry` or an isolated `_test` database, and refuses unrelated relations/
+functions or an active writer. It retains the schema initialization, writer-ownership and mutation
+locks, drops/recreates recognized product objects and records schema 3 in one transaction.
+DDL failure rolls the entire reset back. It removes users, deals, notebooks, templates and other
+product rows in that selected SQL schema; it is not a document-only deletion or an upgrade path.
+The extension schema and old SQLite/Helix stores are untouched by the utility. Normal template
+startup reconciliation may subsequently prune projections missing from the new SQL catalog.
+The application never invokes this reset automatically. Under the temporary MVP policy effective
+2026-11-15 in [the agent guide](../AGENTS.md#persistence-and-indexing), a requested PostgreSQL schema
+change authorizes table recreation unless data preservation is explicitly requested. Revisit this
+policy when the product matures; resets outside schema-change work still need explicit authorization.
 
 `adapters/postgres` owns SQLx 0.8.6 pooling, typed values/rows, parameterized queries and transactions.
 Bootstrap injects one pool into all repositories. Generated numeric identities use `RETURNING` and
@@ -122,12 +165,12 @@ concurrency rollout, not authorization to run multiple application instances.
 
 ## Search and partial failure
 
-Document search, embeddings, identities, graph queries and publication remain in Helix. Canonical
-PostgreSQL ownership/current-version/deletion checks still filter and reauthorize results.
-Files, original bytes, manifests and accepted image text commit before graph publication. A graph
-failure preserves those records and returns the existing committed identity. Exact-content retry
-uses the same identity and accepted image text. There is no distributed transaction or general
-bulk reindex command.
+Documents commit canonical bytes, identities, chunks, pgvector embeddings, lexical data, activity
+and terminal job result together. Preparation/provider work precedes SQL locks; accepted inputs and
+image text are separate durable checkpoints. Both search branches use one read-only snapshot per
+deal with authorization/profile/readiness before limits. Final bounded authorization remains.
+There is no document Helix publication or partial canonical-then-graph failure. See
+[document storage](document-storage.md) and [hybrid retrieval](hybrid-document-search.md).
 
 Templates retain their separate lexical path, previously SQLite FTS5. PostgreSQL stores indexed
 term/field frequencies and document lengths; retrieval uses the existing 15-field weights,
@@ -137,7 +180,7 @@ without a SQLite runtime dependency. Captured FTS5 ranking fixtures cover techni
 diacritics, prefixes, ties and private/app scopes. Helix template metadata/dual-vector projection
 and startup reconciliation remain. Canonical embedding artifacts still belong to PostgreSQL.
 
-Notebook jobs and deletion receipts remain durable; document jobs and caches remain in memory.
+Notebook/document jobs and deletion receipts are durable; query/preview caches remain in memory.
 The historical wire field `sqliteCommitted` and durable deletion phase `sqlite` now mean canonical
 PostgreSQL commit/cleanup. Their names remain unchanged for client compatibility.
 

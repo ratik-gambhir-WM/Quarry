@@ -1,5 +1,5 @@
 use super::model::{HybridHit, MatchSource};
-use crate::domains::documents::graph::query::FileChunkResult;
+use crate::domains::documents::store::chunk::FileChunkResult;
 use std::collections::{BTreeMap, HashSet};
 
 // Full immutable identity; text from a different generation can never contribute a rank.

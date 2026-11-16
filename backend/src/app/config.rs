@@ -704,7 +704,7 @@ fn resolve_chromium(values: &HashMap<String, String>) -> Result<Option<PathBuf>,
 pub struct SearchConfig {
     pub enabled: bool,
     pub deal_concurrency: usize,
-    pub helix_reads: usize,
+    pub sql_reads: usize,
     pub embedding_concurrency: usize,
     pub active_requests: usize,
     pub queued_requests: usize,
@@ -718,7 +718,7 @@ impl Default for SearchConfig {
         Self {
             enabled: false,
             deal_concurrency: 4,
-            helix_reads: 8,
+            sql_reads: 8,
             embedding_concurrency: 4,
             active_requests: 16,
             queued_requests: 32,
@@ -742,7 +742,7 @@ fn parse_search_config(values: &HashMap<String, String>) -> Result<SearchConfig,
         return Err("QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY must be a finite value in 0..=1".into());
     }
     config.deal_concurrency = parse_search_bound(values, "QUARRY_SEARCH_DEAL_CONCURRENCY", 4, 32)?;
-    config.helix_reads = parse_search_bound(values, "QUARRY_SEARCH_HELIX_READS", 8, 64)?;
+    config.sql_reads = parse_search_bound(values, "QUARRY_SEARCH_SQL_READS", 8, 64)?;
     config.embedding_concurrency =
         parse_search_bound(values, "QUARRY_SEARCH_EMBEDDING_CONCURRENCY", 4, 16)?;
     config.active_requests = parse_search_bound(values, "QUARRY_SEARCH_ACTIVE_REQUESTS", 16, 128)?;

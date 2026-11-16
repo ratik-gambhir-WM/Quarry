@@ -70,11 +70,21 @@ fn value(row: &sqlx::postgres::PgRow, i: usize) -> Result<SqlValue, PostgresErro
         "BOOL" => SqlValue::Integer(i64::from(row.try_get::<bool, _>(i)?)),
         "BYTEA" => SqlValue::Blob(row.try_get(i)?),
         "TEXT" | "VARCHAR" | "NAME" | "CHAR" => SqlValue::Text(row.try_get(i)?),
+        "vector" | "quarry_extensions.vector" => SqlValue::Vector(row.try_get(i)?),
         _ => return Err(PostgresError::decode("unsupported PostgreSQL column type")),
     })
 }
 pub trait FromSqlValue: Sized {
     fn decode(value: SqlValue) -> Result<Self, PostgresError>;
+}
+impl FromSqlValue for super::vector::CosineVector {
+    fn decode(value: SqlValue) -> Result<Self, PostgresError> {
+        if let SqlValue::Vector(vector) = value {
+            Ok(vector)
+        } else {
+            Err(PostgresError::decode("expected vector"))
+        }
+    }
 }
 impl FromSqlValue for String {
     fn decode(v: SqlValue) -> Result<Self, PostgresError> {

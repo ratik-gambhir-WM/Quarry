@@ -1,16 +1,9 @@
-use super::error::IngestionError;
-
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::{Arc, Weak},
-    time::Instant,
-};
+use std::{path::Path, sync::Arc, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::{stream, StreamExt, TryStreamExt};
-use serde::Serialize;
-use tokio::sync::{Mutex, OwnedMutexGuard, Semaphore};
+use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 
 pub use crate::domains::documents::model::{Document, DocumentChunk};
 
@@ -21,14 +14,13 @@ use crate::{
             image::{build_image_assembly, validate_image_by_bytes, ImageAssembly},
             ParsedQuarryFile, QuarryFile,
         },
-        graph::repository::{DocumentGraphReader, DocumentGraphWriter},
         ingestion::persistence::persist_document_and_chunks,
-        store::{model::PersistedFileIdentity, postgres::DocumentStore},
+        store::repository::DocumentStore,
     },
     shared::{
         error::{ServiceError, ServiceResult},
         file_policy::infer_supported_image_mime_type,
-        ids::{document_id_from_content, sha256_hex},
+        ids::sha256_hex,
         prompts::PromptId,
     },
 };
@@ -45,7 +37,7 @@ pub struct UploadedDocument {
     pub bytes: Vec<u8>,
 }
 
-struct ParsedDocumentGraph {
+struct ParsedDocument {
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
@@ -64,7 +56,7 @@ impl EmbeddingBatch {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessedDocument {
     pub filename: String,
@@ -76,7 +68,7 @@ pub struct ProcessedDocument {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessDocumentsResponse {
     pub total: usize,
@@ -90,22 +82,19 @@ pub struct ProcessDocumentsResponse {
 pub struct DocumentIngestionService {
     lifecycle: Option<crate::domains::deals::deletion::lifecycle::DealLifecycle>,
     files: DocumentStore,
-    graph_reader: DocumentGraphReader,
-    graph_writer: DocumentGraphWriter,
+    jobs: super::repository::DocumentJobRepository,
     openai: Option<Arc<OpenAiClient>>,
     embedding_model: String,
     image_description_model: String,
-    processing_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
     office_parse_semaphore: Arc<Semaphore>,
     embedding_request_semaphore: Arc<Semaphore>,
     max_concurrent_documents: usize,
 }
 
 impl DocumentIngestionService {
-    pub fn new(
+    pub(crate) fn new(
         files: DocumentStore,
-        graph_reader: DocumentGraphReader,
-        graph_writer: DocumentGraphWriter,
+        jobs: super::repository::DocumentJobRepository,
         openai: Option<Arc<OpenAiClient>>,
         embedding_model: String,
         image_description_model: String,
@@ -114,12 +103,10 @@ impl DocumentIngestionService {
         Self {
             lifecycle: None,
             files,
-            graph_reader,
-            graph_writer,
+            jobs,
             openai,
             embedding_model,
             image_description_model,
-            processing_locks: Arc::new(Mutex::new(HashMap::new())),
             office_parse_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_OFFICE_PARSERS)),
             embedding_request_semaphore: Arc::new(Semaphore::new(
                 MAX_CONCURRENT_EMBEDDING_REQUESTS,
@@ -157,6 +144,9 @@ impl DocumentIngestionService {
             .await
             .map_err(Into::into)
     }
+    pub(crate) fn queue(&self) -> super::repository::DocumentJobRepository {
+        self.jobs.clone()
+    }
     pub async fn process(
         &self,
         deal_id: &str,
@@ -170,42 +160,38 @@ impl DocumentIngestionService {
             ));
         }
         let total = files.len();
-        let worker_service = self.clone();
-        let worker_deal_id = deal_id.to_string();
-        let worker_actor_id = actor_id;
-        let mut indexed_documents = stream::iter(files.into_iter().enumerate())
-            .map(|(index, file)| {
-                let service = worker_service.clone();
-                let deal_id = worker_deal_id.clone();
-                let actor_id = worker_actor_id;
-                let filename = file.filename.clone();
-                async move {
-                    let worker = tokio::spawn(async move {
-                        service
-                            .process_uploaded_document(file, deal_id, actor_id)
-                            .await
-                    });
-                    let document = match worker.await {
-                        Ok(document) => document,
-                        Err(error) => Ok(failed_document(
-                            filename,
-                            format!("document processing task failed: {error}"),
-                        )),
-                    };
-                    (index, document)
+        let mut indexed = stream::iter(files.into_iter().enumerate())
+            .map(|(index, file)| async move {
+                let queue = self.queue();
+                let (id, _) = queue.admit(deal_id.into(), actor_id, file, false).await?;
+                if let Some(mut completed) = queue.job(&id).await?.result {
+                    if completed.success {
+                        completed.skipped = true;
+                        completed.chunk_count = 0;
+                    }
+                    return Ok::<_, ServiceError>((index, completed));
+                }
+                loop {
+                    if let Some(claim) = queue.claim(Some(&id)).await? {
+                        if self.process_claim(claim).await.is_err() {
+                            // The attempt owns failure publication; cancelled HTTP futures
+                            // simply leave an expired request-owned attempt for explicit retry.
+                        }
+                    }
+                    let job = queue.job(&id).await?;
+                    if let Some(result) = job.result {
+                        return Ok::<_, ServiceError>((index, result));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             })
             .buffer_unordered(self.max_concurrent_documents)
-            .collect::<Vec<_>>()
-            .await;
-        indexed_documents.sort_unstable_by_key(|(index, _)| *index);
-        let documents = indexed_documents
-            .into_iter()
-            .map(|(_, document)| document)
-            .collect::<ServiceResult<Vec<_>>>()?;
-        let succeeded = documents.iter().filter(|document| document.success).count();
-        let skipped = documents.iter().filter(|document| document.skipped).count();
-
+            .try_collect::<Vec<_>>()
+            .await?;
+        indexed.sort_by_key(|(index, _)| *index);
+        let documents: Vec<_> = indexed.into_iter().map(|(_, document)| document).collect();
+        let succeeded = documents.iter().filter(|d| d.success).count();
+        let skipped = documents.iter().filter(|d| d.skipped).count();
         Ok(ProcessDocumentsResponse {
             total,
             succeeded,
@@ -214,208 +200,87 @@ impl DocumentIngestionService {
             documents,
         })
     }
-
-    async fn process_uploaded_document(
+    pub(crate) async fn process_claim(
         &self,
-        file: UploadedDocument,
-        deal_id: String,
-        actor_id: i64,
-    ) -> ServiceResult<ProcessedDocument> {
-        let _lifetime = match &self.lifecycle {
-            Some(gate) => Some(gate.admit(&deal_id).await),
-            None => None,
-        };
-        self.files.authorize_upload(&deal_id, actor_id).await?;
-        let filename = file.filename.clone();
-        let content_hash = uploaded_document_content_hash(&file);
-        let document_id = document_id_from_content(&deal_id, &content_hash);
-        let attachment_lock_id = format!("{deal_id}\0{document_id}");
-        let _processing_guard = self.lock_processing(&attachment_lock_id).await;
-        let existing_attachment = match self
-            .files
-            .find_current_by_hash(&deal_id, &content_hash)
-            .await
-        {
-            Ok(attachment) => attachment,
-            Err(error) => {
-                return Ok(failed_document(
-                    filename,
-                    format!("failed to check for an existing deal attachment: {error}"),
-                ));
-            }
-        };
-        if let Some(existing) = &existing_attachment {
-            if let Some(outcome) = self
-                .existing_attachment_outcome(&deal_id, existing, &content_hash, &filename)
-                .await?
-            {
-                return Ok(outcome);
+        claim: super::repository::Claimed,
+    ) -> ServiceResult<()> {
+        let _admission = self.admit_deal(&claim.attempt.deal).await;
+        let attempt = claim.attempt.clone();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(570),
+            self.prepare_and_commit(claim),
+        )
+        .await;
+        match result {
+            Ok(Ok(())) => Ok(()),
+            _ => {
+                tracing::warn!(job_id=%attempt.id,stage="preparing_or_committing",category="attempt_failed","document attempt failed");
+                self.queue().fail(&attempt).await?;
+                Err(ServiceError::unavailable("document processing failed"))
             }
         }
-
+    }
+    async fn prepare_and_commit(&self, claim: super::repository::Claimed) -> ServiceResult<()> {
+        let attempt = claim.attempt;
+        self.files
+            .authorize_upload(&attempt.deal, attempt.actor)
+            .await?;
+        if attempt.profile_id != self.files.profile().id {
+            return Err(ServiceError::unavailable(
+                "document embedding profile changed",
+            ));
+        }
+        if self.files.complete_current_attempt(attempt.clone()).await? {
+            return Ok(());
+        }
         let openai = self
             .openai
             .as_ref()
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
-        Ok(
-            match self
-                .process_document(
-                    file,
-                    deal_id,
-                    actor_id,
-                    existing_attachment.as_ref(),
-                    openai,
-                )
-                .await
-            {
-                Ok((document_id, chunk_count)) => ProcessedDocument {
-                    filename,
-                    document_id: Some(document_id),
-                    chunk_count,
-                    success: true,
-                    sqlite_committed: true,
-                    skipped: false,
-                    error: None,
-                },
-                Err(error) => failed_document(filename, error),
-            },
-        )
-    }
-
-    /// Only a complete projection of the canonical immutable version can skip processing.
-    /// Missing or stale graph state falls through to repair; an unavailable graph fails closed.
-    async fn existing_attachment_outcome(
-        &self,
-        deal_id: &str,
-        existing: &PersistedFileIdentity,
-        content_hash: &str,
-        filename: &str,
-    ) -> ServiceResult<Option<ProcessedDocument>> {
-        let indexed = match self
-            .graph_reader
-            .current_document(deal_id, &existing.file_id)
-            .await
-        {
-            Ok(Some(indexed))
-                if indexed.version.version_id == existing.version_id
-                    && indexed.version.content_sha256 == content_hash =>
-            {
-                indexed
-            }
-            Ok(_) => return Ok(None),
-            Err(error) => {
-                return Ok(Some(failed_document(
-                    filename.to_owned(),
-                    format!("failed to check the existing deal attachment index: {error}"),
-                )))
-            }
-        };
-        let manifest = self
-            .files
-            .manifest(existing.version_id.clone())
-            .await?
-            .ok_or_else(|| ServiceError::internal("identity manifest missing"))?;
-        let active = manifest
-            .chunks
-            .iter()
-            .filter(|chunk| chunk.index_generation == manifest.active_generation)
-            .cloned()
-            .collect::<Vec<_>>();
-        let complete = match self
-            .graph_reader
-            .has_complete_chunks(deal_id, &active)
-            .await
-        {
-            Ok(complete) => complete,
-            Err(error) => {
-                return Ok(Some(failed_document(
-                    filename.to_owned(),
-                    format!("failed to verify the existing deal attachment index: {error}"),
-                )))
-            }
-        };
-        if !complete || indexed.version.index_generation != manifest.active_generation {
-            return Ok(None);
-        }
-        Ok(Some(ProcessedDocument {
-            filename: filename.to_owned(),
-            document_id: Some(manifest.document_id),
-            chunk_count: 0,
-            success: true,
-            sqlite_committed: true,
-            skipped: true,
-            error: None,
-        }))
-    }
-
-    async fn process_document(
-        &self,
-        file: UploadedDocument,
-        deal_id: String,
-        actor_id: i64,
-        existing_attachment: Option<&PersistedFileIdentity>,
-        openai: &OpenAiClient,
-    ) -> Result<(String, usize), IngestionError> {
-        let filename = file.filename.clone();
-        let recovery = match existing_attachment {
-            Some(existing)
-                if infer_supported_image_mime_type(Path::new(&existing.display_name)).is_some() =>
-            {
-                Some(
-                    self.files
-                        .image_assembly(&existing.version_id)
-                        .await
-                        .map_err(|e| e.to_string())?
-                        .ok_or(
-                            "accepted image text is unavailable; maintenance recovery required",
-                        )?,
-                )
-            }
-            _ => None,
-        };
-        let mut graph = parse_document(
-            file,
-            deal_id.clone(),
+        let mut parsed = parse_document(
+            claim.file,
+            attempt.deal.clone(),
             openai,
             &self.image_description_model,
-            Arc::clone(&self.office_parse_semaphore),
-            recovery,
+            self.office_parse_semaphore.clone(),
+            claim.image,
         )
-        .await?;
-        if let Some(existing) = existing_attachment {
-            graph.document.file_id.clone_from(&existing.file_id);
-            graph.document.file_name.clone_from(&existing.display_name);
+        .await
+        .map_err(ServiceError::internal)?;
+        parsed.document.file_id = attempt.file_id.clone();
+        if infer_supported_image_mime_type(Path::new(&attempt.filename)).is_some() {
+            let assembly = ImageAssembly {
+                document: parsed.document.clone(),
+                chunks: parsed.chunks.clone(),
+            };
+            self.queue()
+                .checkpoint_image(
+                    &attempt,
+                    serde_json::to_string(&assembly)
+                        .map_err(|_| ServiceError::internal("image checkpoint encoding failed"))?,
+                )
+                .await?;
         }
-        let manifest_key = crate::shared::ids::file_version_id(
-            &graph.document.file_id,
-            &graph.document.content_hash,
-        );
-        let document_id = self
-            .files
-            .manifest(manifest_key)
-            .await
-            .map_err(|e| e.to_string())?
-            .map(|m| m.document_id)
-            .unwrap_or_else(|| graph.document.document_id.clone());
-        let chunk_count = graph.chunks.len();
         self.embed_chunks(
-            &filename,
-            graph.document.file_size_bytes,
-            &mut graph.chunks,
+            &attempt.filename,
+            parsed.document.file_size_bytes,
+            &mut parsed.chunks,
             openai,
         )
-        .await?;
+        .await
+        .map_err(ServiceError::internal)?;
         persist_document_and_chunks(
             &self.files,
-            &self.graph_writer,
-            &deal_id,
-            actor_id,
-            graph.document,
-            graph.chunks,
-            graph.file_bytes,
+            &attempt.deal,
+            attempt.actor,
+            parsed.document,
+            parsed.chunks,
+            parsed.file_bytes,
+            Some(attempt.clone()),
         )
-        .await?;
-        Ok((document_id, chunk_count))
+        .await
+        .map_err(|_| ServiceError::internal("document commit failed"))?;
+        Ok(())
     }
 
     async fn embed_chunks(
@@ -448,7 +313,15 @@ impl DocumentIngestionService {
 
         for (batch, embeddings) in batch_results {
             for (chunk, embedding) in chunks[batch.start..batch.end].iter_mut().zip(embeddings) {
-                chunk.embedding = Some(embedding.into_iter().map(|value| value as f32).collect());
+                chunk.embedding = Some(
+                    crate::adapters::postgres::vector::CosineVector::from_f64(
+                        &embedding,
+                        self.files.profile().dimensions,
+                    )
+                    .map_err(|_| "invalid provider embedding".to_string())?
+                    .as_slice()
+                    .to_vec(),
+                );
             }
         }
         Ok(())
@@ -508,22 +381,6 @@ impl DocumentIngestionService {
         }
         Ok((batch, embeddings))
     }
-
-    async fn lock_processing(&self, document_id: &str) -> OwnedMutexGuard<()> {
-        let lock = {
-            let mut locks = self.processing_locks.lock().await;
-            locks.retain(|_, lock| lock.strong_count() > 0);
-            match locks.get(document_id).and_then(Weak::upgrade) {
-                Some(lock) => lock,
-                None => {
-                    let lock = Arc::new(Mutex::new(()));
-                    locks.insert(document_id.to_string(), Arc::downgrade(&lock));
-                    lock
-                }
-            }
-        };
-        lock.lock_owned().await
-    }
 }
 
 fn uploaded_document_content_hash(file: &UploadedDocument) -> String {
@@ -575,24 +432,6 @@ fn embedding_batches(chunks: &[DocumentChunk]) -> Result<Vec<EmbeddingBatch>, St
     Ok(batches)
 }
 
-fn failed_document(filename: String, error: impl Into<IngestionError>) -> ProcessedDocument {
-    let sqlite_committed = error.into().sqlite_committed();
-    let message = if sqlite_committed {
-        "Document was stored, but indexing failed. Refresh documents and retry the same file to recover indexing."
-    } else {
-        "Document processing failed. Check the file and your deal access, then retry."
-    };
-    ProcessedDocument {
-        filename,
-        document_id: None,
-        chunk_count: 0,
-        success: false,
-        skipped: false,
-        sqlite_committed,
-        error: Some(message.into()),
-    }
-}
-
 async fn parse_document(
     file: UploadedDocument,
     deal_id: String,
@@ -600,14 +439,14 @@ async fn parse_document(
     image_description_model: &str,
     office_parse_semaphore: Arc<Semaphore>,
     recovery: Option<ImageAssembly>,
-) -> Result<ParsedDocumentGraph, String> {
+) -> Result<ParsedDocument, String> {
     if let Some(assembly) = recovery {
         if assembly.document.deal_id != deal_id
             || assembly.document.content_hash != uploaded_document_content_hash(&file)
         {
             return Err("stored image recovery does not match upload".into());
         }
-        return Ok(ParsedDocumentGraph {
+        return Ok(ParsedDocument {
             document: assembly.document,
             chunks: assembly.chunks,
             file_bytes: file.bytes,
@@ -625,7 +464,7 @@ async fn parse_document(
             } else {
                 parse_file_document(file, &deal_id, office_parse_semaphore).await?
             };
-        Ok(ParsedDocumentGraph {
+        Ok(ParsedDocument {
             document,
             chunks,
             file_bytes,

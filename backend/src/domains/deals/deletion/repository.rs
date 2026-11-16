@@ -336,9 +336,16 @@ impl DeletionRepository {
                 )
                 .await?;
                 tx.write(
+                    Q::update("deal_deletion_files")
+                        .set("purged", 1)
+                        .and_where(C::equal("deletion_id", &op.deletion_id))
+                        .build(),
+                )
+                .await?;
+                tx.write(
                     Q::update("deal_deletions")
                         .set("status", "running")
-                        .set("phase", "graph")
+                        .set("phase", "verifying")
                         .set("updated_at", now())
                         .and_where(C::equal("deletion_id", op.deletion_id))
                         .build(),
@@ -347,37 +354,6 @@ impl DeletionRepository {
                 Ok(())
             })
             .await
-    }
-    pub(super) async fn files(&self, id: String) -> Result<Vec<String>, RepositoryError> {
-        let q = Q::select("deal_deletion_files")
-            .columns(["file_id"])
-            .and_where(C::equal("deletion_id", id))
-            .and_where(C::equal("purged", 0));
-        Ok(self
-            .postgres
-            .read_with_async(
-                q.order_by("file_id", SortDirection::Ascending)
-                    .limit(64)
-                    .build(),
-                |r| r.get(0),
-            )
-            .await?)
-    }
-    pub(super) async fn purged_file(
-        &self,
-        id: String,
-        file: String,
-    ) -> Result<(), RepositoryError> {
-        self.postgres
-            .write_async(
-                Q::update("deal_deletion_files")
-                    .set("purged", 1)
-                    .and_where(C::equal("deletion_id", id))
-                    .and_where(C::equal("file_id", file))
-                    .build(),
-            )
-            .await?;
-        Ok(())
     }
     pub(super) async fn failure(&self, id: String, blocked: bool) -> Result<(), RepositoryError> {
         self.postgres

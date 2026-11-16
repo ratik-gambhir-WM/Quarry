@@ -32,38 +32,131 @@ pub struct StoredDocumentBlob {
 #[derive(Clone)]
 pub struct DocumentStore {
     postgres: PostgresClient,
+    profile: super::search_repository::EmbeddingProfile,
 }
 
 impl DocumentStore {
     pub fn new(postgres: PostgresClient) -> Self {
-        Self { postgres }
+        Self {
+            postgres,
+            profile: super::search_repository::EmbeddingProfile::new(
+                "text-embedding-3-small".into(),
+                1536,
+            ),
+        }
     }
 
+    pub(crate) fn with_profile(mut self, model: String, dimensions: usize) -> Self {
+        self.profile = super::search_repository::EmbeddingProfile::new(model, dimensions);
+        self
+    }
+    pub(crate) fn profile(&self) -> &super::search_repository::EmbeddingProfile {
+        &self.profile
+    }
+    /// Reconcile exact-content work under current file, membership and attempt locks.
+    pub(crate) async fn complete_current_attempt(
+        &self,
+        attempt: crate::domains::documents::ingestion::repository::Attempt,
+    ) -> Result<bool, RepositoryError> {
+        let profile = self.profile.id.clone();
+        self.postgres
+            .transaction_result_async(move |tx| async move {
+                use crate::adapters::postgres::query::{LockWait, RowLock};
+                crate::domains::deals::coordination::lock_authority(
+                    &tx,
+                    &attempt.deal,
+                    RowLock::Share,
+                )
+                .await?;
+                crate::domains::memberships::require_deal(
+                    &tx,
+                    &attempt.deal,
+                    attempt.actor,
+                    crate::domains::memberships::model::Capability::Upload,
+                )
+                .await?;
+                let file = tx
+                    .lock_with(
+                        SqlBuilder::select("quarry_files")
+                            .columns(["file_id"])
+                            .and_where(Condition::equal("file_id", &attempt.file_id))
+                            .and_where(Condition::equal("deal_id", &attempt.deal))
+                            .and_where(Condition::is_null("deleted_at"))
+                            .lock(RowLock::Share, LockWait::Wait)
+                            .build(),
+                        |row| row.get::<_, String>(0),
+                    )
+                    .await?;
+                if file.is_empty() {
+                    return Ok(false);
+                }
+                let version = tx
+                    .read_one_with(
+                        SqlBuilder::select("quarry_file_versions")
+                            .columns(["quarry_file_versions.version_id"])
+                            .inner_join(
+                                "document_identity_manifests",
+                                "quarry_file_versions.version_id",
+                                "document_identity_manifests.version_id",
+                            )
+                            .and_where(Condition::equal(
+                                "quarry_file_versions.file_id",
+                                &attempt.file_id,
+                            ))
+                            .and_where(Condition::equal(
+                                "quarry_file_versions.content_sha256",
+                                &attempt.hash,
+                            ))
+                            .and_where(Condition::equal("quarry_file_versions.is_current", 1))
+                            .and_where(Condition::equal(
+                                "document_identity_manifests.search_ready",
+                                1,
+                            ))
+                            .build(),
+                        |row| row.get::<_, String>(0),
+                    )
+                    .await?;
+                let Some(version) = version else {
+                    return Ok(false);
+                };
+                let manifest = super::identity_repository::read(&tx, &version)
+                    .await?
+                    .ok_or_else(|| RepositoryError::invalid("document manifest missing"))?;
+                let rows = tx
+                    .read_with(
+                        SqlBuilder::select("document_chunks")
+                            .columns(["profile_id"])
+                            .inner_join(
+                                "document_chunk_identities",
+                                "document_chunks.chunk_id",
+                                "document_chunk_identities.chunk_id",
+                            )
+                            .and_where(Condition::equal(
+                                "document_chunk_identities.version_id",
+                                version,
+                            ))
+                            .build(),
+                        |row| row.get::<_, String>(0),
+                    )
+                    .await?;
+                if rows.len() != manifest.chunks.len() || rows.iter().any(|id| id != &profile) {
+                    return Err(RepositoryError::Conflict(
+                        "document search profile or complete set differs".into(),
+                    ));
+                }
+                attempt.lock_and_check(&tx).await?;
+                attempt
+                    .complete(&tx, &manifest.document_id, manifest.chunks.len(), true)
+                    .await?;
+                Ok(true)
+            })
+            .await
+    }
     pub async fn manifest(
         &self,
         version: String,
     ) -> Result<Option<super::identity::IdentityManifest>, RepositoryError> {
-        super::identity::manifest(&self.postgres, version).await
-    }
-    pub(crate) async fn image_assembly(
-        &self,
-        version: &str,
-    ) -> Result<Option<crate::domains::documents::formats::image::ImageAssembly>, RepositoryError>
-    {
-        let json = self
-            .postgres
-            .read_one_with_async(
-                SqlBuilder::select("document_image_recovery")
-                    .columns(["assembly_json"])
-                    .and_where(Condition::equal("version_id", version))
-                    .build(),
-                |r| r.get::<_, String>(0),
-            )
-            .await?;
-        json.map(|json| {
-            serde_json::from_str(&json).map_err(|e| RepositoryError::storage(e.to_string()))
-        })
-        .transpose()
+        super::identity_repository::manifest(&self.postgres, version).await
     }
     pub async fn authorize_read(&self, deal: &str, actor: i64) -> Result<(), RepositoryError> {
         let deal = deal.to_string();
@@ -126,11 +219,13 @@ impl DocumentStore {
             .map_err(RepositoryError::storage)
     }
 
-    pub(crate) async fn persist(
+    pub(crate) async fn persist_complete(
         &self,
         input: FilePersistenceInput,
+        chunks: super::search_repository::PreparedChunks,
+        attempt: Option<crate::domains::documents::ingestion::repository::Attempt>,
     ) -> Result<PersistedFileIdentity, RepositoryError> {
-        persist_file_blob(&self.postgres, input).await
+        persist_file_blob(&self.postgres, input, chunks, attempt).await
     }
 }
 
@@ -296,7 +391,21 @@ async fn find_current_postgres_file_by_content_hash(
 async fn persist_file_blob(
     postgres: &PostgresClient,
     file_persistence: FilePersistenceInput,
+    chunks: super::search_repository::PreparedChunks,
+    attempt: Option<crate::domains::documents::ingestion::repository::Attempt>,
 ) -> Result<PersistedFileIdentity, RepositoryError> {
+    if let Some(attempt) = &attempt {
+        if attempt.deal != file_persistence.deal_id
+            || attempt.actor != file_persistence.actor_id
+            || attempt.hash != file_persistence.content_sha256
+            || attempt.file_id != file_persistence.file_id
+            || attempt.profile_id != chunks.profile.id
+        {
+            return Err(RepositoryError::Conflict(
+                "prepared document differs from immutable accepted operation".into(),
+            ));
+        }
+    }
     postgres
         .transaction_result_async(move |transaction| async move {
             let transaction = &transaction;
@@ -337,6 +446,9 @@ async fn persist_file_blob(
             // The aggregate is always mutated parent-to-child.
             validate_existing_quarry_file(transaction, &file_persistence).await?;
             upsert_quarry_file(transaction, &file_persistence).await?;
+            if let Some(attempt) = &attempt {
+                attempt.lock_and_check(transaction).await?;
+            }
 
             if let Some(existing) =
                 find_existing_file_version(transaction, &file_persistence).await?
@@ -382,9 +494,59 @@ async fn persist_file_blob(
                 .manifest
                 .as_ref()
                 .ok_or_else(|| PostgresError::transaction_aborted("identity manifest required"))?;
-            super::identity::save(transaction, &file_persistence.version_id, manifest, true)
-                .await
-                .map_err(|e| PostgresError::transaction_aborted(e.to_string()))?;
+            super::identity_repository::save(
+                transaction,
+                &file_persistence.version_id,
+                manifest,
+                true,
+            )
+            .await
+            .map_err(|e| PostgresError::transaction_aborted(e.to_string()))?;
+            let existing_chunks = transaction
+                .read_with(
+                    SqlBuilder::select("document_chunks")
+                        .columns(["document_chunks.chunk_id"])
+                        .inner_join(
+                            "document_chunk_identities",
+                            "document_chunks.chunk_id",
+                            "document_chunk_identities.chunk_id",
+                        )
+                        .and_where(Condition::equal(
+                            "document_chunk_identities.version_id",
+                            &file_persistence.version_id,
+                        ))
+                        .build(),
+                    |r| r.get::<_, String>(0),
+                )
+                .await?;
+            if chunks.rows.len() != manifest.chunks.len() {
+                return Err(RepositoryError::invalid("document chunk count differs"));
+            }
+            let replay = !existing_chunks.is_empty();
+            if replay {
+                let incoming: std::collections::HashSet<_> = chunks
+                    .rows
+                    .iter()
+                    .map(|(c, _, _)| c.chunk_id.clone())
+                    .collect();
+                if existing_chunks.len() != incoming.len()
+                    || existing_chunks.iter().any(|id| !incoming.contains(id))
+                {
+                    return Err(RepositoryError::Conflict(
+                        "stored document differs from accepted batch".into(),
+                    ));
+                }
+            } else {
+                chunks.insert(transaction).await?;
+            }
+            transaction
+                .write(
+                    SqlBuilder::update("document_identity_manifests")
+                        .set("search_ready", 1)
+                        .and_where(Condition::equal("version_id", &file_persistence.version_id))
+                        .build(),
+                )
+                .await?;
             if let Some(assembly) = &file_persistence.image_assembly_json {
                 let existing = transaction
                     .read_one_with(
@@ -414,7 +576,20 @@ async fn persist_file_blob(
                     }
                 }
             }
-            Ok(read_back_persisted_file_identity(transaction, &file_persistence).await?)
+            let identity =
+                read_back_persisted_file_identity(transaction, &file_persistence).await?;
+            transaction.validate_deferred_constraints().await?;
+            if let Some(attempt) = &attempt {
+                attempt
+                    .complete(
+                        transaction,
+                        &manifest.document_id,
+                        manifest.chunks.len(),
+                        replay,
+                    )
+                    .await?;
+            }
+            Ok(identity)
         })
         .await
 }
@@ -756,5 +931,5 @@ fn invalid_row_value(column: &str, expected: &str) -> PostgresError {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/integration/domains/documents/store/postgres_tests.rs"]
+#[path = "../../../../tests/integration/domains/documents/store/repository_tests.rs"]
 mod tests;

@@ -568,3 +568,86 @@ fn notebook_query_increment_and_literal_substring_remain_typed_and_bound() {
         &[SqlValue::Text("%\\%\\_\\\\' OR 1=1%".into())]
     );
 }
+
+#[test]
+fn batch_insert_binds_rows_in_order_without_conflict_skipping() {
+    let query = SqlBuilder::insert_batch(
+        "chunks",
+        ["id", "text"],
+        vec![
+            vec![1.into(), "first".into()],
+            vec![2.into(), "second".into()],
+        ],
+    )
+    .build()
+    .unwrap();
+    assert_eq!(
+        query.sql(),
+        "INSERT INTO \"chunks\" (\"id\", \"text\") VALUES ($1, $2), ($3, $4)"
+    );
+    assert_eq!(
+        query.parameters(),
+        &[1.into(), "first".into(), 2.into(), "second".into()]
+    );
+    assert_eq!(query.kind(), QueryKind::Insert);
+    for rows in [
+        vec![],
+        vec![vec![1.into()]],
+        vec![vec![1.into(), 2.into()]; 129],
+    ] {
+        assert!(SqlBuilder::insert_batch("chunks", ["id", "text"], rows)
+            .build()
+            .is_err());
+    }
+    assert!(
+        SqlBuilder::insert_batch("chunks", ["id", "id"], vec![vec![1.into(), 2.into()]])
+            .build()
+            .is_err()
+    );
+}
+
+#[test]
+fn grouped_conditions_and_rank_parameters_keep_placeholder_order() {
+    let query = SqlBuilder::select("chunks")
+        .column("id")
+        .expression(
+            super::SelectExpression::TextRank {
+                column: "lexical".into(),
+                text: "alpha beta".into(),
+            },
+            "score",
+        )
+        .and_where(Condition::all([
+            Condition::equal("owner", 7),
+            Condition::any([
+                Condition::equal("state", "queued"),
+                Condition::all([
+                    Condition::equal("state", "processing"),
+                    Condition::expired("deadline"),
+                ]),
+            ]),
+        ]))
+        .and_where(Condition::text_matches("lexical", "alpha beta"))
+        .order_by("score", SortDirection::Descending)
+        .limit(50)
+        .build()
+        .unwrap();
+    assert_eq!(
+        query.parameters(),
+        &[
+            "alpha beta".into(),
+            "alpha beta".into(),
+            7.into(),
+            "queued".into(),
+            "processing".into(),
+            "alpha beta".into()
+        ]
+    );
+    assert!(query
+        .sql()
+        .contains("plainto_tsquery('pg_catalog.simple',$6)"));
+    assert!(SqlBuilder::select("chunks")
+        .and_where(Condition::any([]))
+        .build()
+        .is_err());
+}

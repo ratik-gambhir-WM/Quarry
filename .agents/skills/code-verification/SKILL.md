@@ -224,3 +224,14 @@ Domain claims/recovery and remote fencing still need their own integration evide
 cross-store compatibility tests only against an explicitly selected fresh Helix instance. Preserve
 and report ownership of validation processes/ports, containers, volumes and schemas; clean only
 those created by the current task. See `docs/postgresql-storage.md`.
+
+## Document SQL cutover verification
+
+Real document/vector tests require the explicitly provisioned vector 0.8.6 extension in the
+separate `quarry_extensions` schema of the selected `_test` database. Follow
+`docs/postgresql-storage.md`; never install/drop it per test or use the explicit destructive
+`reset_postgres --confirm-reset` utility as verification. Cover complete multi-batch rollback,
+deferred failure, old/new snapshots, cancellation, immutable image input, token/DB-clock fencing,
+identity convergence, profile/current authorization and legacy DTO/fusion behavior. Document
+repositories must have no Helix dependency; notebook/template Helix behavior is retained. Report
+large-corpus relevance/load and alternative-ranker evidence separately from correctness tests.

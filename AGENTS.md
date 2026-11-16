@@ -70,10 +70,12 @@ not exist.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
 - `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 2, checksums and catalog fingerprints.
+  `app/migrations.rs` initializes/validates version 3, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
-  schemas. Old SQLite files and Helix stores remain untouched; no import, fallback or reset exists.
+  schemas. Old SQLite files and Helix stores remain outside schema initialization; no import/fallback exists.
+  The explicitly invoked `reset_postgres --confirm-reset` MVP utility recreates recognized SQL
+  product objects atomically, refuses unrelated objects/active writers, and never runs at startup.
 - Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
@@ -123,6 +125,10 @@ request -> router -> handler -> service -> repository/client
 - Handlers extract and validate transport input, call one or more services, and map output.
 - Services own use-case orchestration and typed service errors.
 - Repositories own persistence/index operations and depend on narrow clients.
+- Name domain data access modules `repository.rs` or a specific `*_repository.rs` (for
+  example `search_repository.rs`). Keep feature table names, joins, scope policy and
+  query composition in those repositories. The shared PostgreSQL `query/` module owns
+  only reusable typed SQL building mechanisms; do not add feature-specific query layers there.
 - Services and repositories must not import `AppState`, read ambient environment variables, or
   construct infrastructure clients. Current architecture tests cover lower-layer `AppState`
   imports and ambient configuration reads; preserve the full boundary and extend the tests when
@@ -143,17 +149,27 @@ request -> router -> handler -> service -> repository/client
 
 ### Persistence and indexing
 
+- **MVP PostgreSQL schema policy — effective 2026-11-15:** Quarry is currently at the MVP
+  stage. When implementing PostgreSQL schema changes, it is okay to drop and recreate affected
+  product tables and discard their existing MVP data. A request to implement a schema change
+  authorizes this approach; do not require preserving migrations/backfills or ask the user to
+  choose between migration and recreation unless they explicitly request data preservation.
+  Use the guarded reset utility when recreating the full product schema. Keep recreation an
+  explicit development operation, never automatic startup or failure-recovery behavior, and
+  leave unrelated databases, SQLite files and Helix stores alone. Revisit and replace this
+  temporary policy with a data-preserving migration policy when the product matures.
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
-- Helix remains the graph/search projection, required at normal startup. Ingestion commits
-  PostgreSQL before indexing; graph failure preserves canonical records and exact-content retry
-  reuses the same identity and accepted image text. There is no distributed transaction or general
-  bulk reindex tool. Never delete canonical rows to conceal a graph failure.
-- PostgreSQL schema version 2 adds bounded resource revisions and retained deal lifecycle guards
-  to the former marker-18 layout. Version 1 is intentionally unsupported; select an empty database. Startup
-  initializes an empty selected schema or validates its version, checksum, live catalog and owner/
-  document readiness invariants. Incompatible nonempty layouts fail without deletion. No old-data
-  migration, SQLite fallback or destructive relational reset is supported. Leave old stores alone.
+- Documents own chunks, pgvector embeddings, GIN lexical metadata, original bytes, identities,
+  activity and durable job results in PostgreSQL schema 3. One retained transaction publishes the
+  complete document; accepted input/image checkpoints are separate from canonical commit.
+  See `docs/document-storage.md` for profiles, readiness, limits, attempts and recovery.
+- Helix remains required at startup for notebook/template projections. There is no live document
+  Helix query, index initialization or deletion call. Never clear retained stores for verification.
+- Startup initializes an empty selected schema or validates schema 3, checksums, catalog/indexes,
+  vector extension readiness and document complete-set invariants. It never drops data. Unknown
+  nonempty layouts fail intact; there is no populated-schema upgrade, import or fallback. An MVP
+  reset follows the dated MVP policy above and uses the guarded reset utility, never an automatic retry.
 - One application writer lease is retained by the pool's dedicated session through router and
   detached-worker clones. Writes fail closed on ownership loss. Reads use ordinary pooled
   connections with no writer-session ping, ownership/generation check or explicit row lock,
@@ -166,7 +182,7 @@ request -> router -> handler -> service -> repository/client
   multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
   BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
-  document and template Helix projection/search contracts remain unchanged.
+  template Helix projection/search contracts remain unchanged; document retrieval is SQL-owned.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
 - Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook indexes. Template vector
@@ -175,7 +191,7 @@ request -> router -> handler -> service -> repository/client
   a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
   `docs/postgresql-storage.md` for the verified-empty-index case.
 - `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
-  drained operational procedure; never use it as verification. Document jobs/caches remain in memory.
+  drained operational procedure; never use it as verification. Document jobs are durable SQL inputs/attempts/results; query/preview caches remain in memory.
 - See `docs/postgresql-storage.md` for server-only URL/pool configuration, fresh local graph port
   6970, isolated PostgreSQL tests, backups and recovery.
 
@@ -306,6 +322,10 @@ being changed, keep abstractions proportional to its complexity, and preserve un
 Start with the narrowest relevant check, then run the applicable broader gate. The detailed
 decision tree is in the code-verification skill.
 
+Before handing off Rust changes, run `cargo fmt --all` from each affected Rust build root
+(`backend/` or `frontend/src-tauri/`), then verify with `cargo fmt --all -- --check`. Inspect
+the formatting diff and keep unrelated user work untouched.
+
 ### Shared React/Vite (`frontend/`)
 
 ```sh
@@ -347,6 +367,12 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 `autotests = false`; unit tests mirror `backend/src/` under `backend/tests/unit/`, and cross-module
 suites live under `backend/tests/integration/`. Both are included manually with `#[path]`. Use
 `cargo test <name-filter>` for focused tests. Do not invent `cargo test --test <file>` commands.
+
+Real vector codec tests additionally require pgvector 0.8.6 provisioned once in the separate
+`quarry_extensions` schema of the selected `_test` database. Use the explicit
+`backend/tools/provision-pgvector.sql` procedure in `docs/postgresql-storage.md`; tests and
+application startup never install or drop the extension. Document storage/search and durable
+jobs now use schema 3.
 
 Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and connects to Helix. Tests never reset the development database.
 
@@ -394,8 +420,10 @@ container are ready. PostgreSQL, Docker, and Helix remain running after the laun
 ### When changing PostgreSQL or Helix data shape
 
 - Define canonical ownership and stable IDs before coding.
-- Make forward migration and rollback/recovery behavior explicit.
-- Protect existing local data; use temporary databases in tests.
+- For PostgreSQL, follow the dated MVP schema policy above: table recreation is acceptable;
+  preserving migrations/backfills are required only when explicitly requested. State the reset
+  scope and recovery behavior. Keep Helix rollout/recovery behavior explicit separately.
+- Preserve data outside the intended PostgreSQL reset scope; use temporary databases in tests.
 - Verify transactionality, idempotency, foreign keys, current-version uniqueness, and failure paths.
 - Update the canonical architecture and recovery procedure when the operational rollout changes.
 
