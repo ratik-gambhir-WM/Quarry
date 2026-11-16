@@ -22,7 +22,8 @@ pub(super) struct PreparedNote {
     pub dimensions: usize,
     pub source_hash: String,
     pub markdown: String,
-    pub rows: Vec<(String, CosineVector, String)>,
+    phrase_title: String,
+    pub rows: Vec<(String, CosineVector, String, String)>,
 }
 impl PreparedNote {
     pub fn new(
@@ -41,6 +42,7 @@ impl PreparedNote {
             return Err(Error::invalid("invalid notebook artifact batch"));
         }
         let mut bytes = markdown.len();
+        let phrase_title = crate::shared::search_text::lexical_phrase(&note.summary.title);
         let mut rows = Vec::with_capacity(chunks.len());
         for (text, vector) in chunks.into_iter().zip(vectors) {
             if vector.as_slice().len() != dimensions {
@@ -48,19 +50,33 @@ impl PreparedNote {
             }
             let (_, technical) =
                 crate::shared::search_text::lexical_parts(&super::markdown::unescape(&text));
+            // chunks() prefixes a synthetic heading-context line. Exclude that line from
+            // phrase positions so a repeated heading cannot create an invented phrase.
+            let content = text
+                .split_once('\n')
+                .map_or(text.as_str(), |(_, content)| content);
+            let phrase =
+                crate::shared::search_text::lexical_phrase(&super::markdown::unescape(content));
             bytes = bytes
-                .checked_add(text.len() + technical.len() + dimensions * 4)
+                .checked_add(
+                    text.len()
+                        + technical.len()
+                        + phrase.len()
+                        + phrase_title.len()
+                        + dimensions * 4,
+                )
                 .ok_or_else(|| Error::invalid("notebook artifact overflow"))?;
             if text.is_empty() || text.len() > 2561 || bytes > 128 * 1024 * 1024 {
                 return Err(Error::invalid("notebook artifact exceeds bounds"));
             }
-            rows.push((text, vector, technical));
+            rows.push((text, vector, technical, phrase));
         }
         Ok(Self {
             source_hash: source_hash(note, &pipeline)?,
             pipeline,
             dimensions,
             markdown,
+            phrase_title,
             rows,
         })
     }
@@ -99,12 +115,13 @@ impl PreparedNote {
                 .build(),
         )
         .await?;
+        let phrase_title = self.phrase_title;
         let mut rows = self.rows.into_iter().enumerate();
         loop {
             let batch: Vec<Vec<crate::adapters::postgres::query::SqlValue>> = rows
                 .by_ref()
                 .take(64)
-                .map(|(ordinal, (text, vector, technical))| {
+                .map(|(ordinal, (text, vector, technical, phrase))| {
                     Ok(vec![
                         set.into(),
                         i64::try_from(ordinal)
@@ -115,6 +132,8 @@ impl PreparedNote {
                         text.into(),
                         note.summary.title.clone().into(),
                         technical.into(),
+                        phrase.into(),
+                        phrase_title.clone().into(),
                         vector.into(),
                     ])
                 })
@@ -135,6 +154,8 @@ impl PreparedNote {
                             "text",
                             "title",
                             "technical_text",
+                            "phrase_text",
+                            "phrase_title",
                             "embedding",
                         ],
                         batch,
@@ -276,14 +297,29 @@ impl NotebookRepository {
                             },
                             "score",
                         );
-                        if !body.is_empty() {
+                        if phrase {
+                            let text =
+                                crate::shared::search_text::lexical_phrase(&input.query_text);
+                            q = q.and_where(C::any([
+                                C::english_text_matches(
+                                    "notebook_chunks.phrase_vector",
+                                    &text,
+                                    true,
+                                ),
+                                C::english_text_matches(
+                                    "notebook_chunks.phrase_title_vector",
+                                    text,
+                                    true,
+                                ),
+                            ]));
+                        } else if !body.is_empty() {
                             q = q.and_where(C::english_text_matches(
                                 "notebook_chunks.search_vector",
                                 body,
                                 phrase,
                             ));
                         }
-                        if !technical.is_empty() {
+                        if !phrase && !technical.is_empty() {
                             q = q.and_where(C::text_matches(
                                 "notebook_chunks.search_vector",
                                 technical,

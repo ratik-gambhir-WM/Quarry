@@ -225,6 +225,14 @@ the saved revision. Notebook Helix calls and cleanup polling are removed; templa
 Helix. See [notebook API and recovery](notebook-api.md) for slot ordering, profile identity, attempt
 fences and private content search.
 
+The phrase-search correction adds bounded positional title/content projections and a GIN phrase
+index to schema 4, with a `phrases-v1` notebook pipeline fingerprint. Its schema checksum changes;
+an installation initialized from the earlier schema-4 definition must use a fresh selected schema
+or the explicit guarded reset above before running this binary. Startup refuses the earlier
+layout intact. The full SQL reset discards recognized product data, including users, deals, notebooks
+and templates; it leaves unrelated databases, SQLite files and Helix stores alone. No automatic
+backfill, reset or re-embedding is performed.
+
 Drain old workers before cutover. Use a fresh target or the explicit guarded full SQL reset above,
 with backups first. No preserving backfill or re-embedding runs automatically. Reset recognizes
 the old notebook cleanup ledger as a product object; discarding it does not confirm any remote

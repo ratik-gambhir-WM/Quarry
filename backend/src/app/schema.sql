@@ -322,7 +322,7 @@ CREATE TABLE notebook_save_jobs (
     error_code TEXT COLLATE "C",
     lease_token TEXT COLLATE "C",
     lease_until BIGINT,
-    pipeline_version TEXT COLLATE "C" NOT NULL DEFAULT 'notebook-markdown-v1/chunks-v1',
+    pipeline_version TEXT COLLATE "C" NOT NULL DEFAULT 'notebook-markdown-v1/chunks-v1/phrases-v1',
     content_hash TEXT COLLATE "C",
     created_at TEXT COLLATE "C" NOT NULL,
     updated_at TEXT COLLATE "C" NOT NULL,
@@ -368,6 +368,8 @@ CREATE TABLE notebook_chunks (
     chunk_hash TEXT COLLATE "C" NOT NULL CHECK(length(chunk_hash)=64),
     title TEXT COLLATE "C" NOT NULL CHECK(length(title)<=300),
     technical_text TEXT COLLATE "C" NOT NULL CHECK(octet_length(technical_text)<=131072),
+    phrase_text TEXT COLLATE "C" NOT NULL CHECK(octet_length(phrase_text)<=131072),
+    phrase_title TEXT COLLATE "C" NOT NULL CHECK(octet_length(phrase_title)<=131072),
     embedding quarry_extensions.vector(1536) NOT NULL CHECK(quarry_extensions.vector_norm(embedding)>0)
         CHECK((embedding OPERATOR(quarry_extensions.<=>) embedding) BETWEEN 0 AND 0.00001),
     search_vector tsvector GENERATED ALWAYS AS (
@@ -375,10 +377,17 @@ CREATE TABLE notebook_chunks (
         setweight(to_tsvector('pg_catalog.english'::regconfig,text),'B') ||
         setweight(to_tsvector('pg_catalog.simple'::regconfig,technical_text),'C')
     ) STORED,
+    phrase_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('pg_catalog.english'::regconfig,phrase_text)
+    ) STORED,
+    phrase_title_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('pg_catalog.english'::regconfig,phrase_title)
+    ) STORED,
     PRIMARY KEY(set_id,ordinal),
     FOREIGN KEY(set_id,profile_id) REFERENCES notebook_search_sets(set_id,profile_id)
 );
 CREATE INDEX idx_notebook_chunks_lexical ON notebook_chunks USING gin(search_vector);
+CREATE INDEX idx_notebook_chunks_phrase ON notebook_chunks USING gin(phrase_vector,phrase_title_vector);
 CREATE INDEX idx_notebook_sets_note ON notebook_search_sets(note_id,set_id);
 CREATE INDEX idx_notebook_chunks_profile ON notebook_chunks(profile_id,set_id);
 

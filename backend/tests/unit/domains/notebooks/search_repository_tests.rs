@@ -377,6 +377,82 @@ async fn notebook_lexical_unicode_phrase_technical_prefix_and_cosine_are_scoped_
 }
 
 #[tokio::test]
+async fn notebook_technical_phrases_preserve_positions_and_english_stemming() {
+    let (repo, book) = setup().await;
+    let claim = admitted(&repo, &book, None, "C++ guides API_v2", None).await;
+    repo.commit_test(&claim).await.unwrap();
+    let mut input = test_support::input("Body phrases");
+    input.blocks = PatchField::Value(serde_json::json!([{
+        "id": "paragraph", "type": "paragraph", "props": {}, "children": [],
+        "content": [{"type":"text", "text":"C# reference API_v3. C++ unrelated API_v3.", "styles":{}}]
+    }]));
+    repo.admit(1, book.clone(), None, input).await.unwrap();
+    let body = repo.claim().await.unwrap().unwrap();
+    repo.commit_test(&body).await.unwrap();
+    let pair = admitted(&repo, &book, None, "C++ API_v4", None).await;
+    repo.commit_test(&pair).await.unwrap();
+    // Escaping can split one technical title token across Markdown chunks. The title's
+    // positional projection must still be searchable without a chunk-level token filter.
+    let long_title = format!("a{}", "_".repeat(299));
+    let long = admitted(&repo, &book, None, &long_title, None).await;
+    repo.commit_test(&long).await.unwrap();
+    let long_query = format!("\"{long_title}\"");
+    for (query, matches) in [
+        ("\"C++ guide API_v2\"", true),
+        ("\"API_v2 guide C++\"", false),
+        ("\"C++ API_v2\"", false),
+        ("\"C# guide API_v2\"", false),
+        ("C++ API_v2", true),
+        ("\"C# reference API_v3\"", true),
+        ("\"C++ reference API_v3\"", false),
+        ("\"C++ API_v4\"", true),
+        ("\"API_v4 C++\"", false),
+        (long_query.as_str(), true),
+    ] {
+        let result = repo
+            .search(
+                1,
+                book.clone(),
+                PIPELINE.into(),
+                SearchInput {
+                    query_text: query.into(),
+                    mode: SearchMode::Keyword,
+                    limit: 5,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(!result.hits.is_empty(), matches, "{query}");
+    }
+    let index: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am a ON a.oid=c.relam WHERE c.relnamespace=current_schema()::regnamespace AND c.relname='idx_notebook_chunks_phrase' AND a.amname='gin' AND i.indisvalid)")
+        .fetch_one(repo.postgres.pool()).await.unwrap();
+    assert!(index);
+}
+
+#[tokio::test]
+async fn notebook_unicode_prefix_accepts_combining_marks() {
+    let (repo, book) = setup().await;
+    let claim = admitted(&repo, &book, None, "cafe\u{301} revenue", None).await;
+    repo.commit_test(&claim).await.unwrap();
+    let result = repo
+        .search(
+            1,
+            book,
+            PIPELINE.into(),
+            SearchInput {
+                query_text: "cafe\u{301}*".into(),
+                mode: SearchMode::Keyword,
+                limit: 5,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.hits.len(), 1);
+}
+
+#[tokio::test]
 async fn notebook_old_read_snapshot_retains_complete_set_after_atomic_replacement() {
     let (repo, book) = setup().await;
     let old = admitted(&repo, &book, None, "Original", None).await;

@@ -535,3 +535,40 @@ async fn notebook_search_revalidates_session_after_paused_provider() {
     app.pipeline.gate.notify_one();
     assert_eq!(pending.await.unwrap().status(), 401);
 }
+
+#[tokio::test]
+async fn notebook_search_phrase_order_and_unicode_prefix_work_over_http() {
+    let app = test_support::application().await;
+    let id = book(&app).await;
+    let job = save(
+        &app,
+        &format!("/api/v1/notebooks/{id}/notes"),
+        "POST",
+        json!({
+            "operationId": uuid::Uuid::new_v4().to_string(), "title": "C++ API_v2 cafe\u{301}",
+            "blocks": [], "contentSchemaVersion": 1,
+        }),
+    )
+    .await;
+    for (query, count) in [
+        ("\"C++ API_v2\"", 1),
+        ("\"API_v2 C++\"", 0),
+        ("cafe\u{301}*", 1),
+    ] {
+        let (status, _, results) = call(
+            &app,
+            "POST",
+            &format!("/api/v1/notebooks/{id}/search"),
+            Some(json!({
+                "queryText": query, "mode": "keyword", "limit": 5,
+            })),
+            1,
+        )
+        .await;
+        assert_eq!(status, 200, "{query}: {results}");
+        assert_eq!(results["hits"].as_array().unwrap().len(), count, "{query}");
+        if count > 0 {
+            assert_eq!(results["hits"][0]["noteId"], job["noteId"]);
+        }
+    }
+}

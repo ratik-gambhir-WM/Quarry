@@ -38,7 +38,7 @@ pub enum SqlBuilderError {
     InvalidInsertBatch,
     #[error("condition group cannot be empty")]
     EmptyConditionGroup,
-    #[error("text prefix must contain only letters and numbers")]
+    #[error("text prefix must contain letters or numbers with optional combining marks")]
     InvalidTextPrefix,
 }
 
@@ -1434,7 +1434,10 @@ fn ascii_lower(expression: &str) -> String {
 }
 
 fn validate_prefix(token: &str) -> Result<(), SqlBuilderError> {
-    if token.is_empty() || !token.chars().all(char::is_alphanumeric) {
+    static PREFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\A[\p{L}\p{N}\p{M}]+\z").expect("static text prefix pattern")
+    });
+    if !token.chars().any(char::is_alphanumeric) || !PREFIX.is_match(token) {
         return Err(SqlBuilderError::InvalidTextPrefix);
     }
     Ok(())

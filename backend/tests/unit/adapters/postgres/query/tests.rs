@@ -9,6 +9,49 @@ fn build_error(result: Result<SqlQuery, PostgresError>) -> SqlBuilderError {
 }
 
 #[test]
+fn unicode_prefixes_preserve_bound_parameters_and_reject_query_syntax() {
+    for token in ["cafe\u{301}", "नमस्ते", "revenue", "東京"] {
+        let query = SqlBuilder::select("chunks")
+            .expression(
+                super::SelectExpression::TextPrefixRank {
+                    column: "lexical".into(),
+                    token: token.into(),
+                },
+                "rank",
+            )
+            .and_where(Condition::text_prefix("lexical", token))
+            .build()
+            .unwrap();
+        assert!(!query.sql().contains(token));
+        assert_eq!(query.parameters(), &[token.into(), token.into()]);
+    }
+    for token in ["", "\u{301}", "two words", "a:*", "a' | b", "a\\b", "a\0"] {
+        assert_eq!(
+            build_error(
+                SqlBuilder::select("chunks")
+                    .and_where(Condition::text_prefix("lexical", token))
+                    .build()
+            ),
+            SqlBuilderError::InvalidTextPrefix
+        );
+        assert_eq!(
+            build_error(
+                SqlBuilder::select("chunks")
+                    .expression(
+                        super::SelectExpression::TextPrefixRank {
+                            column: "lexical".into(),
+                            token: token.into(),
+                        },
+                        "rank"
+                    )
+                    .build()
+            ),
+            SqlBuilderError::InvalidTextPrefix
+        );
+    }
+}
+
+#[test]
 fn all_builders_preserve_construction_error_sources() {
     use std::error::Error;
 

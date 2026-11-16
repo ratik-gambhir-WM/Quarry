@@ -23,6 +23,8 @@ The backend topology described here includes the live domain-modularization chan
 
 The root [README](../README.md) provides the product overview, feature status, and roadmap direction;
 [Getting Started](../Getting%20Started.md) covers dependencies, setup, commands, and verification.
+The [key dependency map](dependencies.md) links backend/frontend libraries to their upstream
+documentation and the directories where Quarry integrates them.
 The current code has a broader Tauri
 boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
 Tauri IPC before reaching the same Axum API used by the browser. This document records that
@@ -1540,6 +1542,11 @@ shared typed web/desktop adapters and validated Tauri POST relay. Strict 2000-sc
 limit validation and private ownership precede embedding. GIN English/technical search and exact
 profile-pinned cosine rank only active owner-scoped sets. Hybrid branches share a read snapshot
 and deterministic RRF; bounded final revision/set/owner and HTTP session rechecks precede delivery.
+Quoted phrases use separate GIN-indexed title/content vectors that preserve the positions of
+hashed technical tokens alongside English words, including stemming and stop-word gaps. Synthetic
+chunk heading context is excluded from phrase positions. Unicode prefixes accept combining marks.
+The `phrases-v1` notebook pipeline and updated schema-4 checksum require a fresh schema or explicit
+guarded MVP reset for older schema-4 installations; startup refuses them intact and never resets them.
 There is no ANN index, semantic sidebar integration or editor-offset mapping. The existing sidebar
 metadata filter and explicit-save edit buffers remain unchanged. Pending jobs no longer assign a
 canonical ID to unsaved drafts. SSE names/stages remain compatible; `sqliteCommitted` becomes true

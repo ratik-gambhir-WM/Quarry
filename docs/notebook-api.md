@@ -125,6 +125,13 @@ Search joins only active sets to the owner/notebook/note before ranking and limi
 membership never grants access to another user's notes. Keyword search uses stored title/body
 weighted English vectors plus exact hashed technical tokens and GIN; phrase and single-word prefix
 queries use the shared document analyzer. Markdown literal escapes are undone for technical tokens.
+Quoted phrases retain ordinary and hashed technical tokens in one ordered stream, so `"API_v2 C++"`
+does not match `C++ API_v2`. Dedicated title/content phrase vectors preserve English stemming and
+stop-word gaps; synthetic heading context cannot create phrase matches.
+Prefixes accept Unicode letters, numbers and combining marks (including decomposed accents).
+The `phrases-v1` pipeline changes the schema-4 checksum: older schema-4 installations require a fresh
+schema or the explicit guarded MVP reset described in [storage recovery](postgresql-storage.md).
+Startup leaves incompatible data intact; no automatic upgrade or reset is performed.
 Semantic queries use exact full-precision pgvector cosine inside SQL, pinned to the same fingerprint.
 Hybrid branches run in one read-only repeatable-read snapshot and fuse at most 100 candidates each
 using deterministic reciprocal rank fusion (k=60). There is no ANN index or Rust vector scan.

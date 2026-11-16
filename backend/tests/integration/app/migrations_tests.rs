@@ -25,11 +25,14 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     ] {
         assert!(tables.iter().any(|s| s == table));
     }
+    let phrase_columns: i64 = sqlx::query_scalar("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='notebook_chunks' AND column_name IN ('phrase_text','phrase_title','phrase_vector','phrase_title_vector')")
+        .fetch_one(client.pool()).await.unwrap();
+    assert_eq!(phrase_columns, 4);
     sqlx::query("INSERT INTO app_metadata VALUES ('preserved','value')")
         .execute(client.pool())
         .await
         .unwrap();
-    sqlx::query("DROP INDEX idx_deal_single_owner")
+    sqlx::query("DROP INDEX idx_notebook_chunks_phrase")
         .execute(client.pool())
         .await
         .unwrap();

@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 pub(super) const MAX_REVISION: i64 = 9_007_199_254_740_991;
-pub(super) const PIPELINE: &str = "notebook-markdown-v1/chunks-v1";
+pub(super) const PIPELINE: &str = "notebook-markdown-v1/chunks-v1/phrases-v1";
 
 #[derive(Debug, Default, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
