@@ -233,42 +233,17 @@ impl NotebookRepository {
     }
     pub(super) async fn delete(&self, owner: i64, id: String) -> Result<()> {
         self.postgres
-            .transaction_result_async(move |tx| async move { let tx = &tx;
+            .transaction_result_async(move |tx| async move {
+                let tx = &tx;
                 lock_parent(tx, owner, &id, RowLock::Update).await?;
-                // Include admitted creations that have not reached canonical persistence yet.
-                for table in ["notebook_notes", "notebook_save_jobs"] {
-                    let mut after = String::new();
-                    loop {
-                        let ids = tx.read_with(
-                            Q::select(table)
-                                .columns(["note_id"])
-                                .and_where(C::equal("notebook_id", &id))
-                                .and_where(C::compare(
-                                    "note_id",
-                                    crate::adapters::postgres::query::ComparisonOperator::GreaterThan,
-                                    after,
-                                ))
-                                .order_by("note_id", Sort::Ascending)
-                                .limit(500)
-                                .build(),
-                            |r| r.get::<_, String>(0),
-                        ).await?;
-                        let Some(last) = ids.last() else {
-                            break;
-                        };
-                        after = last.clone();
-                        for note in ids {
-                            enqueue_cleanup(tx, owner, &note).await?;
-                        }
-                    }
-                }
                 tx.write(
                     Q::delete_from("notebooks")
                         .and_where(C::equal("notebook_id", id))
                         .build(),
-                ).await?;
+                )
+                .await?;
                 Ok(())
-             })
+            })
             .await
     }
     pub(super) async fn create_folder(
@@ -455,7 +430,19 @@ impl NotebookRepository {
                     note(tx, &notebook, &id).await?;
                     return Err(conflict());
                 }
-                enqueue_cleanup(tx, owner, &id).await?;
+                let jobs = tx
+                    .read_with(
+                        Q::select("notebook_save_jobs")
+                            .column("job_id")
+                            .and_where(C::equal("note_id", &id))
+                            .and_where(C::in_values("status", ["queued", "processing"]))
+                            .build(),
+                        |r| r.get::<_, String>(0),
+                    )
+                    .await?;
+                for job in jobs {
+                    super::job_repository::release_slot(tx, &job).await?;
+                }
                 tx.write(
                     Q::update("notebook_save_jobs")
                         .set("status", "failed")
@@ -493,18 +480,6 @@ pub(super) async fn relocate_folder(tx: &PostgresTransaction, id: &str) -> Resul
             .set("updated_at", now())
             .increment("revision")
             .and_where(C::equal("folder_id", id))
-            .build(),
-    )
-    .await?;
-    Ok(())
-}
-async fn enqueue_cleanup(tx: &PostgresTransaction, owner: i64, note: &str) -> Result<()> {
-    tx.write(
-        Q::insert_into("notebook_cleanup")
-            .value("note_id", note)
-            .value("user_id", owner)
-            .value("created_at", now())
-            .on_conflict_do_nothing(["note_id"])
             .build(),
     )
     .await?;

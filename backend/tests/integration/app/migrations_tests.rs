@@ -13,7 +13,7 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     .fetch_all(client.pool())
     .await
     .unwrap();
-    assert_eq!(tables.len(), 46); // marker-18 inventory + lexical postings + schema metadata
+    assert_eq!(tables.len(), 50); // schema 4 includes notebook profiles, sets, chunks and admission coordination
     for table in [
         "quarry_files",
         "document_identity_manifests",
@@ -119,9 +119,9 @@ async fn query_plans_use_indexes_for_scoped_access_claims_jobs_and_activity() {
          INSERT INTO deal_activity_events(event_id,deal_id,actor_user_id,kind,created_at)
          SELECT 'event-'||n,'plan-5000',1,'deal_updated',lpad(n::text,8,'0') FROM generate_series(1,10000) n;
          INSERT INTO notebooks(notebook_id,user_id,title,created_at,updated_at) VALUES('book',1,'Book','now','now');
-         INSERT INTO notebook_save_jobs(job_id,user_id,notebook_id,note_id,operation_id,request_hash,input_json,status,stage,created_at,updated_at)
+         INSERT INTO notebook_save_jobs(job_id,user_id,notebook_id,note_id,operation_id,request_hash,input_json,status,stage,created_at,updated_at,committed_revision,committed_set_id)
          SELECT 'job-'||n,1,'book','note-'||n,'operation-'||n,repeat('b',64),'{}',
-                CASE WHEN n=5000 THEN 'queued' ELSE 'completed' END,'persisting','now','now'
+                CASE WHEN n=5000 THEN 'queued' ELSE 'completed' END,'persisting','now','now',CASE WHEN n=5000 THEN NULL ELSE 1 END,CASE WHEN n=5000 THEN NULL ELSE 'fixture-set' END
          FROM generate_series(1,10000) n;
          ANALYZE deals; ANALYZE deal_memberships; ANALYZE quarry_files;
          ANALYZE quarry_file_versions; ANALYZE quarry_current_content;

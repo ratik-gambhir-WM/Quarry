@@ -291,6 +291,7 @@ CREATE TABLE notebook_notes (
     notebook_id TEXT COLLATE "C" NOT NULL REFERENCES notebooks(notebook_id) ON DELETE CASCADE,
     folder_id TEXT COLLATE "C",
     title TEXT COLLATE "C" NOT NULL DEFAULT '' CHECK (length(title) <= 300),
+    active_set_id TEXT COLLATE "C" NOT NULL,
     blocks_json TEXT COLLATE "C" NOT NULL DEFAULT '[]'
         CHECK ((blocks_json IS JSON) AND json_typeof(blocks_json::json) = 'array'),
     content_schema_version BIGINT NOT NULL DEFAULT 1
@@ -314,6 +315,7 @@ CREATE TABLE notebook_save_jobs (
     input_json TEXT COLLATE "C" NOT NULL CHECK((input_json IS JSON)),
     status TEXT COLLATE "C" NOT NULL CHECK(status IN ('queued','processing','completed','failed')),
     stage TEXT COLLATE "C" NOT NULL CHECK(stage IN ('persisting','exporting','chunking','embedding','indexing')),
+    committed_set_id TEXT COLLATE "C",
     committed_revision BIGINT CHECK(committed_revision BETWEEN 1 AND 9007199254740991),
     attempt BIGINT NOT NULL DEFAULT 1 CHECK(attempt BETWEEN 1 AND 5),
     sequence BIGINT NOT NULL DEFAULT 1 CHECK(sequence > 0),
@@ -324,16 +326,61 @@ CREATE TABLE notebook_save_jobs (
     content_hash TEXT COLLATE "C",
     created_at TEXT COLLATE "C" NOT NULL,
     updated_at TEXT COLLATE "C" NOT NULL,
-    UNIQUE(user_id, operation_id)
+    UNIQUE(user_id, operation_id),
+    CHECK ((status='completed')=(committed_revision IS NOT NULL AND committed_set_id IS NOT NULL)),
+    CHECK (status='completed' OR (committed_revision IS NULL AND committed_set_id IS NULL))
 );
 
-CREATE TABLE notebook_cleanup (
-    note_id TEXT COLLATE "C" PRIMARY KEY NOT NULL,
-    user_id BIGINT NOT NULL,
-    created_at TEXT COLLATE "C" NOT NULL,
-    next_attempt_at BIGINT NOT NULL DEFAULT 0,
-    confirmed BIGINT NOT NULL DEFAULT 0 CHECK(confirmed IN (0,1))
+CREATE TABLE notebook_admission_users (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE notebook_save_slots (
+    slot BIGINT PRIMARY KEY CHECK(slot BETWEEN 0 AND 255),
+    job_id TEXT COLLATE "C" UNIQUE REFERENCES notebook_save_jobs(job_id) ON DELETE SET NULL
+);
+INSERT INTO notebook_save_slots(slot) SELECT generate_series(0,255);
+CREATE TABLE notebook_embedding_profiles (
+    profile_id TEXT COLLATE "C" PRIMARY KEY,
+    pipeline TEXT COLLATE "C" NOT NULL,
+    dimensions BIGINT NOT NULL CHECK(dimensions BETWEEN 1 AND 16000),
+    UNIQUE(profile_id, dimensions)
+);
+CREATE TABLE notebook_search_sets (
+    set_id TEXT COLLATE "C" PRIMARY KEY,
+    note_id TEXT COLLATE "C" NOT NULL REFERENCES notebook_notes(note_id) ON DELETE CASCADE,
+    profile_id TEXT COLLATE "C" NOT NULL,
+    dimensions BIGINT NOT NULL,
+    source_hash TEXT COLLATE "C" NOT NULL CHECK(length(source_hash)=64),
+    markdown TEXT COLLATE "C" NOT NULL CHECK(octet_length(markdown)<=2097152),
+    chunk_count BIGINT NOT NULL CHECK(chunk_count BETWEEN 0 AND 1024),
+    UNIQUE(note_id,set_id),
+    UNIQUE(set_id,profile_id),
+    FOREIGN KEY(profile_id,dimensions) REFERENCES notebook_embedding_profiles(profile_id,dimensions)
+);
+ALTER TABLE notebook_notes ADD CONSTRAINT notebook_active_set
+    FOREIGN KEY(note_id,active_set_id) REFERENCES notebook_search_sets(note_id,set_id)
+    DEFERRABLE INITIALLY DEFERRED;
+CREATE TABLE notebook_chunks (
+    set_id TEXT COLLATE "C" NOT NULL REFERENCES notebook_search_sets(set_id) ON DELETE CASCADE,
+    ordinal BIGINT NOT NULL CHECK(ordinal BETWEEN 0 AND 1023),
+    profile_id TEXT COLLATE "C" NOT NULL,
+    text TEXT COLLATE "C" NOT NULL CHECK(octet_length(text) BETWEEN 1 AND 2561),
+    chunk_hash TEXT COLLATE "C" NOT NULL CHECK(length(chunk_hash)=64),
+    title TEXT COLLATE "C" NOT NULL CHECK(length(title)<=300),
+    technical_text TEXT COLLATE "C" NOT NULL CHECK(octet_length(technical_text)<=131072),
+    embedding quarry_extensions.vector(1536) NOT NULL CHECK(quarry_extensions.vector_norm(embedding)>0)
+        CHECK((embedding OPERATOR(quarry_extensions.<=>) embedding) BETWEEN 0 AND 0.00001),
+    search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('pg_catalog.english'::regconfig,title),'A') ||
+        setweight(to_tsvector('pg_catalog.english'::regconfig,text),'B') ||
+        setweight(to_tsvector('pg_catalog.simple'::regconfig,technical_text),'C')
+    ) STORED,
+    PRIMARY KEY(set_id,ordinal),
+    FOREIGN KEY(set_id,profile_id) REFERENCES notebook_search_sets(set_id,profile_id)
+);
+CREATE INDEX idx_notebook_chunks_lexical ON notebook_chunks USING gin(search_vector);
+CREATE INDEX idx_notebook_sets_note ON notebook_search_sets(note_id,set_id);
+CREATE INDEX idx_notebook_chunks_profile ON notebook_chunks(profile_id,set_id);
 
 CREATE TABLE templates (
     revision BIGINT NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
@@ -610,3 +657,29 @@ $$;
 CREATE CONSTRAINT TRIGGER verify_document_search_set
 AFTER INSERT OR UPDATE ON document_identity_manifests
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_document_search_set();
+
+-- Deferred validation runs after all bounded chunk batches and the active pointer are written.
+CREATE VIEW notebook_search_integrity AS
+SELECT s.set_id
+FROM notebook_search_sets s
+LEFT JOIN notebook_chunks c ON c.set_id=s.set_id
+GROUP BY s.set_id,s.chunk_count,s.dimensions
+HAVING count(c.ordinal)<>s.chunk_count
+ OR (s.chunk_count>0 AND (min(c.ordinal)<>0 OR max(c.ordinal)<>s.chunk_count-1))
+ OR bool_or(quarry_extensions.vector_dims(c.embedding)<>s.dimensions)
+ OR bool_or(c.chunk_hash<>encode(sha256(convert_to(c.text,'UTF8')),'hex'));
+CREATE FUNCTION verify_notebook_search_set() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM notebook_search_integrity WHERE set_id=COALESCE(NEW.set_id,OLD.set_id)) THEN
+        RAISE EXCEPTION 'notebook search set is incomplete or incompatible' USING ERRCODE='23514';
+    END IF;
+    RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER verify_notebook_search_set
+AFTER INSERT OR UPDATE ON notebook_search_sets
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_notebook_search_set();
+
+CREATE CONSTRAINT TRIGGER verify_notebook_chunk_set
+AFTER INSERT OR UPDATE OR DELETE ON notebook_chunks
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_notebook_search_set();

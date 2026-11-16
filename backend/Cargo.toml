@@ -35,7 +35,7 @@ walkdir = "2.5.0"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 futures-util = "0.3.31"
 uuid = { version = "1.18.1", features = ["v4"] }
-docx-rust = "0.1.11"
+docx-rust = { git = "ssh://git@github.com/ratik-gambhir-WM/docx-rust-quarry.git", rev = "c63f575c792d1f1bad173dd98d8d23d80d5b4a5d" }
 pdf-extract = "0.12.0"
 lopdf = { version = "0.42.0", default-features = false, features = ["wasm_js"] }
 image = "0.24.9"

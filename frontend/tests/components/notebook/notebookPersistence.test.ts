@@ -202,6 +202,20 @@ describe("Notebook persistence", () => {
     expect(api.updateNotebookNote).not.toHaveBeenCalled();
     expect(store.getSnapshot().records[draft.id].revision).toBe(1);
   });
+  it("keeps failed atomic creates local and retries the submitted snapshot while preserving newer edits", async () => {
+    const { session, store, api, emit } = setup();
+    const draft = session.create();
+    await store.save(draft.id, { notebookId: "book" });
+    expect(store.getSnapshot().records[draft.id].noteId).toBeUndefined();
+    session.update(draft.id, { title: "Newer typing" });
+    emit(job({ status: "failed", stage: "embedding", sequence: 8, retryable: true, errorCode: "embedding_failed" }));
+    expect(store.getSnapshot().records[draft.id].noteId).toBeUndefined();
+    expect(store.getSnapshot().records[draft.id].revision).toBeUndefined();
+    await store.save(draft.id);
+    expect(api.retryNotebookSaveJob).toHaveBeenCalledWith("book", "job");
+    expect(api.updateNotebookNote).not.toHaveBeenCalled();
+    expect(session.getSnapshot()[0].title).toBe("Newer typing");
+  });
   it("hydrates saved notes lazily and patches them after a fresh session load", async () => {
     const { session, store, api, emit } = setup();
     api.listNotebookNotes.mockResolvedValue({

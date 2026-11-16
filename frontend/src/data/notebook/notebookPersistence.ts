@@ -181,7 +181,7 @@ export function createNotebookPersistence(
     } else {
       record(id, {
         ...previous,
-        noteId: job.noteId,
+        noteId: job.sqliteCommitted ? job.noteId : previous.noteId,
         revision,
         status: "saving",
         message: undefined,

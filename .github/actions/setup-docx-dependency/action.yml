@@ -1,0 +1,23 @@
+name: Set up private DOCX dependency
+description: Load the read-only DOCX deploy key and verify GitHub SSH host keys.
+inputs:
+  ssh-private-key:
+    description: Read-only deploy key for ratik-gambhir-WM/docx-rust-quarry.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Configure dependency-only SSH access
+      shell: bash
+      env:
+        DOCX_DEPENDENCY_KEY: ${{ inputs.ssh-private-key }}
+      run: |
+        if [[ -z "$DOCX_DEPENDENCY_KEY" ]]; then
+          echo "DOCX_RUST_DEPENDENCY_KEY is required to fetch the private DOCX dependency."
+          exit 1
+        fi
+        eval "$(ssh-agent -s)" > /dev/null
+        ssh-add - <<< "$DOCX_DEPENDENCY_KEY"
+        printf 'SSH_AUTH_SOCK=%s\nSSH_AGENT_PID=%s\n' "$SSH_AUTH_SOCK" "$SSH_AGENT_PID" >> "$GITHUB_ENV"
+        printf 'GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%s/known_hosts\n' "$GITHUB_ACTION_PATH" >> "$GITHUB_ENV"
+        echo 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"

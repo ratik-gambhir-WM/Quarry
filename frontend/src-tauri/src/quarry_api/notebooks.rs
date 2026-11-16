@@ -40,6 +40,31 @@ pub(super) fn validate_body(body: &Value) -> Result<(), String> {
     }
     Ok(())
 }
+pub(super) fn validate_search(path: &str, body: &Value) -> Result<(), String> {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 6 || parts[..4] != ["", "api", "v1", "notebooks"] || parts[5] != "search" {
+        return Err("notebook search path is not allowed".into());
+    }
+    canonical_id(parts[4])?;
+    let object = body.as_object().ok_or("invalid notebook search body")?;
+    if object.len() != 3
+        || object
+            .keys()
+            .any(|key| !["queryText", "mode", "limit"].contains(&key.as_str()))
+        || !body["queryText"]
+            .as_str()
+            .is_some_and(|q| !q.trim().is_empty() && q.chars().count() <= 2000)
+        || !body["mode"]
+            .as_str()
+            .is_some_and(|m| ["keyword", "semantic", "hybrid"].contains(&m))
+        || !body["limit"]
+            .as_u64()
+            .is_some_and(|n| (1..=50).contains(&n))
+    {
+        return Err("invalid notebook search body".into());
+    }
+    Ok(())
+}
 impl QuarryApiService {
     pub async fn patch(&self, path: &str, body: Value) -> Result<Value, String> {
         if path.starts_with("/api/v1/deals/") {

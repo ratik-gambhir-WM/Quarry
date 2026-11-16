@@ -41,8 +41,8 @@ Existing graph credentials, vector dimensions and template embedding settings re
 
 During the staged migration, `HELIX_VECTOR_DIMENSION` still supplies the common document/notebook
 embedding dimension (default 1536). Document SQL uses checksummed `vector(D)` DDL and immutable
-model profiles; notebook Helix indexes retain their existing definitions. A changed D requires
-an explicitly compatible fresh SQL schema and a separately scoped notebook index procedure.
+model profiles; notebooks use the same SQL dimension and their own preparation fingerprints. A changed D requires
+an explicitly compatible fresh/reset SQL schema or a separately planned preserving re-embedding procedure.
 The reset command reads the configured D without exposing server credentials. It never pads,
 truncates or automatically rebuilds vectors. Templates retain independent dimension settings.
 Do not use `clear_helix` to resolve conflicts. Old document Helix indexes are no longer used.
@@ -78,12 +78,12 @@ Tests create/drop only their own isolated product schemas, retaining the shared 
 
 This prerequisite is exercised by the codec tests, including 1,536/3,072-dimensional
 round trips, schema shadowing, cosine normalization, rollback and read-only enforcement.
-Normal startup validates this extension before initializing or validating schema 3. Document
-chunks/search now use SQL; notebook/template projections still require Helix.
+Normal startup validates this extension before initializing or validating schema 4. Document
+chunks/search now use SQL; template projections still require Helix.
 
 ### Current product schema
 
-`backend/src/app/schema.sql` owns schema 3, extending the previous aggregate/revision/lifecycle
+`backend/src/app/schema.sql` owns schema 4, extending the previous aggregate/revision/lifecycle
 layout with document embedding profiles, complete chunk/search rows, durable accepted jobs and
 input identity claims. A deferred complete-set constraint and integrity view protect readiness.
 Startup validates the rendered dimension-pinned source checksum, catalog, owned index readiness,
@@ -102,7 +102,7 @@ cargo run --locked --bin reset_postgres -- --confirm-reset
 This explicit destructive operation loads the normal server configuration (without printing it),
 requires the dedicated `Quarry` or an isolated `_test` database, and refuses unrelated relations/
 functions or an active writer. It retains the schema initialization, writer-ownership and mutation
-locks, drops/recreates recognized product objects and records schema 3 in one transaction.
+locks, drops/recreates recognized product objects and records schema 4 in one transaction.
 DDL failure rolls the entire reset back. It removes users, deals, notebooks, templates and other
 product rows in that selected SQL schema; it is not a document-only deletion or an upgrade path.
 The extension schema and old SQLite/Helix stores are untouched by the utility. Normal template
@@ -216,3 +216,24 @@ rollback/import source for this fresh PostgreSQL deployment.
 
 See [PostgreSQL storage verification](postgresql-storage-verification.md) for recorded branch checks
 and the separately documented local launcher/index validation.
+
+## Notebook SQL cutover (schema 4)
+
+Notebook native content, the active pgvector/GIN artifact and terminal save-job result now commit
+in one retained transaction. Accepted input remains separate; failed preparation never changes
+the saved revision. Notebook Helix calls and cleanup polling are removed; templates still require
+Helix. See [notebook API and recovery](notebook-api.md) for slot ordering, profile identity, attempt
+fences and private content search.
+
+Drain old workers before cutover. Use a fresh target or the explicit guarded full SQL reset above,
+with backups first. No preserving backfill or re-embedding runs automatically. Reset recognizes
+the old notebook cleanup ledger as a product object; discarding it does not confirm any remote
+effect. Retained old Helix stores remain outside reset scope and require separately authorized
+retirement. Rollback requires the old binary and matching old SQL/Helix backup; do not open schema
+4 with the previous worker. Implementation verification used isolated test schemas, without a development reset or live provider calls.
+
+On 2026-11-16, the user subsequently requested the development reset explicitly. The guarded
+`reset_postgres --confirm-reset` utility successfully recreated the local `Quarry.public` product
+schema as version 4. Post-reset reads confirmed empty users/deals/notebooks/templates/document
+chunks, all 256 notebook slots free, no document/notebook integrity errors and no unready indexes.
+No active Quarry writer was found, and no Helix operation or application startup was performed.

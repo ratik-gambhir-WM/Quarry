@@ -72,7 +72,13 @@ export type NotebookSaveHandlers = {
   onEvent(job: NotebookSaveJob): void;
   onConnectionError?(message: string): void;
 };
+export type NotebookSearchInput = { queryText: string; mode: "keyword" | "semantic" | "hybrid"; limit: number };
+export type NotebookSearchHit = {
+  notebookId: string; noteId: string; revision: number; chunkOrdinal: number;
+  title: string; excerpt: string; matchSources: ("keyword" | "semantic")[];
+};
 export interface NotebookApi {
+  searchNotebook(notebookId: string, input: NotebookSearchInput): Promise<{ hits: NotebookSearchHit[] }>;
   createNotebook(input: CreateNotebook): Promise<Notebook>;
   listNotebooks(options?: NotebookListOptions): Promise<NotebookPage>;
   getNotebook(notebookId: string): Promise<Notebook>;

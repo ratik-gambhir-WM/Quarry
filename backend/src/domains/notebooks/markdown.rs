@@ -177,3 +177,23 @@ pub(super) fn chunks(markdown: &str) -> Result<Vec<String>, &'static str> {
 #[cfg(test)]
 #[path = "../../../tests/unit/domains/notebooks/markdown_tests.rs"]
 mod tests;
+
+/// Undo only export's literal escapes for technical-token indexing, preserving all other bytes.
+pub(super) fn unescape(text: &str) -> String {
+    let mut chars = text.chars().peekable();
+    let mut output = String::with_capacity(text.len());
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && chars
+                .peek()
+                .is_some_and(|next| "\\`*_{}[]<>#+-.!|".contains(*next))
+        {
+            if let Some(next) = chars.next() {
+                output.push(next);
+            }
+        } else {
+            output.push(c);
+        }
+    }
+    output
+}

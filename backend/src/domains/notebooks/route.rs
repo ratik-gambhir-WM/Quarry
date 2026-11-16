@@ -7,6 +7,7 @@ use axum::{
 use std::sync::Arc;
 pub(crate) fn routes(service: Arc<NotebookService>) -> Router {
     Router::new()
+        .route("/notebooks/{notebook_id}/search", post(search))
         .route("/notebooks", route_get(list).post(create))
         .route(
             "/notebooks/{notebook_id}",

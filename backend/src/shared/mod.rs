@@ -5,3 +5,5 @@ pub mod office_zip;
 pub(crate) mod on_demand_task;
 pub mod prompts;
 pub(crate) mod revision;
+
+pub(crate) mod search_text;

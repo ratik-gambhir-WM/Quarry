@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 3;
+const VERSION: i64 = 4;
 // Startup only. Runtime guards are retained separately until worker/remote cutover.
 const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 #[derive(Debug, Error)]
@@ -81,6 +81,13 @@ pub(crate) async fn migrate_with_dimensions(
     )
     .fetch_one(&mut *tx)
     .await?;
+    if invalid {
+        return Err(MigrationError::Incompatible);
+    }
+    let invalid: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM notebook_search_integrity)")
+            .fetch_one(&mut *tx)
+            .await?;
     if invalid {
         return Err(MigrationError::Incompatible);
     }
@@ -162,13 +169,13 @@ pub async fn reset_product_schema(
         .filter_map(|line| line.strip_prefix("CREATE TABLE "))
         .filter_map(|line| line.split_whitespace().next())
         .map(|name| name.trim_matches('"'))
-        .chain(std::iter::once("quarry_schema_version"))
+        .chain(["quarry_schema_version", "notebook_cleanup"])
         .collect();
     let tables:Vec<String>=sqlx::query_scalar("SELECT relname FROM pg_class WHERE relnamespace=current_schema()::regnamespace AND relkind IN ('r','p','v','m','f')").fetch_all(&mut *tx).await?;
-    if tables
-        .iter()
-        .any(|name| !allowed.contains(name.as_str()) && name != "document_search_integrity")
-    {
+    if tables.iter().any(|name| {
+        !allowed.contains(name.as_str())
+            && !["document_search_integrity", "notebook_search_integrity"].contains(&name.as_str())
+    }) {
         return Err(MigrationError::ResetRefused(
             "selected schema contains unrelated relations",
         ));
@@ -183,6 +190,7 @@ pub async fn reset_product_schema(
             "reserve_deal_identity",
             "retire_deal_identity",
             "verify_document_search_set",
+            "verify_notebook_search_set",
         ]
         .contains(&name.as_str())
     }) {
@@ -190,12 +198,14 @@ pub async fn reset_product_schema(
             "selected schema contains unrelated functions",
         ));
     }
-    sqlx::raw_sql("DROP VIEW IF EXISTS document_search_integrity")
+    sqlx::raw_sql("DROP VIEW IF EXISTS document_search_integrity, notebook_search_integrity")
         .execute(&mut *tx)
         .await?;
     let tables: Vec<_> = tables
         .iter()
-        .filter(|name| name.as_str() != "document_search_integrity")
+        .filter(|name| {
+            !["document_search_integrity", "notebook_search_integrity"].contains(&name.as_str())
+        })
         .map(|name| format!("\"{name}\""))
         .collect();
     if !tables.is_empty() {

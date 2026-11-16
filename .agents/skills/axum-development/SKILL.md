@@ -105,7 +105,7 @@ work and preserve necessary guards at the actual operation.
 - Preserve exact-content input claims, deterministic version/chunk IDs, one-current uniqueness,
   immutable accepted image text, profile compatibility and rollback. Changed bytes create a new
   logical file; admission chooses one winning file identity before random parser IDs can diverge.
-- PostgreSQL schema 3 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
+- PostgreSQL schema 4 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
   selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
   restart. Unknown layouts fail without deletion. There is no import, fallback or automatic reset. The explicitly invoked guarded MVP reset requires user authorization; it is not verification.
 - Bootstrap retains a dedicated-session application writer lease through all client clones; database
@@ -121,10 +121,10 @@ work and preserve necessary guards at the actual operation.
   independent reads or test-only transactions that bypass the global guard.
 - Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
   owner/app scoping and stable ties. Its captured fixtures must continue to pass. Helix remains the
-  notebook/template projection boundary. Documents use exact scoped cosine and indexed English/technical lexical search.
+  template projection boundary. Documents use exact scoped cosine and indexed English/technical lexical search.
 - `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
   use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
-- Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Preview caches remain process-local; query embeddings are not cached. Notebook saves/cleanup, template classification
+- Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Preview caches remain process-local; query embeddings are not cached. Notebook atomic saves, template classification
   jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
   Durable receipts do not make these workers a distributed queue.
 

@@ -430,3 +430,21 @@ fn document_data_access_is_repository_owned_and_has_no_helix_dependency() {
         }
     }
 }
+
+#[test]
+fn notebook_storage_and_workers_have_no_helix_publication_or_cleanup_path() {
+    for (path, source) in rust_sources("src/domains/notebooks") {
+        for forbidden in [
+            "helix_db",
+            "adapters::helix",
+            "helix.notebooks",
+            "notebook_cleanup",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path}: retired notebook dependency {forbidden}"
+            );
+        }
+    }
+    assert!(!include_str!("../../src/app/bootstrap.rs").contains("helix.notebooks"));
+}

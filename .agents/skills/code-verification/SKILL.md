@@ -233,5 +233,5 @@ separate `quarry_extensions` schema of the selected `_test` database. Follow
 `reset_postgres --confirm-reset` utility as verification. Cover complete multi-batch rollback,
 deferred failure, old/new snapshots, cancellation, immutable image input, token/DB-clock fencing,
 identity convergence, profile/current authorization and legacy DTO/fusion behavior. Document
-repositories must have no Helix dependency; notebook/template Helix behavior is retained. Report
+repositories must have no Helix dependency; template Helix behavior is retained. Report
 large-corpus relevance/load and alternative-ranker evidence separately from correctness tests.

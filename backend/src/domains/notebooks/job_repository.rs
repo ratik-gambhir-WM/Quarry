@@ -1,10 +1,12 @@
 //! Durable admission, leases and checkpoints. Typed errors roll back every mutation.
+use super::search_repository::{source_hash, PreparedNote};
 use super::{
     model::*,
     repository::{conflict, folder, missing, note, owned, NotebookRepository, Result},
 };
 use crate::adapters::postgres::client::Row;
 use crate::adapters::postgres::client::RowResult;
+use crate::adapters::postgres::query::{LockWait, RowLock};
 use crate::{
     adapters::postgres::{
         client::PostgresTransaction,
@@ -68,27 +70,13 @@ async fn fence(tx: &PostgresTransaction, claim: &ClaimedJob) -> Result<SaveJob> 
                 .and_where(C::equal("job_id", &claim.job.job_id))
                 .and_where(C::equal("lease_token", &claim.token))
                 .and_where(C::equal("status", "processing"))
-                .and_where(C::compare(
-                    "lease_until",
-                    Op::GreaterThan,
-                    chrono::Utc::now().timestamp(),
-                ))
+                .and_where(C::unexpired("lease_until"))
                 .build(),
             job_row,
         )
         .await?
         .ok_or_else(conflict)?;
     owned(tx, claim.owner, &job.notebook_id).await?;
-    if let Some(revision) = job.committed_revision {
-        if note(tx, &job.notebook_id, &job.note_id)
-            .await?
-            .summary
-            .revision
-            != revision
-        {
-            return Err(conflict());
-        }
-    }
     Ok(job)
 }
 impl NotebookRepository {
@@ -103,6 +91,7 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                admission_user(tx, owner).await?;
                 super::repository::lock_parent(
                     tx,
                     owner,
@@ -164,7 +153,7 @@ impl NotebookRepository {
                     None
                 };
                 if let Some(expected) = expected {
-                    if snapshot.summary.revision != expected || expected == MAX_REVISION {
+                    if expected == MAX_REVISION {
                         return Err(conflict());
                     }
                     snapshot.summary.revision = expected.checked_add(1).ok_or_else(conflict)?;
@@ -189,28 +178,7 @@ impl NotebookRepository {
                 if active_note.is_some() {
                     return Err(Error::Conflict("note save already active".into()));
                 }
-                let global = tx
-                    .read(
-                        Q::select("notebook_save_jobs")
-                            .columns(["job_id"])
-                            .and_where(C::in_values("status", ACTIVE))
-                            .limit(256)
-                            .build(),
-                    )
-                    .await?;
-                let actor = tx
-                    .read(
-                        Q::select("notebook_save_jobs")
-                            .columns(["job_id"])
-                            .and_where(C::equal("user_id", owner))
-                            .and_where(C::in_values("status", ACTIVE))
-                            .limit(32)
-                            .build(),
-                    )
-                    .await?;
-                if global.len() >= 256 || actor.len() >= 32 {
-                    return Err(Error::Capacity);
-                }
+                let slot = free_slot(tx, owner).await?;
                 let id = uuid::Uuid::new_v4().to_string();
                 let note_id = snapshot.summary.note_id.clone();
                 let accepted = serde_json::to_string(&AcceptedSave {
@@ -230,12 +198,13 @@ impl NotebookRepository {
                         .value("pipeline_version", pipeline_version)
                         .value("input_json", accepted)
                         .value("status", "queued")
-                        .value("stage", "persisting")
+                        .value("stage", "exporting")
                         .value("created_at", &time)
                         .value("updated_at", time)
                         .build(),
                 )
                 .await?;
+                allocate_slot(tx, slot, &id).await?;
                 load(tx, &id).await
             })
             .await
@@ -257,6 +226,7 @@ impl NotebookRepository {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
+                admission_user(tx, owner).await?;
                 super::repository::lock_parent(
                     tx,
                     owner,
@@ -308,33 +278,7 @@ impl NotebookRepository {
                 {
                     return Err(Error::Conflict("note save already active".into()));
                 }
-                // Retries share the same bounded queue as new admissions.
-                if tx
-                    .read(
-                        Q::select("notebook_save_jobs")
-                            .columns(["job_id"])
-                            .and_where(C::in_values("status", ACTIVE))
-                            .limit(256)
-                            .build(),
-                    )
-                    .await?
-                    .len()
-                    >= 256
-                    || tx
-                        .read(
-                            Q::select("notebook_save_jobs")
-                                .columns(["job_id"])
-                                .and_where(C::equal("user_id", owner))
-                                .and_where(C::in_values("status", ACTIVE))
-                                .limit(32)
-                                .build(),
-                        )
-                        .await?
-                        .len()
-                        >= 32
-                {
-                    return Err(Error::Capacity);
-                }
+                let slot = free_slot(tx, owner).await?;
                 tx.write(
                     Q::update("notebook_save_jobs")
                         .set("status", "queued")
@@ -348,6 +292,7 @@ impl NotebookRepository {
                         .build(),
                 )
                 .await?;
+                allocate_slot(tx, slot, &id).await?;
                 load(tx, &id).await
             })
             .await
@@ -361,9 +306,10 @@ impl NotebookRepository {
                         .order_by("created_at", Sort::Ascending)
                         .order_by("job_id", Sort::Ascending)
                         .limit(1)
+                        .lock(RowLock::Update, LockWait::SkipLocked)
                 };
                 let mut candidate = tx
-                    .read_one_with(
+                    .lock_with(
                         base().and_where(C::equal("status", "queued")).build(),
                         |r| {
                             Ok((
@@ -373,17 +319,14 @@ impl NotebookRepository {
                             ))
                         },
                     )
-                    .await?;
+                    .await?
+                    .pop();
                 if candidate.is_none() {
                     candidate = tx
-                        .read_one_with(
+                        .lock_with(
                             base()
                                 .and_where(C::equal("status", "processing"))
-                                .and_where(C::compare(
-                                    "lease_until",
-                                    Op::LessThanOrEqual,
-                                    chrono::Utc::now().timestamp(),
-                                ))
+                                .and_where(C::expired("lease_until"))
                                 .build(),
                             |r| {
                                 Ok((
@@ -393,7 +336,8 @@ impl NotebookRepository {
                                 ))
                             },
                         )
-                        .await?;
+                        .await?
+                        .pop();
                 }
                 let Some((job, owner, input)) = candidate else {
                     return Ok(None);
@@ -416,6 +360,7 @@ impl NotebookRepository {
                             .build(),
                     )
                     .await?;
+                    release_slot(tx, &job.job_id).await?;
                     return Ok(None);
                 };
                 let token = uuid::Uuid::new_v4().to_string();
@@ -424,7 +369,8 @@ impl NotebookRepository {
                     Q::update("notebook_save_jobs")
                         .set("status", "processing")
                         .set("lease_token", &token)
-                        .set("lease_until", chrono::Utc::now().timestamp() + 180)
+                        .set_epoch_seconds_after("lease_until", 180)
+                        .set("stage", "exporting")
                         .set("updated_at", now())
                         .increment("sequence")
                         .and_where(C::equal("job_id", &job.job_id))
@@ -440,73 +386,77 @@ impl NotebookRepository {
             })
             .await
     }
-    pub(super) async fn persist(&self, claim: &ClaimedJob) -> Result<()> {
-        let claim = clone_claim(claim);
+    pub(super) async fn persist(
+        &self,
+        claim: &ClaimedJob,
+        prepared: Option<PreparedNote>,
+        reuse: Option<String>,
+    ) -> Result<()> {
         self.postgres
             .transaction_result_async(move |tx| async move {
                 let tx = &tx;
-                super::repository::lock_parent(
-                    tx,
-                    claim.owner,
-                    &claim.input.note.summary.notebook_id,
-                    crate::adapters::postgres::query::RowLock::Share,
-                )
-                .await?;
-                if let Some(id) = &claim.input.note.summary.folder_id {
-                    super::repository::lock_folder(
-                        tx,
-                        &claim.input.note.summary.notebook_id,
-                        id,
-                        crate::adapters::postgres::query::RowLock::Share,
-                    )
-                    .await?;
-                }
-                let job = fence(tx, &claim).await?;
-                if job.committed_revision.is_some() {
-                    return Ok(());
-                }
                 let n = &claim.input.note;
                 let s = &n.summary;
+                super::repository::lock_parent(tx, claim.owner, &s.notebook_id, RowLock::Share)
+                    .await?;
                 if let Some(id) = &s.folder_id {
-                    folder(tx, &s.notebook_id, id).await?;
+                    super::repository::lock_folder(tx, &s.notebook_id, id, RowLock::Share).await?;
                 }
+                let job = fence(tx, claim).await?;
+                let hash = source_hash(n, &claim.input.pipeline_version)?;
+                let set = if let Some(set) = reuse {
+                    let valid = tx
+                        .read_one(
+                            Q::select("notebook_search_sets")
+                                .inner_join(
+                                    "notebook_notes",
+                                    "notebook_notes.active_set_id",
+                                    "notebook_search_sets.set_id",
+                                )
+                                .and_where(C::equal("notebook_search_sets.set_id", &set))
+                                .and_where(C::equal("notebook_notes.note_id", &s.note_id))
+                                .and_where(C::equal("source_hash", &hash))
+                                .build(),
+                        )
+                        .await?
+                        .is_some();
+                    if !valid || prepared.is_some() {
+                        return Err(conflict());
+                    }
+                    set
+                } else {
+                    let batch = prepared
+                        .as_ref()
+                        .ok_or_else(|| Error::invalid("missing notebook artifact"))?;
+                    if batch.source_hash != hash || batch.pipeline != claim.input.pipeline_version {
+                        return Err(conflict());
+                    }
+                    uuid::Uuid::new_v4().to_string()
+                };
                 let blocks = serde_json::to_string(&n.blocks)
                     .map_err(|_| Error::storage("invalid durable blocks"))?;
                 if let Some(expected) = claim.input.expected_revision {
-                    if note(tx, &s.notebook_id, &s.note_id).await?.summary.revision != expected {
-                        return Err(conflict());
-                    }
-                    let changed = tx
+                    if tx
                         .write(
                             Q::update("notebook_notes")
                                 .set("title", &s.title)
                                 .set("folder_id", s.folder_id.as_deref())
                                 .set("blocks_json", blocks)
-                                .set("content_schema_version", 1_i64)
                                 .set("revision", s.revision)
                                 .set("updated_at", &s.updated_at)
+                                .set("active_set_id", &set)
                                 .and_where(C::equal("note_id", &s.note_id))
                                 .and_where(C::equal("notebook_id", &s.notebook_id))
                                 .and_where(C::equal("revision", expected))
                                 .build(),
                         )
-                        .await?;
-                    if changed.rows_affected != 1 {
+                        .await?
+                        .rows_affected
+                        != 1
+                    {
                         return Err(conflict());
                     }
                 } else {
-                    // A deletion tombstone fences a worker even before an admitted create commits.
-                    if tx
-                        .read_one(
-                            Q::select("notebook_cleanup")
-                                .and_where(C::equal("note_id", &s.note_id))
-                                .build(),
-                        )
-                        .await?
-                        .is_some()
-                    {
-                        return Err(missing());
-                    }
                     tx.write(
                         Q::insert_into("notebook_notes")
                             .value("note_id", &s.note_id)
@@ -514,112 +464,103 @@ impl NotebookRepository {
                             .value("folder_id", s.folder_id.as_deref())
                             .value("title", &s.title)
                             .value("blocks_json", blocks)
-                            .value("content_schema_version", 1_i64)
                             .value("revision", 1_i64)
+                            .value("active_set_id", &set)
                             .value("created_at", &s.created_at)
                             .value("updated_at", &s.updated_at)
                             .build(),
                     )
                     .await?;
                 }
+                if let Some(batch) = prepared {
+                    batch.insert(tx, n, &set).await?;
+                }
                 tx.write(
-                    Q::update("notebook_save_jobs")
-                        .set("committed_revision", s.revision)
-                        .set("stage", "exporting")
-                        .set("updated_at", now())
-                        .increment("sequence")
-                        .and_where(C::equal("job_id", job.job_id))
+                    Q::delete_from("notebook_search_sets")
+                        .and_where(C::equal("note_id", &s.note_id))
+                        .and_where(C::compare("set_id", Op::NotEqual, &set))
                         .build(),
                 )
                 .await?;
+                // Repeat token/status/DB-clock predicates after row waits and every chunk batch.
+                // A lease lost while preparing or waiting must roll back native and derived state.
+                if tx
+                    .write(
+                        Q::update("notebook_save_jobs")
+                            .set("committed_revision", s.revision)
+                            .set("committed_set_id", set)
+                            .set("content_hash", hash)
+                            .set("status", "completed")
+                            .set("stage", "indexing")
+                            .set("updated_at", now())
+                            .increment("sequence")
+                            .and_where(C::equal("job_id", job.job_id))
+                            .and_where(C::equal("lease_token", &claim.token))
+                            .and_where(C::equal("status", "processing"))
+                            .and_where(C::equal("stage", &job.stage))
+                            .and_where(C::unexpired("lease_until"))
+                            .build(),
+                    )
+                    .await?
+                    .rows_affected
+                    != 1
+                {
+                    return Err(conflict());
+                }
+                release_slot(tx, &claim.job.job_id).await?;
                 Ok(())
             })
             .await
     }
-    pub(super) async fn checkpoint(
-        &self,
-        claim: &ClaimedJob,
-        stage: &'static str,
-        hash: Option<String>,
-        complete: bool,
-    ) -> Result<()> {
-        let claim = clone_claim(claim);
+    pub(super) async fn checkpoint(&self, claim: &ClaimedJob, stage: &'static str) -> Result<()> {
         self.postgres
             .transaction_result_async(move |tx| async move {
-                let tx = &tx;
-                let job = fence(tx, &claim).await?;
-                tx.write(
-                    Q::update("notebook_save_jobs")
-                        .set("stage", stage)
-                        .set("content_hash", hash)
-                        .set("status", if complete { "completed" } else { "processing" })
-                        .set("updated_at", now())
-                        .increment("sequence")
-                        .and_where(C::equal("job_id", job.job_id))
-                        .build(),
-                )
-                .await?;
+                fence(&tx, claim).await?;
+                if tx
+                    .write(
+                        Q::update("notebook_save_jobs")
+                            .set("stage", stage)
+                            .set("updated_at", now())
+                            .increment("sequence")
+                            .and_where(C::equal("job_id", &claim.job.job_id))
+                            .and_where(C::equal("lease_token", &claim.token))
+                            .and_where(C::equal("status", "processing"))
+                            .and_where(C::unexpired("lease_until"))
+                            .build(),
+                    )
+                    .await?
+                    .rows_affected
+                    != 1
+                {
+                    return Err(conflict());
+                }
                 Ok(())
             })
             .await
     }
     pub(super) async fn fail(&self, claim: &ClaimedJob, code: &'static str) -> Result<()> {
-        let id = claim.job.job_id.clone();
-        let token = claim.token.clone();
         self.postgres
-            .write_async(
-                Q::update("notebook_save_jobs")
-                    .set("status", "failed")
-                    .set("error_code", code)
-                    .set("updated_at", now())
-                    .increment("sequence")
-                    .and_where(C::equal("job_id", id))
-                    .and_where(C::equal("lease_token", token))
-                    .and_where(C::equal("status", "processing"))
-                    .build(),
-            )
-            .await?;
-        Ok(())
-    }
-    pub(super) async fn cleanup_batch(&self) -> Result<Vec<(String, i64)>> {
-        Ok(self
-            .postgres
-            .read_with_async(
-                Q::select("notebook_cleanup")
-                    .and_where(C::compare(
-                        "next_attempt_at",
-                        Op::LessThanOrEqual,
-                        chrono::Utc::now().timestamp(),
-                    ))
-                    .order_by("created_at", Sort::Ascending)
-                    .limit(1)
-                    .build(),
-                |r| Ok((r.get("note_id")?, r.get("user_id")?)),
-            )
-            .await?)
-    }
-    pub(super) async fn cleaned(&self, note: String) -> Result<()> {
-        self.postgres
-            .write_async(
-                Q::update("notebook_cleanup")
-                    .set("next_attempt_at", chrono::Utc::now().timestamp() + 3600)
-                    .set("confirmed", 1_i64)
-                    .and_where(C::equal("note_id", note))
-                    .build(),
-            )
-            .await?;
-        Ok(())
-    }
-    pub(super) async fn cleanup_failed(&self, note: String) -> Result<()> {
-        self.postgres
-            .write_async(
-                Q::update("notebook_cleanup")
-                    .set("next_attempt_at", chrono::Utc::now().timestamp() + 60)
-                    .and_where(C::equal("note_id", note))
-                    .build(),
-            )
-            .await?;
-        Ok(())
+            .transaction_result_async(move |tx| async move {
+                let changed = tx
+                    .write(
+                        Q::update("notebook_save_jobs")
+                            .set("status", "failed")
+                            .set("error_code", code)
+                            .set("updated_at", now())
+                            .increment("sequence")
+                            .and_where(C::equal("job_id", &claim.job.job_id))
+                            .and_where(C::equal("lease_token", &claim.token))
+                            .and_where(C::equal("status", "processing"))
+                            .and_where(C::unexpired("lease_until"))
+                            .build(),
+                    )
+                    .await?;
+                if changed.rows_affected == 1 {
+                    release_slot(&tx, &claim.job.job_id).await?;
+                }
+                Ok(())
+            })
+            .await
     }
     pub(super) async fn prune(&self) -> Result<()> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(30))
@@ -632,26 +573,85 @@ impl NotebookRepository {
                     .build(),
             )
             .await?;
-        let cutoff = (chrono::Utc::now() - chrono::Duration::days(30))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        self.postgres
-            .write_async(
-                Q::delete_from("notebook_cleanup")
-                    .and_where(C::equal("confirmed", 1_i64))
-                    .and_where(C::compare("created_at", Op::LessThan, cutoff))
-                    .build(),
-            )
-            .await?;
         Ok(())
     }
 }
-fn clone_claim(c: &ClaimedJob) -> ClaimedJob {
-    ClaimedJob {
-        job: c.job.clone(),
-        owner: c.owner,
-        token: c.token.clone(),
-        input: c.input.clone(),
+// The user row serializes only admissions/retries for that user. Terminal transitions only
+// free slots, and never acquire this row while holding a parent or slot.
+async fn admission_user(tx: &PostgresTransaction, owner: i64) -> Result<()> {
+    tx.write(
+        Q::insert_into("notebook_admission_users")
+            .value("user_id", owner)
+            .on_conflict_do_nothing(["user_id"])
+            .build(),
+    )
+    .await?;
+    tx.lock_with(
+        Q::select("notebook_admission_users")
+            .and_where(C::equal("user_id", owner))
+            .lock(RowLock::Update, LockWait::Wait)
+            .build(),
+        |r| r.get::<_, i64>(0),
+    )
+    .await?;
+    Ok(())
+}
+async fn free_slot(tx: &PostgresTransaction, owner: i64) -> Result<i64> {
+    if tx
+        .read(
+            Q::select("notebook_save_jobs")
+                .column("job_id")
+                .and_where(C::equal("user_id", owner))
+                .and_where(C::in_values("status", ACTIVE))
+                .limit(32)
+                .build(),
+        )
+        .await?
+        .len()
+        >= 32
+    {
+        return Err(Error::Capacity);
     }
+    tx.lock_with(
+        Q::select("notebook_save_slots")
+            .column("slot")
+            .and_where(C::is_null("job_id"))
+            .order_by("slot", Sort::Ascending)
+            .limit(1)
+            .lock(RowLock::Update, LockWait::SkipLocked)
+            .build(),
+        |r| r.get(0),
+    )
+    .await?
+    .pop()
+    .ok_or(Error::Capacity)
+}
+async fn allocate_slot(tx: &PostgresTransaction, slot: i64, job: &str) -> Result<()> {
+    if tx
+        .write(
+            Q::update("notebook_save_slots")
+                .set("job_id", job)
+                .and_where(C::equal("slot", slot))
+                .and_where(C::is_null("job_id"))
+                .build(),
+        )
+        .await?
+        .rows_affected
+        != 1
+    {
+        return Err(Error::Capacity);
+    }
+    Ok(())
+}
+pub(super) async fn release_slot(tx: &PostgresTransaction, job: &str) -> Result<()> {
+    tx.write(
+        Q::update("notebook_save_slots")
+            .set("job_id", None::<String>)
+            .and_where(C::equal("job_id", job))
+            .build(),
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

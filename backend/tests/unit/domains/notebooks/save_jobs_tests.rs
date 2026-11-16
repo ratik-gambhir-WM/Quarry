@@ -34,26 +34,20 @@ async fn notebook_save_is_admitted_while_provider_paused_and_completion_waits_fo
         .await
         .unwrap();
     assert_eq!(pending.status, "processing");
-    assert!(pending.sqlite_committed);
-    assert!(!app
-        .pipeline
-        .published
-        .lock()
-        .unwrap()
-        .contains(&(job.note_id.clone(), 1)));
+    assert!(!pending.sqlite_committed);
+    assert!(app
+        .service
+        .get_note(1, book.clone(), job.note_id.clone())
+        .await
+        .is_err());
     app.pipeline.gate.notify_one();
     let completed = test_support::terminal(&app.service, &book, &job.job_id).await;
     assert_eq!(completed.status, "completed");
     assert_eq!(completed.committed_revision, Some(1));
-    assert!(app
-        .pipeline
-        .published
-        .lock()
-        .unwrap()
-        .contains(&(job.note_id, 1)));
+    assert!(app.service.get_note(1, book, job.note_id).await.is_ok());
 }
 #[tokio::test]
-async fn notebook_index_failure_retains_canonical_content_retry_does_not_increment_revision() {
+async fn notebook_preparation_failure_leaves_no_canonical_note_retry_increments_once() {
     let app = test_support::application().await;
     app.pipeline.fail.store(true, Ordering::SeqCst);
     let book = app
@@ -69,18 +63,14 @@ async fn notebook_index_failure_retains_canonical_content_retry_does_not_increme
         .unwrap();
     let failed = test_support::terminal(&app.service, &book, &job.job_id).await;
     assert_eq!(failed.status, "failed");
-    assert!(failed.sqlite_committed);
+    assert!(!failed.sqlite_committed);
     assert!(failed.retryable);
     assert_eq!(failed.error_code.as_deref(), Some("embedding_failed"));
-    assert_eq!(
-        app.service
-            .get_note(1, book.clone(), job.note_id.clone())
-            .await
-            .unwrap()
-            .summary
-            .revision,
-        1
-    );
+    assert!(app
+        .service
+        .get_note(1, book.clone(), job.note_id.clone())
+        .await
+        .is_err());
     app.postgres
         .with_connection(async |c| {
             c.execute(
@@ -125,24 +115,8 @@ async fn notebook_restart_recovers_admission_and_post_commit_checkpoint_without_
         .await
         .unwrap();
     let claim = repo.claim().await.unwrap().unwrap();
-    repo.persist(&claim).await.unwrap();
-    postgres
-        .with_connection(async |c| {
-            c.execute(
-                "UPDATE notebook_save_jobs SET lease_until=0",
-                Vec::<crate::adapters::postgres::query::SqlValue>::new(),
-            )
-            .await
-        })
-        .await
-        .unwrap();
+    repo.commit_test(&claim).await.unwrap();
     let pipeline = Arc::new(test_support::FakePipeline::default());
-    // Simulate a crash after Helix publication but before the durable completion checkpoint.
-    pipeline
-        .published
-        .lock()
-        .unwrap()
-        .insert((job.note_id.clone(), 1));
     let recovered =
         NotebookService::with_pipeline(NotebookRepository::new(postgres), pipeline.clone());
     let completed = test_support::terminal(&recovered, &book, &job.job_id).await;
@@ -195,21 +169,8 @@ async fn notebook_folder_relocation_and_delete_fence_stale_worker_without_resurr
     app.pipeline.gate.notify_one();
     let failed = test_support::terminal(&app.service, &book, &job.job_id).await;
     assert_eq!(failed.status, "failed");
-    assert_eq!(failed.error_code.as_deref(), Some("revision_conflict"));
+    assert_eq!(failed.error_code.as_deref(), Some("resource_not_found"));
     assert!(!failed.retryable);
-    assert_eq!(
-        app.service
-            .get_note(1, book.clone(), job.note_id.clone())
-            .await
-            .unwrap()
-            .summary
-            .revision,
-        2
-    );
-    app.service
-        .delete_note(1, book.clone(), job.note_id.clone(), 2)
-        .await
-        .unwrap();
     assert!(app
         .service
         .get_note(1, book.clone(), job.note_id)
@@ -269,24 +230,9 @@ async fn notebook_recovery_starts_queued_work_and_deletion_fences_inflight_index
     })
     .await
     .unwrap();
-    recovered
-        .delete_note(1, book.clone(), queued.note_id.clone(), 1)
-        .await
-        .unwrap();
+    recovered.delete_notebook(1, book.clone()).await.unwrap();
     pipeline.gate.notify_one();
-    let terminal = test_support::terminal(&recovered, &book, &queued.job_id).await;
-    assert_eq!(terminal.status, "failed");
-    assert!(!terminal.retryable);
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            if pipeline.published.lock().unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
+    assert!(recovered.job(1, book.clone(), queued.job_id).await.is_err());
     assert!(recovered.get_note(1, book, queued.note_id).await.is_err());
 }
 

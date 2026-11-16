@@ -1,6 +1,6 @@
 # Personal notebook API and save recovery
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
+Current storage is fresh PostgreSQL schema 4. Notebook content and search are SQL-only; Helix remains required for templates. See
 [PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
@@ -8,14 +8,14 @@ Notebooks, single-level folders, native BlockNote notes and save jobs are durabl
 The web and desktop adapters expose the same authenticated contract under `/api/v1`. The Notebook page integrates these APIs with an explicit Save button, saved-note loading and
 job feedback; edit buffers remain session-local until saved.
 There is no implicit/default notebook, background draft promotion, collaboration, attachments,
-revision history, cross-notebook move, nested folder, or notebook search endpoint.
+revision history, cross-notebook move, or nested folder. The content search API is available to both adapters; the sidebar remains a local metadata filter.
 
 ## Resources and authorization
 
 All operations require a bearer session and matching `X-User-Id`. `notebooks.user_id` is the
 ownership authority. Every operation verifies that owner and the entire notebook/child path.
 Missing and inaccessible resources and deal/folder references return the same 404 envelope.
-Notebook/deal associations require an existing same-owner deal, including archived deals. Links
+Notebook/deal associations require an existing member-authorized deal, including archived deals. Links
 can be absent or cleared and never transfer ownership. Multiple notebooks can reference a deal.
 
 | Methods | Path after `/api/v1` | Result |
@@ -26,6 +26,7 @@ can be absent or cleared and never transfer ownership. Multiple notebooks can re
 | GET / PATCH / DELETE | `/notebooks/{notebook_id}/folders/{folder_id}` | Metadata / rename / 204 relocate notes then delete |
 | POST / GET | `/notebooks/{notebook_id}/notes` | 202 durable save job / paginated summaries without blocks |
 | GET / PATCH / DELETE | `/notebooks/{notebook_id}/notes/{note_id}` | Native document / 202 save job / 204 delete |
+| POST | `/notebooks/{notebook_id}/search` | Bounded private content search |
 | GET | `/notebooks/{notebook_id}/save-jobs/{job_id}` | Durable status snapshot |
 | POST | `/notebooks/{notebook_id}/save-jobs/{job_id}/retry` | 202 same job, new numbered attempt |
 | GET | `/notebooks/{notebook_id}/save-jobs/{job_id}/events` | Authenticated SSE snapshots |
@@ -68,51 +69,73 @@ expectedRevision plus an actual change. Blocks and contentSchemaVersion must occ
 PATCH. Every committed PATCH increments revision, including metadata/move-only patches. Revisions
 are JS-safe positive integers, up to 9007199254740991, with checked overflow.
 
-Admission authorizes the parent, note, referenced folder and revision and stores an immutable full
+Admission authorizes the parent, note and referenced folder, validates revision bounds, and stores an immutable full
 snapshot and request hash in PostgreSQL. Actor-scoped operation IDs reconcile lost responses: identical
 request replay returns its job, different input is 409. Admission returns 202 promptly with IDs,
 statusUrl, eventsUrl and a Location pointing at status; it does not wait for providers. Another
 active save on the note is 409. At most 32 jobs per actor and 256 globally may be queued/processing;
 capacity returns 503 with Retry-After: 1. Admission checks are rechecked at canonical commit.
 
-One worker per application claims durable rows in immediate transactions. Claims have unique tokens
-and 180-second leases; attempts have a 120-second deadline. After restart, queued rows and expired
-claims are rediscovered. A process must not share an expired claim; all canonical checkpoints check
-the token, lease, ownership and current revision. Canonical writes and committed-revision/job-stage
-updates are atomic. No provider or graph operation holds a PostgreSQL lock. Infrastructure is injected
-at bootstrap; services do not read environment variables or construct clients.
+Four bounded workers per application claim queued/expired rows with `FOR UPDATE SKIP LOCKED`.
+Claims have random tokens and database-clock 180-second leases; attempts have a 120-second deadline.
+The global writer lease and transaction advisory lock remain in production. Independent-pool tests
+exercise row primitives without this guard; they do not establish multi-instance deployment support.
+Admissions/retries lock a per-user admission row before the shared notebook parent and job/free slot.
+There are 256 independently lockable SQL slots. Exact operation replay allocates no second slot.
+Completion/failure and cascades release slots without acquiring the user row backwards.
 
-The pipeline persists native blocks, exports deterministic Markdown, prepares bounded chunks,
-embeds batches of at most 16, and publishes Helix. Markdown includes title, supported text/list/
-quote/code/table/link content; formatting is intentionally lossy. Chunking uses 512-character windows
-with 64-character overlap and up to 128 characters of heading context: at most 2561 UTF-8 bytes
-(and therefore at most 2561 tokenizer tokens) per chunk. Export is capped at 2 MiB and 1024 chunks.
-The immutable job pins the pipeline/model/dimension fingerprint; changed configuration fails with
-`pipeline_changed` until restored. Missing OpenAI configuration fails nonempty saves explicitly.
-Empty Markdown skips embedding and publishes an empty projection, removing older chunks.
+The worker exports deterministic lossy Markdown from native blocks, chunks it, and embeds batches
+of at most 16 outside SQL transactions. Format remains version 1: 512-character windows, 64-character
+overlap, 128 characters of heading context, at most 2561 UTF-8 bytes per chunk, 2 MiB export and
+1024 chunks. Native blocks remain the editable source; Markdown never reconstructs the editor.
+Empty Markdown needs no provider call and publishes an explicitly counted zero-chunk artifact.
+Unconfigured embedding fails nonempty work with `embedding_unavailable`; no native-only success.
+The accepted snapshot pins provider/model/dimensions/preparation in its pipeline fingerprint.
+A changed fingerprint fails `pipeline_changed`; explicit retry retains that fingerprint.
 
-Helix labels are `QuarryNotebookRevision` and `QuarryNotebookChunk`. Deterministic identities include
-owner, notebook, note, revision, content/pipeline hash and chunk ordinal. Index initialization waits
-for unique-key/vector receipts; it never clears existing graph data. Every query is preflighted
-against the 2 MiB writer cap before graph writes. Ordered dimension-valid finite vectors/chunks are
-staged first; a revision root is published only after all stages acknowledge durability. Publication
-removes strictly older roots/chunks, never a newer revision. Immutable per-revision roots prevent
-an old worker from replacing a newer one. A published matching root is reused after a crash rather
-than embedding/writing again. Consumers must join canonical PostgreSQL ownership/existence and current
-content/revision state; generic document search does not query these labels. Folder/deal metadata
-is read from PostgreSQL. Folder relocation changes row revisions without re-embedding unchanged text;
-no notebook retrieval/search API is implemented yet.
+One final retained transaction rechecks parent/folder existence, ownership, expected revision and
+current attempt, publishes native title/blocks/folder/revision plus the complete immutable search
+set and every bounded 64-row chunk batch, switches the active set, removes superseded artifacts,
+and records terminal job revision/set/sequence while releasing the slot. Its final conditional
+job update repeats token/status/stage/database-clock expiry after row waits and batches. Deferred
+same-note FKs and complete-set count/ordinal/hash/dimension checks can still reject commit, rolling
+back every native, search and job change. New notes have no visible placeholder before this commit.
+Readers see an old complete set or a new complete set through MVCC. A folder-only patch can reuse
+an exact native-title/blocks/profile fingerprint; folder relocation preserves artifact identity
+while incrementing the current native revision. Equal vector dimensions alone never permit reuse.
 
-Completion is recorded only after Helix publication and another canonical revision/lease check.
-A failed projection preserves PostgreSQL content and returns `status: failed`, `sqliteCommitted: true`,
-committedRevision and a sanitized code. Failed pre-commit work reports sqliteCommitted false.
-Never infer completion from 202, a note GET, an embedding response or PostgreSQL alone.
+`sqliteCommitted` is the historical wire name for the canonical PostgreSQL commit. It stays false
+and `committedRevision` stays null until the entire save completes. Provider, constraint, stale
+revision, deletion or attempt failure leaves the prior saved note and search results unchanged.
+Failed creation leaves only its accepted snapshot/job, not a saved note. Admission (202) and
+intermediate stages never mean Saved. Lost responses reconcile by operation ID without incrementing
+a committed revision again. Explicit retry keeps the immutable submitted snapshot and original
+expected revision; it never rebases onto a newer revision. Retryable provider/pipeline/interrupted
+failures allow five attempts with minimum 1/2/4/8-second backoff. Conflicts require reload/review.
 
-Explicit retry retains job identity and committed revision; it never reapplies an already committed
-mutation. Retryable codes include embedding/provider/unconfigured/indexing/interrupted/pipeline
-configuration failures. At most five attempts are allowed, with minimum 1/2/4/8-second backoff.
-Resource, revision, content/export/size and integrity failures require a new corrected operation.
-There are no automatic save retries; durable deletion cleanup retries separately.
+## Private content search
+
+`POST /api/v1/notebooks/{notebook_id}/search` accepts exactly
+`{queryText, mode: "keyword" | "semantic" | "hybrid", limit}`. Text is nonblank and at most
+2000 Unicode scalars; limit is 1–50. HTTP shape validation and ownership precede query embedding.
+The desktop gateway validates the exact canonical search path and strict bounded body using the
+existing authenticated POST relay; no native permissions are broadened.
+
+Search joins only active sets to the owner/notebook/note before ranking and limiting. Deal
+membership never grants access to another user's notes. Keyword search uses stored title/body
+weighted English vectors plus exact hashed technical tokens and GIN; phrase and single-word prefix
+queries use the shared document analyzer. Markdown literal escapes are undone for technical tokens.
+Semantic queries use exact full-precision pgvector cosine inside SQL, pinned to the same fingerprint.
+Hybrid branches run in one read-only repeatable-read snapshot and fuse at most 100 candidates each
+using deterministic reciprocal rank fusion (k=60). There is no ANN index or Rust vector scan.
+Query embedding occurs before the snapshot with a 45-second timeout and four fail-fast query permits per application. Missing/failed query embedding
+returns 503; callers may explicitly choose keyword mode. There is no silent degraded success.
+
+The response is `{hits: [{notebookId, noteId, revision, chunkOrdinal, title, excerpt, matchSources}]}`.
+Excerpts are bounded plain strings (up to 600 scalars) from derived Markdown, with no raw vectors,
+native blocks, artifact IDs or invented editor navigation offsets. A fresh bounded read rechecks
+owner/current revision/active set after ranking; HTTP middleware revalidates the session before
+delivery. The editor/sidebar is unchanged and does not consume this new API yet.
 
 SSE events use queued/processing/completed/failed; processing stages are persisting/exporting/
 chunking/embedding/indexing. Persisted snapshots include job/note IDs, attempt, monotonic sequence
@@ -127,25 +150,32 @@ Markdown, vectors and provider bodies. Client activity logging excludes notebook
 content. The editor reconciles a completed submitted snapshot against newer edits; completion of
 an older snapshot leaves the newer buffer marked Unsaved changes.
 
-Folder deletion relocates notes to root, increments their revisions and deletes the folder in one
-transaction; a stale save cannot restore the deleted relationship. Direct nonempty-folder deletion
-fails its deferred composite FK. Notebook deletion cascades notes/folders/jobs; note deletion fences
-active jobs and never upserts. Deletions queue independent durable cleanup tombstones in the same
-transaction. Each worker handles one cleanup at a time, retries failure after 60 seconds, and repeats
-confirmed cleanup hourly for 30 days to remove late stale work. Confirmed tombstones expire after
-30 days; unconfirmed cleanup is retained. Terminal jobs/immutable inputs expire after 30 days.
-Operation IDs must not be deliberately reused after retention. There is no cancellation endpoint,
-trash or automatic distributed transaction across PostgreSQL/Helix.
+Folder deletion relocates notes to root and increments revisions transactionally. A late save
+cannot restore a deleted folder or overwrite relocated notes. Note deletion retains displayed
+expectedRevision CAS, fences active jobs and releases slots in the same transaction; SQL cascades
+remove its sets/chunks. Notebook deletion locks its parent exclusively and cascades notes/jobs/slots.
+No notebook Helix publication, readback, index initializer, remote deletion or cleanup poll remains.
+Terminal jobs/accepted inputs expire after 30 days; operation IDs must not be reused after retention.
+There is no cancellation endpoint, trash or note vector history.
 
-<a id="additive-schema-12--13-and-recovery"></a>
 ## PostgreSQL schema and recovery
 
-Notebook tables, durable save snapshots/jobs and cleanup tombstones are part of fresh PostgreSQL
-schema 2. There is no old-data upgrade/reset path. Startup validates the complete schema and rejects
-drift without deleting notes. Back up PostgreSQL and the matching Helix store/binary before any
-future rollout or restore; drain writers for recovery. Projection failures preserve canonical notes.
-Reopen with matching embedding/pipeline configuration to resume queued/expired jobs, or explicitly
-retry failed indexing. The historical `sqliteCommitted` field means a PostgreSQL canonical commit.
+Schema 4 follows document schema 3 and requires the same explicitly provisioned pgvector 0.8.6 in
+`quarry_extensions`. Startup initializes an empty selected schema or validates its version,
+checksum/catalog, indexes, FKs and complete notebook/document sets. It never upgrades or resets a
+populated database. Drain old workers before switching binaries. Use a fresh target, or the
+explicit guarded `reset_postgres --confirm-reset` MVP procedure in [storage recovery](postgresql-storage.md),
+which discards recognized SQL product data. This implementation did not run that utility or modify
+an existing development database. No preserving backfill or provider spend is performed.
+
+Back up the old SQL database and matching Helix store/binary before a reset. Old notebook Helix
+artifacts and cleanup effects remain outside the SQL reset's erasure claim; resetting the recognized
+legacy cleanup ledger does not confirm remote deletion. Keep that old store intact/read-only until
+separately authorized retirement. Do not run old and new workers against the same schema. Rollback
+requires the matching old binary/database/store backup; a schema-4 target cannot be opened by the
+old worker. Prefer a forward fix on the SQL-only target after drain. Queued/expired jobs resume from
+accepted native input; preparation may repeat provider work after a crash. Committed jobs replay
+the original result; explicit retry of a failed uncommitted job retries the whole atomic save.
 
 ## Explicit Save editor
 
@@ -154,18 +184,18 @@ action tokens as New note. First save asks for an existing notebook or a new not
 never creates one. Later new notes reuse that session's explicitly selected destination. Existing
 notes PATCH their server ID with expectedRevision; folder assignment remains unchanged. The editor
 stays usable while admission/indexing runs. Saved appears only after job completion; canonical
-notes loaded after sign-in show Stored on server because GET does not prove indexing completion.
+notes loaded after sign-in show Stored on server; every schema-4 canonical note has a complete search set.
 
 The session-scoped persistence controller loads paginated summaries, hydrates a selected document,
 tracks immutable submission snapshots and reconciles SSE with status polling. A lost admission
 response reuses operationId and input; failed indexing retries the same job; 409 conflicts preserve
 local edits until a confirmed reload. The first server-ID URL replacement does not remount the
 editor or discard subsequent edits. Server-backed deletion retains local content on failure and
-is blocked while an admission/save is unresolved. Unsaved changes warn on browser unload and are
+is blocked while an admission/save is unresolved. New drafts receive a canonical server ID only on completion. Unsaved changes warn on browser unload and are
 lost on reload/authentication changes; canonical notes reload after signing in again. Folder
 organization, autosave and offline sync remain deferred.
 
 Note DELETE requires `?expectedRevision=` with the displayed note revision. Missing or invalid
 values fail before product work; an authorized stale revision returns 409 without invalidating jobs
-or creating cleanup. Child writes retain shared notebook parent locks; notebook deletion uses an
+or releasing their slots. Child writes retain shared notebook parent locks; notebook deletion uses an
 exclusive parent lock. Folder relocation locks the folder and increments bounded note revisions.
