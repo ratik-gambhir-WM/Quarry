@@ -359,12 +359,25 @@ async fn embedding_pairs_infer_dimensions_and_reject_invalid_capability_vectors(
                         .unwrap(),
                 ),
             });
-            let pair = service.embed_pair("subject", "capability").await;
+            let pair = service
+                .prepare_embeddings(&SlideEmbeddingJob {
+                    attempt_count: 1,
+                    claim: StageClaim {
+                        template_id: "t".into(),
+                        token: "token".into(),
+                    },
+                    capability_document: "capability".into(),
+                    capability_fingerprint: "capability-fingerprint".into(),
+                    subject_document: "subject".into(),
+                    subject_fingerprint: "subject-fingerprint".into(),
+                    template_id: "t".into(),
+                })
+                .await;
             if valid {
                 let pair = pair.unwrap();
-                assert_eq!(pair.dimensions, 2);
-                assert_eq!(pair.subject_vector, [1.0, 0.5]);
-                assert_eq!(pair.capability_vector, [0.5, 1.0]);
+                assert_eq!(pair.profile, TemplateEmbeddingProfile::new("fixture", 2));
+                assert_eq!(pair.subject.as_slice(), [1.0, 0.5]);
+                assert_eq!(pair.capability.as_slice(), [0.5, 1.0]);
             } else {
                 assert!(pair.is_err());
             }

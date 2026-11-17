@@ -148,12 +148,6 @@ pub struct SlideClassificationServiceOptions {
     pub repository: Arc<dyn TemplateProcessingRepository>,
 }
 
-struct EmbeddingPair {
-    subject_vector: Vec<f64>,
-    capability_vector: Vec<f64>,
-    dimensions: usize,
-}
-
 pub struct SlideClassificationService {
     pub options: SlideClassificationServiceOptions,
 }
@@ -161,70 +155,36 @@ impl SlideClassificationService {
     pub fn new(options: SlideClassificationServiceOptions) -> Self {
         Self { options }
     }
-    /// Prepare every artifact before the caller publishes them atomically.
-    pub async fn process(
-        &self,
-        job: &SlideClassificationJob,
-    ) -> anyhow::Result<CompleteSlideProcessing> {
-        let classification = self.prepare_classification(job.clone()).await?;
-        let EmbeddingPair {
-            subject_vector,
-            capability_vector,
-            dimensions,
-        } = self
-            .embed_pair(
-                &classification.subject_embedding_document,
-                &classification.capability_embedding_document,
-            )
-            .await?;
-        Ok(CompleteSlideProcessing {
-            classification,
-            embedding_dimensions: dimensions,
-            embedding_model: self.options.embedding_model.clone(),
-            subject_vector,
-            capability_vector,
-        })
-    }
-    pub async fn process_and_persist(&self, job: &SlideClassificationJob) -> anyhow::Result<()> {
-        let result = self.process(job).await?;
-        let repository = self.options.repository.clone();
-        tokio::spawn(async move { repository.complete_slide_processing(&result).await })
-            .await?
-            .map_err(Into::into)
-    }
+    /// Classify outside SQL, then publish metadata/lexical input under the job's claim.
     pub async fn classify(&self, job: SlideClassificationJob) -> anyhow::Result<()> {
+        let claim = job.claim.clone();
         let result = self.prepare_classification(job).await?;
         let repository = self.options.repository.clone();
-        tokio::spawn(async move { repository.complete_slide_classification(&result).await })
-            .await?
-            .map_err(Into::into)
+        tokio::spawn(async move {
+            repository
+                .complete_slide_classification(&claim, &result)
+                .await
+        })
+        .await?
+        .map_err(Into::into)
     }
+    /// Embed both roles outside SQL; one failed role publishes nothing.
     pub async fn embed(&self, job: &SlideEmbeddingJob) -> anyhow::Result<()> {
-        let EmbeddingPair {
-            subject_vector,
-            capability_vector,
-            dimensions,
-        } = self
-            .embed_pair(&job.subject_document, &job.capability_document)
-            .await?;
-        let result = CompleteSlideEmbedding {
-            capability_fingerprint: job.capability_fingerprint.clone(),
-            capability_vector,
-            dimensions,
-            model: self.options.embedding_model.clone(),
-            subject_fingerprint: job.subject_fingerprint.clone(),
-            subject_vector,
-            template_id: job.template_id.clone(),
-        };
+        let prepared = self.prepare_embeddings(job).await?;
         let repository = self.options.repository.clone();
-        tokio::spawn(async move { repository.complete_slide_embedding(&result).await })
+        let claim = job.claim.clone();
+        tokio::spawn(async move { repository.complete_slide_embedding(&claim, &prepared).await })
             .await?
             .map_err(Into::into)
     }
-    async fn embed_pair(&self, subject: &str, capability: &str) -> anyhow::Result<EmbeddingPair> {
+    /// Obtain and validate the complete pair before any mutation.
+    pub async fn prepare_embeddings(
+        &self,
+        job: &SlideEmbeddingJob,
+    ) -> anyhow::Result<PreparedSlideEmbeddings> {
         let (subject_vector, capability_vector) = tokio::try_join!(
-            self.options.embedder.embed(subject),
-            self.options.embedder.embed(capability),
+            self.options.embedder.embed(&job.subject_document),
+            self.options.embedder.embed(&job.capability_document),
         )?;
         let dimensions = self
             .options
@@ -232,11 +192,13 @@ impl SlideClassificationService {
             .unwrap_or(subject_vector.len());
         validate_embedding(&subject_vector, Some(dimensions))?;
         validate_embedding(&capability_vector, Some(dimensions))?;
-        Ok(EmbeddingPair {
-            subject_vector,
-            capability_vector,
-            dimensions,
-        })
+        PreparedSlideEmbeddings::new(
+            TemplateEmbeddingProfile::new(self.options.embedding_model.clone(), dimensions),
+            job.subject_fingerprint.clone(),
+            &subject_vector,
+            job.capability_fingerprint.clone(),
+            &capability_vector,
+        )
     }
 
     async fn prepare_classification(

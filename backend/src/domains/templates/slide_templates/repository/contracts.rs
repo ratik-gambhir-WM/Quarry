@@ -29,11 +29,6 @@ pub trait TemplateCatalogRepository: Send + Sync {
         record: &TemplateInsert,
         pending: &PendingSlideClassification,
     ) -> RepositoryResult<()>;
-    async fn insert_with_processing_classification(
-        &self,
-        record: &TemplateInsert,
-        pending: &PendingSlideClassification,
-    ) -> RepositoryResult<()>;
     /// Inserts a template, metadata, assets, and optional preview atomically.
     async fn insert(
         &self,
@@ -122,39 +117,35 @@ pub trait TemplateProcessingRepository: Send + Sync {
         &self,
         id: &str,
     ) -> RepositoryResult<Option<StoredSlideClassification>>;
+    /// Claim one due classification with a fresh token and a database-clock lease.
     async fn claim_next_slide_classification(
         &self,
-        now: &str,
-        lease_expires_at: &str,
+        lease_seconds: u32,
     ) -> RepositoryResult<Option<SlideClassificationJob>>;
+    /// Claim one due embedding pair with a fresh token and a database-clock lease.
     async fn claim_next_slide_embedding(
         &self,
-        now: &str,
-        lease_expires_at: &str,
+        lease_seconds: u32,
     ) -> RepositoryResult<Option<SlideEmbeddingJob>>;
+    /// Publish metadata, lexical postings and embedding input under the same claim.
     async fn complete_slide_classification(
         &self,
+        claim: &StageClaim,
         result: &CompleteSlideClassification,
     ) -> RepositoryResult<()>;
-    async fn complete_slide_processing(
-        &self,
-        result: &CompleteSlideProcessing,
-    ) -> RepositoryResult<()>;
+    /// Publish both roles and readiness atomically under the same claim.
     async fn complete_slide_embedding(
         &self,
-        result: &CompleteSlideEmbedding,
+        claim: &StageClaim,
+        result: &PreparedSlideEmbeddings,
     ) -> RepositoryResult<()>;
-    async fn record_slide_classification_failure(
+    /// Record a failed attempt only while the same claim still owns the stage.
+    async fn record_slide_stage_failure(
         &self,
-        id: &str,
+        stage: SlideProcessingStage,
+        claim: &StageClaim,
         code: &str,
-        retry: Option<&str>,
-    ) -> RepositoryResult<()>;
-    async fn record_slide_embedding_failure(
-        &self,
-        id: &str,
-        code: &str,
-        retry: Option<&str>,
+        retry_after_seconds: Option<u32>,
     ) -> RepositoryResult<()>;
     async fn refresh_pending_slide_classification(
         &self,
@@ -174,6 +165,7 @@ pub trait TemplateProcessingRepository: Send + Sync {
 /// Read the scoped lexical and classified retrieval projection.
 #[async_trait::async_trait]
 pub trait TemplateRetrievalRepository: Send + Sync {
+    /// Classified metadata without vectors.
     async fn list_retrieval_classifications(
         &self,
         app_id: &str,
@@ -184,6 +176,26 @@ pub trait TemplateRetrievalRepository: Send + Sync {
         fts_query: &str,
         limit: usize,
     ) -> RepositoryResult<Vec<String>>;
+    /// Exact SQL cosine ranking for one role and profile over the authorized catalog.
+    async fn rank_slide_embeddings(
+        &self,
+        app_id: &str,
+        profile_id: &str,
+        role: EmbeddingRole,
+        query: &crate::adapters::postgres::vector::CosineVector,
+    ) -> RepositoryResult<Vec<RankedTemplate>>;
+    /// A ready source pair visible in this scope, for `similar`.
+    async fn find_slide_embedding_pair(
+        &self,
+        app_id: &str,
+        template_id: &str,
+    ) -> RepositoryResult<Option<StoredEmbeddingPair>>;
+    /// Fresh bounded owner/app recheck of selected identities before delivery.
+    async fn retain_retrievable(
+        &self,
+        app_id: &str,
+        template_ids: &[String],
+    ) -> RepositoryResult<std::collections::HashSet<String>>;
 }
 
 /// Composition boundary for owner/app scoping and consumers that coordinate multiple capabilities.

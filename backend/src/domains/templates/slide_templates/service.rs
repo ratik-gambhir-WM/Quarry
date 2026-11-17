@@ -248,12 +248,6 @@ impl ImportService {
         self.import_single(source, kind, true, Some(cancellation))
             .await
     }
-    pub async fn complete_processing(&self, result: &CompleteSlideProcessing) -> SlideResult<()> {
-        self.repository
-            .complete_slide_processing(result)
-            .await
-            .map_err(SlideTemplateError::internal)
-    }
     async fn import_single(
         &self,
         source: &[u8],
@@ -739,53 +733,6 @@ impl ImportService {
             .find_preview(template_id)
             .await
             .map_err(SlideTemplateError::internal)
-    }
-
-    pub(crate) async fn projection_record(
-        &self,
-        id: &str,
-    ) -> SlideResult<Option<super::graph::TemplateProjectionRecord>> {
-        let Some(template) = self
-            .repository
-            .find_by_id(id)
-            .await
-            .map_err(SlideTemplateError::internal)?
-        else {
-            return Ok(None);
-        };
-        let metadata = self
-            .repository
-            .find_metadata(id)
-            .await
-            .map_err(SlideTemplateError::internal)?
-            .ok_or_else(|| {
-                SlideTemplateError::internal(anyhow::anyhow!("missing template metadata"))
-            })?;
-        let classification = self
-            .repository
-            .find_slide_classification(id)
-            .await
-            .map_err(SlideTemplateError::internal)?;
-        let preview = self
-            .repository
-            .find_preview(id)
-            .await
-            .map_err(SlideTemplateError::internal)?
-            .map(|p| super::graph::TemplatePreviewDescriptor {
-                content_type: p.content_type,
-                width: p.width,
-                height: p.height,
-                url: format!(
-                    "/api/v1/templates/slide-templates/catalog/{id}/preview?appId={}",
-                    self.app_id
-                ),
-            });
-        Ok(Some(super::graph::TemplateProjectionRecord {
-            template,
-            metadata,
-            classification,
-            preview,
-        }))
     }
 
     /// Checks whether a template exists without hydrating its assets.

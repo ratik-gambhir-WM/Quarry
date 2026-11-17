@@ -7,7 +7,9 @@ use crate::{
 #[tokio::test]
 async fn seeded_queries_are_scoped_and_survive_migration_validation() {
     let fixture = seeded_database().await;
-    migrations::migrate(&fixture.postgres).await.unwrap();
+    migrations::migrate(&fixture.postgres, Default::default())
+        .await
+        .unwrap();
     let owned = fixture
         .companies
         .list(fixture.owner, Some("Fixture".into()), 10, 0)

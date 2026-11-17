@@ -9,7 +9,6 @@ use thiserror::Error;
 const SCHEMA_VERSION: &str = "1";
 const CATALOG_ASSETS: &[&str] = &[
     "document_summary.md",
-    "company_research.md",
     "diligence_review.md",
     "system/research_agent.md",
     "system/assistant_chat.md",
@@ -18,7 +17,6 @@ const CATALOG_ASSETS: &[&str] = &[
 pub enum PromptId {
     DefaultResponse,
     DefaultInstructions,
-    HelixQueryExample,
     DealExtractionSystem,
     DealExtractionRequest,
     SummarySystem,
@@ -31,10 +29,9 @@ pub enum PromptId {
 }
 
 impl PromptId {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 11] = [
         Self::DefaultResponse,
         Self::DefaultInstructions,
-        Self::HelixQueryExample,
         Self::DealExtractionSystem,
         Self::DealExtractionRequest,
         Self::SummarySystem,
@@ -50,7 +47,6 @@ impl PromptId {
         match self {
             Self::DefaultResponse => "default-response",
             Self::DefaultInstructions => "default-instructions",
-            Self::HelixQueryExample => "helix-query-example",
             Self::DealExtractionSystem => "deal-extraction-system",
             Self::DealExtractionRequest => "deal-extraction-request",
             Self::SummarySystem => "summary-system",
@@ -73,7 +69,6 @@ impl PromptId {
                 "system/research_agent.md"
             }
             Self::AssistantChatDefault => "system/assistant_chat.md",
-            Self::HelixQueryExample => "company_research.md",
             Self::DealExtractionSystem | Self::DealExtractionRequest => "diligence_review.md",
             Self::SummarySystem
             | Self::CliSummarySystem

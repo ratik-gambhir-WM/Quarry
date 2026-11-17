@@ -7,7 +7,9 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
     ))
     .unwrap();
     let client = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&client).await.unwrap();
+    migrations::migrate(&client, Default::default())
+        .await
+        .unwrap();
     crate::integration_support::seed_identity(&client, "lexical-one@example.invalid", 'a').await;
     crate::integration_support::seed_identity(&client, "lexical-two@example.invalid", 'b').await;
     client

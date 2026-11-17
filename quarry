@@ -12,12 +12,6 @@ readonly QUARRY_TEMPLATE_PREVIEW_RENDER_URL="${QUARRY_UI_URL}/_internal/template
 readonly QUARRY_STARTUP_TIMEOUT_SECONDS=300
 readonly POSTGRES_BIN="${QUARRY_POSTGRES_BIN:-/Applications/Postgres.app/Contents/Versions/18/bin}"
 readonly POSTGRES_DATA_DIR="${QUARRY_POSTGRES_DATA_DIR:-${HOME}/Library/Application Support/Postgres/var-18}"
-readonly HELIX_CONTAINER_NAME="${QUARRY_HELIX_CONTAINER_NAME:-helix-quarry-v3-dev}"
-readonly HELIX_VOLUME_NAME="${HELIX_CONTAINER_NAME}-data"
-readonly HELIX_DATA_DIR="/var/lib/helix"
-readonly HELIX_CONFIG_PATH="${QUARRY_ROOT}/backend/helix.toml"
-readonly LOCAL_HELIX_PORT="${QUARRY_HELIX_PORT:-6969}"
-readonly LOCAL_HELIX_URL="http://127.0.0.1:${LOCAL_HELIX_PORT}"
 
 backend_pid=""
 ui_pid=""
@@ -26,17 +20,15 @@ usage() {
   cat <<'EOF'
 Usage: quarry <web|desktop>
 
-  web      Start PostgreSQL, Docker, Helix, Axum, and the React web UI.
-  desktop  Start PostgreSQL, Docker, Helix, Axum, and the Tauri desktop UI.
+  web      Start PostgreSQL, Axum, and the React web UI.
+  desktop  Start PostgreSQL, Axum, and the Tauri desktop UI.
 
-Templates run in Axum and persist in the Quarry PostgreSQL database.
+Documents, notebooks and templates persist and search in the Quarry PostgreSQL
+database with the separately provisioned pgvector extension. Docker is not required.
 Set server-only QUARRY_DATABASE_URL before starting (postgresql://localhost/Quarry locally).
-The default Helix container is helix-quarry-v3-dev on port 6969.
-QUARRY_HELIX_CONTAINER_NAME and QUARRY_HELIX_PORT select another store.
-Helix uses disk storage in the Docker volume <container-name>-data.
 On macOS, an existing Postgres.app 18 cluster starts automatically.
 QUARRY_POSTGRES_BIN and QUARRY_POSTGRES_DATA_DIR select another existing local cluster.
-PostgreSQL, Docker, and Helix remain running when the launcher exits.
+PostgreSQL remains running when the launcher exits.
 
 Run this command from the Quarry repository root.
 EOF
@@ -141,7 +133,7 @@ case "$1" in
     ;;
 esac
 
-for required_command in cargo npm curl node docker; do
+for required_command in cargo npm curl node; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     fail "required command not found: ${required_command}"
   fi
@@ -178,119 +170,11 @@ if [[ "$(uname -s)" == "Darwin" && -x "$POSTGRES_BIN/pg_ctl" && -d "$POSTGRES_DA
   esac
 fi
 
-node -e 'const value = process.argv[1]; if (!/^[0-9]{1,5}$/.test(value) || Number(value) < 1 || Number(value) > 65535) process.exit(1)' "$LOCAL_HELIX_PORT" \
-  || fail "QUARRY_HELIX_PORT must be a port between 1 and 65535"
-
-docker_daemon_is_ready() {
-  docker info >/dev/null 2>&1
-}
-
-helix_is_ready() {
-  curl --fail --silent --max-time 1 --output /dev/null "${LOCAL_HELIX_URL}/healthz"
-}
-
-helix_local_dev_config_value() {
-  local key="$1"
-
-  awk -F '"' -v key="$key" '
-    /^[[:space:]]*\[local\.dev\][[:space:]]*(#.*)?$/ { in_local_dev = 1; next }
-    in_local_dev && /^[[:space:]]*\[/ { exit }
-    in_local_dev && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*\"[^\"]+\"[[:space:]]*(#.*)?$") {
-      print $2
-      exit
-    }
-  ' "$HELIX_CONFIG_PATH"
-}
-
-if ! docker_daemon_is_ready; then
-  if [[ "$(uname -s)" != "Darwin" ]] || ! command -v open >/dev/null 2>&1; then
-    fail "Docker daemon is not running; start it and try again"
-  fi
-
-  printf 'Starting Docker Desktop...\n'
-  open -a "Docker Desktop" \
-    || fail "could not open Docker Desktop"
-
-  readonly docker_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
-  while ! docker_daemon_is_ready; do
-    if ((SECONDS >= docker_startup_deadline)); then
-      fail "Docker daemon did not become ready within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
-    fi
-    sleep 1
-  done
-fi
-
-helix_image_repository="$(helix_local_dev_config_value image)"
-helix_image_tag="$(helix_local_dev_config_value tag)"
-helix_image_digest="$(helix_local_dev_config_value digest)"
-[[ -n "$helix_image_repository" && -n "$helix_image_tag" && -n "$helix_image_digest" ]] \
-  || fail "could not read the local Helix image, tag, and digest from ${HELIX_CONFIG_PATH}"
-readonly HELIX_IMAGE="${helix_image_repository}@${helix_image_digest}"
-
-if ! expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE" 2>/dev/null)"; then
-  printf 'Pulling pinned Helix image %s (tag %s)...\n' "$HELIX_IMAGE" "$helix_image_tag"
-  docker pull "$HELIX_IMAGE" >/dev/null \
-    || fail "could not pull pinned Helix image '${HELIX_IMAGE}'"
-  expected_helix_image_id="$(docker image inspect --format '{{.Id}}' "$HELIX_IMAGE")" \
-    || fail "could not inspect pinned Helix image '${HELIX_IMAGE}'"
-fi
-
-if docker container inspect "$HELIX_CONTAINER_NAME" >/dev/null 2>&1; then
-  existing_helix_image_id="$(docker container inspect --format '{{.Image}}' "$HELIX_CONTAINER_NAME")"
-  if [[ "$existing_helix_image_id" != "$expected_helix_image_id" ]]; then
-    existing_helix_image_ref="$(docker container inspect --format '{{.Config.Image}}' "$HELIX_CONTAINER_NAME")"
-    fail "Helix container '${HELIX_CONTAINER_NAME}' uses '${existing_helix_image_ref}', not pinned ${HELIX_IMAGE}. Choose a new QUARRY_HELIX_CONTAINER_NAME or deliberately replace the old container; this launcher will not modify it."
-  fi
-else
-  printf 'Creating Helix container %s from %s...\n' "$HELIX_CONTAINER_NAME" "$HELIX_IMAGE"
-  docker create \
-    --name "$HELIX_CONTAINER_NAME" \
-    --restart unless-stopped \
-    --publish "127.0.0.1:${LOCAL_HELIX_PORT}:8080" \
-    --env "HELIX_DATA_DIR=${HELIX_DATA_DIR}" \
-    --mount "type=volume,source=${HELIX_VOLUME_NAME},target=${HELIX_DATA_DIR}" \
-    "$HELIX_IMAGE" >/dev/null \
-    || fail "could not create Helix container '${HELIX_CONTAINER_NAME}' from '${HELIX_IMAGE}'"
-fi
-
-helix_host_port="$(docker container inspect --format '{{range (index .HostConfig.PortBindings "8080/tcp")}}{{.HostIp}}:{{.HostPort}}{{end}}' "$HELIX_CONTAINER_NAME")" \
-  || fail "could not inspect Helix port mapping"
-[[ "$helix_host_port" == "127.0.0.1:${LOCAL_HELIX_PORT}" ]] \
-  || fail "the selected Helix container uses a different port; select its matching QUARRY_HELIX_PORT or a fresh container"
-
-helix_disk_storage="$(docker container inspect --format '{{range .Config.Env}}{{if eq . "HELIX_DATA_DIR=/var/lib/helix"}}true{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
-  || fail "could not inspect Helix storage configuration"
-helix_data_volume="$(docker container inspect --format '{{range .Mounts}}{{if and (eq .Destination "/var/lib/helix") (eq .Type "volume") .RW}}{{.Name}}{{end}}{{end}}' "$HELIX_CONTAINER_NAME")" \
-  || fail "could not inspect Helix data volume"
-if [[ "$helix_disk_storage" != "true" || "$helix_data_volume" != "$HELIX_VOLUME_NAME" ]]; then
-  fail "Helix container '${HELIX_CONTAINER_NAME}' must use HELIX_DATA_DIR=${HELIX_DATA_DIR} and writable Docker volume '${HELIX_VOLUME_NAME}'. Stop Quarry and preserve/export any live graph before deliberately replacing the container. This launcher will not replace it or use memory storage."
-fi
-
-if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME")" == "true" ]]; then
-  printf 'Waiting for Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-else
-  printf 'Starting Helix container %s...\n' "$HELIX_CONTAINER_NAME"
-  docker start "$HELIX_CONTAINER_NAME" >/dev/null \
-    || fail "could not start Helix container '${HELIX_CONTAINER_NAME}'"
-fi
-
-readonly helix_startup_deadline=$((SECONDS + QUARRY_STARTUP_TIMEOUT_SECONDS))
-while ! helix_is_ready; do
-  if [[ "$(docker container inspect --format '{{.State.Running}}' "$HELIX_CONTAINER_NAME" 2>/dev/null)" != "true" ]]; then
-    fail "Helix container '${HELIX_CONTAINER_NAME}' stopped before becoming ready"
-  fi
-  if ((SECONDS >= helix_startup_deadline)); then
-    fail "Helix did not become ready at ${LOCAL_HELIX_URL} within ${QUARRY_STARTUP_TIMEOUT_SECONDS} seconds"
-  fi
-  sleep 0.25
-done
-
 printf 'Starting Axum API at %s...\n' "$QUARRY_API_URL"
 set -m
 (
   cd "$QUARRY_ROOT/backend" || exit 1
   exec env \
-    HELIX_URL="$LOCAL_HELIX_URL" \
     QUARRY_API_HOST="$QUARRY_API_HOST" \
     QUARRY_API_PORT="$QUARRY_API_PORT" \
     QUARRY_TEMPLATE_PREVIEW_RENDER_URL="$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" \
@@ -361,8 +245,8 @@ while ! curl --fail --silent --max-time 1 "$QUARRY_TEMPLATE_PREVIEW_RENDER_URL" 
   sleep 0.25
 done
 
-printf 'Quarry is ready: Helix %s, Axum %s, UI %s, templates %s.\n' \
-  "$LOCAL_HELIX_URL" "$QUARRY_API_URL" "$QUARRY_UI_URL" "embedded"
+printf 'Quarry is ready: Axum %s, UI %s, templates %s.\n' \
+  "$QUARRY_API_URL" "$QUARRY_UI_URL" "embedded"
 
 while true; do
   if ! kill -0 "$backend_pid" 2>/dev/null; then

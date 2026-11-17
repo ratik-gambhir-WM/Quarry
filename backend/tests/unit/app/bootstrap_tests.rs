@@ -16,12 +16,11 @@ async fn rejects_a_missing_catalog_before_opening_local_infrastructure() {
 
 /// Explicit full-stack validation harness: no .env reads and no existing stores.
 #[tokio::test]
-#[ignore = "serves disposable production-composed API on 127.0.0.1:3001; requires isolated Helix on 16969"]
+#[ignore = "serves disposable production-composed API on 127.0.0.1:3001; requires isolated PostgreSQL"]
 async fn serve_disposable_slide_template_validation_api() {
     let mut values: Vec<(String, String)> = vec![
-        ("HELIX_VECTOR_DIMENSION".into(), "2".into()),
+        ("QUARRY_EMBEDDING_DIMENSION".into(), "2".into()),
         ("OPENAI_SLIDE_EMBEDDING_DIMENSIONS".into(), "2".into()),
-        ("HELIX_URL".into(), "http://127.0.0.1:16969".into()),
         (
             "QUARRY_DATABASE_URL".into(),
             std::env::var("QUARRY_TEST_DATABASE_URL").expect("disposable PostgreSQL database URL"),

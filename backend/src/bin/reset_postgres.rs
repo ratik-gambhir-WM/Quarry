@@ -11,7 +11,11 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let config = AppConfig::from_env().map_err(anyhow::Error::msg)?;
     let client = PostgresClient::connect(&config.postgres).await?;
-    reset_product_schema(&client, config.helix.vector_dimension.get()).await?;
+    reset_product_schema(
+        &client,
+        quarry_backend::app::bootstrap::schema_dimensions(&config),
+    )
+    .await?;
     client.close().await;
     println!("Recreated Quarry PostgreSQL product schema");
     Ok(())

@@ -1,5 +1,9 @@
 # File permanent deletion plan
 
+Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
+Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+operations and maintenance instructions below are historical, not executable rollout guidance.
+
 Date: 2026-11-06. Status: proposed; not implemented.
 
 This document records the agreed planning direction. Saving it changes no runtime behavior,
@@ -10,17 +14,17 @@ product; this plan is a design input. Preserve the existing uncommitted work.
 
 Add permanent deletion of one uploaded Quarry file, identified by `deal_id` and `file_id`.
 Remove all of its versions, original bytes, recovery data, search text, embeddings, and graph
-relationships from active SQLite and Helix storage. A temporary cleanup phase is permitted;
+relationships from active SQLite and legacy storage. A temporary cleanup phase is permitted;
 there is no trash or restore operation in this feature.
 
-SQLite and Helix cannot commit one transaction together. Use a durable cleanup job so SQLite
-content can be deleted first and Helix cleanup can finish after an outage or backend restart.
+SQLite and legacy storage cannot commit one transaction together. Use a durable cleanup job so SQLite
+content can be deleted first and legacy storage cleanup can finish after an outage or backend restart.
 Do not report completion while either store still holds the targeted application records.
 
 | Store or surface | Deletion scope |
 | --- | --- |
 | SQLite | The logical file, every version and blob, deduplication claims, identity manifests, chunk identities, image recovery snapshots, and file-specific activity references. |
-| Helix | Every matching `QuarryFile`, `FileVersion`, and `FileChunk`, all generations, unpublished partial writes, incident relationships, and associated vector/text index entries. |
+| legacy storage | Every matching `QuarryFile`, `FileVersion`, and `FileChunk`, all generations, unpublished partial writes, incident relationships, and associated vector/text index entries. |
 | Runtime state | Related ingestion jobs and retained events, preview work and caches, selected-file state, browser preview bytes/object URLs, and related route-local state. |
 
 Preserve the deal, memberships, unrelated files, templates, notebooks, chats, and other deals'
@@ -34,7 +38,7 @@ and any stronger erasure requirement need a separate operational policy.
 - [SQLite document store](../backend/src/domains/documents/store/sqlite.rs) owns canonical
   files, versions, blobs, and current-content claims.
 - [Identity manifests](../backend/src/domains/documents/store/identity.rs) retain immutable
-  version/chunk identities independently of Helix.
+  version/chunk identities independently of legacy storage.
 - [Migrations](../backend/src/app/migrations.rs) own the shared schema, currently marker 17,
   and the existing foreign-key cascades. Coordinate the next additive marker at implementation time.
 - [Ingestion](../backend/src/domains/documents/ingestion/service.rs) uses process-local
@@ -105,15 +109,15 @@ finish deletion; do not copy filenames, document contents, blobs, or vectors int
 If a generic deletion audit event is retained, define that explicitly in the migration and keep
 it free of the deleted file's name, identifiers, hash, or content.
 
-### 3.4 Purge Helix
+### 3.4 Purge legacy storage
 
 The worker removes every document node belonging to the captured deal/file identity, including
 all versions and index generations. Find partial and orphaned nodes directly by their properties;
 cleanup must not depend solely on traversing published version edges.
 
 Delete the associated relationships and ensure vector/text index entries are removed through
-the supported Helix deletion behavior. Keep cleanup bounded and idempotent. Never delete by
-filename or content hash alone, drop shared index definitions, or run `clear_helix`.
+the supported legacy storage deletion behavior. Keep cleanup bounded and idempotent. Never delete by
+filename or content hash alone, drop shared index definitions, or run the retired graph maintenance utilities.
 
 Use the existing process-serialized, durability-acknowledged writer boundary. Reconcile an
 ambiguous write outcome by verification; do not add generic transport retries. Retry safe cleanup
@@ -124,7 +128,7 @@ phases with bounded backoff. Persist attempts and progress so startup resumes pe
 Completion requires:
 
 - No targeted canonical file, version, blob, claim, identity, recovery, or activity-reference rows.
-- No matching Helix file/version/chunk nodes, relationships, or searchable vector/text entries.
+- No matching legacy storage file/version/chunk nodes, relationships, or searchable vector/text entries.
 - Related runtime jobs, retained results, and preview caches evicted, with late writes fenced.
 
 Clear browser-selected-file state, rendered preview data, object URLs, and search/list caches.
@@ -159,12 +163,12 @@ interpret this plan as authorization to run that maintenance now.
 
 ## 6. Verification and acceptance criteria
 
-Use temporary SQLite databases and an explicitly disposable, disk-backed Helix instance.
+Use temporary SQLite databases and an explicitly disposable, disk-backed legacy storage instance.
 
 - Authorization rejects viewers/contributors and cross-deal file IDs.
 - Every version/generation and partial projection is removed; another deal's identical file survives.
 - A failure before the SQLite commit rolls back both content removal and job creation.
-- A Helix outage after the commit leaves a durable pending job and no servable canonical file.
+- A legacy storage outage after the commit leaves a durable pending job and no servable canonical file.
 - Restart between stages resumes cleanup; unknown write outcomes are reconciled safely.
 - Repeated DELETE requests converge without duplicate jobs or accidental wider deletion.
 - Concurrent upload, indexing, preview generation, and deletion cannot resurrect the file.

@@ -11,7 +11,6 @@ async fn json_studio() -> SlideTemplates {
         ),
         Arc::new(support::FixturePreview),
         None,
-        None,
         false,
     )
 }
@@ -125,7 +124,6 @@ async fn committed_slide_job_is_notified_when_the_request_is_cancelled_before_re
         repository.clone(),
         Arc::new(support::FixturePreview),
         Some(classification),
-        None,
         false,
     ));
     let (committed, saved) = tokio::sync::oneshot::channel();
@@ -183,7 +181,7 @@ fn retrieval_waits_for_the_blocking_pool_without_blocking_the_runtime() {
     runtime.block_on(async {
         let repository = Arc::new(support::repository(std::path::Path::new(":memory:")).await.unwrap());
         let imported = support::import_fixture(repository.clone(), TemplateKind::Diagram).await;
-        let studio = Arc::new(SlideTemplates::new(repository, Arc::new(support::FixturePreview), None, None, false));
+        let studio = Arc::new(SlideTemplates::new(repository, Arc::new(support::FixturePreview), None, false));
         let (release, released) = std::sync::mpsc::channel();
         let (started, ready) = tokio::sync::oneshot::channel();
         let occupied = tokio::task::spawn_blocking(move || {

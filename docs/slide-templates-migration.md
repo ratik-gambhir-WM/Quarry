@@ -1,17 +1,18 @@
 # Slide Templates Studio migration evidence
 
-Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
-Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
-reset and verification records below describe the earlier implementation, not current commands.
+Current storage is PostgreSQL schema 5 with pgvector for all product persistence and search.
+See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
+verification records below describe earlier implementations, not current prerequisites or commands.
 
 ## Current implementation
 
 The maintained launcher uses embedded Axum templates and does not start the Node service.
-Fresh PostgreSQL schema 2 owns private templates, assets, previews, classification/embedding
-artifacts and durable jobs through the same asynchronous pool as other product records. Helix
-remains the metadata/dual-vector projection; imports commit canonical content before indexing.
-Startup reconciles templates from PostgreSQL. There is no SQLite driver, profile import, marker
-upgrade chain, separate template database or destructive reset command in this deployment.
+Fresh PostgreSQL schema 5 owns private templates, assets, previews, classification/embedding
+artifacts and durable jobs through the same asynchronous pool as other product records. Typed
+subject/capability vector pairs and readiness publish atomically in PostgreSQL; startup validates
+the SQL schema and resumes durable stages. There is no remote projection or startup reconciliation.
+There is no SQLite driver, historical import, marker upgrade chain or separate template database.
+The guarded MVP schema reset remains an explicit development operation.
 
 Use [current storage and recovery](postgresql-storage.md), [private template policy](template-ownership.md),
 and [current template architecture](ARCHITECTURE.md#1121-embedded-slide-templates-studio) for
@@ -27,13 +28,13 @@ and hidden from user catalogs. See [private template rollout and recovery](templ
 The asynchronous classified-import rollout below describes schema 16 and still applies before
 schema 17 is added.
 At that time, schema 11 and older required a deliberately selected, drained development reset
-paired with an isolated Helix store. That utility and upgrade path have since been removed; do
+paired with an isolated legacy store. That utility and upgrade path have since been removed; do
 not use the historical schema-9/10 or reset procedures with the PostgreSQL runtime.
 
 ## Asynchronous classified imports (schema 16)
 
 Drain HTTP imports and background writers, stop the old backend, and take a consistent SQLite
-backup (including committed WAL content) and matching Helix backup before deploying. Start the
+backup (including committed WAL content) and matching legacy storage backup before deploying. Start the
 new backend to validate the complete schema and transactionally rename `slide_classifications`
 to `template_classification_status`; no template data, FTS, indexes or vectors are rebuilt or
 discarded. Old synchronous processing rows without leases are requeued with reset attempts and
@@ -62,12 +63,12 @@ provider failures stop immediately. Failed classification preserves the slide/pr
 embedding also preserves successful classification/FTS. Terminal failures remain inspectable;
 there is no public manual retry endpoint. Restart resumes pending jobs and reclaims expired leases,
 without redoing successful stages. With classification disabled, existing pending work stays saved
-until a configured worker starts. Helix projection failure is logged and repaired by startup
-reconciliation, independently of completed provider work. No live provider/Helix calls or real
+until a configured worker starts. legacy storage projection failure is logged and repaired by startup
+reconciliation, independently of completed provider work. No live provider or graph-storage calls or real
 local databases are needed for the temporary-database verification suite.
 
 Rollback requires draining/stopping the new worker and restoring the pre-upgrade database and
-matching binary/Helix backup. An old binary cannot open schema 16; do not change the marker or
+matching binary/legacy storage backup. An old binary cannot open schema 16; do not change the marker or
 rename a live table manually. Restoring a backup discards post-backup changes and must be planned.
 
 Source snapshot: local `slide-template-endpoints/server`, inspected 2026-10-19.
@@ -87,8 +88,8 @@ Validation results and operational limits are recorded below during implementati
 
 ## Storage decision and recovery
 
-Implemented 2026-10-20. The user explicitly selected **SQLite canonical storage with a Helix
-projection**, superseding the original plan's no-Helix-write scope for this migration.
+Implemented 2026-10-20. The user explicitly selected **SQLite canonical storage with a legacy storage
+projection**, superseding the original plan's SQL-only-write scope for this migration.
 
 The embedded service now shares Quarry's existing durable product SQLite database and the same
 `SqliteClient` connection. `backend/src/app/migrations.rs` is the sole schema authority (marker 10).
@@ -109,7 +110,7 @@ deals, chats, documents, versions, and blobs. Normal startup requires no extra d
 Previously created standalone template files remain untouched and are not automatically attached,
 copied, or imported. Their former `QUARRY_SLIDE_TEMPLATES_DATABASE_PATH` setting is ignored.
 
-The Helix projection has four labels, scoped to `Quarry_WestMonroe`:
+The legacy storage projection has four labels, scoped to `Quarry_WestMonroe`:
 
 | Label | Contents |
 | --- | --- |
@@ -118,24 +119,24 @@ The Helix projection has four labels, scoped to `Quarry_WestMonroe`:
 | `SlideTemplateSubject` | Subject vector, model, dimensions, embedding document, and fingerprint |
 | `SlideTemplateCapability` | Capability vector, model, dimensions, embedding document, and fingerprint |
 
-Each Helix request is preflighted below 2 MiB. JSON fragments are staged in bounded pieces;
+Each legacy storage request is preflighted below 2 MiB. JSON fragments are staged in bounded pieces;
 publication atomically replaces the root and both ready vector roles. Old-generation fragments
 are cleaned afterward. Repeating the same publication is idempotent. The full canonical precision
-is retained in the JSON classification record; Helix's native vector index receives validated
+is retained in the JSON classification record; legacy storage's native vector index receives validated
 finite f32 vectors. Both roles use cosine indexes filtered by app. The classification model,
 embedding model, dimensions, input/classified fingerprints, and embedding fingerprints remain
 part of the projected record. Image references resolve to SQLite-owned assets; binary images are
-not duplicated into Helix vectors or root properties.
+not duplicated into legacy storage vectors or root properties.
 
-SQLite commits before projection publication. A failed or uncertain Helix write leaves canonical
+SQLite commits before projection publication. A failed or uncertain legacy storage write leaves canonical
 records intact and returns an explicit saved-in-SQLite/indexing-unconfirmed failure. No ambiguous
 import/delete is automatically retried. Refresh the catalog before retrying an import: the original
-record may already exist. Deletion retries also remove a stale Helix projection when SQLite has
+record may already exist. Deletion retries also remove a stale legacy storage projection when SQLite has
 already removed the membership. Dropped responses after commit remain uncertain outcomes.
 
 Embedded startup reconciles only this app's template projection against the shared SQLite
 catalog and republishes its records. This repairs interrupted publication and removes stale
-deleted records. It never clears document labels or runs `clear_helix`. Canonical shared-database data survives failed reconciliation; startup fails
+deleted records. It never clears document labels or runs the retired graph maintenance utilities. Canonical shared-database data survives failed reconciliation; startup fails
 explicitly so the failure can be resolved before serving. There is no new general reindex CLI,
 background indexing worker, or public template-search route. Existing internal retrieval modes
 continue to use canonical SQLite classification/FTS/vector artifacts.
@@ -143,7 +144,7 @@ continue to use canonical SQLite classification/FTS/vector artifacts.
 ## Selection, classification, and cutover
 
 The repository and launcher run templates inside Axum: use ordinary `./quarry web` or
-`./quarry desktop`. No separate template process or backend selector is supported. Helix
+`./quarry desktop`. No separate template process or backend selector is supported. legacy storage
 remains required for startup.
 The renderer becomes available after Vite starts; API startup does not wait for screenshots.
 
@@ -151,26 +152,26 @@ Ordinary single/deck imports retain their existing behavior. Optional native
 `/api/v1/templates/slide-templates/import/classified` waits for classification and both embeddings
 before reporting success. A failed provider does not publish ready metadata/FTS or partial vectors.
 Provider calls are bounded and never retried automatically. Classified metadata and embeddings
-are then projected into Helix with the template. Built-ins and unclassified imports have no invented
+are then projected into legacy storage with the template. Built-ins and unclassified imports have no invented
 embeddings. Model/key settings are server-only and disabled by default. Raw-vector HTTP inspection
 requires the separate server opt-in and is absent from gallery DTOs and browser persistence.
 
 Before upgrading a valuable schema-9 database, drain requests and stop every Quarry process
 using it. Take a consistent SQLite backup (use SQLite's backup mechanism, or checkpoint and close
 all connections before copying; do not copy an active WAL database's main file alone). Back up
-the matching Helix store under the documented drain/backup procedure. Keep source PPTX files and
+the matching legacy store under the documented drain/backup procedure. Keep source PPTX files and
 any prior standalone template databases. This implementation was tested only on disposable stores;
 it has not migrated a real local database during development.
 
 Restart on the new version to apply the transactional additive upgrade. If migration fails,
 resolve the reported access/layout issue before retrying; no reset or deletion is needed. If
-Helix reconciliation fails after the SQLite upgrade committed, the schema-10 database and templates
-remain canonical; repair Helix availability and restart to retry reconciliation. Do not clear the
+legacy storage reconciliation fails after the SQLite upgrade committed, the schema-10 database and templates
+remain canonical; repair legacy storage availability and restart to retry reconciliation. Do not clear the
 document graph. The explicit offline development reset is still destructive and now also deletes
 templates, assets, previews, memberships, FTS, and embeddings; it is never a migration fallback.
 
 To roll back the executable to a version that only understands schema 9, drain and stop it first,
-then restore the consistent pre-upgrade SQLite backup and matching Helix backup. Do not decrement
+then restore the consistent pre-upgrade SQLite backup and matching legacy storage backup. Do not decrement
 `user_version` or delete template tables by hand. Restoring an older backup loses intervening writes;
 retain the schema-10 backup and source imports for a deliberate recovery. Changing vector dimensions
 requires a separately reviewed template-index rollout; indexes are never reset automatically.
@@ -202,7 +203,7 @@ production deployment remain outside this change.
 
 The working tree already contained npm dependency changes, an architecture edit, a deleted plan,
 and untracked documentation/planning files. Those changes were preserved. No real environment
-file, product database, or existing Helix graph was read or changed for validation.
+file, product database, or existing legacy graph was read or changed for validation.
 
 Prior port verification (before shared-database correction), completed 2026-10-20:
 
@@ -213,7 +214,7 @@ Prior port verification (before shared-database correction), completed 2026-10-2
 | `backend/` | `cargo test --locked --offline --all-targets` | 360 passed, 7 ignored |
 | `backend/` | `cargo clippy --locked --offline --all-targets -- -D warnings` | Blocked by the pre-existing PDF parser lint below |
 | `backend/` | `cargo clippy --locked --offline --all-targets -- -D warnings -A clippy::chunks_exact_to_as_chunks` | Passed |
-| `backend/` | `cargo test --locked --offline live_helix_templates_metadata_dual_vectors_and_deletion -- --ignored` | 1 passed against disposable Helix on port 16969 |
+| `backend/` | the retired graph integration suite | 1 passed against disposable legacy storage on port 16969 |
 | `backend/` | `cargo test --locked --offline slide_templates_headless_preview_tests -- --ignored` | 3 passed with real Chromium and synthetic loopback renderer |
 | `frontend/` | `npm run typecheck` | Both web and desktop passed |
 | `frontend/` | `npm run check:boundaries` | Passed |
@@ -233,7 +234,7 @@ The unmodified PDF parser at `backend/src/domains/documents/formats/pdf.rs:451` 
 Rust 1.99's `clippy::chunks_exact_to_as_chunks` under `-D warnings`. The scoped Clippy run
 allows only that pre-existing lint; no broad warning suppression or unrelated PDF edit was added.
 
-The live Helix case verifies complete template reconstruction, metadata and preview descriptors,
+The live legacy storage case verifies complete template reconstruction, metadata and preview descriptors,
 both vector roles, dimensions/model, repeated publication, and deletion. The Chromium cases
 verify injected input, external-request blocking, screenshot bounds, unavailable readiness,
 and cancellation/browser cleanup. They use a synthetic renderer, so they do not establish
@@ -254,10 +255,10 @@ operations with bound values. No newly unreachable implementation was identified
 background worker and internal retrieval capabilities are intentionally retained but not started
 or exposed as public search. Runtime UI acceptance remains the review limitation.
 
-The owned disposable Helix container was stopped and removed after validation; the existing
-local development Helix container was left untouched. No walkthrough API or Vite server was
+The owned disposable legacy storage container was stopped and removed after validation; the existing
+local development legacy storage container was left untouched. No walkthrough API or Vite server was
 started. Architecture impact: updated `docs/ARCHITECTURE.md` for the embedded runtime,
-configuration, routes, canonical template storage, Helix projection, cutover and recovery.
+configuration, routes, canonical template storage, legacy storage projection, cutover and recovery.
 
 
 ## Shared-database correction verification
@@ -288,7 +289,7 @@ Correction checks completed 2026-10-20:
 Initial focused runs exposed and corrected test fixture expectations and the built-in last-membership
 reseed bug. A restricted-sandbox template-suite run also failed its existing loopback provider fixture;
 the authorized full rerun passed. No production API, user database, standalone template database, or
-existing Helix instance was started, read, reset, or migrated. All database tests use disposable stores.
+existing legacy storage instance was started, read, reset, or migrated. All database tests use disposable stores.
 The schema-9 fixture matches the previous product DDL exactly; template DDL was transferred without
 semantic changes except removing `IF NOT EXISTS` so conflicts fail atomically.
 
@@ -300,7 +301,7 @@ separate template-path field were removed; no new unreachable code was identifie
 Architecture impact: updated `docs/ARCHITECTURE.md` and `AGENTS.md` for shared schema 10,
 additive migration, default embedded mode, built-in deletion persistence, and recovery behavior.
 Prior port results above are historical evidence, not reruns for this correction. Frontend/Tauri API contracts and Node sources
-are unchanged; browser walkthrough, native save, real providers, and live Helix/Chromium are not
+are unchanged; browser walkthrough, native save, real providers, and live legacy storage/Chromium are not
 re-exercised for this storage/configuration correction.
 
 
@@ -308,8 +309,8 @@ re-exercised for this storage/configuration correction.
 
 A subsequent user-authorized browser pass on 2026-10-20 used Vite on port 1421, the production-
 composed disposable API harness on port 3002, a temporary shared SQLite database, and a fresh
-Helix container on port 16969 without host volumes. Existing listeners on 1420/3001 and the
-normal Helix container were left untouched. The harness now accepts test-only
+legacy storage container on port 16969 without host volumes. Existing listeners on 1420/3001 and the
+normal legacy storage container were left untouched. The harness now accepts test-only
 `QUARRY_VALIDATION_API_PORT`, `QUARRY_VALIDATION_DATABASE_PATH`,
 `QUARRY_VALIDATION_CORS_ORIGINS`, and `QUARRY_VALIDATION_RENDER_URL` overrides, allowing isolated
 ports and database reuse across controlled restarts without reading environment files.
@@ -379,10 +380,10 @@ CORS-visible export headers, and compact mobile controls.
 
 
 Cleanup completed: the temporary SQLite database and sidecars, uploaded/generated test fixtures,
-captured API responses, export file, and raw test logs were deleted. The isolated Helix container
+captured API responses, export file, and raw test logs were deleted. The isolated legacy storage container
 was stopped and removed, with no mounted host store. The test API and Vite processes were stopped.
 The product test tab was closed (discarding its session storage); a cleanup page loaded on the
 same test origin with `Clear-Site-Data: "cache", "cookies", "storage"`, then that page and its
-cleanup listener were closed. The original API/Vite listeners and original Helix container were
+cleanup listener were closed. The original API/Vite listeners and original legacy storage container were
 left running. No screenshot files or sample product records are retained as deliverables. This
 document retains only aggregate verification results and limitations.

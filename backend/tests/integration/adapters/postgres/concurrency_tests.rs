@@ -12,7 +12,7 @@ use std::time::Duration;
 async fn clients() -> (PostgresClient, PostgresClient) {
     let path = format!("concurrent-primitives-{}", uuid::Uuid::new_v4());
     let a = PostgresClient::test_database_at(&path).await.unwrap();
-    migrations::migrate(&a).await.unwrap();
+    migrations::migrate(&a, Default::default()).await.unwrap();
     for key in ["a", "b"] {
         a.write_async(
             Q::insert_into("app_metadata")

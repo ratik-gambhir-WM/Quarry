@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
+    adapters::postgres::client::PostgresClient,
     app::{bootstrap::assemble_api_routes, migrations},
     domains::templates::slide_templates::*,
     integration_support, slide_template_test_support as support, AppConfig,
@@ -17,7 +17,9 @@ const PPTX: &str = "application/vnd.openxmlformats-officedocument.presentationml
 
 async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres.clone()));
@@ -41,7 +43,6 @@ async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
         repository,
         Arc::new(support::FixturePreview),
         Some(classification),
-        None,
         false,
     ));
     let config = AppConfig::default();
@@ -399,7 +400,9 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
 #[tokio::test]
 async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_changes() {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let base = PostgresTemplateRepository::new(postgres);
@@ -451,7 +454,7 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
 }
 
 #[tokio::test]
-async fn foreign_template_deletion_never_touches_its_graph_projection() {
+async fn foreign_template_deletion_is_denied_and_preserves_the_owner_template() {
     let (_, postgres, application_studio) = application().await;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres));
     let owner = repository.for_user(1).unwrap();
@@ -459,16 +462,10 @@ async fn foreign_template_deletion_never_touches_its_graph_projection() {
         .import(&pptx::write(&document()).unwrap(), TemplateKind::Diagram)
         .await
         .unwrap();
-    // Any attempted graph deletion would fail against this unavailable local transport.
-    let graph = Arc::new(graph::TemplateGraph::new(
-        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
-        std::num::NonZeroUsize::new(2).unwrap(),
-    ));
     let studio = SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
         None,
-        Some(graph),
         false,
     );
     assert!(!studio

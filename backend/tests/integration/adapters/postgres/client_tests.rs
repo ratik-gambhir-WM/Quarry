@@ -5,7 +5,7 @@ use crate::{
 };
 async fn client() -> PostgresClient {
     let c = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&c).await.unwrap();
+    migrations::migrate(&c, Default::default()).await.unwrap();
     c
 }
 fn insert(key: &str) -> Result<SqlQuery, PostgresError> {

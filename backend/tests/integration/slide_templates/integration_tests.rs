@@ -32,7 +32,6 @@ async fn compressed_preview_response_finishes_without_repolling_an_exhausted_str
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
         None,
-        None,
         false,
     ));
     let response = routes(studio)
@@ -288,7 +287,6 @@ async fn dropping_request_cancels_blocking_preview_and_prevents_publication() {
             finished: finished.clone(),
         }),
         None,
-        None,
         false,
     ));
     let source = pptx::write(&document()).unwrap();
@@ -313,37 +311,23 @@ async fn dropping_request_cancels_blocking_preview_and_prevents_publication() {
 }
 
 #[tokio::test]
-async fn projection_failure_preserves_the_canonical_import_without_fallback() {
+async fn import_publishes_once_in_postgresql_without_a_projection_step() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("quarry.sqlite3");
     let repository = Arc::new(support::repository(&path).await.unwrap());
-    let helix = Arc::new(
-        crate::adapters::helix::client::HelixClient::with_config("http://127.0.0.1:9", None)
-            .unwrap(),
-    );
-    let graph = Arc::new(graph::TemplateGraph::new(
-        helix,
-        std::num::NonZeroUsize::new(2).unwrap(),
-    ));
     let studio = SlideTemplates::new(
         repository.clone(),
         Arc::new(DisabledTemplatePreviewGenerator),
         None,
-        Some(graph),
         false,
     );
-    let error = studio
+    let imported = studio
         .import(pptx::write(&document()).unwrap(), TemplateKind::Diagram)
         .await
-        .unwrap_err();
-    assert_eq!(error.code, "template_projection_failed");
+        .unwrap();
     let saved = repository.list(None).await.unwrap();
     assert_eq!(saved.len(), 1);
-    assert_eq!(
-        studio.reconcile().await.unwrap_err().code,
-        "template_projection_failed"
-    );
-    assert_eq!(repository.list(None).await.unwrap(), saved);
+    assert_eq!(saved[0].template.template_id, imported.template_id);
     drop(studio);
     drop(repository);
     let reopened = support::repository(&path).await.unwrap();
@@ -392,7 +376,6 @@ async fn classified_http_returns_saved_json_and_preview_before_classification_fi
         repository.clone(),
         Arc::new(support::FixturePreview),
         Some(classifier),
-        None,
         true,
     ));
     let app = routes(studio.clone());
@@ -488,7 +471,6 @@ async fn classified_import_does_not_acknowledge_saved_preview_when_preview_gener
         repository.clone(),
         Arc::new(DisabledTemplatePreviewGenerator),
         Some(classifier),
-        None,
         false,
     ));
     let app = routes(studio);
@@ -519,7 +501,6 @@ async fn shutdown_cancels_owned_preview_and_rejects_new_work() {
             started: started.clone(),
             finished: finished.clone(),
         }),
-        None,
         None,
         false,
     ));

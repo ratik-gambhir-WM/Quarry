@@ -131,7 +131,6 @@ async fn batch_classified_saves_ordered_deck_before_parallel_background_stages_f
                 release: embed_release.clone(),
             }),
         )),
-        None,
         true,
     ));
     let app = routes(studio.clone());
@@ -254,7 +253,6 @@ async fn batch_classified_preview_failure_does_not_publish_partial_deck_or_jobs(
             Arc::new(support::FixtureClassifier),
             Arc::new(support::FixtureEmbedder(false)),
         )),
-        None,
         false,
     ));
     let (status, body) = send(
@@ -272,7 +270,7 @@ async fn batch_classified_preview_failure_does_not_publish_partial_deck_or_jobs(
     );
     assert!(repository.list(None).await.unwrap().is_empty());
     assert!(repository
-        .claim_next_slide_classification("2099-01-01T00:00:00Z", "2099-01-01T00:03:00Z")
+        .claim_next_slide_classification(60)
         .await
         .unwrap()
         .is_none());
@@ -294,7 +292,6 @@ async fn batch_classified_validates_inputs_and_capability_without_writes() {
         repository.clone(),
         Arc::new(support::FixturePreview),
         Some(classifier),
-        None,
         false,
     )));
     for (suffix, mime, source, expected) in [
@@ -361,7 +358,6 @@ async fn batch_classified_request_cancellation_stops_previews_without_partial_pu
             Arc::new(support::FixtureClassifier),
             Arc::new(support::FixtureEmbedder(false)),
         )),
-        None,
         false,
     ));
     let source = deck(12);
@@ -389,7 +385,7 @@ async fn batch_classified_request_cancellation_stops_previews_without_partial_pu
     studio.stop_worker().await;
     assert!(repository.list(None).await.unwrap().is_empty());
     assert!(repository
-        .claim_next_slide_classification("2099-01-01T00:00:00Z", "2099-01-01T00:03:00Z")
+        .claim_next_slide_classification(60)
         .await
         .unwrap()
         .is_none());

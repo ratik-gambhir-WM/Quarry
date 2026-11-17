@@ -1,10 +1,13 @@
 //! Finding-oriented retrieval built on the common query ranking primitives.
 
 use super::{
-    all_topics, compatible_vectors, equal, percent_encode_component, rank_by_vector,
-    reciprocal_rank_scores, SlideRetrievalError, SlideRetrievalService, VectorRole,
+    all_topics, compatible_vectors, equal, percent_encode_component, reciprocal_rank_scores,
+    SlideRetrievalError, SlideRetrievalService,
 };
 use crate::domains::templates::slide_templates::retrieval::RetrievalClassificationRecord;
+use crate::domains::templates::slide_templates::retrieval::{
+    EmbeddingRole, TemplateEmbeddingProfile,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -49,9 +52,14 @@ pub(super) async fn find_for_finding(
     untrusted_input: &Value,
 ) -> anyhow::Result<Value> {
     let input = parse_finding_input(untrusted_input)?;
-    if retrieval.embedder.is_none() || retrieval.embedding_model.is_none() {
+    let Some(profile_id) = retrieval
+        .profile
+        .as_ref()
+        .map(TemplateEmbeddingProfile::id)
+        .filter(|_| retrieval.embedder.is_some())
+    else {
         return Err(SlideRetrievalError::new("semantic_unavailable").into());
-    }
+    };
     let repository = retrieval.repository.clone();
     let app = app_id.to_owned();
     let records =
@@ -60,15 +68,7 @@ pub(super) async fn find_for_finding(
     let analysis = analyze_finding(&input.markdown, &records);
     let compatible: Vec<_> = records
         .iter()
-        .filter(|record| {
-            compatible_vectors(
-                record,
-                retrieval.embedding_model.as_deref(),
-                retrieval
-                    .embedding_dimensions
-                    .or(record.classification.embedding_dimensions),
-            )
-        })
+        .filter(|record| compatible_vectors(record, Some(&profile_id)))
         .collect();
     if compatible.is_empty() {
         return Ok(json!({"results":[],"warnings":[]}));
@@ -96,8 +96,24 @@ pub(super) async fn find_for_finding(
             .lexical(app_id, Some(&lexical_terms.join(" ")), &compatible, "OR")
             .await?
     };
-    let subject = rank_by_vector(&subject_vector, &compatible, VectorRole::Subject)?;
-    let capability = rank_by_vector(&capability_vector, &compatible, VectorRole::Capability)?;
+    let subject = retrieval
+        .rank_by_vector(
+            app_id,
+            &profile_id,
+            subject_vector,
+            &compatible,
+            EmbeddingRole::Subject,
+        )
+        .await?;
+    let capability = retrieval
+        .rank_by_vector(
+            app_id,
+            &profile_id,
+            capability_vector,
+            &compatible,
+            EmbeddingRole::Capability,
+        )
+        .await?;
     let mut ranked = reciprocal_rank_scores(&[&lexical, &subject, &capability], 60.0)
         .into_iter()
         .map(|(record, score)| {
@@ -115,10 +131,19 @@ pub(super) async fn find_for_finding(
                 super::locale_compare(&left_record.template_id, &right_record.template_id)
             })
     });
-    let results = ranked
+    let selected = retrieval
+        .retain_retrievable(
+            app_id,
+            ranked
+                .into_iter()
+                .take(input.limit)
+                .map(|(record, _)| record)
+                .collect(),
+        )
+        .await?;
+    let results = selected
         .into_iter()
-        .take(input.limit)
-        .map(|(record, _)| explain_finding_match(record, &analysis, app_id))
+        .map(|record| explain_finding_match(record, &analysis, app_id))
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(json!({"results":results,"warnings":[]}))
 }

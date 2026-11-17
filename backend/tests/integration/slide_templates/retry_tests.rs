@@ -54,7 +54,6 @@ fn configured(
         repository,
         Arc::new(support::FixturePreview),
         Some(service),
-        None,
         false,
     ))
 }

@@ -1,7 +1,8 @@
 # Private template ownership
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+All three domains use the same PostgreSQL pool. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 As of 2026-11-05, embedded templates belong to the authenticated importing user. An account starts
@@ -20,22 +21,22 @@ checks; the React workspace already remounts when the authenticated session gene
 
 Shared workers process durable jobs for all owners using the trusted system repository, retaining
 existing concurrency, leases, shutdown and retry budgets. Request scopes share that worker and
-admission/mutation limits. Helix keys and projection shape are unchanged; PostgreSQL remains the
-ownership authority. There is no public endpoint exposing unfiltered Helix template retrieval.
-Deleting a missing or inaccessible template never deletes its graph projection. If a graph deletion
-fails after canonical deletion, startup reconciliation removes the stale projection.
+admission limits. PostgreSQL is the ownership authority and the only template store: vector ranking
+applies owner/app/profile predicates in SQL, and no public endpoint exposes unfiltered retrieval.
+Deleting a missing or inaccessible template changes nothing; canonical deletion cascades to stage
+rows, lexical postings and vectors in the same transaction, with no graph cleanup step.
 
 <a id="schema-17-rollout-and-recovery"></a>
 ## PostgreSQL setup and recovery
 
-Fresh PostgreSQL schema 2 includes nullable `templates.owner_user_id`, its restricted user foreign
+Fresh PostgreSQL schema 5 includes nullable `templates.owner_user_id`, its restricted user foreign
 key and owner/template index. Every authenticated import assigns the verified actor inside the
 publication transaction. Unassigned records stay hidden; no automatic ownership claim is allowed.
 This deployment does not import older shared catalogs or run former SQLite upgrades.
 
-Use a fresh `Quarry` database with the matching isolated Helix store. Back up both stores and retain
-the matching configuration/binary before future changes. Drain writers for recovery. Do not
-remove ownership checks, modify schema markers or delete canonical rows to conceal a graph failure.
+Use a fresh `Quarry` database. Back up PostgreSQL and retain the matching configuration/binary
+before future changes. Drain writers for recovery. Do not remove ownership checks, modify schema
+markers or delete canonical rows to conceal a failure.
 See [current storage setup and recovery](postgresql-storage.md).
 
 ## Verification
@@ -61,7 +62,7 @@ npm test -- tests/api/httpQuarryApi.test.ts tests/api/tauriQuarryApi.test.ts tes
 
 The default-parallel backend run hit two existing QuickLook fixture failures; both passed in
 isolation, and the complete suite passed with four test threads. No tests were newly ignored.
-The nine opt-in tests, live application startup, live Helix/provider calls and desktop packaging
+The nine opt-in tests, live application startup, live legacy storage/provider calls and desktop packaging
 were not run. Frontend source and transport signatures did not change, so frontend production
 builds and native Rust checks were not rerun for this backend-only ownership change.
 

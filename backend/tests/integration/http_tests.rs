@@ -263,7 +263,9 @@ async fn saved_chat_loads_thread_history_streams_and_persists_the_response() {
         },
     };
     let postgres = PostgresClient::test_database().await.unwrap();
-    crate::app::migrations::migrate(&postgres).await.unwrap();
+    crate::app::migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     let users = UserRepository::new(postgres.clone());
     let user = users
         .create(AddUserInput {
@@ -835,33 +837,7 @@ async fn redundant_user_exists_route_is_not_exposed() {
 }
 
 #[tokio::test]
-async fn helix_user_routes_are_not_exposed() {
-    let app = test_router().await;
-    let get_response = app
-        .clone()
-        .oneshot(
-            Request::get("/api/users/helix/by-email?email=ada%40example.com")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let create_response = app
-        .oneshot(
-            Request::post("/api/users/helix")
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(create_response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn document_search_validates_input_before_calling_helix() {
+async fn document_search_validates_input_before_searching() {
     let app = test_router().await;
 
     let response = app

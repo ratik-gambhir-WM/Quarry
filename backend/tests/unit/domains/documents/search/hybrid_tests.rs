@@ -354,9 +354,9 @@ async fn hybrid_preserves_exact_keyword_hits_and_relevant_semantic_paraphrases()
 }
 
 #[tokio::test]
-async fn hybrid_rejects_helix_orthogonal_and_weak_neighbors_instead_of_filling_thirty_results() {
+async fn hybrid_rejects_orthogonal_and_weak_neighbors_instead_of_filling_thirty_results() {
     // The old 1-distance conversion falsely interpreted an orthogonal 0.5 as 50% similarity.
-    // Use the actual normalized scale from the pinned Helix compatibility test.
+    // Use the retained normalized distance scale from the captured compatibility fixture.
     for distance in [0.5, 0.45, 0.4, 0.35] {
         let fake = Arc::new(Fake {
             keyword_empty: true,
@@ -382,14 +382,14 @@ async fn hybrid_rejects_helix_orthogonal_and_weak_neighbors_instead_of_filling_t
             .unwrap();
         assert!(
             results.results.is_empty(),
-            "normalized Helix distance {distance} must be rejected"
+            "normalized legacy distance {distance} must be rejected"
         );
     }
 }
 
 #[tokio::test]
 async fn hybrid_recovers_measured_concept_matches_without_admitting_judged_controls() {
-    // Recorded with text-embedding-3-large/3072 and the actual current Helix passages.
+    // Recorded with text-embedding-3-large/3072 and the captured reference passages.
     // This guards the filtering policy, not future model quality or unjudged queries.
     for (case, similarity, expected) in [
         ("royal_dynasties_rome", 0.3694882392883301, 1),

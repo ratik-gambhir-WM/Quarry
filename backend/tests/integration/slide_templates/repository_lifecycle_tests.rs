@@ -59,6 +59,57 @@ fn classified(id: &str, fingerprint: &str) -> CompleteSlideClassification {
     }
 }
 
+const LEASE: u32 = 60;
+
+fn pair(
+    subject_fingerprint: &str,
+    subject: &[f64],
+    capability_fingerprint: &str,
+    capability: &[f64],
+) -> anyhow::Result<PreparedSlideEmbeddings> {
+    PreparedSlideEmbeddings::new(
+        TemplateEmbeddingProfile::new("embedder", 2),
+        subject_fingerprint.into(),
+        subject,
+        capability_fingerprint.into(),
+        capability,
+    )
+}
+
+async fn classify(repository: &PostgresTemplateRepository, id: &str, fingerprint: &str) {
+    let job = repository
+        .claim_next_slide_classification(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.claim.template_id, id);
+    repository
+        .complete_slide_classification(&job.claim, &classified(id, fingerprint))
+        .await
+        .unwrap();
+}
+
+async fn embed(repository: &PostgresTemplateRepository, subject: &[f64], capability: &[f64]) {
+    let job = repository
+        .claim_next_slide_embedding(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    repository
+        .complete_slide_embedding(
+            &job.claim,
+            &pair(
+                &job.subject_fingerprint,
+                subject,
+                &job.capability_fingerprint,
+                capability,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
     let directory = tempfile::tempdir().unwrap();
@@ -77,8 +128,8 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
             .unwrap(),
         RetrySlideProcessingOutcome::NotFailed
     );
-    repository
-        .claim_next_slide_classification("2026-11-04T00:00:00Z", "2026-11-04T00:01:00Z")
+    let job = repository
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .unwrap();
@@ -90,7 +141,12 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
         RetrySlideProcessingOutcome::NotFailed
     );
     repository
-        .record_slide_classification_failure("retry", "classification_timeout", None)
+        .record_stage_failure(
+            SlideProcessingStage::Classification,
+            &job.claim,
+            "classification_timeout",
+            None,
+        )
         .await
         .unwrap();
     let other = repository.for_app("Another_App").await.unwrap().unwrap();
@@ -98,15 +154,13 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
         other.retry_failed_slide_processing("retry").await.unwrap(),
         RetrySlideProcessingOutcome::NotFound
     );
-    assert_eq!(
-        repository
-            .find_slide_classification("retry")
-            .await
-            .unwrap()
-            .unwrap()
-            .status,
-        "failed"
-    );
+    let failed = repository
+        .find_slide_classification("retry")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.status, "failed");
+    assert!(failed.next_attempt_at.is_none());
     let repository = std::sync::Arc::new(repository);
     let (first, second) = tokio::join!(
         repository.retry_failed_slide_processing("retry"),
@@ -141,7 +195,7 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
     assert_eq!(state.attempt_count, 0);
     assert!(state.last_error_code.is_none());
     let job = reopened
-        .claim_next_slide_classification("2026-11-04T00:02:00Z", "2026-11-04T00:03:00Z")
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .unwrap();
@@ -156,20 +210,22 @@ async fn manual_embedding_retry_preserves_completed_artifacts_and_resets_only_em
             .await
             .unwrap();
     repository
-        .insert_with_processing_classification(&insert("retry"), &pending("v1"))
+        .insert_with_pending_classification(&insert("retry"), &pending("v1"))
         .await
         .unwrap();
-    repository
-        .complete_slide_classification(&classified("retry", "v1"))
-        .await
-        .unwrap();
-    repository
-        .claim_next_slide_embedding("2026-11-04T00:00:00Z", "2026-11-04T00:01:00Z")
+    classify(&repository, "retry", "v1").await;
+    let job = repository
+        .claim_next_slide_embedding(LEASE)
         .await
         .unwrap()
         .unwrap();
     repository
-        .record_slide_embedding_failure("retry", "embedding_timeout", None)
+        .record_stage_failure(
+            SlideProcessingStage::Embedding,
+            &job.claim,
+            "embedding_timeout",
+            None,
+        )
         .await
         .unwrap();
     let before = repository
@@ -209,7 +265,7 @@ async fn manual_embedding_retry_preserves_completed_artifacts_and_resets_only_em
     assert!(after.embedding_last_error_code.is_none());
     assert_eq!(
         repository
-            .claim_next_slide_embedding("2026-11-04T00:02:00Z", "2026-11-04T00:03:00Z")
+            .claim_next_slide_embedding(LEASE)
             .await
             .unwrap()
             .unwrap()
@@ -229,67 +285,72 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
         .insert_with_pending_classification(&insert("cloud"), &pending("class-v1"))
         .await
         .unwrap();
-    assert_eq!(
-        repository
-            .claim_next_slide_classification("2026-09-14T00:00:00Z", "2026-09-14T00:00:10Z")
-            .await
-            .unwrap()
-            .unwrap()
-            .attempt_count,
-        1
-    );
+    let first = repository
+        .claim_next_slide_classification(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.attempt_count, 1);
+    // A database-clock retry in the future is not due.
     repository
-        .record_slide_classification_failure(
-            "cloud",
+        .record_stage_failure(
+            SlideProcessingStage::Classification,
+            &first.claim,
             "classification_timeout",
-            Some("2026-09-14T00:00:30Z"),
+            Some(3600),
         )
         .await
         .unwrap();
+    let scheduled = repository
+        .find_slide_classification("cloud")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(scheduled.status, "pending");
+    assert!(scheduled
+        .next_attempt_at
+        .as_deref()
+        .is_some_and(|time| time.ends_with(".000Z")));
     assert!(repository
-        .claim_next_slide_classification("2026-09-14T00:00:29Z", "2026-09-14T00:00:39Z")
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .is_none());
+    // New content input replaces the scheduled retry and restarts the attempt budget.
+    assert!(repository
+        .refresh_pending_slide_classification("cloud", &pending("class-v1b"))
+        .await
+        .unwrap());
     let job = repository
-        .claim_next_slide_classification("2026-09-14T00:00:30Z", "2026-09-14T00:00:40Z")
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(job.attempt_count, 2);
+    assert_eq!(job.attempt_count, 1);
+    assert_eq!(job.input_fingerprint, "class-v1b");
     repository
-        .complete_slide_classification(&classified("cloud", "class-v1"))
+        .complete_slide_classification(&job.claim, &classified("cloud", "class-v1b"))
         .await
         .unwrap();
     let embedding = repository
-        .claim_next_slide_embedding("2026-09-14T00:00:31Z", "2026-09-14T00:00:41Z")
+        .claim_next_slide_embedding(LEASE)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(embedding.subject_fingerprint, "subject-v1");
     assert_eq!(embedding.capability_fingerprint, "capability-v1");
     assert!(repository
-        .complete_slide_embedding(&CompleteSlideEmbedding {
-            template_id: "cloud".into(),
-            subject_fingerprint: "stale".into(),
-            capability_fingerprint: "stale".into(),
-            subject_vector: vec![1.0, 0.0],
-            capability_vector: vec![0.0, 1.0],
-            model: "embedder".into(),
-            dimensions: 2,
-        })
+        .complete_slide_embedding(
+            &embedding.claim,
+            &pair("stale", &[1.0, 0.0], "stale", &[0.0, 1.0]).unwrap()
+        )
         .await
         .is_err());
     repository
-        .complete_slide_embedding(&CompleteSlideEmbedding {
-            template_id: "cloud".into(),
-            subject_fingerprint: "subject-v1".into(),
-            capability_fingerprint: "capability-v1".into(),
-            subject_vector: vec![1.0, 0.0],
-            capability_vector: vec![0.0, 1.0],
-            model: "embedder".into(),
-            dimensions: 2,
-        })
+        .complete_slide_embedding(
+            &embedding.claim,
+            &pair("subject-v1", &[1.0, 0.0], "capability-v1", &[0.0, 1.0]).unwrap(),
+        )
         .await
         .unwrap();
     assert!(repository
@@ -312,13 +373,25 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
         )
         .await
         .unwrap());
-    repository
-        .claim_next_slide_embedding("2026-09-14T00:00:32Z", "2026-09-14T00:00:42Z")
+    let refreshed = repository
+        .find_slide_classification("cloud")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(refreshed.embedding_status, "pending");
+    assert!(refreshed.subject_vector.is_none() && refreshed.capability_vector.is_none());
+    let job = repository
+        .claim_next_slide_embedding(LEASE)
         .await
         .unwrap()
         .unwrap();
     repository
-        .record_slide_embedding_failure("cloud", "embedding_unavailable", None)
+        .record_stage_failure(
+            SlideProcessingStage::Embedding,
+            &job.claim,
+            "embedding_unavailable",
+            None,
+        )
         .await
         .unwrap();
     drop(repository);
@@ -347,34 +420,211 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
 }
 
 #[tokio::test]
-async fn invalid_synchronous_embedding_does_not_publish_metadata_or_fts() {
+async fn stale_identical_input_attempts_cannot_publish_or_fail_a_reclaimed_successor() {
     let repository =
         crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
             .await
             .unwrap();
     repository
-        .insert_with_processing_classification(&insert("cloud"), &pending("class-v1"))
+        .insert_with_pending_classification(&insert("cloud"), &pending("v1"))
         .await
         .unwrap();
-    let result = CompleteSlideProcessing {
-        classification: classified("cloud", "class-v1"),
-        embedding_dimensions: 2,
-        embedding_model: "embedder".into(),
-        subject_vector: vec![0.0, 0.0],
-        capability_vector: vec![0.0, 0.0],
-    };
-    assert!(repository.complete_slide_processing(&result).await.is_err());
-    let stored = repository
+    // A zero-second database-clock lease expires immediately.
+    let stale = repository
+        .claim_next_slide_classification(0)
+        .await
+        .unwrap()
+        .unwrap();
+    let current = repository
+        .claim_next_slide_classification(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.attempt_count, 2);
+    assert_ne!(stale.claim.token, current.claim.token);
+    assert_eq!(stale.input_fingerprint, current.input_fingerprint);
+    // The expired attempt has identical input but cannot publish or fail the successor.
+    assert!(repository
+        .complete_slide_classification(&stale.claim, &classified("cloud", "v1"))
+        .await
+        .is_err());
+    repository
+        .record_stage_failure(
+            SlideProcessingStage::Classification,
+            &stale.claim,
+            "classification_timeout",
+            None,
+        )
+        .await
+        .unwrap();
+    let state = repository
         .find_slide_classification("cloud")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(stored.status, "processing");
-    assert!(stored.metadata.is_none());
-    assert!(stored.subject_vector.is_none());
-    assert!(stored.capability_vector.is_none());
+    assert_eq!(state.status, "processing");
+    assert!(state.metadata.is_none());
     assert!(repository
         .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+        .await
+        .unwrap()
+        .is_empty());
+    repository
+        .complete_slide_classification(&current.claim, &classified("cloud", "v1"))
+        .await
+        .unwrap();
+
+    // The same protocol fences embedding pairs.
+    let stale = repository
+        .claim_next_slide_embedding(0)
+        .await
+        .unwrap()
+        .unwrap();
+    let current = repository
+        .claim_next_slide_embedding(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    let prepared = pair("subject-v1", &[1.0, 0.0], "capability-v1", &[0.0, 1.0]).unwrap();
+    assert!(repository
+        .complete_slide_embedding(&stale.claim, &prepared)
+        .await
+        .is_err());
+    repository
+        .record_stage_failure(
+            SlideProcessingStage::Embedding,
+            &stale.claim,
+            "embedding_timeout",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repository
+            .find_slide_classification("cloud")
+            .await
+            .unwrap()
+            .unwrap()
+            .embedding_status,
+        "processing"
+    );
+    repository
+        .complete_slide_embedding(&current.claim, &prepared)
+        .await
+        .unwrap();
+    let ready = repository
+        .find_slide_classification("cloud")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ready.embedding_status, "ready");
+    assert_eq!(ready.embedding_model.as_deref(), Some("embedder"));
+    assert_eq!(ready.embedding_dimensions, Some(2));
+    // Completing again with the consumed claim is rejected without changing the pair.
+    assert!(repository
+        .complete_slide_embedding(
+            &current.claim,
+            &pair("subject-v1", &[0.0, 1.0], "capability-v1", &[1.0, 0.0]).unwrap()
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        repository
+            .find_slide_classification("cloud")
+            .await
+            .unwrap()
+            .unwrap()
+            .subject_vector,
+        Some(vec![1.0, 0.0])
+    );
+}
+
+#[tokio::test]
+async fn invalid_or_mismatched_pairs_publish_nothing() {
+    let repository =
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap();
+    // Invalid provider output is rejected before any mutation.
+    assert!(pair("s", &[0.0, 0.0], "c", &[0.0, 1.0]).is_err());
+    assert!(pair("s", &[1.0, 0.0], "c", &[f64::NAN, 1.0]).is_err());
+    assert!(pair("s", &[1.0, 0.0, 1.0], "c", &[0.0, 1.0]).is_err());
+    repository
+        .insert_with_pending_classification(&insert("cloud"), &pending("v1"))
+        .await
+        .unwrap();
+    classify(&repository, "cloud", "v1").await;
+    let job = repository
+        .claim_next_slide_embedding(LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    // A profile whose dimensions do not match the typed column rolls back the whole pair.
+    let wrong = PreparedSlideEmbeddings::new(
+        TemplateEmbeddingProfile::new("embedder", 3),
+        job.subject_fingerprint.clone(),
+        &[1.0, 0.0, 0.0],
+        job.capability_fingerprint.clone(),
+        &[0.0, 1.0, 0.0],
+    )
+    .unwrap();
+    assert!(repository
+        .complete_slide_embedding(&job.claim, &wrong)
+        .await
+        .is_err());
+    let state = repository
+        .find_slide_classification("cloud")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.embedding_status, "processing");
+    assert!(state.subject_vector.is_none() && state.capability_vector.is_none());
+    // Keyword readiness precedes semantic readiness.
+    assert_eq!(
+        repository
+            .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+            .await
+            .unwrap(),
+        ["cloud"]
+    );
+}
+
+#[tokio::test]
+async fn content_refresh_invalidates_metadata_lexical_and_vectors_atomically() {
+    let repository =
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap();
+    repository
+        .insert_with_pending_classification(&insert("cloud"), &pending("v1"))
+        .await
+        .unwrap();
+    classify(&repository, "cloud", "v1").await;
+    embed(&repository, &[1.0, 0.0], &[0.0, 1.0]).await;
+    assert!(!repository
+        .refresh_pending_slide_classification("cloud", &pending("v1"))
+        .await
+        .unwrap());
+    assert!(repository
+        .refresh_pending_slide_classification("cloud", &pending("v2"))
+        .await
+        .unwrap());
+    let state = repository
+        .find_slide_classification("cloud")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.status, "pending");
+    assert_eq!(state.embedding_status, "not_ready");
+    assert!(state.metadata.is_none());
+    assert!(state.subject_vector.is_none() && state.capability_vector.is_none());
+    assert!(repository
+        .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(repository
+        .list_retrieval_classifications("Quarry_WestMonroe")
         .await
         .unwrap()
         .is_empty());
@@ -410,7 +660,12 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
     });
     {
         let client = PostgresClient::test_database_at(&path).await.unwrap();
-        migrations::migrate(&client).await.unwrap();
+        migrations::migrate(
+            &client,
+            crate::slide_template_test_support::SCHEMA_DIMENSIONS,
+        )
+        .await
+        .unwrap();
         client.with_connection(async |connection| {
             connection.execute("INSERT INTO users (first_name, last_name, email, username, password_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
                 ["Test", "Owner", "coexist@example.test", "fixture-key", "Analyst"]).await?;
@@ -422,19 +677,11 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
             .await
             .unwrap();
         repository
-            .insert_with_processing_classification(&record, &pending("class-v1"))
+            .insert_with_pending_classification(&record, &pending("class-v1"))
             .await
             .unwrap();
-        repository
-            .complete_slide_processing(&CompleteSlideProcessing {
-                classification: classified("durable-import", "class-v1"),
-                embedding_dimensions: 2,
-                embedding_model: "embedder".into(),
-                subject_vector: vec![1.0, 0.0],
-                capability_vector: vec![0.0, 1.0],
-            })
-            .await
-            .unwrap();
+        classify(&repository, "durable-import", "class-v1").await;
+        embed(&repository, &[1.0, 0.0], &[0.0, 1.0]).await;
         stored_template = repository.find_by_id("durable-import").await.unwrap();
         client
             .with_connection(async |connection| {
@@ -455,7 +702,12 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
     }
     for _ in 0..2 {
         let client = PostgresClient::test_database_at(&path).await.unwrap();
-        migrations::migrate(&client).await.unwrap();
+        migrations::migrate(
+            &client,
+            crate::slide_template_test_support::SCHEMA_DIMENSIONS,
+        )
+        .await
+        .unwrap();
         let repository = PostgresTemplateRepository::new(client.clone());
         repository
             .ensure_app("Quarry_WestMonroe", None)
@@ -528,27 +780,27 @@ async fn background_claims_never_process_another_apps_templates() {
         .await
         .unwrap();
     assert!(repository
-        .claim_next_slide_classification("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .is_none());
     let job = other
-        .claim_next_slide_classification("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .claim_next_slide_classification(LEASE)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(job.template.template_id, "foreign");
     other
-        .complete_slide_classification(&classified("foreign", "foreign-v1"))
+        .complete_slide_classification(&job.claim, &classified("foreign", "foreign-v1"))
         .await
         .unwrap();
     assert!(repository
-        .claim_next_slide_embedding("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .claim_next_slide_embedding(LEASE)
         .await
         .unwrap()
         .is_none());
     assert!(other
-        .claim_next_slide_embedding("2026-11-04T00:00:00.000Z", "2026-11-04T00:03:00.000Z")
+        .claim_next_slide_embedding(LEASE)
         .await
         .unwrap()
         .is_some());

@@ -399,7 +399,9 @@ async fn independent_pools_recover_input_and_replay_committed_result_after_resta
     drop(jobs);
     db.close().await;
     let reopened = PostgresClient::test_database_at(&path).await.unwrap();
-    crate::app::migrations::migrate(&reopened).await.unwrap();
+    crate::app::migrations::migrate(&reopened, Default::default())
+        .await
+        .unwrap();
     sqlx::query("UPDATE document_jobs SET lease_until=0 WHERE job_id=$1")
         .bind(&id)
         .execute(reopened.pool())

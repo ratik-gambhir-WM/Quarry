@@ -16,7 +16,9 @@ pub(crate) async fn database_at(path: &str) -> PostgresClient {
     seed_database(PostgresClient::test_database_at(path).await.unwrap()).await
 }
 async fn seed_database(db: PostgresClient) -> PostgresClient {
-    crate::app::migrations::migrate(&db).await.unwrap();
+    crate::app::migrations::migrate(&db, Default::default())
+        .await
+        .unwrap();
     crate::integration_support::seed_identity(&db, "document-owner@example.invalid", 'a').await;
     crate::integration_support::seed_identity(&db, "document-other@example.invalid", 'b').await;
     for (deal, actor) in [("DEAL-SQL", 1i64), ("DEAL-FOREIGN", 2)] {

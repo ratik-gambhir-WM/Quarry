@@ -1,7 +1,8 @@
 # Backend validation and authorization boundaries
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+All three domains use the same PostgreSQL pool. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 The 2026-11-07 audit separates checks that can reject an HTTP request before product work from
@@ -104,7 +105,7 @@ overflow. Existing authentication, membership, notebook, stored-file, replay, an
 cover the retained state-dependent protections.
 
 Use the backend's normal formatting, all-target compilation, Clippy, and test gates. Live provider,
-Chromium, and disposable-Helix opt-in fixtures are not needed for this ownership refactor; they
+Chromium, and disposable-legacy storage opt-in fixtures are not needed for this ownership refactor; they
 remain separately invoked integration checks. No real configuration, database, or graph is used
 as a verification shortcut.
 
@@ -132,18 +133,17 @@ The audit retained the existing uncommitted frontend, file-reference, and Postgr
 ### Requested opt-in rerun
 
 Rerun completed on 2026-11-07 against the current boundary-refactor code. A fresh pinned-image
-Helix container used port 16969 without host data mounts; full Chrome used temporary test profiles.
+legacy storage container used port 16969 without host data mounts; full Chrome used temporary test profiles.
 
 From `backend/`:
 
 ```sh
-QUARRY_HELIX_COMPAT_URL=http://127.0.0.1:16969 \
 QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
 cargo test --locked --all-targets -- --ignored --test-threads=1 \
   --skip notebook_visual_fixture --skip serve_disposable_slide_template_validation_api
 ```
 
-Result: **8 passed, 0 failed, 0 ignored**: four browser tests and four live Helix tests.
+Result: **8 passed, 0 failed, 0 ignored**: four browser tests and four live legacy storage tests.
 
 The two skipped names are interactive server fixtures. They were launched separately with their
 exact test names, `--exact --ignored --nocapture`, using test ports 3002 and 39001:
@@ -157,7 +157,7 @@ exact test names, `--exact --ignored --nocapture`, using test ports 3002 and 390
   completed Cargo test.
 
 Both fixture processes were stopped, the owned test container was removed, and all three test
-ports were verified free. The existing API process and normal Helix container remained running.
+ports were verified free. The existing API process and normal legacy storage container remained running.
 No application code changed for this rerun.
 
 Revision request shape (required, positive, at most 9,007,199,254,740,991) is validated at the

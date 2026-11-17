@@ -1,7 +1,6 @@
 //! In-process Slide Templates Studio, adapted from the supplied Rust implementation.
 pub(super) mod error;
 mod facade;
-pub mod graph;
 mod handler;
 mod json_contract;
 mod models;

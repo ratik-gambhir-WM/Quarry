@@ -48,9 +48,9 @@ pub struct VectorFileChunkHit {
     pub distance: f64,
 }
 
-/// The pinned Helix runtime reports normalized cosine distance: (1 - cosine) / 2.
-/// Keep raw distances on legacy DTOs and convert explicitly before similarity policy.
-/// Verified against the pinned image with aligned, scaled, oblique and orthogonal vectors.
+/// Legacy document DTOs carry the retired graph store's normalized cosine distance scale:
+/// (1 - cosine) / 2. Keep raw distances on those DTOs and convert explicitly before
+/// similarity policy; the scale is a retained wire contract, not a storage dependency.
 pub(crate) fn legacy_cosine_similarity(distance: f64) -> Option<f64> {
     (distance.is_finite() && (0.0..=1.0).contains(&distance)).then_some(1.0 - 2.0 * distance)
 }

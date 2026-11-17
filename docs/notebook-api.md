@@ -1,7 +1,7 @@
 # Personal notebook API and save recovery
 
-Current storage is fresh PostgreSQL schema 4. Notebook content and search are SQL-only; Helix remains required for templates. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 5. Notebook, document and template content and search are SQL-only; legacy storage is retired. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 Notebooks, single-level folders, native BlockNote notes and save jobs are durable backend resources.
@@ -161,7 +161,7 @@ Folder deletion relocates notes to root and increments revisions transactionally
 cannot restore a deleted folder or overwrite relocated notes. Note deletion retains displayed
 expectedRevision CAS, fences active jobs and releases slots in the same transaction; SQL cascades
 remove its sets/chunks. Notebook deletion locks its parent exclusively and cascades notes/jobs/slots.
-No notebook Helix publication, readback, index initializer, remote deletion or cleanup poll remains.
+No notebook legacy storage publication, readback, index initializer, remote deletion or cleanup poll remains.
 Terminal jobs/accepted inputs expire after 30 days; operation IDs must not be reused after retention.
 There is no cancellation endpoint, trash or note vector history.
 
@@ -175,7 +175,7 @@ explicit guarded `reset_postgres --confirm-reset` MVP procedure in [storage reco
 which discards recognized SQL product data. This implementation did not run that utility or modify
 an existing development database. No preserving backfill or provider spend is performed.
 
-Back up the old SQL database and matching Helix store/binary before a reset. Old notebook Helix
+Back up the old SQL database and matching legacy store/binary before a reset. Old notebook legacy storage
 artifacts and cleanup effects remain outside the SQL reset's erasure claim; resetting the recognized
 legacy cleanup ledger does not confirm remote deletion. Keep that old store intact/read-only until
 separately authorized retirement. Do not run old and new workers against the same schema. Rollback

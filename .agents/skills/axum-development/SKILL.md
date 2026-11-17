@@ -1,6 +1,6 @@
 ---
 name: axum-development
-description: Develop, refactor, debug, review, and verify Quarry's Axum backend under backend/, including routes, handlers, services, repositories, configuration, PostgreSQL, Helix, document jobs, parsers, and server integrations. Use for backend Rust or API behavior; do not use as the primary guide for frontend-only React changes or the Tauri desktop crate.
+description: Develop, refactor, debug, review, and verify Quarry's Axum backend under backend/, including routes, handlers, services, repositories, configuration, PostgreSQL, pgvector, document jobs, parsers, and server integrations. Use for backend Rust or API behavior; do not use as the primary guide for frontend-only React changes or the Tauri desktop crate.
 ---
 
 # Quarry Axum development
@@ -14,7 +14,7 @@ valuable local data or external infrastructure.
    sections of `docs/ARCHITECTURE.md`.
 2. Run `git status --short` and preserve unrelated work.
 3. Confirm exact crate versions in `backend/Cargo.toml` and `Cargo.lock`. Quarry currently uses
-   Axum 0.8, Tower 0.5, tower-http 0.7, Tokio 1, reqwest 0.13, SQLx 0.8.6 (PostgreSQL/Tokio/Rustls), and Helix 3.
+   Axum 0.8, Tower 0.5, tower-http 0.7, Tokio 1, reqwest 0.13, SQLx 0.8.6 (PostgreSQL/Tokio/Rustls), and pgvector 0.4.2.
 4. Inspect the route, extractor/handler, service, repository/client, DTO, and existing tests along
    the complete request path before editing.
 
@@ -32,7 +32,7 @@ request -> router -> handler -> service -> repository/client
 - `routes/`: route/middleware composition.
 - `handlers/`: extract/validate transport input, invoke service, adapt response.
 - `services/`: orchestration and preconditions derived from loaded or upstream state.
-- `repository/`: PostgreSQL/Helix persistence and projection operations.
+- `repository/`: PostgreSQL persistence and search operations.
 - `adapters/`, domain parsers, and query/model modules: concrete infrastructure and pure mechanisms.
 
 Services and repositories must not depend on `AppState`, read ambient configuration, or construct
@@ -81,7 +81,7 @@ work and preserve necessary guards at the actual operation.
 - Treat CORS and client/Tauri validation as transport controls, not authorization.
 - The API verifies bearer sessions and per-user resource ownership. Never trust caller-supplied
   email, `userId`, or `workspaceId`; use the authenticated actor. Organization tenancy remains absent.
-- Never move OpenAI, Helix, WM AI, Azure, or other secrets into frontend-visible configuration.
+- Never move OpenAI, WM AI, Azure, or other secrets into frontend-visible configuration.
 
 ## Async and blocking work
 
@@ -98,14 +98,14 @@ work and preserve necessary guards at the actual operation.
 - Document chunks, full pgvector embeddings, GIN lexical metadata and durable jobs are PostgreSQL-owned.
   Accepted input/image checkpoints precede canonical publication; one retained transaction commits
   file/version/blob, identities, every chunk/vector/lexical batch, current selection, activity and
-  terminal job result. No document Helix read/write/index/deletion remains.
+  terminal job result. Document reads, writes, indexing and deletion all use PostgreSQL.
 - Keep feature data access in `repository.rs` or specific `*_repository.rs` modules, including
   table names, joins, authorization scope and query composition. Reuse the generic typed SQL builder
   for grouped predicates, ranking and bounded multi-row INSERTs. Never add feature SQL to adapters.
 - Preserve exact-content input claims, deterministic version/chunk IDs, one-current uniqueness,
   immutable accepted image text, profile compatibility and rollback. Changed bytes create a new
   logical file; admission chooses one winning file identity before random parser IDs can diverge.
-- PostgreSQL schema 4 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
+- PostgreSQL schema 5 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
   selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
   restart. Unknown layouts fail without deletion. There is no import, fallback or automatic reset. The explicitly invoked guarded MVP reset requires user authorization; it is not verification.
 - Bootstrap retains a dedicated-session application writer lease through all client clones; database
@@ -120,10 +120,8 @@ work and preserve necessary guards at the actual operation.
   during the concurrency transition. Do not claim distributed application support from
   independent reads or test-only transactions that bypass the global guard.
 - Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
-  owner/app scoping and stable ties. Its captured fixtures must continue to pass. Helix remains the
-  template projection boundary. Documents use exact scoped cosine and indexed English/technical lexical search.
-- `cargo run --bin clear_helix` is destructive. It is never a development or verification command;
-  use it only with explicit authorization and ADR 0002's backup/drain/reindex procedure.
+  owner/app scoping and stable ties. Its captured fixtures must continue to pass. Templates use typed subject/capability
+  vector pairs in PostgreSQL. Documents use exact scoped cosine and indexed English/technical lexical search.
 - Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Preview caches remain process-local; query embeddings are not cached. Notebook atomic saves, template classification
   jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
   Durable receipts do not make these workers a distributed queue.
@@ -134,7 +132,7 @@ work and preserve necessary guards at the actual operation.
   in parallel tests.
 - OpenAI is optional: an API key enables it, and model names have defaults. WM AI is an all-or-none
   optional group; partial WM AI configuration must fail precisely.
-- Helix is mandatory during normal bootstrap and index initialization.
+- PostgreSQL and its separately provisioned pgvector extension are required at bootstrap.
 - Keep secrets in `SecretString` or an equivalent redacted wrapper.
 - Keep the configuration tables in `docs/ARCHITECTURE.md` aligned with parser changes. Quarry uses
   only the ignored `backend/.env` at runtime and does not maintain a second env-shaped template.
@@ -175,7 +173,7 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 Run a focused `cargo test <filter>` before the full suite when practical. Add
 `cargo build --locked --release` for release/build-system changes.
 
-Do not use `cargo run` as a routine check: startup initializes/validates the selected PostgreSQL schema, requires Helix and initializes indexes. A runtime smoke test needs explicit disposable
+Do not use `cargo run` as a routine check: startup initializes/validates the selected PostgreSQL schema, validates pgvector readiness and initializes indexes. A runtime smoke test needs explicit disposable
 configuration and live dependencies.
 
 If an authorized smoke test starts Axum or another port-listening dependency, record its process
@@ -198,9 +196,7 @@ uncertainty, and pre-existing failures separately.
 
 Server configuration requires redacted `QUARRY_DATABASE_URL`; the dedicated development database is
 `Quarry`. Pool/query/acquisition bounds are parsed only in `AppConfig`. Tests require an explicit URL
-ending in `_test`, use isolated random schemas and clean only namespaces they created. Match fresh
-PostgreSQL data with a separate fresh Helix store selected explicitly through the launcher overrides;
-the launcher defaults to the existing `helix-quarry-v3-dev` store on port 6969. See
+ending in `_test`, use isolated random schemas and clean only namespaces they created. Keep development and test databases separate. No remote graph service is required. See
 `docs/postgresql-storage.md` for setup/recovery.
 
 ## Document vector prerequisite

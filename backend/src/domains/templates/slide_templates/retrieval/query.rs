@@ -1,8 +1,10 @@
 use super::super::{providers::SlideEmbedder, TemplateKind, TemplateRetrievalRepository};
 use super::metadata::{js_trim, normalize_taxonomy_value, utf16_len};
 use super::{
-    cosine_similarity, validate_embedding, RetrievalClassificationRecord, SlideRetrievalMetadata,
+    validate_embedding, EmbeddingRole, RetrievalClassificationRecord, SlideRetrievalMetadata,
+    TemplateEmbeddingProfile,
 };
+use crate::adapters::postgres::vector::CosineVector;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -65,12 +67,6 @@ pub struct SlideQueryInput {
     pub filters: SlideQueryFilters,
     pub select: Vec<String>,
     pub limit: usize,
-}
-
-#[derive(Clone, Copy)]
-enum VectorRole {
-    Subject,
-    Capability,
 }
 
 pub fn parse_slide_query_input(value: &Value) -> Result<SlideQueryInput, SlideRetrievalError> {
@@ -203,8 +199,8 @@ fn validate_taxonomy(
 pub struct SlideRetrievalService {
     pub repository: Arc<dyn TemplateRetrievalRepository>,
     pub embedder: Option<Arc<dyn SlideEmbedder>>,
-    pub embedding_model: Option<String>,
-    pub embedding_dimensions: Option<usize>,
+    /// Query-embedding profile; stored pairs from any other profile are never compared.
+    pub profile: Option<TemplateEmbeddingProfile>,
 }
 
 impl SlideRetrievalService {
@@ -244,15 +240,25 @@ impl SlideRetrievalService {
                     .await?
             }
             "semantic" => {
-                self.semantic(input.query.as_deref(), &records, &input.semantic_target)
-                    .await?
+                self.semantic(
+                    app_id,
+                    input.query.as_deref(),
+                    &records,
+                    &input.semantic_target,
+                )
+                .await?
             }
             "hybrid" => {
                 let lexical = self
                     .lexical(app_id, input.query.as_deref(), &records, "AND")
                     .await?;
                 match self
-                    .semantic(input.query.as_deref(), &records, &input.semantic_target)
+                    .semantic(
+                        app_id,
+                        input.query.as_deref(),
+                        &records,
+                        &input.semantic_target,
+                    )
                     .await
                 {
                     Ok(semantic) if semantic.is_empty() && !records.is_empty() => {
@@ -279,42 +285,49 @@ impl SlideRetrievalService {
                     })
                     .filter(|record| has_ready_vectors(record))
                     .ok_or_else(|| SlideRetrievalError::new("slide_not_available"))?;
+                // Stored source vectors are ranked in SQL; no query embedding provider is used.
+                let repository = self.repository.clone();
+                let (app, id) = (app_id.to_owned(), source.template_id.clone());
+                let pair =
+                    tokio::spawn(
+                        async move { repository.find_slide_embedding_pair(&app, &id).await },
+                    )
+                    .await??
+                    .ok_or_else(|| SlideRetrievalError::new("slide_not_available"))?;
                 let candidates: Vec<_> = records
                     .into_iter()
                     .filter(|record| {
                         record.template_id != source.template_id
-                            && compatible_vectors(
-                                record,
-                                source.classification.embedding_model.as_deref(),
-                                source.classification.embedding_dimensions,
-                            )
+                            && compatible_vectors(record, Some(&pair.profile_id))
                     })
                     .collect();
-                let subject = rank_by_vector(
-                    source
-                        .classification
-                        .subject_vector
-                        .as_deref()
-                        .unwrap_or_default(),
-                    &candidates,
-                    VectorRole::Subject,
-                )?;
-                let capability = rank_by_vector(
-                    source
-                        .classification
-                        .capability_vector
-                        .as_deref()
-                        .unwrap_or_default(),
-                    &candidates,
-                    VectorRole::Capability,
-                )?;
+                let subject = self
+                    .rank_by_vector(
+                        app_id,
+                        &pair.profile_id,
+                        pair.subject.clone(),
+                        &candidates,
+                        EmbeddingRole::Subject,
+                    )
+                    .await?;
+                let capability = self
+                    .rank_by_vector(
+                        app_id,
+                        &pair.profile_id,
+                        pair.capability.clone(),
+                        &candidates,
+                        EmbeddingRole::Capability,
+                    )
+                    .await?;
                 reciprocal_rank_fusion(&subject, &capability, 60.0)
             }
             _ => return Err(SlideRetrievalError::new("invalid_query").into()),
         };
-        let results = ranked
+        let selected = self
+            .retain_retrievable(app_id, ranked.into_iter().take(input.limit).collect())
+            .await?;
+        let results = selected
             .iter()
-            .take(input.limit)
             .map(|record| project_record(record, &input.select, app_id))
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(json!({"mode_used":input.mode,"results":results,"warnings":warnings}))
@@ -360,41 +373,130 @@ impl SlideRetrievalService {
 
     async fn semantic<'a>(
         &self,
+        app_id: &str,
         query: Option<&str>,
         records: &[&'a RetrievalClassificationRecord],
         target: &str,
     ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
         let query = query.ok_or_else(|| SlideRetrievalError::new("invalid_query"))?;
+        let profile_id = self.profile.as_ref().map(TemplateEmbeddingProfile::id);
         let compatible: Vec<_> = records
             .iter()
-            .filter(|record| {
-                compatible_vectors(
-                    record,
-                    self.embedding_model.as_deref(),
-                    self.embedding_dimensions
-                        .or(record.classification.embedding_dimensions),
-                )
-            })
+            .filter(|record| compatible_vectors(record, profile_id.as_deref()))
             .copied()
             .collect();
-        if compatible.is_empty() {
+        let Some(profile_id) = profile_id.filter(|_| !compatible.is_empty()) else {
             return Ok(Vec::new());
-        }
+        };
         let vector = self.embed(js_trim(query)).await?;
         match target {
-            "subject" => rank_by_vector(&vector, &compatible, VectorRole::Subject),
-            "capability" => rank_by_vector(&vector, &compatible, VectorRole::Capability),
+            "subject" => {
+                self.rank_by_vector(
+                    app_id,
+                    &profile_id,
+                    vector,
+                    &compatible,
+                    EmbeddingRole::Subject,
+                )
+                .await
+            }
+            "capability" => {
+                self.rank_by_vector(
+                    app_id,
+                    &profile_id,
+                    vector,
+                    &compatible,
+                    EmbeddingRole::Capability,
+                )
+                .await
+            }
             "both" => Ok(reciprocal_rank_fusion(
-                &rank_by_vector(&vector, &compatible, VectorRole::Subject)?,
-                &rank_by_vector(&vector, &compatible, VectorRole::Capability)?,
+                &self
+                    .rank_by_vector(
+                        app_id,
+                        &profile_id,
+                        vector.clone(),
+                        &compatible,
+                        EmbeddingRole::Subject,
+                    )
+                    .await?,
+                &self
+                    .rank_by_vector(
+                        app_id,
+                        &profile_id,
+                        vector,
+                        &compatible,
+                        EmbeddingRole::Capability,
+                    )
+                    .await?,
                 60.0,
             )),
             _ => Err(SlideRetrievalError::new("invalid_query").into()),
         }
     }
 
-    async fn embed(&self, document: &str) -> anyhow::Result<Vec<f64>> {
-        let (Some(embedder), Some(_)) = (self.embedder.as_ref(), self.embedding_model.as_ref())
+    /// Rank one role in SQL over the authorized catalog, then keep only filtered candidates.
+    /// The full compatible ranking is retained so fusion sees winners below any output limit.
+    async fn rank_by_vector<'a>(
+        &self,
+        app_id: &str,
+        profile_id: &str,
+        vector: CosineVector,
+        records: &[&'a RetrievalClassificationRecord],
+        role: EmbeddingRole,
+    ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
+        let repository = self.repository.clone();
+        let (app, profile) = (app_id.to_owned(), profile_id.to_owned());
+        let ranked = tokio::spawn(async move {
+            repository
+                .rank_slide_embeddings(&app, &profile, role, &vector)
+                .await
+        })
+        .await??;
+        let scores: HashMap<_, _> = ranked
+            .into_iter()
+            .map(|ranked| (ranked.template_id, ranked.similarity))
+            .collect();
+        let mut scored = records
+            .iter()
+            .filter_map(|&record| {
+                scores
+                    .get(&record.template_id)
+                    .map(|&score| (record, score))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|(left, left_score), (right, right_score)| {
+            right_score
+                .total_cmp(left_score)
+                .then_with(|| locale_compare(&right.created_at, &left.created_at))
+                .then_with(|| locale_compare(&left.template_id, &right.template_id))
+        });
+        Ok(scored.into_iter().map(|(record, _)| record).collect())
+    }
+
+    /// Fresh owner/app recheck of the bounded selection, protecting against concurrent
+    /// deletion or revocation after the ranking reads.
+    async fn retain_retrievable<'a>(
+        &self,
+        app_id: &str,
+        selected: Vec<&'a RetrievalClassificationRecord>,
+    ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
+        let ids = selected
+            .iter()
+            .map(|record| record.template_id.clone())
+            .collect::<Vec<_>>();
+        let repository = self.repository.clone();
+        let app = app_id.to_owned();
+        let current =
+            tokio::spawn(async move { repository.retain_retrievable(&app, &ids).await }).await??;
+        Ok(selected
+            .into_iter()
+            .filter(|record| current.contains(&record.template_id))
+            .collect())
+    }
+
+    async fn embed(&self, document: &str) -> anyhow::Result<CosineVector> {
+        let (Some(embedder), Some(profile)) = (self.embedder.as_ref(), self.profile.as_ref())
         else {
             return Err(SlideRetrievalError::new("semantic_unavailable").into());
         };
@@ -402,9 +504,10 @@ impl SlideRetrievalService {
             .embed(document)
             .await
             .map_err(|_| SlideRetrievalError::new("semantic_unavailable"))?;
-        validate_embedding(&vector, self.embedding_dimensions)
+        validate_embedding(&vector, Some(profile.dimensions))
             .map_err(|_| SlideRetrievalError::new("semantic_unavailable"))?;
-        Ok(vector)
+        CosineVector::from_f64(&vector, profile.dimensions)
+            .map_err(|_| SlideRetrievalError::new("semantic_unavailable").into())
     }
 }
 
@@ -438,42 +541,12 @@ pub fn build_safe_fts_query(query: &str, operator: &str) -> Result<String, Slide
 
 fn has_ready_vectors(record: &RetrievalClassificationRecord) -> bool {
     let classification = &record.classification;
-    classification.embedding_status == "ready"
-        && classification.subject_vector.is_some()
-        && classification.capability_vector.is_some()
+    classification.embedding_status == "ready" && classification.embedding_profile_id.is_some()
 }
-fn compatible_vectors(
-    record: &RetrievalClassificationRecord,
-    model: Option<&str>,
-    dimensions: Option<usize>,
-) -> bool {
+fn compatible_vectors(record: &RetrievalClassificationRecord, profile_id: Option<&str>) -> bool {
     has_ready_vectors(record)
-        && record.classification.embedding_model.as_deref() == model
-        && record.classification.embedding_dimensions == dimensions
-}
-fn rank_by_vector<'a>(
-    vector: &[f64],
-    records: &[&'a RetrievalClassificationRecord],
-    role: VectorRole,
-) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
-    let mut scored = records
-        .iter()
-        .map(|&record| {
-            let candidate = match role {
-                VectorRole::Subject => record.classification.subject_vector.as_deref(),
-                VectorRole::Capability => record.classification.capability_vector.as_deref(),
-            }
-            .unwrap_or_default();
-            Ok((record, cosine_similarity(vector, candidate)?))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    scored.sort_by(|(left, left_score), (right, right_score)| {
-        right_score
-            .total_cmp(left_score)
-            .then_with(|| locale_compare(&right.created_at, &left.created_at))
-            .then_with(|| locale_compare(&left.template_id, &right.template_id))
-    });
-    Ok(scored.into_iter().map(|(record, _)| record).collect())
+        && profile_id.is_some()
+        && record.classification.embedding_profile_id.as_deref() == profile_id
 }
 /// Fuse ordinal ranks without combining lexical and vector scores directly.
 pub fn reciprocal_rank_fusion<'a>(

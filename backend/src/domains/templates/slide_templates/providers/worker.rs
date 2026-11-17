@@ -1,12 +1,11 @@
 //! Durable, bounded classification and embedding worker for saved slide imports.
 
 use super::super::{
-    retrieval::{SlideClassificationJob, SlideEmbeddingJob},
+    retrieval::{SlideClassificationJob, SlideEmbeddingJob, SlideProcessingStage, StageClaim},
     TemplateProcessingRepository,
 };
 use super::{SlideClassificationService, SlideProviderError};
 use crate::shared::on_demand_task::OnDemandTask;
-use chrono::{DateTime, Utc};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -24,13 +23,9 @@ pub struct SlideClassificationWorkerOptions {
     pub embedding_timeout: Duration,
     pub lease_padding: Duration,
     pub retry_base: Duration,
-    pub now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub random: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub repository: Arc<dyn TemplateProcessingRepository>,
     pub service: Arc<SlideClassificationService>,
-    pub import: Arc<super::super::ImportService>,
-    pub projection: Option<Arc<super::super::graph::TemplateGraph>>,
-    pub mutations: Arc<tokio::sync::Mutex<()>>,
 }
 
 pub struct SlideClassificationWorker {
@@ -46,54 +41,34 @@ enum Work {
     Embedding(SlideEmbeddingJob),
 }
 
-#[derive(Clone, Copy)]
-enum Stage {
-    Classification,
-    Embedding,
-}
-
 struct StagePolicy {
     name: &'static str,
     maximum_attempts: usize,
     timeout: Duration,
 }
 
-impl Stage {
-    fn policy(self, options: &SlideClassificationWorkerOptions) -> StagePolicy {
-        match self {
-            Self::Classification => StagePolicy {
-                name: "classification",
-                maximum_attempts: options.classification_max_attempts,
-                timeout: options.classification_timeout,
-            },
-            Self::Embedding => StagePolicy {
-                name: "embedding",
-                maximum_attempts: options.embedding_max_attempts,
-                timeout: options.embedding_timeout,
-            },
-        }
+fn policy(stage: SlideProcessingStage, options: &SlideClassificationWorkerOptions) -> StagePolicy {
+    match stage {
+        SlideProcessingStage::Classification => StagePolicy {
+            name: "classification",
+            maximum_attempts: options.classification_max_attempts,
+            timeout: options.classification_timeout,
+        },
+        SlideProcessingStage::Embedding => StagePolicy {
+            name: "embedding",
+            maximum_attempts: options.embedding_max_attempts,
+            timeout: options.embedding_timeout,
+        },
     }
+}
 
-    async fn record_failure(
-        self,
-        repository: &dyn TemplateProcessingRepository,
-        id: &str,
-        code: &str,
-        retry: Option<&str>,
-    ) -> Result<(), crate::shared::error::RepositoryError> {
-        match self {
-            Self::Classification => {
-                repository
-                    .record_slide_classification_failure(id, code, retry)
-                    .await
-            }
-            Self::Embedding => {
-                repository
-                    .record_slide_embedding_failure(id, code, retry)
-                    .await
-            }
-        }
-    }
+/// Database-clock lease length: provider timeout plus padding, rounded up to whole seconds.
+/// One more second covers the floored epoch-second start, so a lease is never shorter
+/// than the provider timeout it protects.
+fn lease_seconds(timeout: Duration, padding: Duration) -> u32 {
+    let total = timeout.saturating_add(padding);
+    let seconds = total.as_secs() + u64::from(total.subsec_nanos() > 0) + 1;
+    u32::try_from(seconds).unwrap_or(u32::MAX)
 }
 
 impl SlideClassificationWorker {
@@ -143,10 +118,9 @@ impl SlideClassificationWorker {
             self.task.begin_scan();
             while !self.stopping.load(Ordering::Acquire) && active.len() < self.options.concurrency
             {
-                let now = (self.options.now)();
                 let worker = Arc::clone(&self);
                 let prefer = self.prefer_classification.load(Ordering::Acquire);
-                let work = tokio::spawn(async move { worker.claim(now, prefer).await })
+                let work = tokio::spawn(async move { worker.claim(prefer).await })
                     .await
                     .map_err(anyhow::Error::from)
                     .and_then(|result| result);
@@ -190,34 +164,25 @@ impl SlideClassificationWorker {
             }
         }
     }
-    async fn claim(
-        &self,
-        now: DateTime<Utc>,
-        prefer_classification: bool,
-    ) -> anyhow::Result<Option<Work>> {
+    async fn claim(&self, prefer_classification: bool) -> anyhow::Result<Option<Work>> {
+        let options = &self.options;
         let classification = || async {
-            self.options
+            options
                 .repository
-                .claim_next_slide_classification(
-                    &iso(now),
-                    &iso(now
-                        + chrono_duration(
-                            self.options.classification_timeout + self.options.lease_padding,
-                        )),
-                )
+                .claim_next_slide_classification(lease_seconds(
+                    options.classification_timeout,
+                    options.lease_padding,
+                ))
                 .await
                 .map(|job| job.map(Work::Classification))
         };
         let embedding = || async {
-            self.options
+            options
                 .repository
-                .claim_next_slide_embedding(
-                    &iso(now),
-                    &iso(now
-                        + chrono_duration(
-                            self.options.embedding_timeout + self.options.lease_padding,
-                        )),
-                )
+                .claim_next_slide_embedding(lease_seconds(
+                    options.embedding_timeout,
+                    options.lease_padding,
+                ))
                 .await
                 .map(|job| job.map(Work::Embedding))
         };
@@ -235,19 +200,23 @@ impl SlideClassificationWorker {
     }
     async fn execute(&self, work: Work) {
         let mut cancelled = self.cancel.subscribe();
-        let (stage, id, attempt) = match &work {
+        let (stage, claim, attempt): (_, StageClaim, _) = match &work {
             Work::Classification(job) => (
-                Stage::Classification,
-                job.template.template_id.clone(),
+                SlideProcessingStage::Classification,
+                job.claim.clone(),
                 job.attempt_count,
             ),
-            Work::Embedding(job) => (Stage::Embedding, job.template_id.clone(), job.attempt_count),
+            Work::Embedding(job) => (
+                SlideProcessingStage::Embedding,
+                job.claim.clone(),
+                job.attempt_count,
+            ),
         };
         let StagePolicy {
             name,
             maximum_attempts: maximum,
             timeout,
-        } = stage.policy(&self.options);
+        } = policy(stage, &self.options);
         let operation = async {
             // Expired leases also consume the bounded attempt budget.
             if attempt > maximum {
@@ -277,64 +246,46 @@ impl SlideClassificationWorker {
                 _=cancelled.changed()=>Err(SlideProviderError::new(format!("{name}_timeout"),true).into()),
             }
         };
-        if let Err(error) = result {
-            let provider = error.downcast_ref::<SlideProviderError>();
-            let retry = if provider.is_none_or(|error| error.retryable) && attempt < maximum {
-                Some(self.retry_at(attempt))
-            } else {
-                None
-            };
-            let fallback = format!("{name}_internal");
-            let code = provider.map_or(fallback.as_str(), |error| error.code.as_str());
-            let repository = self.options.repository.clone();
-            let code = code.to_owned();
-            let id = id.clone();
-            let recorded = tokio::spawn(async move {
-                stage
-                    .record_failure(repository.as_ref(), &id, &code, retry.as_deref())
-                    .await
-            })
-            .await
-            .map_err(anyhow::Error::from)
-            .and_then(|result| result.map_err(Into::into));
-            if let Err(error) = recorded {
-                let _ = error;
-                tracing::warn!("classification worker could not record failure");
-            }
-        }
-        if let Some(projection) = &self.options.projection {
-            // Serialize the snapshot + graph write with HTTP deletion/publication.
-            let _mutation = self.options.mutations.lock().await;
-            let import = self.options.import.clone();
-            let record = tokio::spawn(async move { import.projection_record(&id).await }).await;
-            match record {
-                Ok(Ok(Some(record))) => {
-                    if !matches!(
-                        tokio::time::timeout(Duration::from_secs(10), projection.upsert(record))
-                            .await,
-                        Ok(Ok(()))
-                    ) {
-                        tracing::warn!("classification saved; template projection failed and will reconcile on restart");
-                    }
-                }
-                Ok(Ok(None)) => {} // Deleted while the provider was running.
-                _ => tracing::warn!("classification worker could not read projection record"),
-            }
+        let Err(error) = result else { return };
+        let provider = error.downcast_ref::<SlideProviderError>();
+        let retry = if provider.is_none_or(|error| error.retryable) && attempt < maximum {
+            Some(self.retry_after_seconds(attempt))
+        } else {
+            None
+        };
+        let fallback = format!("{name}_internal");
+        let code = provider
+            .map_or(fallback.as_str(), |error| error.code.as_str())
+            .to_owned();
+        let repository = self.options.repository.clone();
+        // The repository matches this exact claim, so a stale attempt cannot fail a successor.
+        let recorded = tokio::spawn(async move {
+            repository
+                .record_slide_stage_failure(stage, &claim, &code, retry)
+                .await
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|result| result.map_err(Into::into));
+        if recorded.is_err() {
+            tracing::warn!(
+                stage = name,
+                "classification worker could not record failure"
+            );
         }
     }
-    pub fn retry_at(&self, attempt: usize) -> String {
+    /// Exponential backoff with bounded jitter, rounded up to database-clock seconds.
+    pub fn retry_after_seconds(&self, attempt: usize) -> u32 {
         let exponential = self.options.retry_base.as_millis() as f64
             * 2.0_f64.powf(attempt.saturating_sub(1) as f64);
         let jitter = (exponential * 0.25 * (self.options.random)()).floor();
-        iso((self.options.now)() + chrono::Duration::milliseconds((exponential + jitter) as i64))
+        let seconds = ((exponential + jitter) / 1000.0).ceil();
+        if seconds.is_finite() {
+            seconds.clamp(0.0, f64::from(u32::MAX)) as u32
+        } else {
+            u32::MAX
+        }
     }
-}
-
-fn iso(value: DateTime<Utc>) -> String {
-    value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-fn chrono_duration(value: Duration) -> chrono::Duration {
-    chrono::Duration::milliseconds(value.as_millis().min(i64::MAX as u128) as i64)
 }
 
 #[cfg(test)]

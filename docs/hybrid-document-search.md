@@ -2,7 +2,7 @@
 
 Updated 2026-11-15. Documents use PostgreSQL schema 3, exact pgvector cosine and GIN lexical
 retrieval. Hybrid remains opt-in (`QUARRY_HYBRID_SEARCH_ENABLED=false` by default).
-Notebook/template Helix infrastructure remains required. See [document storage](document-storage.md)
+legacy storage was retired for all domains in schema 5. See [document storage](document-storage.md)
 for profiles, durable jobs, atomic readiness and the explicitly fresh MVP cutover.
 
 ## Request and result contract
@@ -29,7 +29,7 @@ must succeed. Full canonical chunk-ID lists and remote header-verification scans
 
 Defaults remain four deal pipelines, eight SQL read operations across the service (including
 legacy endpoints), four provider requests, 16 active hybrid requests and 32 queued requests.
-`QUARRY_SEARCH_SQL_READS` replaces the old Helix-read setting. Queue, embedding and operation
+`QUARRY_SEARCH_SQL_READS` replaces the old legacy storage-read setting. Queue, embedding and operation
 deadlines remain two, fifteen and thirty seconds. These are bounds, not measured latency targets.
 Dropping a request drops scheduling and its SQL/provider waiters; no result/permission cache exists.
 
@@ -59,8 +59,8 @@ The repository selects matching immutable provider/model/dimension/metric/prepar
 equal dimensions do not infer a model. Provider vectors validate finite f64 and f32 values,
 nonzero norms and profile dimensions. Stored values remain full f32 vectors without padding or
 truncation. Model/dimension changes require an explicit compatible schema/profile operation.
-Provider error bodies are never returned. The historical `HELIX_VECTOR_DIMENSION` name remains
-the shared document/notebook dimension setting during the staged rollout.
+Provider error bodies are never returned. The shared document/notebook dimension setting is now
+`QUARRY_EMBEDDING_DIMENSION`.
 
 Each hybrid search generates its own query embedding. Vectors are reused only across the
 accessible deals within that request, then released. There is no embedding cache, retained query
@@ -115,12 +115,12 @@ No frontend implementation or transport changes are required for this storage re
 
 ## Historical verification records
 
-The following 2026-11-06 Helix measurements describe the retired implementation. They do not
+The following 2026-11-06 legacy storage measurements describe the retired implementation. They do not
 measure current PostgreSQL relevance, latency, index readiness or operational behavior.
 
 The dated November 6 records below describe the former SQLite deployment and its local model
 trial. They do not describe the current PostgreSQL database or authorize repeating any cleanup.
-Use [PostgreSQL storage and Helix](postgresql-storage.md) for the current deployment and recovery.
+Use [PostgreSQL storage](postgresql-storage.md) for the current deployment and recovery.
 
 ## Implementation verification — 2026-11-06
 
@@ -165,9 +165,9 @@ logging, submitted UI/source/fallback states and the retained indexed/capacity l
 code findings or newly unreachable code identified. The live rollout gates above remain open.
 
 
-## Helix query diagnosis — 2026-11-06
+## legacy storage query diagnosis — 2026-11-06
 
-A separate, memory-only container using the repository-pinned Helix image reproduced the issue
+A separate, memory-only container using the repository-pinned legacy storage image reproduced the issue
 without reading or changing the live product graph or calling a provider. The production
 `current_vector_candidates` query correctly nests canonical deal/chunk-ID predicates inside
 `vector_search_nodes_within`, binds the supplied embedding, and projects `$distance` directly.
@@ -187,23 +187,22 @@ OpenAI responses now have to match the requested dimension and finite f32 storag
 initialization and preflight. A mismatch is rejected before any SQLite document row is committed.
 The test-only mock provider now explicitly requests and returns the same two dimensions.
 Cosine remains the metric, following [official OpenAI embedding guidance](https://developers.openai.com/api/docs/guides/embeddings#which-distance-function-should-i-use);
-OpenAI embeddings are unit-normalized, while the Helix regression additionally verifies that scaling
+OpenAI embeddings are unit-normalized, while the legacy storage regression additionally verifies that scaling
 a stored vector does not alter cosine ranking. Existing production data is not rewritten.
 
 
-Verification after the Helix-scale and dimension fixes:
+Verification after the legacy storage-scale and dimension fixes:
 
 - `cargo fmt --all -- --check`, `cargo check --locked --all-targets` and
   `cargo clippy --locked --all-targets -- -D warnings` passed.
 - `cargo test --locked --all-targets --quiet -- --test-threads=4`: 502 passed,
   ten opt-in tests ignored by the normal gate.
-- `QUARRY_HELIX_COMPAT_URL=http://127.0.0.1:16979 cargo test --locked v3_ -- --ignored --test-threads=1`:
-  all three document compatibility tests passed on the separate pinned-image container,
+- Historical remote-store compatibility run: all three document compatibility tests passed on the separate pinned-image container,
   including saved-vector value/dimension readback, normalized metric behavior and candidate
   filtering before top-K. No live provider call was used.
 - Focused provider-response and pre-persistence dimension-rejection tests passed.
 - The temporary container was stopped/removed and its port was verified free. The original
-  development Helix container remained running. No frontend/native source changed in this
+  development legacy storage container remained running. No frontend/native source changed in this
   follow-up; the earlier frontend build/test evidence remains the applicable baseline.
 
 The running development backend needs a restart to load the corrected conversion and dimension
@@ -215,23 +214,23 @@ is the normalized distance interpretation, and the similarity floor remains 0.4.
 ## Selected local 3072-dimensional trial (2026-11-06)
 
 At the user's explicit request, the selected local profile was drained and its SQLite database,
-Helix store, and configuration were backed up together under ignored local maintenance storage.
-The user then authorized removal of all uploaded Data Room documents from SQLite and Helix.
+legacy store, and configuration were backed up together under ignored local maintenance storage.
+The user then authorized removal of all uploaded Data Room documents from SQLite and legacy storage.
 The cleanup removed the SQLite file/version/blob/current-content/identity/recovery records and
-all Helix document nodes, including an orphan projection. All seven document tables and all
+all legacy storage document nodes, including an orphan projection. All seven document tables and all
 three document graph labels were verified empty. Account, deal, membership, template, notebook,
-and note counts were unchanged; the 14 unrelated Helix nodes were retained. A disposable copy
+and note counts were unchanged; the 14 unrelated legacy storage nodes were retained. A disposable copy
 first verified the SQLite cascade and preservation behavior, followed by a foreign-key check.
 
 The empty document and notebook vector indexes were explicitly rebuilt at 3072 dimensions.
 Notebook projections were already empty; canonical notebook content was preserved. The ignored
 local configuration now selects `OPENAI_EMBEDDING_MODEL=text-embedding-3-large` and
-`HELIX_VECTOR_DIMENSION=3072`. Template vector dimensions and repository defaults remain unchanged.
+the previous vector-dimension setting. Template vector dimensions and repository defaults remain unchanged.
 New document ingestion and query embeddings use this same model/dimension pair. Configuration
 now rejects dimensions exceeding the known small/large model maxima (1536/3072).
 
 A small live provider check returned finite 3072-dimensional vectors. A synthetic vector was
-written to Helix, read back with all 3072 values unchanged, and queried through the actual
+written to legacy storage, read back with all 3072 values unchanged, and queried through the actual
 within-candidate vector path; the returned normalized distance agreed with local cosine
 calculation. The synthetic document was removed and both document stores were checked empty
 again. The temporary cleanup source, executable, and scratch SQLite copy were removed afterward;
@@ -244,7 +243,7 @@ documents need to be uploaded again and judged after this reset. The proposed br
 UI/request/configuration option was removed at the user's request; search remains embedding-only
 with the original keyword branch and no relevance-model call.
 
-Rollback requires another drained window and restoration of the matching SQLite, Helix, and
+Rollback requires another drained window and restoration of the matching SQLite, legacy storage, and
 configuration backups together. Preserve any newly uploaded content before restoring the old
 snapshot; do not mix the old 1536-dimensional graph with 3072-dimensional query configuration.
 
@@ -260,7 +259,7 @@ Post-cutover verification:
   tests/api/dealMembershipApi.test.ts`: 25 passed; `npm run typecheck` passed for both targets.
 - Live maintenance checks: matching backups, disposable SQLite cascade/preservation check,
   foreign-key check, zero document rows/projections, unchanged unrelated counts, and a real
-  3072-dimensional provider/Helix save/read/search round trip passed. Probe records were removed.
+  3072-dimensional provider/legacy storage save/read/search round trip passed. Probe records were removed.
 - The standalone embedding demonstration now uses the configured model, avoiding a hardcoded
   small-model request with the selected profile's 3072-dimensional setting. It was not executed
   because it prints full vector values.
@@ -300,7 +299,7 @@ The user subsequently identified additional indexed Rome and COBOL history docum
 the three initially supplied test documents. A temporary read-only diagnosis confirmed six
 current files and 22 canonical chunks in the selected local deal, including three current
 chunks each for Rome and COBOL. It used a read-only SQLite connection, bound query builders,
-the existing Helix candidate-filtered retrieval path, and a small batch of query embeddings.
+the existing legacy storage candidate-filtered retrieval path, and a small batch of query embeddings.
 No bootstrap, migration, ingestion, document deletion, or graph write was performed.
 
 | Query | Best expected-file cosine | Effect of 0.4 | Effect of selected 0.26 |
@@ -320,7 +319,7 @@ this comparison, the user explicitly selected 0.26.
 The ignored selected-profile configuration now explicitly sets
 `QUARRY_SEARCH_MIN_SEMANTIC_SIMILARITY=0.26`. Repository defaults remain 0.4 because the
 measurement used this specific large/3072 corpus, not every supported model/profile. The
-normalized Helix conversion remains unchanged; a 0.26 floor admits distances at most 0.37.
+normalized legacy storage conversion remains unchanged; a 0.26 floor admits distances at most 0.37.
 No re-embedding, dimensional change, rechunking, or broader-match UI option accompanies this
 correction. A deterministic policy regression covers the measured positives and controls.
 These measurements explain the reported false negatives, but do not guarantee relevance for

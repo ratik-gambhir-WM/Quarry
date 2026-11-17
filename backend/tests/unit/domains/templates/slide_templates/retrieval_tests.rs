@@ -30,11 +30,7 @@ fn comparison_metadata() -> SlideRetrievalMetadata {
     metadata
 }
 
-async fn insert(
-    repository: &dyn TemplateRepository,
-    id: &str,
-    title: &str,
-) -> SlideClassificationJob {
+async fn insert(repository: &dyn TemplateRepository, id: &str, title: &str) {
     let template = StoredTemplate { revision: 1,
         template_id: id.to_owned(),
         template_json: serde_json::from_value(json!({
@@ -53,7 +49,7 @@ async fn insert(
         schema_version: SLIDE_CLASSIFICATION_SCHEMA_VERSION,
     };
     repository
-        .insert_with_processing_classification(
+        .insert_with_pending_classification(
             &TemplateInsert {
                 template: template.clone(),
                 assets: vec![],
@@ -73,14 +69,22 @@ async fn insert(
         )
         .await
         .unwrap();
-    SlideClassificationJob {
-        attempt_count: 1,
-        input_fingerprint: fingerprint,
-        kind: TemplateKind::Diagram,
-        preview: None,
-        template,
-        title: title.to_owned(),
-    }
+}
+
+/// Run both durable stages through their claims, as the worker does.
+async fn process(repository: &dyn TemplateRepository, service: &SlideClassificationService) {
+    let job = repository
+        .claim_next_slide_classification(60)
+        .await
+        .unwrap()
+        .unwrap();
+    service.classify(job).await.unwrap();
+    let job = repository
+        .claim_next_slide_embedding(60)
+        .await
+        .unwrap()
+        .unwrap();
+    service.embed(&job).await.unwrap();
 }
 
 struct Classifier;
@@ -181,19 +185,14 @@ async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
     );
     let app = repository.for_app("TestApp").await.unwrap().unwrap();
     let service = service(Arc::clone(&app));
-    service
-        .process_and_persist(&insert(app.as_ref(), "security", "Security Architecture").await)
-        .await
-        .unwrap();
-    service
-        .process_and_persist(&insert(app.as_ref(), "other", "Other Architecture").await)
-        .await
-        .unwrap();
+    insert(app.as_ref(), "security", "Security Architecture").await;
+    process(app.as_ref(), &service).await;
+    insert(app.as_ref(), "other", "Other Architecture").await;
+    process(app.as_ref(), &service).await;
     let retrieval = SlideRetrievalService {
         repository: repository.clone(),
         embedder: Some(Arc::new(Embedder)),
-        embedding_model: Some("embedding".into()),
-        embedding_dimensions: Some(2),
+        profile: Some(TemplateEmbeddingProfile::new("embedding", 2)),
     };
 
     let mut semantic = query("semantic");
@@ -233,4 +232,256 @@ async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
         finding["results"][0]["matchedIntents"],
         json!(["finding", "evidence", "recommendation"])
     );
+}
+
+/// Reference exact cosine in f64, used only to check SQL ranking parity.
+fn reference_cosine(left: &[f32], right: &[f32]) -> f64 {
+    let (mut dot, mut l, mut r) = (0.0, 0.0, 0.0);
+    for (&a, &b) in left.iter().zip(right) {
+        let (a, b) = (f64::from(a), f64::from(b));
+        dot += a * b;
+        l += a * a;
+        r += b * b;
+    }
+    dot / (l * r).sqrt()
+}
+
+struct VectorEmbedder(Vec<f64>);
+impl SlideEmbedder for VectorEmbedder {
+    fn embed<'a>(&'a self, _: &'a str) -> ProviderFuture<'a, Vec<f64>> {
+        Box::pin(async move { Ok(self.0.clone()) })
+    }
+}
+
+#[tokio::test]
+async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
+    use crate::adapters::postgres::vector::CosineVector;
+    let repository: Arc<dyn TemplateRepository> = Arc::new(
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
+    let app = repository.for_app("TestApp").await.unwrap().unwrap();
+    // Distinct, tied and opposite vectors; "tie-a"/"tie-b" share a score and creation time.
+    let fixtures: [(&str, [f64; 2]); 5] = [
+        ("exact", [1.0, 0.0]),
+        ("tie-b", [1.0, 1.0]),
+        ("tie-a", [2.0, 2.0]),
+        ("orthogonal", [0.0, 1.0]),
+        ("opposite", [-1.0, 0.1]),
+    ];
+    for (id, vector) in fixtures {
+        insert(app.as_ref(), id, id).await;
+        let service = SlideClassificationService::new(SlideClassificationServiceOptions {
+            classifier: Arc::new(Classifier),
+            classification_model: "classifier".into(),
+            embedder: Arc::new(VectorEmbedder(vector.to_vec())),
+            embedding_dimensions: Some(2),
+            embedding_max_text_bytes: 32_000,
+            embedding_model: "embedding".into(),
+            input_limits: SlideClassificationInputLimits::default(),
+            repository: app.clone(),
+        });
+        process(app.as_ref(), &service).await;
+    }
+    let profile = TemplateEmbeddingProfile::new("embedding", 2);
+    let query = CosineVector::from_f64(&[0.9, 0.1], 2).unwrap();
+    let ranked = repository
+        .rank_slide_embeddings("TestApp", &profile.id(), EmbeddingRole::Subject, &query)
+        .await
+        .unwrap();
+    assert_eq!(ranked.len(), fixtures.len());
+    for ranked in &ranked {
+        let stored = fixtures
+            .iter()
+            .find(|(id, _)| *id == ranked.template_id)
+            .unwrap()
+            .1;
+        let stored = CosineVector::from_f64(&stored, 2).unwrap();
+        let expected = reference_cosine(query.as_slice(), stored.as_slice());
+        assert!(
+            (ranked.similarity - expected).abs() < 1e-6,
+            "{}: {} vs {expected}",
+            ranked.template_id,
+            ranked.similarity
+        );
+    }
+    // Descending score polarity with stable identity ties.
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|r| r.template_id.as_str())
+            .collect::<Vec<_>>(),
+        ["exact", "tie-a", "tie-b", "orthogonal", "opposite"]
+    );
+    // Another profile or another app ranks nothing.
+    assert!(repository
+        .rank_slide_embeddings(
+            "TestApp",
+            &TemplateEmbeddingProfile::new("embedding", 3).id(),
+            EmbeddingRole::Subject,
+            &query
+        )
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(repository
+        .rank_slide_embeddings(
+            "Quarry_WestMonroe",
+            &profile.id(),
+            EmbeddingRole::Subject,
+            &query
+        )
+        .await
+        .unwrap()
+        .is_empty());
+
+    // The service ranks the complete compatible list, so a semantic winner is found
+    // even when the output limit is one, and "similar" needs no query provider.
+    let retrieval = SlideRetrievalService {
+        repository: repository.clone(),
+        embedder: Some(Arc::new(VectorEmbedder(vec![-1.0, 0.0]))),
+        profile: Some(profile.clone()),
+    };
+    let mut semantic = query_input("semantic");
+    semantic["query"] = json!("anything");
+    semantic["semantic_target"] = json!("subject");
+    semantic["limit"] = json!(1);
+    assert_eq!(
+        retrieval.query("TestApp", &semantic).await.unwrap()["results"],
+        json!([{"kind":"diagram","previewUrl":null,"sections":{"subject":serde_json::to_value(&metadata().subject).unwrap()},"templateId":"opposite","title":"opposite"}])
+    );
+    let without_provider = SlideRetrievalService {
+        repository: repository.clone(),
+        embedder: None,
+        profile: Some(profile.clone()),
+    };
+    let mut similar = query_input("similar");
+    similar["similar_to_template_id"] = json!("exact");
+    let results = without_provider.query("TestApp", &similar).await.unwrap();
+    let ids = results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["templateId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert!(!ids.contains(&"exact".to_owned()));
+    assert_eq!(ids.len(), fixtures.len() - 1);
+    // A foreign app cannot use a source it cannot see.
+    let error = without_provider
+        .query("Quarry_WestMonroe", &similar)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<SlideRetrievalError>().unwrap().code,
+        "slide_not_available"
+    );
+    // Semantic search without a provider fails explicitly; keyword-free hybrid degrades.
+    let error = without_provider
+        .query("TestApp", &semantic)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<SlideRetrievalError>().unwrap().code,
+        "semantic_unavailable"
+    );
+    let mut hybrid = query_input("hybrid");
+    hybrid["query"] = json!("security");
+    let hybrid = without_provider.query("TestApp", &hybrid).await.unwrap();
+    assert_eq!(hybrid["warnings"], json!(["semantic_unavailable"]));
+}
+
+fn query_input(mode: &str) -> Value {
+    query(mode)
+}
+
+#[tokio::test]
+async fn large_catalog_preserves_filtered_matches_and_complete_role_fusion() {
+    use crate::adapters::postgres::client::PostgresClient;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("large-retrieval-catalog");
+    let client = PostgresClient::test_database_at(&path).await.unwrap();
+    let repository = Arc::new(
+        crate::slide_template_test_support::repository(&path)
+            .await
+            .unwrap(),
+    );
+    let app = repository.for_app("TestApp").await.unwrap().unwrap();
+    insert(app.as_ref(), "target", "Target").await;
+    process(app.as_ref(), &service(Arc::clone(&app))).await;
+
+    // Seed a complete catalog in bulk rather than invoking 10,001 provider workflows.
+    // Target is last for subject, first for capability, and newer than the runner-up.
+    let mut tx = client.pool().begin().await.unwrap();
+    sqlx::query("UPDATE template_embeddings SET embedding=CASE role WHEN 'subject' THEN '[0,1]'::quarry_extensions.vector ELSE '[1,0]'::quarry_extensions.vector END WHERE template_id='target'")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO templates(template_id,template_json,owner_user_id)
+        SELECT 'candidate-'||n,template_json,owner_user_id FROM templates
+        CROSS JOIN generate_series(0,10000) n WHERE template_id='target'",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO template_metadata(template_id,kind,description,source,created_at)
+        SELECT template_id,CASE WHEN template_id='candidate-0' THEN 'diagram' ELSE 'commentary' END,
+            '', 'import', '1970-01-01T00:00:00.009Z' FROM templates WHERE template_id<>'target'",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO app_templates(app_id,template_id,created_at)
+        SELECT 'TestApp',template_id,'now' FROM templates WHERE template_id<>'target'",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO template_classification_status(template_id,status,metadata_json,
+            embedding_status,subject_embedding_document,subject_embedding_fingerprint,
+            capability_embedding_document,capability_embedding_fingerprint,embedding_profile_id,
+            input_fingerprint,classified_fingerprint,schema_version,prompt_version)
+        SELECT t.template_id,'ready',CASE WHEN t.template_id='candidate-0' THEN $1 ELSE s.metadata_json END,
+            'ready',s.subject_embedding_document,s.subject_embedding_fingerprint,
+            s.capability_embedding_document,s.capability_embedding_fingerprint,s.embedding_profile_id,
+            s.input_fingerprint,s.classified_fingerprint,s.schema_version,s.prompt_version
+        FROM templates t CROSS JOIN template_classification_status s
+        WHERE t.template_id<>'target' AND s.template_id='target'")
+        .bind(serde_json::to_string(&comparison_metadata()).unwrap())
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO template_embeddings(template_id,role,profile_id,dimensions,input_fingerprint,embedding)
+        SELECT t.template_id,e.role,e.profile_id,e.dimensions,e.input_fingerprint,
+            CASE WHEN e.role='subject' THEN '[1,0]'::quarry_extensions.vector
+                 WHEN t.template_id='candidate-0' THEN '[1,1]'::quarry_extensions.vector
+                 ELSE '[0,1]'::quarry_extensions.vector END
+        FROM templates t CROSS JOIN template_embeddings e
+        WHERE t.template_id<>'target' AND e.template_id='target'")
+        .execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let retrieval = SlideRetrievalService {
+        repository,
+        embedder: Some(Arc::new(VectorEmbedder(vec![1.0, 0.0]))),
+        profile: Some(TemplateEmbeddingProfile::new("embedding", 2)),
+    };
+    let mut input = query("semantic");
+    input["query"] = json!("anything");
+    input["semantic_target"] = json!("subject");
+    input["filters"]["kinds"] = json!(["diagram"]);
+    input["filters"]["intents"] = json!(["finding"]);
+    input["limit"] = json!(1);
+    let filtered = retrieval.query("TestApp", &input).await.unwrap();
+    assert_eq!(filtered["results"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["results"][0]["templateId"], "target");
+
+    // Both diagrams tie in complete reciprocal-rank fusion: (2,1) versus (1,2).
+    // Recency selects target. Truncating its subject rank incorrectly selects candidate-0.
+    input["semantic_target"] = json!("both");
+    input["filters"]["intents"] = json!([]);
+    let fused = retrieval.query("TestApp", &input).await.unwrap();
+    assert_eq!(fused["results"].as_array().unwrap().len(), 1);
+    assert_eq!(fused["results"][0]["templateId"], "target");
+    client.close().await;
 }

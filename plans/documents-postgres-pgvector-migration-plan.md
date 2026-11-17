@@ -1,27 +1,31 @@
 # Plan 1: document chunks, embeddings and search in PostgreSQL
 
+Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
+Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+operations and maintenance instructions below are historical, not executable rollout guidance.
+
 Date: 2026-11-12. Reviewed against `main` at `83071dd` on 2026-11-15.
 Status: design for the **first migration**; no runtime changes made.
-Execution order: **1. Documents (this plan) → 2. Notebooks → 3. Templates and final Helix removal.**
+Execution order: **1. Documents (this plan) → 2. Notebooks → 3. Templates and final legacy storage removal.**
 This document migration runs first, followed by [notebooks](notebooks-postgres-pgvector-migration-plan.md), then
-[templates and final Helix retirement](templates-postgres-pgvector-migration-plan.md).
+[templates and final legacy storage retirement](templates-postgres-pgvector-migration-plan.md).
 Reinspect code/manifests before implementation. Current code, not these proposed names, remains
 authoritative. Relevant baseline: [architecture](../docs/ARCHITECTURE.md),
 [storage](../docs/postgresql-storage.md), [hybrid search](../docs/hybrid-document-search.md).
 The inspected baseline has no pgvector dependency. Documents move to SQL in this migration;
-notebooks/templates and their shared Helix infrastructure remain operational until their turns.
+notebooks/templates and their shared legacy storage infrastructure remain operational until their turns.
 
 ## 1. Outcome and current behavior
 
-Replace `helix.document_indexes.initialize` and every document graph read/write/delete with
+Replace the retired remote graph operations and every document graph read/write/delete with
 PostgreSQL tables, pgvector cosine search and indexed keyword retrieval. This includes preview
 text, chunk lookup, current-version selection, authorization snapshots and deletion; replacing
-only vector search would leave Helix mandatory. Do not implement a second graph database in SQL:
+only vector search would leave legacy storage mandatory. Do not implement a second graph database in SQL:
 file/version/chunk foreign keys and joins express the relationships already needed by the product.
 
 Today original bytes, versions, identity manifests and accepted image text are PostgreSQL-owned,
-but full chunks/vectors and search are Helix-owned. Ingestion prepares embeddings, commits the
-canonical file, then publishes multiple Helix requests. Keyword hybrid retrieval currently transfers
+but full chunks/vectors and search are graph-owned. Ingestion prepares embeddings, commits the
+canonical file, then publishes multiple legacy storage requests. Keyword hybrid retrieval currently transfers
 canonical candidate chunks and ranks them in Rust. Document job state is process-local.
 
 The replacement commits a complete document version, all chunks and embeddings, search metadata,
@@ -106,11 +110,11 @@ Candidate index DDL and matching query casts must be fixed by migrations/profile
 not request input. Benchmark partial/partitioned indexes only when measured scope skew warrants
 them; do not create one table/index per deal or owner by default. Keep relational scope indexes.
 
-pgvector cosine distance is `1 - cosineSimilarity`, unlike the current Helix-normalized distance
+pgvector cosine distance is `1 - cosineSimilarity`, unlike the current legacy storage-normalized distance
 `(1 - cosineSimilarity) / 2`. Preserve the legacy vector API's `distance` field as pgvector distance
 divided by two, without changing its snake_case flattened chunk DTO. Hybrid uses similarity
 `1 - pgvectorDistance` for its configured relevance floor, before fusion; it must not reuse the old
-Helix conversion on SQL distances. Test aligned, orthogonal, opposite, near-threshold and invalid
+legacy storage conversion on SQL distances. Test aligned, orthogonal, opposite, near-threshold and invalid
 vectors, with pinned float tolerances and deterministic ties. Required nonzero-norm checks apply
 to raw-vector query input too; reject it at the handler before product work.
 
@@ -222,7 +226,7 @@ only by their existing authorized APIs; normal retrieval sees current, live, rea
    stale attempt, revoked access or commit failure rolls back canonical rows/current pointer/activity.
    The accepted job may remain failed/retryable, but never report `sqliteCommitted=true` from input
    admission alone. Retry uses immutable accepted input; after an uncertain commit query operation ID.
-6. No Helix publication follows. The response/SSE is emitted after commit; reconnect on another
+6. No legacy storage publication follows. The response/SSE is emitted after commit; reconnect on another
    process reads durable job state. Do not rerun providers because an acknowledgment was lost.
 
 This intentionally eliminates the old canonical-commit-then-graph-failure state for new ingestion.
@@ -275,7 +279,7 @@ change, not an assertion that a same-size vector proves which model produced it.
 Replace live `DocumentGraphReader` consumers, including exact-upload retry checks, with SQL
 repositories and replace `ResourceAccess` full chunk snapshots with SQL-scoped selection. Stored
 PDF/raw-text viewing already loads PostgreSQL blobs and converts/parses them outside Tokio workers;
-preserve that path rather than treating it as Helix-owned or reconstructing source text from snippets.
+preserve that path rather than treating it as graph-owned or reconstructing source text from snippets.
 Audit downstream assistant/context consumers without inventing a graph dependency. Current authority
 comes from membership/session and canonical rows,
 never a cached result or caller-supplied deal list. Keep PDF/page/filename/size/URL contracts intact.
@@ -290,8 +294,8 @@ current attempt inside their mutation; deleted IDs remain reserved.
 | Existing area | Change |
 | --- | --- |
 | `backend/src/adapters/postgres/{client.rs,query/}` | Shared typed vector/bulk/ranked query support and transaction-bound execution. |
-| `backend/src/app/{schema.sql,migrations.rs,config.rs,bootstrap.rs}` | Extension/profile readiness, owned SQL indexes, new repository wiring; replace document index initialization only. Keep notebook/template Helix startup until their plans land. |
-| `backend/src/domains/documents/{ingestion,store,graph}/` | Durable admission/preparation/final commit; move reusable chunk DTOs out of Helix query modules into document-owned models. Introduce narrow SQL chunk/search repositories and remove document graph code when no consumer remains. |
+| `backend/src/app/{schema.sql,migrations.rs,config.rs,bootstrap.rs}` | Extension/profile readiness, owned SQL indexes, new repository wiring; replace document index initialization only. Keep notebook/template legacy storage startup until their plans land. |
+| `backend/src/domains/documents/{ingestion,store,graph}/` | Durable admission/preparation/final commit; move reusable chunk DTOs out of legacy storage query modules into document-owned models. Introduce narrow SQL chunk/search repositories and remove document graph code when no consumer remains. |
 | `backend/src/domains/documents/{search,viewing}/`, `domains/identity/access.rs` | SQL candidates/snapshots, text retrieval, bounded final authorization; retain fusion and preview contracts. |
 | `backend/src/domains/deals/deletion/` | SQL chunk deletion/verification, durable attempts and lifecycle fencing; preserve receipts/worker recovery. |
 | `backend/tests/` | Replace graph-only fixtures with SQL repository tests and failure injection, preserving format/image/exact retry/HTTP/auth coverage. |
@@ -299,11 +303,11 @@ current attempt inside their mutation; deleted IDs remain reserved.
 Implementation order: (1) freeze API/identity fixtures and benchmark lexical/vector alternatives;
 (2) provision extension and add typed/profile/schema helpers; (3) implement atomic repository with
 injected failures; (4) connect durable jobs and provider preparation; (5) replace search/read/delete;
-(6) cut document traffic to PostgreSQL and remove its Helix startup/call sites; (7) run gates and
+(6) cut document traffic to PostgreSQL and remove its legacy storage startup/call sites; (7) run gates and
 update architecture/recovery guidance. No permanent dual-write/fallback architecture. A temporary
 offline comparison tool must be explicit, read-only against old data and removable after acceptance.
 
-### 6.1 Mandatory document code and Helix query cleanup — migration 1
+### 6.1 Mandatory document code and legacy storage query cleanup — migration 1
 
 Complete this checklist in the document migration PR after moving every document caller to SQL.
 Remove newly unused code rather than disabling it or adding `allow(dead_code)`. The queries are
@@ -314,21 +318,16 @@ the implementation branch; this inventory records the reviewed baseline.
   `PreparedDocumentGraph`, `FileVersionGraphWrite`, graph-only response structs, the document
   `graph/` module and its exports. Move still-used chunk/search DTOs, identity/range validation and
   limits into document-owned model/query modules, preserving their serialized contracts.
-- [ ] Remove document index initialization/status queries: `helix.document_indexes.initialize`
-  and `helix.document_indexes.operation_status`, their 14 index specifications and polling helpers.
-- [ ] Remove publication queries `helix.file_version.insert_setup`,
-  `helix.file_version.insert_chunk_batch`, `helix.file_version.publish`, their setup/chunk/publish
-  builders, graph labels/edges and graph request-size/receipt checks. Replace their integrity and
+- [ ] Remove remote document index initialization/status queries, their 14 index specifications
+  and polling helpers.
+- [ ] Remove remote setup, chunk-batch and publication queries and builders, graph labels/edges
+  and graph request-size/receipt checks. Replace their integrity and
   batch-size protections with SQL constraints/prepared-batch limits on the same transaction.
-- [ ] Remove read queries `helix.file_version.by_content_hash`, `helix.file_version.current`,
-  `helix.file_version.by_id`, `helix.file_version.chunks`; search queries
-  `helix.file_chunk.search_vector`, `helix.file_chunk.search_keyword`,
-  `helix.file_chunk.current_vector`, `helix.file_chunk.current_keyword`; and the remote
-  `helix.file_chunk.verify_candidates` query. Replace readiness/header checks with SQL complete-set
+- [ ] Remove remote file-version lookup, chunk reads, vector/keyword search and current-version
+  candidate verification queries. Replace readiness/header checks with SQL complete-set
   invariants. Preserve current-versus-historical identity rules and exact-byte retry behavior.
-- [ ] Remove document deletion operations `helix.deletion.fence`, `helix.deletion.inspect`,
-  `helix.deletion.purge`, `helix.deletion.verify`, the `QuarryDealLifecycle` remote guard and graph
-  cleanup polling. Keep SQL lifecycle/tombstone/attempt guards, receipts and reserved deleted IDs.
+- [ ] Remove remote document deletion fencing, inspection, purge and verification, the
+  `QuarryDealLifecycle` remote guard and graph cleanup polling. Keep SQL lifecycle/tombstone/attempt guards, receipts and reserved deleted IDs.
   Explicitly resolve pre-cutover pending deletion receipts without claiming old remote data was
   erased; retain historical wire phases, including `sqlite`, with documented SQL-only transitions.
 - [ ] Replace ingestion graph assembly/preflight and `DocumentPersistenceResult` graph receipts;
@@ -338,26 +337,26 @@ the implementation branch; this inventory records the reviewed baseline.
 - [ ] Replace document graph imports/constructor arguments in bootstrap, ingestion, search,
   identity/access, deletion and all remaining callers. Remove full canonical-ID materialization,
   graph verification scans and Rust whole-catalog keyword ranking when SQL replaces them. Update
-  search read permits/log phases from Helix-specific ownership to bounded SQL work; retain query
+  search read permits/log phases from legacy-store ownership to bounded SQL work; retain query
   embedding cache/coalescing, provider limits, request admission and final result authorization.
 - [ ] Replace graph serialization/query-only tests with real SQL publication/read/search/delete
   tests; move useful identity, image-retry, rollback and unauthorized-access assertions first.
   Update `backend/tests/unit/domains/documents/graph/`, graph writer integration fixtures, mixed
-  Helix compatibility suites and module hooks. Keep still-used notebook/template/shared tests.
+  legacy storage compatibility suites and module hooks. Keep still-used notebook/template/shared tests.
   Reference rankers needed only for parity belong under manually wired `backend/tests/`, not
   unused production exports. Remove temporary comparison tools after acceptance.
-- [ ] Audit `backend/src/bin/{embedding.rs,helix_query.rs,clear_helix.rs}` and all remaining callers.
-  Retire document-only unused code; retain shared Helix tools only while another live domain needs
+- [ ] Audit the retired graph maintenance utilities and all remaining callers.
+  Retire document-only unused code; retain shared legacy storage tools only while another live domain needs
   them. Do not execute a utility, drop an index or delete a store to demonstrate code removal.
-- [ ] Add an architecture regression guard rejecting document Helix imports/call sites. Record a
-  before/after symbol, operation and dependency inventory; require zero live document Helix queries
+- [ ] Add an architecture regression guard rejecting document legacy storage imports/call sites. Record a
+  before/after symbol, operation and dependency inventory; require zero live document legacy storage queries
   and no newly unused imports/exports. Verify all targets compile and Clippy passes. Intentional
   historical documentation matches do not count as runtime callers.
 
 Keep template cleanup in migration 3's template plan and notebook cleanup in migration 2's notebook
-plan. This first migration does not remove their live code, the shared Helix adapter/SDK/config,
-Docker/launcher setup or old data volumes. A document-only no-Helix test should instantiate its SQL
-services with fake providers; normal application startup still needs Helix for the other two domains
+plan. This first migration does not remove their live code, the shared legacy storage adapter/SDK/config,
+Docker/launcher setup or old data volumes. A document-only SQL-only test should instantiate its SQL
+services with fake providers; normal application startup still needs legacy storage for the other two domains
 until their migrations finish. Preserve global writer ownership and advisory serialization until
 the separate concurrency acceptance gates pass.
 
@@ -370,7 +369,7 @@ startup never drops old state. Preserving mode keeps schema-2 validation, introd
 backfills complete documents in per-document transactions while writers are drained.
 
 SQL identity manifests alone do not contain all old text/vectors. For populated data, export validated
-Helix chunks while available, or reparse/re-embed canonical bytes with an explicit identity mapping.
+legacy storage chunks while available, or reparse/re-embed canonical bytes with an explicit identity mapping.
 Reuse accepted image text; do not silently regenerate descriptions/change IDs. Count/hash/span/profile
 checks and atomic readiness precede switching readers. Mark unrecoverable records incomplete and
 stop cutover with a report. Never acknowledge successful migration with missing documents.
@@ -382,10 +381,10 @@ must not apply ad hoc DDL or edit schema markers to bless a backfill. Select fre
 mode before implementation; later migrations reuse the actual resulting schema/version policy.
 
 Keep old stores intact until backups/readback/restore are verified. No automatic destructive reset,
-Helix container/volume deletion or live re-embedding spend. Rollback drains workers and requires
+legacy storage container/volume deletion or live re-embedding spend. Rollback drains workers and requires
 schema/profile/API compatibility; do not restore an old binary that cannot read the new schema.
 
-This supersedes document Helix projection-intent/remote-fence work in the
+This supersedes document legacy storage projection-intent/remote-fence work in the
 [concurrency continuation](durable-claims-remote-fencing-and-recovery-plan.md). Those remote writes
 cease to exist; replace them with current-attempt/resource checks in the same SQL commit. Durable
 admission, recovery, replica budgets and the global-writer removal acceptance gates still apply.
@@ -409,7 +408,7 @@ Required real PostgreSQL tests, manually wired under `backend/tests/`:
   mismatch, selective ANN filters and exact reference ranking; verify real query plans/index use.
 - Keyword fixture quality/technical tokens/phrases, authorization before limits, stable RRF ties,
   page spans/match offsets and safe snippets. Backend and web/desktop contracts stay compatible.
-- Document cleanup checklist 6.1 is complete, with no live document Helix dependency and no loss of
+- Document cleanup checklist 6.1 is complete, with no live document legacy storage dependency and no loss of
   unrelated notebook/template functionality. Legacy distance normalization/response casing and
   hybrid explicit fallback/failure semantics have focused regression coverage.
 - Explain-analyze and relevance harness: exact top-k is ground truth; proposed ANN gate recall@20

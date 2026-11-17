@@ -18,7 +18,9 @@ fn service(postgres: PostgresClient) -> Arc<DealDeletionService> {
     )
 }
 async fn seed(postgres: &PostgresClient) {
-    migrations::migrate(postgres).await.unwrap();
+    migrations::migrate(postgres, Default::default())
+        .await
+        .unwrap();
     seed_identity(postgres, "deletion-test@example.com", 'a').await;
     seed_deal(postgres, "DELETE-RESTART").await;
 }
@@ -88,7 +90,9 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
     drop(first);
     drop(postgres);
     let postgres = PostgresClient::test_database_at(&path).await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     let second = service(postgres.clone());
     second
         .repository
@@ -98,7 +102,9 @@ async fn deletion_worker_resumes_after_acceptance_and_after_canonical_purge() {
     drop(second);
     drop(postgres);
     let postgres = PostgresClient::test_database_at(&path).await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     let third = service(postgres);
     third.tick().await.unwrap();
     assert_eq!(

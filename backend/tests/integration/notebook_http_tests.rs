@@ -385,7 +385,7 @@ async fn notebook_http_status_and_events_require_owned_parent_and_revoked_sessio
     assert_eq!(call(&app, "GET", status, None, 1).await.0, 401);
 }
 
-/// Explicit opt-in visual fixture: isolated PostgreSQL, fake embeddings/Helix, loopback only.
+/// Explicit opt-in visual fixture: isolated PostgreSQL, fake embeddings, loopback only.
 #[tokio::test]
 #[ignore = "interactive Computer visual fixture; listens on 127.0.0.1:39001 until stopped"]
 async fn notebook_visual_fixture() {

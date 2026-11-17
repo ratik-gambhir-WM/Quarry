@@ -4,9 +4,14 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 4;
+const VERSION: i64 = 5;
 // Startup only. Runtime guards are retained separately until worker/remote cutover.
 const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
+const INTEGRITY_VIEWS: [&str; 3] = [
+    "document_search_integrity",
+    "notebook_search_integrity",
+    "template_embedding_integrity",
+];
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error("PostgreSQL schema operation failed")]
@@ -18,17 +23,47 @@ pub enum MigrationError {
     #[error("storage reset refused: {0}")]
     ResetRefused(&'static str),
 }
-pub(crate) async fn migrate(client: &PostgresClient) -> Result<(), MigrationError> {
-    migrate_with_dimensions(client, 1536).await
+const SHARED_VECTOR_COLUMN: &str = "vector(1536)";
+const TEMPLATE_VECTOR_COLUMN: &str = "vector(TEMPLATE_VECTOR_DIMENSIONS)";
+
+/// Typed vector column dimensions. Documents/notebooks share one configured dimension;
+/// templates are an independent family and are never resized by the shared value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SchemaDimensions {
+    pub shared: usize,
+    pub template: usize,
 }
-pub(crate) async fn migrate_with_dimensions(
-    client: &PostgresClient,
-    dimensions: usize,
-) -> Result<(), MigrationError> {
-    if !(1..=16000).contains(&dimensions) {
-        return Err(MigrationError::Incompatible);
+
+impl Default for SchemaDimensions {
+    fn default() -> Self {
+        Self {
+            shared: 1536,
+            template: 1536,
+        }
     }
-    let schema = SCHEMA.replace("vector(1536)", &format!("vector({dimensions})"));
+}
+
+impl SchemaDimensions {
+    fn render(self) -> Result<String, MigrationError> {
+        if !(1..=16000).contains(&self.shared) || !(1..=16000).contains(&self.template) {
+            return Err(MigrationError::Incompatible);
+        }
+        // Render the template family through its own placeholder first so the shared
+        // replacement can never touch template columns.
+        Ok(SCHEMA
+            .replace(SHARED_VECTOR_COLUMN, &format!("vector({})", self.shared))
+            .replace(
+                TEMPLATE_VECTOR_COLUMN,
+                &format!("vector({})", self.template),
+            ))
+    }
+}
+
+pub(crate) async fn migrate(
+    client: &PostgresClient,
+    dimensions: SchemaDimensions,
+) -> Result<(), MigrationError> {
+    let schema = dimensions.render()?;
     validate_vector_extension(client).await?;
     let mut tx = client.pool().begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),$1))")
@@ -84,10 +119,12 @@ pub(crate) async fn migrate_with_dimensions(
     if invalid {
         return Err(MigrationError::Incompatible);
     }
-    let invalid: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM notebook_search_integrity)")
-            .fetch_one(&mut *tx)
-            .await?;
+    let invalid: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM notebook_search_integrity)
+             OR EXISTS(SELECT 1 FROM template_embedding_integrity)",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     if invalid {
         return Err(MigrationError::Incompatible);
     }
@@ -121,18 +158,16 @@ async fn initialize(
 }
 
 /// Explicit MVP reset: recreate only the recognized Quarry product schema atomically.
-/// Normal startup never calls this operation. Old Helix/SQLite stores are untouched.
+/// Normal startup never calls this operation. Old SQLite files and retired graph stores are untouched.
 ///
 /// # Errors
 /// Refuses unrelated databases/objects and any active application writer. A DDL
 /// failure rolls back both deletion and initialization, preserving the old schema.
 pub async fn reset_product_schema(
     client: &PostgresClient,
-    dimensions: usize,
+    dimensions: SchemaDimensions,
 ) -> Result<(), MigrationError> {
-    if !(1..=16000).contains(&dimensions) {
-        return Err(MigrationError::Incompatible);
-    }
+    let schema = dimensions.render()?;
     validate_vector_extension(client).await?;
     let mut tx = client.pool().begin().await?;
     let database: String = sqlx::query_scalar("SELECT current_database()")
@@ -172,10 +207,10 @@ pub async fn reset_product_schema(
         .chain(["quarry_schema_version", "notebook_cleanup"])
         .collect();
     let tables:Vec<String>=sqlx::query_scalar("SELECT relname FROM pg_class WHERE relnamespace=current_schema()::regnamespace AND relkind IN ('r','p','v','m','f')").fetch_all(&mut *tx).await?;
-    if tables.iter().any(|name| {
-        !allowed.contains(name.as_str())
-            && !["document_search_integrity", "notebook_search_integrity"].contains(&name.as_str())
-    }) {
+    if tables
+        .iter()
+        .any(|name| !allowed.contains(name.as_str()) && !INTEGRITY_VIEWS.contains(&name.as_str()))
+    {
         return Err(MigrationError::ResetRefused(
             "selected schema contains unrelated relations",
         ));
@@ -191,6 +226,7 @@ pub async fn reset_product_schema(
             "retire_deal_identity",
             "verify_document_search_set",
             "verify_notebook_search_set",
+            "verify_template_embedding_pair",
         ]
         .contains(&name.as_str())
     }) {
@@ -198,14 +234,15 @@ pub async fn reset_product_schema(
             "selected schema contains unrelated functions",
         ));
     }
-    sqlx::raw_sql("DROP VIEW IF EXISTS document_search_integrity, notebook_search_integrity")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::raw_sql(&format!(
+        "DROP VIEW IF EXISTS {}",
+        INTEGRITY_VIEWS.join(", ")
+    ))
+    .execute(&mut *tx)
+    .await?;
     let tables: Vec<_> = tables
         .iter()
-        .filter(|name| {
-            !["document_search_integrity", "notebook_search_integrity"].contains(&name.as_str())
-        })
+        .filter(|name| !INTEGRITY_VIEWS.contains(&name.as_str()))
         .map(|name| format!("\"{name}\""))
         .collect();
     if !tables.is_empty() {
@@ -218,7 +255,6 @@ pub async fn reset_product_schema(
             .execute(&mut *tx)
             .await?;
     }
-    let schema = SCHEMA.replace("vector(1536)", &format!("vector({dimensions})"));
     let checksum = format!("{:x}", Sha256::digest(schema.as_bytes()));
     initialize(&mut tx, &schema, &checksum).await?;
     tx.commit().await?;

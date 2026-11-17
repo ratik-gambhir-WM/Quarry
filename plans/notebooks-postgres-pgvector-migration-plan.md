@@ -1,19 +1,23 @@
 # Plan 2: atomic notebook saves and PostgreSQL search
 
+Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
+Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+operations and maintenance instructions below are historical, not executable rollout guidance.
+
 Date: 2026-11-12. Status: proposed follow-up PR; no implementation or data changes.
 Depends on the shared extension/vector/bulk/search contract in
 [Plan 1](documents-postgres-pgvector-migration-plan.md#2-common-storage-and-search-decisions-for-all-three-plans).
-Followed by [templates and final Helix retirement](templates-postgres-pgvector-migration-plan.md).
+Followed by [templates and final legacy storage retirement](templates-postgres-pgvector-migration-plan.md).
 Baseline: [notebook API](../docs/notebook-api.md) and [architecture](../docs/ARCHITECTURE.md).
 
 ## 1. Outcome and deliberate behavior change
 
-Replace `helix.notebooks.indexes` and notebook publication/readback/delete with PostgreSQL
+Replace the retired remote graph operations and notebook publication/readback/delete with PostgreSQL
 note artifacts/chunks, pgvector and indexed keyword search. Native editor blocks stay canonical;
 Markdown remains a deterministic lossy derived representation, never the input for reconstructing
 editable blocks. A notebook linked to a shared deal stays private to its notebook owner.
 
-Today a save job first commits the note revision, then exports/chunks/embeds and publishes to Helix.
+Today a save job first commits the note revision, then exports/chunks/embeds and publishes to legacy storage.
 Index failure can therefore leave a new saved native revision with failed enrichment. Under this
 plan, **the native note revision, title/location, complete derived chunk/embedding set and terminal
 job result commit together**. Any chunk/vector failure rolls back the whole save and leaves the
@@ -150,12 +154,12 @@ Note deletion keeps displayed expectedRevision CAS. In the same transaction remo
 active set/chunks, fence/cancel admitted work and resolve owned slots. Parent/folder deletion uses
 existing lock protocol; folder relocation preserves unchanged artifacts while advancing revisions.
 A paused worker must fail its final transaction after the note/notebook disappears or job is fenced.
-No remote tombstone or eventual Helix cleanup is necessary for new SQL-only notes.
+No remote tombstone or eventual legacy storage cleanup is necessary for new SQL-only notes.
 
 Retire notebook `graph.rs` publication/readback and `notebook_cleanup` remote polling only after
-all readers/writers move. If old Helix cleanup records remain during cutover, classify them in an
+all readers/writers move. If old legacy storage cleanup records remain during cutover, classify them in an
 explicit one-time migration; do not declare remote data deleted by removing its ledger. Keep old
-Helix stores intact until authorized retirement. SQL cascades replace remote cleanup for new data;
+legacy stores intact until authorized retirement. SQL cascades replace remote cleanup for new data;
 any remaining cleanup queue must identify a real external effect, not a redundant SQL mirror.
 
 Crash tests distinguish admission only, prepared only, in-transaction rollback and committed-but-
@@ -168,9 +172,9 @@ separate acceptance gate in the concurrency continuation, not an automatic conse
 | Existing path | Work |
 | --- | --- |
 | `backend/src/domains/notebooks/{repository.rs,job_repository.rs}` | Atomic native/artifact batch transaction, parent/revision/attempt checks, slots, SQL search and cascades. Split a feature-owned search module if needed, not a generic persistence framework. |
-| `backend/src/domains/notebooks/{save_jobs.rs,graph.rs,markdown.rs,model.rs,service.rs}` | Prepare before persist, typed prepared batch, durable recovery, remove Helix pipeline dependency; retain deterministic native-to-Markdown export and bounds. |
+| `backend/src/domains/notebooks/{save_jobs.rs,graph.rs,markdown.rs,model.rs,service.rs}` | Prepare before persist, typed prepared batch, durable recovery, remove legacy storage pipeline dependency; retain deterministic native-to-Markdown export and bounds. |
 | `backend/src/domains/notebooks/{handler.rs,handler/validate.rs,route.rs}` | Existing 202/SSE/revision behavior plus strict owned query API if included. |
-| `backend/src/app/{schema.sql,migrations.rs,bootstrap.rs,config.rs}` | Artifact DDL/profile/index readiness, one SQL service assembly; remove notebook Helix initializer. Documents/templates may still use Helix during ordered rollout. |
+| `backend/src/app/{schema.sql,migrations.rs,bootstrap.rs,config.rs}` | Artifact DDL/profile/index readiness, one SQL service assembly; remove notebook legacy storage initializer. Documents/templates may still use legacy storage during ordered rollout. |
 | `frontend/src/data/notebook/`, notebook API/contracts and native relay | Verify committed flags, captured revisions, retry/reconnect, newer edits and explicit reload; wire new query API without broadening transport. |
 | `backend/tests/`, `frontend/tests/` | Atomicity, job/parent races, real query/index tests and saved-buffer/transport regressions. |
 
@@ -182,7 +186,7 @@ schedule re-embedding. No provider spend or old-store deletion is authorized by 
 
 Drain old workers before changing save ordering/schema. Backfill each note completely in one SQL
 transaction, validate counts/fingerprints and publish its active reference only on success. Do not
-hold a transaction across backfill provider work. Old source/Helix can remain read-only for rollback;
+hold a transaction across backfill provider work. Old source/legacy storage can remain read-only for rollback;
 never permanent dual-write. Rollback compatibility and a forward-fix path must be documented before
 cutover. Update API docs to make the changed save-failure semantics unambiguous.
 

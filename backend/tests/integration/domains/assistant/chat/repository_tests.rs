@@ -10,7 +10,9 @@ use crate::{
 
 async fn repository_fixture() -> (AssistantChatRepository, i64, PostgresClient) {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     let user = UserRepository::new(postgres.clone())
         .create(AddUserInput {
             email: "analyst@example.com".to_string(),

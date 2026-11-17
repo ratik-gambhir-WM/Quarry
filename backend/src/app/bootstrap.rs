@@ -5,7 +5,6 @@ use thiserror::Error;
 
 use crate::{
     adapters::{
-        helix::client::HelixClient,
         office::converter::OfficeConverter,
         openai::client::OpenAiClient,
         postgres::client::{PostgresClient, PostgresError},
@@ -71,8 +70,14 @@ pub enum BootstrapError {
     SlideTemplates(String),
     #[error("failed to construct shared HTTP client: {0}")]
     HttpClient(reqwest::Error),
-    #[error("failed to construct Helix client: {0}")]
-    HelixClient(String),
+}
+
+/// Typed vector columns for the shared document/notebook family and the template family.
+pub fn schema_dimensions(config: &AppConfig) -> migrations::SchemaDimensions {
+    migrations::SchemaDimensions {
+        shared: config.embeddings.vector_dimension.get(),
+        template: config.slide_templates.embedding_dimensions.get(),
+    }
 }
 
 pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError> {
@@ -82,15 +87,9 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let postgres = PostgresClient::connect(&config.postgres)
         .await
         .map_err(BootstrapError::Postgres)?;
-    if config.helix.vector_dimension.get() == 1536 {
-        migrations::migrate(&postgres)
-            .await
-            .map_err(BootstrapError::Migration)?;
-    } else {
-        migrations::migrate_with_dimensions(&postgres, config.helix.vector_dimension.get())
-            .await
-            .map_err(BootstrapError::Migration)?;
-    }
+    migrations::migrate(&postgres, schema_dimensions(&config))
+        .await
+        .map_err(BootstrapError::Migration)?;
     if !crate::domains::documents::store::identity_repository::ready(&postgres)
         .await
         .map_err(|_| BootstrapError::Migration(MigrationError::Incompatible))?
@@ -169,26 +168,14 @@ async fn assemble_api(
             },
         ))
     });
-    let dimensions = settings.embedding_dimensions;
-    let helix =
-        Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
-    let graph = Arc::new(graph::TemplateGraph::new(helix.clone(), dimensions));
-    graph.initialize().await.map_err(|_| {
-        BootstrapError::SlideTemplates("Helix template indexes failed to initialize".into())
-    })?;
+    // PostgreSQL is the only template store: startup validated the schema, pair integrity
+    // and indexes; no catalog-wide reconciliation or re-embedding runs here.
     let embedded = Arc::new(SlideTemplates::new(
         repository,
         preview,
         classification,
-        Some(graph),
         settings.allow_embedding_inspection,
     ));
-    embedded.reconcile().await.map_err(|_| {
-        BootstrapError::SlideTemplates(
-            "Helix template reconciliation failed; canonical PostgreSQL records were preserved"
-                .into(),
-        )
-    })?;
     embedded.resume_pending_jobs();
     let api = assemble_api_routes(config, postgres, http, prompts, Some(embedded.clone()));
     Ok((api, embedded))
@@ -220,7 +207,7 @@ pub(crate) fn assemble_api_routes(
             .as_ref()
             .map(|c| c.embedding_model.clone())
             .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.into()),
-        config.helix.vector_dimension.get(),
+        config.embeddings.vector_dimension.get(),
     );
     let document_search_repository =
         crate::domains::documents::store::search_repository::DocumentSearchRepository::new(
@@ -235,7 +222,7 @@ pub(crate) fn assemble_api_routes(
         NotebookRepository::new(postgres.clone()),
         Arc::new(NotebookPipeline::new(
             openai.clone(),
-            config.helix.vector_dimension,
+            config.embeddings.vector_dimension,
             config
                 .openai
                 .as_ref()
@@ -328,7 +315,7 @@ pub(crate) fn assemble_api_routes(
                 Arc::new(QueryEmbeddings::openai(
                     client.clone(),
                     settings.embedding_model.clone(),
-                    config.helix.vector_dimension.get(),
+                    config.embeddings.vector_dimension.get(),
                     config.search.embedding_concurrency,
                     config.search.embedding_timeout,
                 ))

@@ -15,7 +15,9 @@ fn select() -> Result<SqlQuery, PostgresError> {
 async fn clients() -> (PostgresClient, PostgresClient) {
     let path = format!("read-independence-{}", uuid::Uuid::new_v4());
     let writer = PostgresClient::test_database_at(&path).await.unwrap();
-    migrations::migrate(&writer).await.unwrap();
+    migrations::migrate(&writer, Default::default())
+        .await
+        .unwrap();
     writer
         .write_async(
             SqlBuilder::insert_into("app_metadata")

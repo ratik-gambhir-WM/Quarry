@@ -114,7 +114,7 @@ attach a message to the wrong answer. Existing normalized legacy self-parent rec
 ## 4. Backend correctness gate before enabling branch creation
 
 The schema already has parent links and a `(thread_id, parent_message_id)` index. No schema
-change is expected for the first release; do not reset SQLite or Helix.
+change is expected for the first release; do not reset SQLite or legacy storage.
 
 - In the owned thread's start-run transaction, validate that a supplied parent exists in the
   same thread, is an assistant, and is completed. A global foreign key does not establish that
@@ -279,7 +279,7 @@ During implementation, update `docs/ARCHITECTURE.md` sections on Assistant state
 feature maturity, UI composition, persistent runs/context selection, and verification. Remove the
 current statement that branching controls are unsupported only when they actually ship. Document
 session-only layout state and the unchanged stale-stream/authentication limitations. SQLite stays
-canonical, Axum owns AI/context, and Tauri stays a transport boundary; no Helix chat graph is needed.
+canonical, Axum owns AI/context, and Tauri stays a transport boundary; no legacy storage chat graph is needed.
 
 Ship the slices independently with the existing Thread view working throughout. Keep Canvas opt-in
 until parent validation/context tests and runtime/UI gates pass. The view switch offers a direct

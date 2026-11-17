@@ -1,8 +1,8 @@
 # Notebook Save UI verification
 
-Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
-Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
-reset and verification records below describe the earlier implementation, not current commands.
+Current storage is PostgreSQL schema 5 with pgvector for all product persistence and search.
+See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
+verification records below describe earlier implementations, not current prerequisites or commands.
 
 Date: 2026-10-28. This follow-up integrates the previously implemented notebook API into the editor.
 Earlier backend, transport, migration and documentation changes were already present and were
@@ -72,12 +72,12 @@ The web UI ran from `frontend/`:
 
 `VITE_API_BASE_URL=http://127.0.0.1:39001 npm run dev:web -- --host 127.0.0.1`
 
-The API fixture uses in-memory SQLite, real authentication and fake embedding/Helix capabilities.
+The API fixture uses in-memory SQLite, real authentication and fake embedding/legacy storage capabilities.
 Computer verified first-save notebook creation, native body/title save, completed Saved feedback,
 subsequent save at the same server-ID URL, reload/sign-in restoration of the updated content, and
 another PATCH after reload. The new-note title received focus. The Save button matches New note's
 filled color and precedes Export on desktop and at 390×844. Browser warning/error logs were empty.
-Dark mode remains disabled by the product; packaged Tauri execution and live OpenAI/Helix were
+Dark mode remains disabled by the product; packaged Tauri execution and live OpenAI/legacy storage were
 not exercised. Shared desktop typechecking and production UI build passed.
 
 Screenshots are outside the repository:

@@ -97,16 +97,6 @@ impl TemplateCatalogRepository for PostgresTemplateRepository {
         })
         .await
     }
-    async fn insert_with_processing_classification(
-        &self,
-        record: &TemplateInsert,
-        pending: &PendingSlideClassification,
-    ) -> RepositoryResult<()> {
-        repository_boundary(async {
-            Self::insert_with_processing_classification(self, record, pending).await
-        })
-        .await
-    }
     async fn insert(
         &self,
         template: &StoredTemplate,
@@ -171,7 +161,7 @@ impl TemplateCatalogRepository for PostgresTemplateRepository {
         cancellation: Option<&super::RequestCancellation>,
     ) -> RepositoryResult<()> {
         repository_boundary(async {
-            self.insert_classification(record, pending, false, cancellation)
+            self.insert_classification(record, pending, cancellation)
                 .await
         })
         .await
@@ -646,61 +636,47 @@ impl TemplateProcessingRepository for PostgresTemplateRepository {
     }
     async fn claim_next_slide_classification(
         &self,
-        now: &str,
-        lease_expires_at: &str,
+        lease_seconds: u32,
     ) -> RepositoryResult<Option<SlideClassificationJob>> {
         repository_boundary(async {
-            Self::claim_next_slide_classification(self, now, lease_expires_at).await
+            Self::claim_next_slide_classification(self, lease_seconds).await
         })
         .await
     }
     async fn claim_next_slide_embedding(
         &self,
-        now: &str,
-        lease_expires_at: &str,
+        lease_seconds: u32,
     ) -> RepositoryResult<Option<SlideEmbeddingJob>> {
-        repository_boundary(async {
-            Self::claim_next_slide_embedding(self, now, lease_expires_at).await
-        })
-        .await
+        repository_boundary(async { Self::claim_next_slide_embedding(self, lease_seconds).await })
+            .await
     }
     async fn complete_slide_classification(
         &self,
+        claim: &StageClaim,
         result: &CompleteSlideClassification,
     ) -> RepositoryResult<()> {
-        repository_boundary(async { Self::complete_slide_classification(self, result).await }).await
-    }
-    async fn complete_slide_processing(
-        &self,
-        result: &CompleteSlideProcessing,
-    ) -> RepositoryResult<()> {
-        repository_boundary(async { Self::complete_slide_processing(self, result).await }).await
-    }
-    async fn complete_slide_embedding(
-        &self,
-        result: &CompleteSlideEmbedding,
-    ) -> RepositoryResult<()> {
-        repository_boundary(async { Self::complete_slide_embedding(self, result).await }).await
-    }
-    async fn record_slide_classification_failure(
-        &self,
-        id: &str,
-        code: &str,
-        retry: Option<&str>,
-    ) -> RepositoryResult<()> {
         repository_boundary(async {
-            Self::record_slide_classification_failure(self, id, code, retry).await
+            Self::complete_slide_classification(self, claim, result).await
         })
         .await
     }
-    async fn record_slide_embedding_failure(
+    async fn complete_slide_embedding(
         &self,
-        id: &str,
+        claim: &StageClaim,
+        result: &PreparedSlideEmbeddings,
+    ) -> RepositoryResult<()> {
+        repository_boundary(async { Self::complete_slide_embedding(self, claim, result).await })
+            .await
+    }
+    async fn record_slide_stage_failure(
+        &self,
+        stage: SlideProcessingStage,
+        claim: &StageClaim,
         code: &str,
-        retry: Option<&str>,
+        retry_after_seconds: Option<u32>,
     ) -> RepositoryResult<()> {
         repository_boundary(async {
-            Self::record_slide_embedding_failure(self, id, code, retry).await
+            Self::record_stage_failure(self, stage, claim, code, retry_after_seconds).await
         })
         .await
     }
@@ -756,6 +732,36 @@ impl TemplateRetrievalRepository for PostgresTemplateRepository {
             Self::search_slide_classifications(self, app_id, fts_query, limit).await
         })
         .await
+    }
+    async fn rank_slide_embeddings(
+        &self,
+        app_id: &str,
+        profile_id: &str,
+        role: EmbeddingRole,
+        query: &crate::adapters::postgres::vector::CosineVector,
+    ) -> RepositoryResult<Vec<RankedTemplate>> {
+        repository_boundary(async {
+            Self::rank_slide_embeddings(self, app_id, profile_id, role, query).await
+        })
+        .await
+    }
+    async fn find_slide_embedding_pair(
+        &self,
+        app_id: &str,
+        template_id: &str,
+    ) -> RepositoryResult<Option<StoredEmbeddingPair>> {
+        repository_boundary(async {
+            Self::find_slide_embedding_pair(self, app_id, template_id).await
+        })
+        .await
+    }
+    async fn retain_retrievable(
+        &self,
+        app_id: &str,
+        template_ids: &[String],
+    ) -> RepositoryResult<std::collections::HashSet<String>> {
+        repository_boundary(async { Self::retain_retrievable(self, app_id, template_ids).await })
+            .await
     }
 }
 

@@ -39,7 +39,7 @@ use synthetic equivalent examples in committed tests and do not copy its deal-sp
   membership/capability checks, including write-time authorization in the repository.
 - `backend/src/app/migrations.rs` currently uses schema marker 14, supports validated marker-12/13
   upgrades, validates owned DDL and foreign keys, and protects existing data. Reconfirm the live
-  marker and current migration paths before implementation. Helix and template processing
+  marker and current migration paths before implementation. legacy storage and template processing
   are not involved in this feature.
 
 ## Proposed contract and behavior
@@ -197,5 +197,5 @@ Questions prompt or limit its historical file handling as an incidental change.
   Inspect web and desktop UI at relevant widths, keyboard/focus behavior, and applicable themes;
   use isolated fixtures and disposable dependencies. Report existing failing checks separately.
 - Re-read architecture documentation, review the implementation and final diff, run
-  `git diff --check`, and review `git status --short`. No live model calls, database resets, Helix
+  `git diff --check`, and review `git status --short`. No live model calls, database resets, legacy storage
   clearing, or other destructive startup operations are routine verification.

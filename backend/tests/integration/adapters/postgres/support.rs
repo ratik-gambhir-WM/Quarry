@@ -114,7 +114,9 @@ impl PostgresClient {
     pub(crate) async fn concurrent_test_clients() -> (Self, Self) {
         let path = format!("resource-races-{}", uuid::Uuid::new_v4());
         let a = Self::test_database_at(&path).await.unwrap();
-        crate::app::migrations::migrate(&a).await.unwrap();
+        crate::app::migrations::migrate(&a, Default::default())
+            .await
+            .unwrap();
         let b = Self::test_database_at(&path).await.unwrap();
         sqlx::raw_sql("CREATE FUNCTION pg_advisory_xact_lock(bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$")
             .execute(a.pool()).await.unwrap();

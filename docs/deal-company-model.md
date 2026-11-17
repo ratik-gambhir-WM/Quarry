@@ -1,15 +1,16 @@
 # Deal, company, and chat model
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+All three domains use the same PostgreSQL pool. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
-Current storage uses PostgreSQL schema 2, including the existing nine diligence stages and all
+Current storage uses PostgreSQL schema 5, including the existing nine diligence stages and all
 access/ownership constraints. The replacement starts fresh without importing prior records or
 converting statuses. See [storage setup and recovery](postgresql-storage.md).
 
-PostgreSQL owns the engagement aggregate. Helix owns only a document search projection; creating or
-editing a deal has no graph or template-catalog write.
+PostgreSQL owns the engagement aggregate and document search artifacts; creating or editing a
+deal does not write to a separate search service or template catalog.
 
 A deal represents one diligence engagement on a transaction. Companies are reusable within the
 current development user's directory. A company's name or website is never a unique identity and
@@ -67,11 +68,10 @@ resolution and returns persisted text unchanged. Archiving a deal retains its ch
 ## Fresh storage and recovery
 
 Startup creates or validates the selected PostgreSQL schema without deleting records. Use the
-`Quarry` database and a matching fresh Helix store; leave old SQLite files and graph data untouched.
-There is no reset binary, historical data migration, distributed transaction or general bulk
-reindex command. Back up PostgreSQL and Helix with the matching binary/configuration, and drain
-writers before a coordinated restore. A Helix failure preserves committed file identities and
-bytes; exact-content re-upload retries the projection. See [storage operations](postgresql-storage.md).
+`Quarry` database; leave old SQLite files and retired graph data untouched. The guarded MVP reset
+is an explicit development operation, never a startup fallback. There is no historical import or
+distributed transaction. Back up PostgreSQL with the matching binary/configuration, and drain
+writers before a coordinated restore. Document bytes, identities and search artifacts commit atomically. See [storage operations](postgresql-storage.md).
 
 Deal fields/parties/scopes and company replacements return bounded positive `revision` and require
 `expectedRevision` on update. Deal metadata has its own revision; multipart metadata updates require

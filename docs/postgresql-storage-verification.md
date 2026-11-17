@@ -1,11 +1,12 @@
 # PostgreSQL storage verification
 
-The dated records below retain earlier schema-1 evidence. Current schema-2 implementation and
-verification are recorded in the final November 12 section.
+The dated records below retain evidence from earlier storage implementations. Current schema-5
+setup and recovery are documented in [PostgreSQL storage](postgresql-storage.md); historical
+remote-store commands below are not current prerequisites.
 
-Verified November 11, 2026 against PostgreSQL 18.6 and the repository-pinned Helix 3 image.
+Verified November 11, 2026 against PostgreSQL 18.6 and the repository-pinned legacy storage 3 image.
 The canonical database is **`Quarry`**, with PostgreSQL schema version 1 and 42 tables.
-Helix remains the document/notebook/template graph and search projection. This change does not
+legacy storage remains the document/notebook/template graph and search projection. This change does not
 migrate old data or change client contracts. See [setup and recovery](postgresql-storage.md).
 
 ## Automated gates
@@ -46,15 +47,15 @@ and destructive reset binary are removed. The independent legacy Node service is
 ## Explicit cross-store runs
 
 The following filters ran separately with `cargo test --locked --lib <filter> -- <options>`.
-Both database and graph targets were explicitly disposable; Helix listened on port 16969.
-Set `QUARRY_HELIX_COMPAT_URL=http://127.0.0.1:16969` as well as the test database URL.
+Both database and graph targets were explicitly disposable; legacy storage listened on port 16969.
+That historical run selected the disposable graph target separately from the test database URL.
 
 | Filter | Options | Result |
 | --- | --- | --- |
 | `v3_` | `--include-ignored --test-threads=1` | 7 passed: retained graph protocol, bounds, deletion fences, vector candidates, scoped search and exact-byte repair |
-| `postgres_notebook_commit_retry_and_cleanup_use_the_retained_helix_projection` | `--ignored` | 1 passed: nonempty canonical save, graph publication failure, same-revision retry, private ownership and cleanup |
+| postgres_notebook_commit_retry_and_cleanup_use_the_retained_legacy graph_projection | `--ignored` | 1 passed: nonempty canonical save, graph publication failure, same-revision retry, private ownership and cleanup |
 | `deletion_worker_resumes_after_acceptance_and_after_canonical_purge` | `--ignored` | 1 passed: durable restart recovery and graph verification |
-| `live_helix_templates_metadata_dual_vectors_and_deletion` | `--ignored` | 1 passed: metadata, both vector roles and graph deletion |
+| live_legacy graph_templates_metadata_dual_vectors_and_deletion | `--ignored` | 1 passed: metadata, both vector roles and graph deletion |
 
 These runs explicitly exercise eight of the 14 opt-in tests in the broad gate. The disposable API
 harness was also run for the HTTP/UI checks below. The notebook visual fixture and four dedicated
@@ -67,7 +68,7 @@ and their contract/boundary tests passed.
 ## Lexical parity and query plans
 
 Template keyword retrieval retains the separate path formerly implemented with FTS5; document
-keyword/vector/hybrid search remains in Helix. All 27 captured FTS5 query/scope rankings and 14
+keyword/vector/hybrid search remains in legacy storage. All 27 captured FTS5 query/scope rankings and 14
 Unicode 6.1 tokenizer cases pass. Fixtures include technical identifiers, punctuation, diacritics,
 prefix AND/OR, stable ties, owner/app isolation and a corpus containing 300 empty documents.
 The PostgreSQL implementation preserves the weighted BM25 formula and corpus-wide statistics.
@@ -90,11 +91,11 @@ limit. These are deterministic development fixtures, not production throughput b
 ## Runtime and UI checks
 
 A production-composed API and web UI ran on separate validation ports, using a temporary schema
-in `Quarry_test` and the disposable Helix store. Fresh synthetic accounts verified:
+in `Quarry_test` and the disposable legacy store. Fresh synthetic accounts verified:
 
 - Registration, login/session restoration, logout and revoked-session rejection.
 - Company creation/lookup, deal creation/update, membership-based cross-account denial.
-- Private notebook creation/save, PostgreSQL persistence and Helix publication.
+- Private notebook creation/save, PostgreSQL persistence and legacy storage publication.
 - Native PPTX template import, private catalog access, generated PNG preview and PPTX export.
 - Graceful API restart preserving sessions, deals, notebooks and templates, including startup
   template reconciliation.
@@ -106,7 +107,7 @@ were present. No frontend UI behavior or styling changed; a full theme/accessibi
 review was outside this persistence change. Existing shared-client tests and both builds passed.
 
 The final application binary then initialized the actual empty **`Quarry`** database through normal
-bootstrap against `helix-quarry-postgres-dev` on port 6970. API health and the read-only connection
+bootstrap against the former local graph store on port 6970. API health and the read-only connection
 checker passed. Inspection confirmed schema version 1, 42 tables, and zero users, deals or
 templates. This API process was stopped gracefully after validation. The new persistent graph and
 database remain available for development. The old port-6969 graph and old SQLite files were
@@ -134,10 +135,10 @@ coverage and unexercised environments are recorded explicitly in this document.
 
 Architecture impact: updated `docs/ARCHITECTURE.md`, storage/recovery guidance, domain and API
 notes, onboarding, `AGENTS.md` and affected project skills for PostgreSQL ownership, fresh schema,
-async I/O, retained Helix, pool/writer behavior, configuration, launcher defaults and test isolation.
+async I/O, retained legacy storage, pool/writer behavior, configuration, launcher defaults and test isolation.
 The final architecture sections were re-read after implementation. Historical `sqliteCommitted`
 and deletion phase `sqlite` values remain for API compatibility and now mean PostgreSQL commit
-and canonical cleanup. Canonical PostgreSQL commits still precede Helix publication; there is no
+and canonical cleanup. Canonical PostgreSQL commits still precede legacy storage publication; there is no
 cross-store atomicity, data migration or general reindex command.
 
 An earlier test run passed its assertions but failed process-exit cleanup after its running binary
@@ -150,26 +151,26 @@ passed.
 ## Launcher and local vector-index follow-up — November 11, 2026
 
 The launcher now starts an existing Postgres.app 18 cluster when stopped, verifies PostgreSQL
-connectivity, starts/reuses the configured durable Helix container, and supervises only Axum and
+connectivity, starts/reuses the configured durable legacy storage container, and supervises only Axum and
 the selected web or desktop UI. It pins embedded templates and no longer manages the legacy Node
-service. PostgreSQL, Docker and Helix normally remain running when the launcher exits.
+service. PostgreSQL, Docker and legacy storage normally remain running when the launcher exits.
 
 An initial normal startup exposed an existing configuration/index mismatch: the local configured
 `text-embedding-3-large` model requested 3072 dimensions while the document/notebook vector indexes
 were created at 1536. Both targets first passed with a temporary 1536 override; that did not change
-saved configuration. The user then explicitly requested changing the Helix size to 3072.
+saved configuration. The user then explicitly requested changing the legacy storage size to 3072.
 
 Before that operation, with application writers stopped, inspection confirmed zero canonical
-document versions, notebook notes and notebook save jobs, and zero Helix `FileChunk`,
+document versions, notebook notes and notebook save jobs, and zero legacy storage `FileChunk`,
 `QuarryNotebookChunk` and `QuarryNotebookRevision` nodes. Only the two empty vector definitions
 were dropped/recreated at 3072, retaining cosine distance and their `deal_id`/`owner_id` partitions.
 Every drop/build operation reached `succeeded`. No canonical records, unrelated template indexes,
-Helix nodes, containers or volumes were removed. No provider call or re-embedding was needed.
+legacy storage nodes, containers or volumes were removed. No provider call or re-embedding was needed.
 The one-off maintenance source was removed afterward; it is not a product maintenance command.
 
 Both `./quarry web` and `./quarry desktop` then passed normal startup with the existing 3072
 configuration and no dimension override. The native `quarry-desktop` executable launched, and
-`/api/v1/health`, the internal Vite preview route, and Helix `/healthz` each returned HTTP 200.
+`/api/v1/health, the internal Vite preview route, and legacy graph /healthz` each returned HTTP 200.
 The launcher tests also exercise an inherited legacy-mode selection without starting Node.
 
 Follow-up checks:
@@ -184,7 +185,7 @@ accessibility, real-provider or populated-index migration coverage. Changes to d
 reviewed against configuration, bootstrap, schema, pool, job and template ownership code. Historical
 SQLite evidence remains labeled as such instead of being rewritten as PostgreSQL test results.
 
-After the startup checks, owned API/UI processes were stopped. PostgreSQL and both Quarry Helix
+After the startup checks, owned API/UI processes were stopped. PostgreSQL and both Quarry legacy storage
 containers were returned to the user's requested stopped state; ports 3000, 3001, 1420, 5432,
 6969 and 6970 were verified free. This final service state supersedes the earlier post-migration
 runtime state recorded above. Architecture, onboarding, domain/authentication/recovery guidance,
@@ -269,7 +270,7 @@ lifecycle guards. The schema initialization lock is distinct from runtime mutati
 corpus statistics now use exact snapshot aggregates; the shared statistics row/trigger is gone.
 Canonical replacement/delete predicates check submitted revisions and affected counts. Authority
 changes and protected deal writes coordinate on exclusive/shared lifecycle rows; notebooks, folders,
-assistant threads and templates coordinate on their own parent rows. Providers/Helix remain outside
+assistant threads and templates coordinate on their own parent rows. Providers/legacy storage remain outside
 SQL transactions. Web and desktop clients send captured revisions, keep conflicting drafts and
 require review after destructive conflicts. The native gateway validates revision transport shape.
 
@@ -317,7 +318,7 @@ import PyYAML; Ruby validated the two modified skill frontmatters instead.
 
 ### Browser check, review and limits
 
-The existing opt-in notebook visual fixture ran with fake embeddings/Helix and an isolated schema
+The existing opt-in notebook visual fixture ran with fake embeddings/legacy storage and an isolated schema
 on port 39001. A separate temporary Vite configuration proxied port 1427 to it, without editing
 project configuration. Browser checks covered sign-in, empty notebook, note creation, save dialog,
 saved feedback, a second saved edit, and opening/cancelling the delete dialog. Escape restored focus

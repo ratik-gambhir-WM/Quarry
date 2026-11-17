@@ -718,7 +718,6 @@ async fn imported_templates_filter_by_kind_and_serve_previews() {
             repository,
             Arc::new(DisabledTemplatePreviewGenerator),
             None,
-            None,
             false,
         )),
     });
@@ -1059,7 +1058,7 @@ impl SlideTemplateEndpoint {
             config.preview,
         );
         Self {
-            studio: Arc::new(SlideTemplates::new(repository, preview, None, None, false)),
+            studio: Arc::new(SlideTemplates::new(repository, preview, None, false)),
         }
     }
 }

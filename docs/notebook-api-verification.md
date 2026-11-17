@@ -1,17 +1,17 @@
 # Notebook API implementation verification
 
-Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
-Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
-reset and verification records below describe the earlier implementation, not current commands.
+Current storage is PostgreSQL schema 5 with pgvector for all product persistence and search.
+See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
+verification records below describe earlier implementations, not current prerequisites or commands.
 
 This record covers the initial API/transport implementation before the subsequent explicit-Save
 editor integration. See [Save UI verification](notebook-save-ui-verification.md) for the current
 UI behavior and later checks.
 
 Date: 2026-10-28. Scope: personal notebook/folder/note resources, durable save jobs, schema 13,
-Markdown/chunk/embedding/Helix publication, authenticated SSE, and web/desktop transport parity.
+Markdown/chunk/embedding/legacy storage publication, authenticated SSE, and web/desktop transport parity.
 The initial working tree was clean. No dependency/lockfile changes, real database resets, ignored
-product-data edits, `.env` reads, live provider calls, or live Helix writes were used.
+product-data edits, `.env` reads, live provider calls, or live legacy storage writes were used.
 
 ## Results
 
@@ -45,8 +45,8 @@ failures in existing App/AddDealModal navigation tests; all tests passed with tw
 unrelated UI/QuickLook implementation or test assertions were changed to conceal these failures.
 
 Eight default-ignored backend tests comprise the interactive notebook fixture (run separately here),
-a template validation server, disposable live Helix compatibility/projection tests, and installed
-Chromium preview tests. Live OpenAI/Helix and packaged Tauri execution remain unverified. No release
+a template validation server, disposable live legacy storage compatibility/projection tests, and installed
+Chromium preview tests. Live OpenAI/legacy storage and packaged Tauri execution remain unverified. No release
 packaging, normal product `cargo run`, reset utility, or graph clearing was needed or performed.
 
 ## Coverage and review
@@ -66,7 +66,7 @@ migration/concurrency/architecture checks also passed.
 Graph preparation tests verify deterministic ordered owner/notebook/note/revision/chunk identities,
 bounded queries, dimension/finite-vector validation, publication after all staged chunks, and empty
 replacement. The save pipeline uses a paused/failing fake to prove admission returns before indexing
-and completion waits for both stores. Graph protocol requests compile against the pinned Helix 3
+and completion waits for both stores. Graph protocol requests compile against the pinned legacy storage 3
 SDK; no live graph compatibility claim is inferred from those fake/pure tests.
 
 All REST methods have web/desktop adapter parity tests, including encoded query values, omitted vs
@@ -86,7 +86,7 @@ identified. The unused conceptual notebook scaffold was replaced by registered i
 
 The explicit ignored `notebook_visual_fixture` test was started through
 `cargo test --locked notebook_visual_fixture -- --ignored --nocapture` on loopback port 39001.
-It uses in-memory SQLite, real authentication and fake embedding/Helix capabilities. The frontend
+It uses in-memory SQLite, real authentication and fake embedding/legacy storage capabilities. The frontend
 ran with `VITE_API_BASE_URL=http://127.0.0.1:39001 npm run dev:web -- --host 127.0.0.1` on 1420.
 Both ports were checked before startup; only the task-owned listeners were stopped afterward, and
 both ports were verified free. The fixture uses synthetic test credentials; no real user records
@@ -123,7 +123,7 @@ pgvector/GIN set, terminal job revision/set/sequence and slot release in one ret
 The private keyword/semantic/hybrid search API is wired through both adapters and the validated
 Tauri POST relay. The sidebar remains a metadata filter. Rollout uses a fresh schema or explicit
 guarded MVP reset after draining old workers; no development database reset, backfill, live provider
-call or retained Helix mutation was performed during implementation.
+call or retained legacy storage mutation was performed during implementation.
 
 Verification from the owning build roots:
 
@@ -166,7 +166,7 @@ Review covered state/architecture, transaction/authorization placement, bounded 
 ownership, cross-runtime transports and manual ownership/clone analysis. Repeated deep claim copies
 were removed and checked vectors now move into SQL parameters; one native snapshot copy remains
 necessary for the owned blocking export task. Small profile/title copies belong to independent
-bound rows. No required review finding remains. The removed Helix implementation and compatibility
+bound rows. No required review finding remains. The removed legacy storage implementation and compatibility
 tests were retired with their callers; no alternate notebook backend or unused cleanup worker remains.
 Visual styles, controls, motion and focus were unchanged; no manual browser/theme walkthrough was
 run. Existing editor tests cover save/retry/newer-edit/reload behavior. Architecture and recovery

@@ -11,7 +11,7 @@ fn default_config_is_local_and_has_a_timeout() {
         config.postgres.url.expose(),
         "postgresql://localhost/Quarry"
     );
-    assert_eq!(config.helix.vector_dimension.get(), 1536);
+    assert_eq!(config.embeddings.vector_dimension.get(), 1536);
     assert!(config.openai.is_none());
     assert!(config.wm_ai.is_none());
     assert_eq!(config.prompts.directory, PathBuf::from("prompts"));
@@ -38,7 +38,6 @@ fn parses_all_sections_from_an_injected_source() {
     let config = crate::integration_support::config([
         ("QUARRY_API_PORT", "4010"),
         ("QUARRY_DATABASE_PATH", "/tmp/quarry.sqlite3"),
-        ("HELIX_URL", "http://helix.internal:6969"),
         ("OPENAI_API_KEY", "secret"),
         ("OPENAI_EMBEDDING_MODEL", "embedding-model"),
         ("QUARRY_DATA_ROOM_DEAL_42", "/tmp/data-room"),
@@ -51,8 +50,7 @@ fn parses_all_sections_from_an_injected_source() {
         config.postgres.url.expose(),
         "postgresql://localhost/Quarry"
     );
-    assert_eq!(config.helix.url, "http://helix.internal:6969");
-    assert_eq!(config.helix.vector_dimension.get(), 1536);
+    assert_eq!(config.embeddings.vector_dimension.get(), 1536);
     let openai = config.openai.unwrap();
     assert_eq!(openai.embedding_model, "embedding-model");
     assert_eq!(openai.embedding_dimensions.get(), 1536);
@@ -80,29 +78,23 @@ fn rejects_invalid_values_and_partial_optional_capabilities() {
 }
 
 #[test]
-fn helix_requires_an_instance_base_url_and_a_nonzero_vector_dimension() {
+fn shared_embedding_dimension_is_postgresql_named_and_bounded() {
     let configured = crate::integration_support::config([
-        ("HELIX_VECTOR_DIMENSION", "3072"),
+        ("QUARRY_EMBEDDING_DIMENSION", "3072"),
         ("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
         ("OPENAI_API_KEY", "secret"),
     ])
     .unwrap();
-    assert_eq!(configured.helix.vector_dimension.get(), 3072);
+    assert_eq!(configured.embeddings.vector_dimension.get(), 3072);
     assert_eq!(
         configured.openai.unwrap().embedding_dimensions.get(),
-        configured.helix.vector_dimension.get()
+        configured.embeddings.vector_dimension.get()
     );
-
-    for value in [
-        "http://127.0.0.1:6969/v2/query",
-        "http://user:secret@127.0.0.1:6969",
-        "http://127.0.0.1:6969?debug=true",
-        "ftp://127.0.0.1:6969",
-    ] {
-        let error = crate::integration_support::config([("HELIX_URL", value)]).unwrap_err();
-        assert!(error.contains("HELIX_URL"), "{error}");
+    for value in ["0", "16001"] {
+        let error = crate::integration_support::config([("QUARRY_EMBEDDING_DIMENSION", value)])
+            .unwrap_err();
+        assert!(error.contains("QUARRY_EMBEDDING_DIMENSION"), "{error}");
     }
-    assert!(crate::integration_support::config([("HELIX_VECTOR_DIMENSION", "0")]).is_err());
 }
 
 #[test]
@@ -114,7 +106,7 @@ fn embedding_models_reject_dimensions_above_their_supported_maximum() {
         assert!(crate::integration_support::config([
             ("OPENAI_API_KEY", "secret"),
             ("OPENAI_EMBEDDING_MODEL", model),
-            ("HELIX_VECTOR_DIMENSION", dimensions),
+            ("QUARRY_EMBEDDING_DIMENSION", dimensions),
         ])
         .unwrap_err()
         .contains("supported dimensions"));
@@ -122,7 +114,7 @@ fn embedding_models_reject_dimensions_above_their_supported_maximum() {
     let config = crate::integration_support::config([
         ("OPENAI_API_KEY", "secret"),
         ("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
-        ("HELIX_VECTOR_DIMENSION", "1536"),
+        ("QUARRY_EMBEDDING_DIMENSION", "1536"),
     ])
     .unwrap();
     assert_eq!(config.openai.unwrap().embedding_dimensions.get(), 1536);
@@ -189,12 +181,12 @@ fn slide_template_provider_configuration_is_atomic() {
 #[test]
 fn slide_vector_dimensions_remain_independent_when_classification_is_disabled() {
     let configured = crate::integration_support::config([
-        ("HELIX_VECTOR_DIMENSION", "3"),
+        ("QUARRY_EMBEDDING_DIMENSION", "3"),
         ("OPENAI_SLIDE_EMBEDDING_DIMENSIONS", "2"),
         ("QUARRY_SLIDE_CLASSIFICATION_PROVIDER", "disabled"),
     ])
     .unwrap();
-    assert_eq!(configured.helix.vector_dimension.get(), 3);
+    assert_eq!(configured.embeddings.vector_dimension.get(), 3);
     assert_eq!(configured.slide_templates.embedding_dimensions.get(), 2);
     assert!(configured.slide_templates.classification.is_none());
     assert!(
