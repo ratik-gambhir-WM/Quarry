@@ -1,5 +1,5 @@
 //! Native HTTP mappings; Quarry supplies request IDs, timeout, tracing and CORS.
-pub(super) mod auth;
+pub(in crate::domains::templates) mod auth;
 use validate::{headers, invalid, kind, query, too_large, validate_id};
 mod validate;
 use axum::{
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::{error::FailureKind, *};
 #[derive(Clone)]
-pub(super) struct EndpointState {
+pub(in crate::domains::templates) struct EndpointState {
     pub studio: Arc<SlideTemplates>,
 }
 impl IntoResponse for SlideTemplateError {
@@ -79,7 +79,7 @@ fn powerpoint(result: ExportedPowerPoint) -> SlideResult<Response> {
     );
     Ok(private(response))
 }
-pub(super) async fn export(
+pub(in crate::domains::templates) async fn export(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -95,25 +95,25 @@ pub(super) async fn export(
         .await?;
     powerpoint(s.studio.export(input).await?)
 }
-pub(super) async fn import(
+pub(in crate::domains::templates) async fn import(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, false).await
 }
-pub(super) async fn batch_import(
+pub(in crate::domains::templates) async fn batch_import(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, true, false).await
 }
-pub(super) async fn import_classified(
+pub(in crate::domains::templates) async fn import_classified(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, true).await
 }
-pub(super) async fn batch_import_classified(
+pub(in crate::domains::templates) async fn batch_import_classified(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -192,7 +192,7 @@ async fn import_inner(
     .await?;
     let location = format!(
         "{}/catalog/{}?appId=Quarry_WestMonroe",
-        super::route::PREFIX,
+        super::super::route::SLIDE_TEMPLATE_PREFIX,
         template_id
     );
     response
@@ -214,14 +214,14 @@ async fn import_inner(
             header::LINK,
             header_value(&format!(
                 "<{}/catalog/{}/preview?appId=Quarry_WestMonroe>; rel=\"preview\"",
-                super::route::PREFIX,
+                super::super::route::SLIDE_TEMPLATE_PREFIX,
                 template_id
             ))?,
         );
     }
     Ok(private(response))
 }
-pub(super) async fn catalog(
+pub(in crate::domains::templates) async fn catalog(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -236,7 +236,7 @@ pub(super) async fn catalog(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn previews(
+pub(in crate::domains::templates) async fn previews(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -256,7 +256,7 @@ pub(super) async fn previews(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn get(
+pub(in crate::domains::templates) async fn get(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
@@ -268,7 +268,7 @@ pub(super) async fn get(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn delete(
+pub(in crate::domains::templates) async fn delete(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
@@ -286,7 +286,7 @@ pub(super) async fn delete(
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
-pub(super) async fn preview(
+pub(in crate::domains::templates) async fn preview(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
@@ -320,7 +320,7 @@ pub(super) async fn preview(
     );
     Ok(private(response))
 }
-pub(super) async fn asset(
+pub(in crate::domains::templates) async fn asset(
     Extension(s): Extension<EndpointState>,
     Path((id, asset)): Path<(String, String)>,
     request: Request,
@@ -354,7 +354,7 @@ pub(super) async fn asset(
     }
     Ok(private(response))
 }
-pub(super) async fn retry_processing(
+pub(in crate::domains::templates) async fn retry_processing(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
@@ -373,7 +373,7 @@ pub(super) async fn retry_processing(
     ))
 }
 
-pub(super) async fn retrieval(
+pub(in crate::domains::templates) async fn retrieval(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
@@ -404,7 +404,7 @@ pub(super) async fn retrieval(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn insert(
+pub(in crate::domains::templates) async fn insert(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {

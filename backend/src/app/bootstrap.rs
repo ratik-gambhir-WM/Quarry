@@ -188,7 +188,7 @@ pub(crate) fn assemble_api_routes(
     prompts: Arc<PromptCatalog>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
 ) -> Router {
-    let templates = Arc::new(TemplateService::new(embedded.clone()));
+    let templates = Arc::new(TemplateService::new(embedded));
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
         postgres.clone(),
         UserRepository::new(postgres.clone()),
@@ -350,12 +350,8 @@ pub(crate) fn assemble_api_routes(
         stored_documents.clone(),
     );
     deletions.resume_pending();
-    let native_routes = embedded
-        .map(templates::slide_templates::route::routes)
-        .unwrap_or_default();
     let protected = Router::new()
         .merge(identity::route::protected(identity.clone()))
-        .merge(native_routes)
         .merge(deals::route::routes(deals))
         .merge(deals::deletion::route::routes(deletions))
         .merge(crate::domains::memberships::route::routes(memberships))

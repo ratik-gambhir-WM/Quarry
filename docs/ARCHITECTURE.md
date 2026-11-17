@@ -329,7 +329,9 @@ pending, with an accessible status announcement and disabled submission/back con
 motion leaves the indicator static; success navigates to the destination and failure restores the
 sign-in action with its error and retry path.
 
-The authentication boundary also catches failed sign-in/registration module loads. Its recovery
+While the sign-in or registration module loads, the authentication boundary shows a centered
+shared spinner and visible status text; reduced motion keeps the spinner static. The
+authentication boundary also catches failed sign-in/registration module loads. Its recovery
 screen keeps the product shell mounted, announces the error, and focuses the recovery heading.
 Reload page reloads the current web URL or desktop hash route, preserving the navigation entry
 while clearing the rejected lazy-module state; it does not repeatedly render the cached failure.
@@ -1279,7 +1281,15 @@ then discard the unused hydrated JSON body. Neither waits for enrichment or retr
 write. CORS exposes these acknowledgment headers for configured cross-origin web builds. Gallery
 refresh failure offers refresh-only recovery. Classified actions require configured providers and do not receive an unclassified fallback.
 
-`TemplateService` delegates directly to `domains::templates::slide_templates` in Axum.
+`domains/templates/route.rs` owns both the compact product endpoints and the native
+`/templates/slide-templates` endpoints. Bootstrap mounts this combined router once; it derives
+the native routes from the same engine held by `TemplateService`, and omits them when that
+engine is unconfigured. Each endpoint family retains its own HTTP mappings, request limits,
+owner scoping and admission middleware.
+`TemplateService` adapts compact product DTOs and errors and delegates to
+`domains::templates::slide_templates` in Axum. The latter's `ImportService` and `ExportService`
+own conversion/import/export workflows; its repository is the single template persistence
+implementation shared by both endpoint families.
 Bootstrap's `assemble_api` initializes the repository, previews, providers and pending-job
 recovery once; there is no graph projection, startup reconciliation or catalog-wide re-embedding. `assemble_api_routes` shares that engine between
 facade and native routes; the application retains the same engine for shutdown. There is no

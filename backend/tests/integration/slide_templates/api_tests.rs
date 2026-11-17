@@ -1065,11 +1065,9 @@ impl SlideTemplateEndpoint {
 fn compose(endpoint: SlideTemplateEndpoint) -> Router {
     let studio = endpoint.studio;
     let facade = Arc::new(crate::domains::templates::service::TemplateService::new(
-        Some(studio.clone()),
+        Some(studio),
     ));
-    let api = crate::domains::templates::route::routes(facade).merge(
-        crate::domains::templates::slide_templates::route::routes(studio),
-    );
+    let api = crate::domains::templates::route::routes(facade);
     crate::create_router(
         api.layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,

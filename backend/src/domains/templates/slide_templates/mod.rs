@@ -1,7 +1,7 @@
 //! In-process Slide Templates Studio, adapted from the supplied Rust implementation.
 pub(super) mod error;
 mod facade;
-mod handler;
+pub(super) mod handler;
 mod json_contract;
 mod models;
 mod normalize;
@@ -11,7 +11,6 @@ mod preview;
 mod providers;
 pub(crate) mod repository;
 pub mod retrieval;
-pub(crate) mod route;
 mod service;
 pub use crate::adapters::slide_templates::RequestCancellation;
 pub use error::{FailureKind, SlideResult, SlideTemplateError};
