@@ -30,7 +30,6 @@ pub async fn repository(path: &Path) -> anyhow::Result<PostgresTemplateRepositor
             .await;
     }
     let repository = PostgresTemplateRepository::new(client).user_scope(1)?;
-    repository.ensure_app("Quarry_WestMonroe", None).await?;
     Ok(repository)
 }
 pub async fn import_fixture(

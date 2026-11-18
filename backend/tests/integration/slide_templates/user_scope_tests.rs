@@ -23,10 +23,6 @@ async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres.clone()));
-    repository
-        .ensure_app("Quarry_WestMonroe", None)
-        .await
-        .unwrap();
     let classification = Arc::new(SlideClassificationService::new(
         SlideClassificationServiceOptions {
             classifier: Arc::new(support::FixtureClassifier),
@@ -370,13 +366,10 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
     let base = PostgresTemplateRepository::new(postgres.clone());
     for user in [1, 2] {
         let scoped = base.for_user(user).unwrap();
-        let records = scoped
-            .list_retrieval_classifications("Quarry_WestMonroe")
-            .await
-            .unwrap();
+        let records = scoped.list_retrieval_classifications().await.unwrap();
         assert_eq!(records.len(), 1);
         let matches = scoped
-            .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+            .search_slide_classifications("cloud", 10)
             .await
             .unwrap();
         assert_eq!(matches, [records[0].template_id.clone()]);
@@ -398,7 +391,7 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
 }
 
 #[tokio::test]
-async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_changes() {
+async fn templates_require_a_user_owner_and_reject_owner_changes() {
     let postgres = PostgresClient::test_database().await.unwrap();
     migrations::migrate(&postgres, Default::default())
         .await
@@ -406,22 +399,12 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let base = PostgresTemplateRepository::new(postgres);
-    base.ensure_app("Quarry_WestMonroe", None).await.unwrap();
-    // Old shared imports remain canonical, with no inferred owner.
-    let legacy = ImportService::new(Arc::new(base.clone()))
+    // The global worker repository cannot publish ownerless templates.
+    assert!(ImportService::new(Arc::new(base.clone()))
         .import(&pptx::write(&document()).unwrap(), TemplateKind::Diagram)
         .await
-        .unwrap();
-    for user in [1, 2] {
-        let scoped = base.for_user(user).unwrap();
-        assert!(scoped.list(None).await.unwrap().is_empty());
-        assert!(scoped
-            .find_by_id(&legacy.template_id)
-            .await
-            .unwrap()
-            .is_none());
-        assert!(!scoped.delete(&legacy.template_id, 1).await.unwrap());
-    }
+        .is_err());
+    assert!(base.list(None).await.unwrap().is_empty());
     let owner = base.for_user(1).unwrap();
     assert!(owner.for_user(2).is_err());
     let imported = ImportService::new(owner.clone())
@@ -447,7 +430,7 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
         .unwrap()
         .is_some());
     assert!(base
-        .find_by_id(&legacy.template_id)
+        .find_by_id(&imported.template_id)
         .await
         .unwrap()
         .is_some());

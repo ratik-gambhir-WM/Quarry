@@ -1,6 +1,6 @@
 # Quarry domain and data model
 
-Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+Current storage is fresh PostgreSQL schema 6 with pgvector as the only canonical and search store;
 All three domains use the same PostgreSQL pool. See
 [PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
@@ -65,7 +65,7 @@ and tests first.
 | `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
 | `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | PostgreSQL-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog, lexical postings and typed vector pairs inside Axum | Authenticated owner/app scope; no deal ownership implied |
+| `templates` | User-owned slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog, lexical postings and typed vector pairs inside Axum | Authenticated user scope; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -139,10 +139,11 @@ when adding or reviewing a check rather than inferring its owner from a domain n
 
 ## 4. Canonical relational model
 
-PostgreSQL schema 2 is canonical and recreates the final former SQLite marker-18 layout directly.
+PostgreSQL schema 6 is canonical and extends the former SQLite marker-18 data model.
+Templates require a user owner and have no app registry or app memberships.
 It includes membership/activity, document identity/image checkpoints, private templates, notebooks
 and deletion receipts. There is no old-data migration. The table inventory is in
-[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-2).
+[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-6).
 
 ```mermaid
 erDiagram

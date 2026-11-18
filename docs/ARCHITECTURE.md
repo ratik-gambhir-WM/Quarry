@@ -1267,7 +1267,7 @@ reference data. Freeform runs receive no implicit deal context; context is not d
 | GET | `/templates/{template_id}` | Read one bounded hydrated presentation document | Embedded template engine |
 | POST | `/templates/export` | Convert current presentation JSON into a downloadable PPTX | Embedded template engine |
 | POST | `/templates/import?mode=single\|batch` | Import one PPTX as one slide template or as one template per deck slide | Embedded template engine |
-| DELETE | `/templates/{template_id}` | Delete one template from Quarry's owner/app-scoped catalog | Embedded template engine |
+| DELETE | `/templates/{template_id}` | Delete one template from Quarry's owner-scoped catalog | Embedded template engine |
 
 The existing template facade routes remain available. The shared `importPptxTemplate` API retains
 its file/mode inputs and compact result, but the template buttons now use the native classified
@@ -1295,7 +1295,7 @@ recovery once; there is no graph projection, startup reconciliation or catalog-w
 facade and native routes; the application retains the same engine for shutdown. There is no
 alternate template backend, HTTP relay, or per-operation fallback.
 
-Both import modes select the fixed `Quarry_WestMonroe` scope. Existing imports accept one nonempty,
+Both import modes select the authenticated user scope. Existing imports accept one nonempty,
 safe-named `.pptx` multipart `files` part and explicit `mode=single|batch`, with 25 MiB file and
 26 MiB multipart caps. Single mode returns the existing “Use Import Deck Template instead” error
 for a multi-slide deck; it never retries as batch. Batch publication is atomic in the selected
@@ -1372,9 +1372,9 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 
 PostgreSQL is canonical and the only template store; see [PostgreSQL storage](postgresql-storage.md).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
-fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 5 with
+fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 6 with
 checksums and catalog fingerprints. There is no data migration or startup reset. Unknown or damaged
-layouts fail without deletion. Templates, image bytes, previews, metadata, memberships,
+layouts fail without deletion. Templates, image bytes, previews, metadata,
 classification, lexical postings and typed vector pairs are transactional. Indexed lexical term
 frequencies preserve the previous FTS5 weighted BM25 path unchanged. New databases start with an empty catalog; startup no longer seeds built-in templates.
 The retired built-in catalog assets, seeder, and catalog-specific tests have been removed;
@@ -1383,18 +1383,18 @@ Each new import records `templates.owner_user_id` from the verified bearer-sessi
 Both facade and native route middleware derive immutable request scopes from that identity;
 clients cannot select another owner. Catalogs and pagination, documents, previews, image assets,
 classification/retrieval status and retries, updates, deletion, and export/insertion asset hydration
-all use the owner-filtered repository within the fixed Quarry app. Cross-owner IDs behave as
+all use the owner-filtered repository. Cross-owner IDs behave as
 missing records. The global worker and admission budgets remain shared; only trusted background
 processing uses the unscoped repository. PostgreSQL is the ownership authority; vector ranking
-queries apply owner/app/profile predicates before any result leaves the database.
-Existing built-in and imported records are preserved with a null owner and hidden from all user
-catalogs; startup never guesses the importer or transfers these records to a new account.
-Users can reimport their original files to create owned copies. See
-[template ownership and rollout](template-ownership.md).
-Imported templates are physically removed after their last membership is deleted. Previously created standalone template files remain
-untouched and are not automatically imported.
+queries apply owner/profile predicates before any result leaves the database.
+Schema 6 requires `templates.owner_user_id` and removes the `apps` registry and
+`app_templates` memberships. Existing schema-5 databases fail intact at startup; use a fresh
+database or the explicit guarded MVP reset after draining the writer. No ownership is inferred
+and no catalog is imported. See [template ownership and rollout](template-ownership.md).
+Deleting an owned template physically removes its canonical row and cascades its artifacts
+in the same transaction. Previously created standalone template files remain untouched.
 
-Schema 5 stores template vectors as typed pgvector values. `template_embeddings` holds exactly
+Schema 6 stores template vectors as typed pgvector values. `template_embeddings` holds exactly
 one `subject` and one `capability` row per template, keyed by template and role, each carrying its
 embedding-profile ID, input fingerprint and a `vector(T)` value. T is the template dimension
 (`OPENAI_SLIDE_EMBEDDING_DIMENSIONS`), rendered independently of the shared document/notebook
@@ -1465,10 +1465,10 @@ same bounded worker after committing. A failed classification restarts from the 
 and resets dependent embedding work; an embedding-only failure preserves completed metadata and
 reuses its saved embedding documents. Each manual retry gets the normal three-attempt budget.
 Saved slides, previews and completed classification artifacts are retained; retry never re-imports
-or creates another template. The repository checks membership and status atomically, so duplicate
+or creates another template. The repository checks ownership and status atomically, so duplicate
 requests and active/successful/unclassified jobs cannot reset work (409); missing or out-of-scope
 templates return 404, and an unconfigured worker returns 503. The endpoint uses existing bearer
-authentication and fixed app scope, rejects nonempty JSON/unknown queries and retains `private,
+authentication and immutable owner scope, rejects nonempty JSON/unknown queries and retains `private,
 no-store`. Pending retries survive disconnects/restarts. A failed classification retry also clears
 that template's vectors, because only ready stages may hold a pair.
 
@@ -1515,7 +1515,7 @@ limit still fuse. `similar` loads the authorized source pair and ranks
 stored vectors without a query provider, excluding the source; foreign sources are
 `slide_not_available`. Hybrid degrades to lexical with `semantic_unavailable`; semantic without a
 provider fails explicitly; finding retrieval keeps its lexical/subject/capability fusion and
-`exact_finding_boost * 0.005`. Selected results get a bounded fresh owner/app recheck before
+`exact_finding_boost * 0.005`. Selected results get a bounded fresh owner recheck before
 delivery. Metadata, lexical and vector reads are separate read snapshots joined by that recheck,
 not one repeatable-read snapshot; metadata filtering and facets still hydrate the scoped metadata
 projection. HNSW/ANN, SQL-side metadata filtering and a single-snapshot retrieval call are deferred.
@@ -1642,8 +1642,13 @@ state.
 
 Embedded template persistence exposes asset, catalog/publication, processing-job, and retrieval
 capabilities in `slide_templates/repository/contracts.rs`, all implemented by the same PostgreSQL
-repository. The composite repository retains owner/app scoping and app registration for assembly
-and workflows that need multiple capabilities. Export receives only the asset interface, provider
+repository. The `repository/mod.rs` entry point owns the repository handle, owner scope helpers and
+shared record codecs. `catalog_repository.rs`, `processing_repository.rs` and
+`retrieval_repository.rs` implement their focused traits beside the corresponding SQL;
+`repository/mod.rs` also implements immutable authenticated user scoping. These are parts of one
+`PostgresTemplateRepository`, not separate stores or alternate implementations. Single and batch
+classified publication share a record-writing helper on the caller's retained transaction.
+The composite repository retains owner scoping for assembly and workflows that need multiple capabilities. Export receives only the asset interface, provider
 services/workers receive the processing interface, and retrieval receives its read interface.
 The facade constructs export from the same owner-scoped repository as import. Template, asset,
 preview, and pending-job publication retains its existing transaction boundaries.
@@ -1832,7 +1837,7 @@ Use a fresh PostgreSQL database; leave old SQLite data and retired graph stores 
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
 [fresh storage and recovery](postgresql-storage.md).
 
-### 9.1 Shared PostgreSQL schema version 5
+### 9.1 Shared PostgreSQL schema version 6
 
 The pinned pgvector 0.4.2 Rust adapter uses SQLx 0.8.6 and an explicitly provisioned
 `quarry_extensions.vector` 0.8.6 server extension. Types/operators are qualified and vectors are
@@ -1875,7 +1880,6 @@ schema currently contains:
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
 | `template_assets`, `template_previews` | Image and PNG preview BLOBs with dimensions | Embedded templates |
-| `apps`, `app_templates` | Template app registry and memberships, including built-in deletion choices | Embedded templates |
 | `template_classification_status` | Classification/embedding progress, attempts, retry times, errors, leases, metadata, fingerprints, subject/capability vectors and model/dimensions | Durable embedded classification worker/retrieval |
 | `slide_classifications_fts` | Lexical fields and token lengths | Embedded keyword retrieval |
 | `template_lexical_terms` | Indexed Unicode 6.1 field frequencies | Compatible weighted BM25/prefix retrieval |
@@ -1910,10 +1914,10 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 5 includes the former marker-18 layout, bounded content revisions,
+PostgreSQL schema version 6 includes the former marker-18 layout, bounded content revisions,
 durable deal lifecycle guards, complete document/notebook search artifacts and template
 embedding profiles/typed vector pairs (replacing schema 4's template BYTEA vectors and
-caller-clock lease text), with
+caller-clock lease text), removes template app registration/memberships and requires a user owner, with
 `bytea` assets, generated numeric IDs and safe-integer checks, C-collated text, preserved serialized
 JSON/timestamps, all existing checks, same-deal composite foreign keys and partial unique indexes.
 `slide_classifications_fts` stores lexical documents/lengths and `template_lexical_terms` indexes
@@ -1921,10 +1925,10 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates an empty selected schema or validates schema 5, checksum/catalog, owned indexes,
+Startup creates an empty selected schema or validates schema 6, checksum/catalog, owned indexes,
 extension readiness, ownership, complete document/notebook search sets and template pair integrity.
 The schema renders two vector dimension families: the shared document/notebook dimension and the
-independent template dimension. Schema 4 databases are refused; select a fresh database or run the
+independent template dimension. Schema 4 and 5 databases are refused; select a fresh database or run the
 explicit reset. Unknown layouts fail without
 deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
 rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
@@ -2336,7 +2340,12 @@ locally because its verbose trace target includes request/response bodies. Quarr
 sanitized diagnostics outside that scope. Enabling Rig's model catalog requires resolving this
 compatibility issue. Slide-provider wire requests, OpenAI envelope decoding, and Rig execution live in
 `adapters/slide_templates/providers.rs`. The domain provider module retains its ports, taxonomy and
-metadata normalization, input/vector integrity policy, and classification lifecycle. A shared embedding
+metadata normalization and provider input/vector integrity policy. `processing/service.rs` owns
+classification and embedding preparation/publication; `processing/worker.rs` owns durable claims,
+retry scheduling and shutdown. `service/mod.rs` retains the existing scoped service handles, with
+import, export and catalog implementations in `service/{import,export,catalog}.rs` and shared asset
+conversion in `service/assets.rs`. Catalog methods remain on the existing `ImportService` interface;
+this split does not add another service instance or change the facade contract. A shared embedding
 pair operation applies the same dimension and vector checks to combined processing and embedding
 retries. The durable worker uses an exhaustive stage enum for retry policy and failure recording;
 persisted stage codes, attempt budgets, timeout/cancellation behavior, and publication order are
@@ -2359,7 +2368,7 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- No graph store is contacted. Startup validates PostgreSQL schema 5, pgvector, document vector
+- No graph store is contacted. Startup validates PostgreSQL schema 6, pgvector, document vector
   profiles, notebook and template pair integrity, and indexes.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
@@ -2392,7 +2401,7 @@ All fields are required if any one is present:
 - LibreOffice runs with fixed arguments, isolated temporary/profile directories, bounded output,
   concurrency, and a timeout.
 - Embedded template responses retain bounded JSON/PPTX/preview sizes, decoded-image and pixel
-  budgets, private no-store headers and authenticated owner/app scopes. Native Chromium previews
+  budgets, private no-store headers and authenticated owner scopes. Native Chromium previews
   block navigation and subresources outside the configured frontend origin except `blob:` and `data:`.
 
 ### 12.2 Development-only or missing controls
@@ -2531,7 +2540,7 @@ preservation and fresh-schema validation, shared-worker processing of owned impo
 
 Template SQL suites cover stage-token fences (stale identical-input attempts cannot publish or
 fail a successor), deferred pair integrity, independent template/shared vector dimensions, exact
-SQL cosine parity with a reference implementation, profile/app scoping and provider-free `similar`.
+SQL cosine parity with a reference implementation, profile/owner scoping and provider-free `similar`.
 The opt-in browser tests also require installed Chromium and loopback access. Their test helper
 honors `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH`; the tab-backgrounding test requires full Chrome or
 Chromium rather than the headless-shell executable. The ignored `notebook_visual_fixture` and
@@ -2672,7 +2681,7 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 5 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
+| Persistence | Fresh PostgreSQL schema 6 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
 | Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |

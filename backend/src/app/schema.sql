@@ -393,10 +393,11 @@ CREATE INDEX idx_notebook_chunks_profile ON notebook_chunks(profile_id,set_id);
 
 CREATE TABLE templates (
     revision BIGINT NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
- catalog_sequence BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
-                 template_id TEXT COLLATE "C" PRIMARY KEY,
-                 template_json TEXT COLLATE "C" NOT NULL CHECK ((template_json IS JSON))
-             , owner_user_id BIGINT REFERENCES users(id) ON DELETE RESTRICT);
+    catalog_sequence BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
+    template_id TEXT COLLATE "C" PRIMARY KEY,
+    template_json TEXT COLLATE "C" NOT NULL CHECK ((template_json IS JSON)),
+    owner_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT
+);
 
 CREATE TABLE template_assets (
                  asset_id TEXT COLLATE "C" PRIMARY KEY,
@@ -423,18 +424,6 @@ CREATE TABLE template_previews (
                  width BIGINT NOT NULL CHECK (width > 0),
                  height BIGINT NOT NULL CHECK (height > 0),
                  FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
-             );
-
-CREATE TABLE apps (
-                 app_id TEXT COLLATE "C" PRIMARY KEY, display_name TEXT COLLATE "C" NOT NULL,
-                 metadata_json TEXT COLLATE "C" NOT NULL CHECK((metadata_json IS JSON)),
-                 created_at TEXT COLLATE "C" NOT NULL, last_seen_at TEXT COLLATE "C" NOT NULL
-             );
-
-CREATE TABLE app_templates (
-                 app_id TEXT COLLATE "C" NOT NULL REFERENCES apps(app_id) ON DELETE CASCADE,
-                 template_id TEXT COLLATE "C" NOT NULL REFERENCES templates(template_id) ON DELETE CASCADE,
-                 created_at TEXT COLLATE "C" NOT NULL, PRIMARY KEY(app_id, template_id)
              );
 
 -- Template stage claims use opaque attempt tokens and database-clock epoch-second deadlines.
@@ -556,7 +545,6 @@ CREATE INDEX template_assets_template_id_idx
                  ON template_assets (template_id);
 CREATE INDEX template_metadata_kind_created_at_idx
                  ON template_metadata (kind, created_at DESC);
-CREATE INDEX app_templates_template_id_idx ON app_templates(template_id);
 CREATE INDEX slide_classifications_classification_jobs_idx
         ON "template_classification_status" (status, next_attempt_at, lease_until);
 CREATE INDEX slide_classifications_embedding_jobs_idx

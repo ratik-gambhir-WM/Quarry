@@ -2,6 +2,9 @@ use super::super::{
     providers::*, StoredTemplateMetadata, TemplateInsert, TemplateRepository, TemplateSource,
 };
 use super::*;
+use crate::domains::templates::slide_templates::{
+    SlideClassificationService, SlideClassificationServiceOptions, TemplateRetrievalRepository,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -183,12 +186,12 @@ async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
             .await
             .unwrap(),
     );
-    let app = repository.for_app("TestApp").await.unwrap().unwrap();
-    let service = service(Arc::clone(&app));
-    insert(app.as_ref(), "security", "Security Architecture").await;
-    process(app.as_ref(), &service).await;
-    insert(app.as_ref(), "other", "Other Architecture").await;
-    process(app.as_ref(), &service).await;
+    let scoped = repository.clone();
+    let service = service(scoped.clone());
+    insert(scoped.as_ref(), "security", "Security Architecture").await;
+    process(scoped.as_ref(), &service).await;
+    insert(scoped.as_ref(), "other", "Other Architecture").await;
+    process(scoped.as_ref(), &service).await;
     let retrieval = SlideRetrievalService {
         repository: repository.clone(),
         embedder: Some(Arc::new(Embedder)),
@@ -199,30 +202,30 @@ async fn dual_vectors_drive_query_similarity_and_finding_retrieval() {
     semantic["query"] = json!("Security testing");
     semantic["semantic_target"] = json!("subject");
     assert_eq!(
-        retrieval.query("TestApp", &semantic).await.unwrap()["results"][0]["templateId"],
+        retrieval.query(&semantic).await.unwrap()["results"][0]["templateId"],
         "security"
     );
     semantic["semantic_target"] = json!("capability");
     assert_eq!(
-        retrieval.query("TestApp", &semantic).await.unwrap()["results"][0]["templateId"],
+        retrieval.query(&semantic).await.unwrap()["results"][0]["templateId"],
         "other"
     );
 
     let mut similar = query("similar");
     similar["similar_to_template_id"] = json!("security");
     assert_eq!(
-        retrieval.query("TestApp", &similar).await.unwrap()["results"][0]["templateId"],
+        retrieval.query(&similar).await.unwrap()["results"][0]["templateId"],
         "other"
     );
 
     let mut facets = query("facets");
     facets["facet_name"] = json!("domains");
     assert_eq!(
-        retrieval.query("TestApp", &facets).await.unwrap()["values"][0],
+        retrieval.query(&facets).await.unwrap()["values"][0],
         json!({"count":2,"value":"cybersecurity"})
     );
 
-    let finding = retrieval.find_for_finding("TestApp", &json!({"markdown":"# Finding\nSecurity testing control gap\n## Evidence\nCoverage is incomplete\n## Recommendation\nExpand testing"})).await.unwrap();
+    let finding = retrieval.find_for_finding(&json!({"markdown":"# Finding\nSecurity testing control gap\n## Evidence\nCoverage is incomplete\n## Recommendation\nExpand testing"})).await.unwrap();
     assert_eq!(finding["results"][0]["templateId"], "security");
     assert_eq!(
         finding["results"][0]["matchedDomains"],
@@ -256,12 +259,12 @@ impl SlideEmbedder for VectorEmbedder {
 #[tokio::test]
 async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
     use crate::adapters::postgres::vector::CosineVector;
-    let repository: Arc<dyn TemplateRepository> = Arc::new(
-        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
-            .await
-            .unwrap(),
-    );
-    let app = repository.for_app("TestApp").await.unwrap().unwrap();
+    let owner = crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+        .await
+        .unwrap();
+    let other = owner.other_user_fixture().await;
+    let repository: Arc<dyn TemplateRepository> = Arc::new(owner);
+    let scoped = repository.clone();
     // Distinct, tied and opposite vectors; "tie-a"/"tie-b" share a score and creation time.
     let fixtures: [(&str, [f64; 2]); 5] = [
         ("exact", [1.0, 0.0]),
@@ -271,7 +274,7 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
         ("opposite", [-1.0, 0.1]),
     ];
     for (id, vector) in fixtures {
-        insert(app.as_ref(), id, id).await;
+        insert(scoped.as_ref(), id, id).await;
         let service = SlideClassificationService::new(SlideClassificationServiceOptions {
             classifier: Arc::new(Classifier),
             classification_model: "classifier".into(),
@@ -280,14 +283,14 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
             embedding_max_text_bytes: 32_000,
             embedding_model: "embedding".into(),
             input_limits: SlideClassificationInputLimits::default(),
-            repository: app.clone(),
+            repository: scoped.clone(),
         });
-        process(app.as_ref(), &service).await;
+        process(scoped.as_ref(), &service).await;
     }
     let profile = TemplateEmbeddingProfile::new("embedding", 2);
     let query = CosineVector::from_f64(&[0.9, 0.1], 2).unwrap();
     let ranked = repository
-        .rank_slide_embeddings("TestApp", &profile.id(), EmbeddingRole::Subject, &query)
+        .rank_slide_embeddings(&profile.id(), EmbeddingRole::Subject, &query)
         .await
         .unwrap();
     assert_eq!(ranked.len(), fixtures.len());
@@ -314,10 +317,9 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
             .collect::<Vec<_>>(),
         ["exact", "tie-a", "tie-b", "orthogonal", "opposite"]
     );
-    // Another profile or another app ranks nothing.
+    // Another profile or another user ranks nothing.
     assert!(repository
         .rank_slide_embeddings(
-            "TestApp",
             &TemplateEmbeddingProfile::new("embedding", 3).id(),
             EmbeddingRole::Subject,
             &query
@@ -325,13 +327,8 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
         .await
         .unwrap()
         .is_empty());
-    assert!(repository
-        .rank_slide_embeddings(
-            "Quarry_WestMonroe",
-            &profile.id(),
-            EmbeddingRole::Subject,
-            &query
-        )
+    assert!(other
+        .rank_slide_embeddings(&profile.id(), EmbeddingRole::Subject, &query)
         .await
         .unwrap()
         .is_empty());
@@ -348,7 +345,7 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
     semantic["semantic_target"] = json!("subject");
     semantic["limit"] = json!(1);
     assert_eq!(
-        retrieval.query("TestApp", &semantic).await.unwrap()["results"],
+        retrieval.query(&semantic).await.unwrap()["results"],
         json!([{"kind":"diagram","previewUrl":null,"sections":{"subject":serde_json::to_value(&metadata().subject).unwrap()},"templateId":"opposite","title":"opposite"}])
     );
     let without_provider = SlideRetrievalService {
@@ -358,7 +355,7 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
     };
     let mut similar = query_input("similar");
     similar["similar_to_template_id"] = json!("exact");
-    let results = without_provider.query("TestApp", &similar).await.unwrap();
+    let results = without_provider.query(&similar).await.unwrap();
     let ids = results["results"]
         .as_array()
         .unwrap()
@@ -367,27 +364,23 @@ async fn sql_cosine_ranking_matches_reference_scores_ties_and_profile_scope() {
         .collect::<Vec<_>>();
     assert!(!ids.contains(&"exact".to_owned()));
     assert_eq!(ids.len(), fixtures.len() - 1);
-    // A foreign app cannot use a source it cannot see.
-    let error = without_provider
-        .query("Quarry_WestMonroe", &similar)
-        .await
-        .unwrap_err();
+    // Missing sources remain unavailable in the owner's catalog.
+    let mut missing = similar.clone();
+    missing["similar_to_template_id"] = json!("missing");
+    let error = without_provider.query(&missing).await.unwrap_err();
     assert_eq!(
         error.downcast_ref::<SlideRetrievalError>().unwrap().code,
         "slide_not_available"
     );
     // Semantic search without a provider fails explicitly; keyword-free hybrid degrades.
-    let error = without_provider
-        .query("TestApp", &semantic)
-        .await
-        .unwrap_err();
+    let error = without_provider.query(&semantic).await.unwrap_err();
     assert_eq!(
         error.downcast_ref::<SlideRetrievalError>().unwrap().code,
         "semantic_unavailable"
     );
     let mut hybrid = query_input("hybrid");
     hybrid["query"] = json!("security");
-    let hybrid = without_provider.query("TestApp", &hybrid).await.unwrap();
+    let hybrid = without_provider.query(&hybrid).await.unwrap();
     assert_eq!(hybrid["warnings"], json!(["semantic_unavailable"]));
 }
 
@@ -407,9 +400,9 @@ async fn large_catalog_preserves_filtered_matches_and_complete_role_fusion() {
             .await
             .unwrap(),
     );
-    let app = repository.for_app("TestApp").await.unwrap().unwrap();
-    insert(app.as_ref(), "target", "Target").await;
-    process(app.as_ref(), &service(Arc::clone(&app))).await;
+    let scoped = repository.clone();
+    insert(scoped.as_ref(), "target", "Target").await;
+    process(scoped.as_ref(), &service(scoped.clone())).await;
 
     // Seed a complete catalog in bulk rather than invoking 10,001 provider workflows.
     // Target is last for subject, first for capability, and newer than the runner-up.
@@ -428,13 +421,6 @@ async fn large_catalog_preserves_filtered_matches_and_complete_role_fusion() {
         "INSERT INTO template_metadata(template_id,kind,description,source,created_at)
         SELECT template_id,CASE WHEN template_id='candidate-0' THEN 'diagram' ELSE 'commentary' END,
             '', 'import', '1970-01-01T00:00:00.009Z' FROM templates WHERE template_id<>'target'",
-    )
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO app_templates(app_id,template_id,created_at)
-        SELECT 'TestApp',template_id,'now' FROM templates WHERE template_id<>'target'",
     )
     .execute(&mut *tx)
     .await
@@ -472,7 +458,7 @@ async fn large_catalog_preserves_filtered_matches_and_complete_role_fusion() {
     input["filters"]["kinds"] = json!(["diagram"]);
     input["filters"]["intents"] = json!(["finding"]);
     input["limit"] = json!(1);
-    let filtered = retrieval.query("TestApp", &input).await.unwrap();
+    let filtered = retrieval.query(&input).await.unwrap();
     assert_eq!(filtered["results"].as_array().unwrap().len(), 1);
     assert_eq!(filtered["results"][0]["templateId"], "target");
 
@@ -480,8 +466,57 @@ async fn large_catalog_preserves_filtered_matches_and_complete_role_fusion() {
     // Recency selects target. Truncating its subject rank incorrectly selects candidate-0.
     input["semantic_target"] = json!("both");
     input["filters"]["intents"] = json!([]);
-    let fused = retrieval.query("TestApp", &input).await.unwrap();
+    let fused = retrieval.query(&input).await.unwrap();
     assert_eq!(fused["results"].as_array().unwrap().len(), 1);
     assert_eq!(fused["results"][0]["templateId"], "target");
     client.close().await;
+}
+
+#[tokio::test]
+async fn retrieval_and_tools_cannot_read_another_users_catalog() {
+    let owner = Arc::new(
+        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+            .await
+            .unwrap(),
+    );
+    let other = Arc::new(owner.other_user_fixture().await);
+    insert(owner.as_ref(), "private-slide", "Private architecture").await;
+    process(owner.as_ref(), &service(owner.clone())).await;
+    let retrieval = Arc::new(SlideRetrievalService {
+        repository: other.clone(),
+        embedder: Some(Arc::new(Embedder)),
+        profile: Some(TemplateEmbeddingProfile::new("embedding", 2)),
+    });
+    let mut input = query("semantic");
+    input["query"] = json!("architecture");
+    assert_eq!(retrieval.query(&input).await.unwrap()["results"], json!([]));
+    let mut similar = query("similar");
+    similar["similar_to_template_id"] = json!("private-slide");
+    let error = retrieval.query(&similar).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<SlideRetrievalError>().unwrap().code,
+        "slide_not_available"
+    );
+    assert_eq!(
+        retrieval
+            .find_for_finding(&json!({"markdown":"Architecture finding"}))
+            .await
+            .unwrap()["results"],
+        json!([])
+    );
+    let tools = SlideAgentTools {
+        retrieval,
+        templates: super::super::ImportService::new(other),
+    };
+    assert_eq!(
+        tools
+            .get_slide(&json!({"template_id":"private-slide"}))
+            .await
+            .unwrap()["error"]["code"],
+        "slide_not_available"
+    );
+    assert!(tools
+        .get_slide(&json!({"template_id":"private-slide", "user_id":1}))
+        .await
+        .is_err());
 }

@@ -1,11 +1,11 @@
 # Deal, company, and chat model
 
-Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+Current storage is fresh PostgreSQL schema 6 with pgvector as the only canonical and search store;
 All three domains use the same PostgreSQL pool. See
 [PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
-Current storage uses PostgreSQL schema 5, including the existing nine diligence stages and all
+Current storage uses PostgreSQL schema 6, including the existing nine diligence stages and all
 access/ownership constraints. The replacement starts fresh without importing prior records or
 converting statuses. See [storage setup and recovery](postgresql-storage.md).
 

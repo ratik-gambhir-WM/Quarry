@@ -184,6 +184,7 @@ async fn native_routes_reject_scope_selection_duplicate_queries_and_real_declare
     let app = routes(support::studio().await);
     for uri in [
         "/api/v1/templates/slide-templates/catalog?appId=Other",
+        "/api/v1/templates/slide-templates/catalog?userId=2",
         "/api/v1/templates/slide-templates/catalog/previews?page=0",
         "/api/v1/templates/slide-templates/catalog/previews?page=101",
         "/api/v1/templates/slide-templates/catalog/previews?page=1&page=2",
@@ -206,7 +207,7 @@ async fn native_routes_reject_scope_selection_duplicate_queries_and_real_declare
         )
         .await
         .0,
-        StatusCode::BAD_REQUEST
+        StatusCode::OK
     );
     let uri = "/api/v1/templates/slide-templates/import";
     assert_eq!(

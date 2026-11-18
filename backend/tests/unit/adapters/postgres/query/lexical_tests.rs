@@ -1,7 +1,7 @@
 use super::*;
 use crate::{adapters::postgres::query::SqlValue, app::migrations};
 #[tokio::test]
-async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters() {
+async fn lexical_order_matches_captured_fts5_results_with_user_ownership() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../fixtures/template-lexical-baseline.json"
     ))
@@ -14,18 +14,6 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
     crate::integration_support::seed_identity(&client, "lexical-two@example.invalid", 'b').await;
     client
         .transaction_async(|tx| async move {
-            for app in ["A", "B"] {
-                tx.write(
-                    SqlBuilder::insert_into("apps")
-                        .value("app_id", app)
-                        .value("display_name", app)
-                        .value("metadata_json", "{}")
-                        .value("created_at", "now")
-                        .value("last_seen_at", "now")
-                        .build(),
-                )
-                .await?;
-            }
             for row in fixture["rows"].as_array().unwrap() {
                 let id = row["id"].as_str().unwrap();
                 tx.write(
@@ -33,14 +21,6 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
                         .value("template_id", id)
                         .value("template_json", "{}")
                         .value("owner_user_id", row["owner"].as_i64().unwrap())
-                        .build(),
-                )
-                .await?;
-                tx.write(
-                    SqlBuilder::insert_into("app_templates")
-                        .value("app_id", row["app"].as_str().unwrap())
-                        .value("template_id", id)
-                        .value("created_at", "now")
                         .build(),
                 )
                 .await?;
@@ -98,7 +78,6 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
         let result = search(
             &client,
             Some(query["owner"].as_i64().unwrap()),
-            query["app"].as_str().unwrap(),
             query["expression"].as_str().unwrap(),
             200,
         )
@@ -110,7 +89,21 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(result, expected, "{query}");
+        // Compare relative ordering against each captured historical partition;
+        // runtime search returns every matching template owned by this user.
+        let baseline_ids = fixture["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["app"] == query["app"])
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<std::collections::HashSet<_>>();
+        let partition = result
+            .iter()
+            .filter(|id| baseline_ids.contains(id.as_str()))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(partition, expected, "{query}");
     }
     // A selective prefix must keep using the term index as the unrelated corpus grows.
     sqlx::query("INSERT INTO template_lexical_terms(template_id,term,field_index,frequency) SELECT 'empty-0','noise' || n,0,1 FROM generate_series(1,10000) n")
@@ -121,7 +114,7 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
         .execute(client.pool())
         .await
         .unwrap();
-    let query = search_query(Some(1), "A", "\"cloud\"*", 200).unwrap();
+    let query = search_query(Some(1), "\"cloud\"*", 200).unwrap();
     let explain = SqlQuery::new(
         format!("EXPLAIN (COSTS OFF) {}", query.sql()),
         query.parameters().to_vec(),
@@ -135,8 +128,8 @@ async fn lexical_order_matches_captured_fts5_results_with_owner_and_app_filters(
     assert!(plan.contains("template_lexical_terms_pkey"), "{plan}");
     eprintln!("Indexed lexical plan after 10,000 unrelated terms:\n{plan}");
     // Query text is bound, and syntax outside the established safe grammar is rejected.
-    assert!(search_query(Some(1), "A", "cloud');DROP TABLE users;--", 10).is_err());
-    assert!(search_query(Some(1), "A", "\"cloud\"*", 10)
+    assert!(search_query(Some(1), "cloud');DROP TABLE users;--", 10).is_err());
+    assert!(search_query(Some(1), "\"cloud\"*", 10)
         .unwrap()
         .parameters()
         .contains(&SqlValue::from("cloud")));

@@ -81,12 +81,12 @@ Tests create/drop only their own isolated product schemas, retaining the shared 
 
 This prerequisite is exercised by the codec tests, including 1,536/3,072-dimensional
 round trips, schema shadowing, cosine normalization, rollback and read-only enforcement.
-Normal startup validates this extension before initializing or validating schema 5. Documents,
+Normal startup validates this extension before initializing or validating schema 6. Documents,
 notebooks and templates all search in SQL.
 
 ### Current product schema
 
-`backend/src/app/schema.sql` owns schema 5, extending the previous aggregate/revision/lifecycle
+`backend/src/app/schema.sql` owns schema 6, extending the previous aggregate/revision/lifecycle
 layout with document embedding profiles, complete chunk/search rows, durable accepted jobs and
 input identity claims, notebook search sets, and template embedding profiles plus typed
 subject/capability vector pairs. Template stage rows carry per-stage opaque claim tokens and
@@ -99,7 +99,9 @@ There is no populated-data migration or automatic reset. See [document storage](
 
 ### Explicit MVP reset
 
-The user-selected rollout recreates existing product tables rather than importing schema-2 data.
+The MVP rollout recreates recognized product tables instead of importing old schemas. Schema 6
+removes template app registration/memberships and requires a user owner. Schema-5 data is not
+automatically upgraded; normal startup refuses it intact.
 After stopping the API writer and provisioning pgvector in the selected database, from `backend/`:
 
 ```sh
@@ -109,9 +111,10 @@ cargo run --locked --bin reset_postgres -- --confirm-reset
 This explicit destructive operation loads the normal server configuration (without printing it),
 requires the dedicated `Quarry` or an isolated `_test` database, and refuses unrelated relations/
 functions or an active writer. It retains the schema initialization, writer-ownership and mutation
-locks, drops/recreates recognized product objects and records schema 5 in one transaction.
+locks, drops/recreates recognized product objects and records schema 6 in one transaction.
 DDL failure rolls the entire reset back. It removes users, deals, notebooks, templates and other
-product rows in that selected SQL schema; it is not a document-only deletion or an upgrade path.
+product rows in that selected SQL schema. The retired schema-5 `apps` and `app_templates` tables
+are recognized for this explicit reset and are not recreated.
 The extension schema, old SQLite files and retired legacy stores are untouched by the utility.
 The application never invokes this reset automatically. Under the temporary MVP policy effective
 2026-11-15 in [the agent guide](../AGENTS.md#persistence-and-indexing), a requested PostgreSQL schema
@@ -183,9 +186,9 @@ There is no document legacy storage publication or partial canonical-then-graph 
 Templates retain their separate lexical path, previously SQLite FTS5. PostgreSQL stores indexed
 term/field frequencies and document lengths; retrieval uses the existing 15-field weights,
 FTS5 BM25 formula, prefix AND/OR queries, transactionally maintained corpus-wide statistics and stable ID ties. It filters by
-owner/app before limiting results. The retained public-domain Unicode 6.1 tokenizer tables preserve FTS5 case folding and diacritics
+owner before limiting results. The retained public-domain Unicode 6.1 tokenizer tables preserve FTS5 case folding and diacritics
 without a SQLite runtime dependency. Captured FTS5 ranking fixtures cover technical tokens,
-diacritics, prefixes, ties and private/app scopes. Template semantic ranking uses exact pgvector
+diacritics, prefixes, ties and private owner scopes. Template semantic ranking uses exact pgvector
 cosine per role over the authorized, profile-matching ready catalog; only IDs and similarities leave
 SQL, and the existing fusion/tie policy runs over the complete ranking. There is no template graph
 projection, publication step or startup reconciliation; SQL commit is semantic availability.
@@ -230,7 +233,7 @@ and the separately documented local launcher/index validation.
 Notebook native content, the active pgvector/GIN artifact and terminal save-job result now commit
 in one retained transaction. Accepted input remains separate; failed preparation never changes
 the saved revision. Notebook legacy storage calls and cleanup polling are removed; templates then still required
-legacy storage (retired in schema 5, below). See [notebook API and recovery](notebook-api.md) for slot ordering, profile identity, attempt
+legacy storage (retired in schema 6, below). See [notebook API and recovery](notebook-api.md) for slot ordering, profile identity, attempt
 fences and private content search.
 
 The phrase-search correction adds bounded positional title/content projections and a GIN phrase

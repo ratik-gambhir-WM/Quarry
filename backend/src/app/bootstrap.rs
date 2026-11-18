@@ -124,11 +124,6 @@ async fn assemble_api(
     use templates::slide_templates::*;
     let settings = &config.slide_templates;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres.clone()));
-    repository.ensure_app(APP_ID, None).await.map_err(|_| {
-        BootstrapError::SlideTemplates(
-            "shared PostgreSQL template catalog initialization failed".into(),
-        )
-    })?;
     let native_preview: Arc<dyn native::TemplatePreviewGenerator> = match &settings.chromium_path {
         Some(path) => Arc::new(native::HeadlessTemplatePreviewGenerator::new(
             path.clone(),

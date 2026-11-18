@@ -1,6 +1,5 @@
 use crate::domains::templates::slide_templates::*;
 use serde_json::json;
-use std::sync::Arc;
 fn record(id: &str, source: TemplateSource) -> TemplateInsert {
     let document: CanvasDocument = serde_json::from_value(json!({
         "presentation": {
@@ -94,40 +93,37 @@ async fn newer_schema_is_rejected_without_changing_database() {
     );
 }
 #[tokio::test]
-async fn builtin_deletion_is_app_scoped_and_unchanged_reseed_keeps_deletion() {
-    let repo = Arc::new(
-        crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
-            .await
-            .unwrap(),
-    );
+async fn builtin_records_are_user_owned_and_deletion_removes_the_canonical_record() {
+    let owner = crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
+        .await
+        .unwrap();
+    let other = owner.other_user_fixture().await;
     let builtin = record("builtin", TemplateSource::Builtin);
-    repo.upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
+    owner
+        .upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
         .await
         .unwrap();
-    let a = repo.for_app("AppA").await.unwrap().unwrap();
-    let b = repo.for_app("AppB").await.unwrap().unwrap();
-    assert!(a.delete("builtin", 1).await.unwrap());
-    assert!(a.find_by_id("builtin").await.unwrap().is_none());
-    assert!(b.find_by_id("builtin").await.unwrap().is_some());
-    repo.upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
+    assert!(other.find_by_id("builtin").await.unwrap().is_none());
+    assert!(other
+        .upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
+        .await
+        .is_err());
+    assert!(owner.delete("builtin", 1).await.unwrap());
+    assert!(owner.find_by_id("builtin").await.unwrap().is_none());
+    owner
+        .upsert_builtin(&builtin.template, &[], &builtin.metadata, None)
         .await
         .unwrap();
-    let a = repo.for_app("AppA").await.unwrap().unwrap();
-    assert!(a.find_by_id("builtin").await.unwrap().is_none());
-    let c = repo.for_app("AppC").await.unwrap().unwrap();
-    assert!(c.find_by_id("builtin").await.unwrap().is_some());
-    assert!(b.delete("builtin", 1).await.unwrap());
-    assert!(c.delete("builtin", 1).await.unwrap());
-    assert!(repo.delete("builtin", 1).await.unwrap());
-    assert!(repo.find_by_id("builtin").await.unwrap().is_none());
+    assert!(owner.find_by_id("builtin").await.unwrap().is_some());
+    assert!(other.find_by_id("builtin").await.unwrap().is_none());
 }
 #[tokio::test]
-async fn cross_app_assets_updates_and_deletes_cannot_access_imports() {
+async fn cross_user_assets_updates_and_deletes_cannot_access_imports() {
     let repo = crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
         .await
         .unwrap();
-    let a = repo.for_app("A").await.unwrap().unwrap();
-    let b = repo.for_app("B").await.unwrap().unwrap();
+    let b = repo.other_user_fixture().await;
+    let a = repo;
     let mut record = record("private", TemplateSource::Import);
     record.assets.push(TemplateAsset {
         asset_id: "image".into(),

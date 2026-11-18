@@ -1,10 +1,11 @@
 //! Durable, bounded classification and embedding worker for saved slide imports.
 
+use super::super::providers::SlideProviderError;
 use super::super::{
     retrieval::{SlideClassificationJob, SlideEmbeddingJob, SlideProcessingStage, StageClaim},
     TemplateProcessingRepository,
 };
-use super::{SlideClassificationService, SlideProviderError};
+use super::SlideClassificationService;
 use crate::shared::on_demand_task::OnDemandTask;
 use std::{
     sync::{
@@ -289,5 +290,5 @@ impl SlideClassificationWorker {
 }
 
 #[cfg(test)]
-#[path = "../../../../../tests/unit/domains/templates/slide_templates/providers/worker_tests.rs"]
+#[path = "../../../../../tests/unit/domains/templates/slide_templates/processing/worker_tests.rs"]
 mod tests;

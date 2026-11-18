@@ -74,14 +74,15 @@ configuration. Do not invent scripts that do not exist.
 
 ### Embedded templates
 
+- Templates are scoped only to authenticated users; no app registry or app membership remains.
 - Templates run only inside Axum through `domains/templates/slide_templates`, with native
   conversion, Chromium/CDP previews and shared durable PostgreSQL/pgvector storage: claim-fenced
   classification/lexical publication and typed subject/capability vector pairs. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
   the shared read-only SVG render surface.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
-- `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 5, checksums and catalog fingerprints.
+- `app/schema.sql` owns the fresh PostgreSQL schema, extending the former SQLite marker-18 data model;
+  `app/migrations.rs` initializes/validates version 6, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
   schemas. Old SQLite files and retired graph stores remain outside schema initialization; no import/fallback exists.
@@ -172,7 +173,7 @@ request -> router -> handler -> service -> repository/client
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
 - Documents own chunks, pgvector embeddings, GIN lexical metadata, original bytes, identities,
-  activity and durable job results in PostgreSQL schema 5. One retained transaction publishes the
+  activity and durable job results in PostgreSQL schema 6. One retained transaction publishes the
   complete document; accepted input/image checkpoints are separate from canonical commit.
   See `docs/document-storage.md` for profiles, readiness, limits, attempts and recovery.
 - Notebook native snapshots, active pgvector/GIN artifacts and terminal save jobs commit atomically;
@@ -183,7 +184,7 @@ request -> router -> handler -> service -> repository/client
   a ready template has exactly its current subject and capability vectors (deferred pair check).
   The architecture suite rejects retired graph publication and projection paths. Never delete retained graph
   stores/volumes without separate authorization.
-- Startup initializes an empty selected schema or validates schema 5, checksums, catalog/indexes,
+- Startup initializes an empty selected schema or validates schema 6, checksums, catalog/indexes,
   vector extension readiness and document/notebook/template complete-set invariants. It never drops data. Unknown
   nonempty layouts fail intact; there is no populated-schema upgrade, import or fallback. An MVP
   reset follows the dated MVP policy above and uses the guarded reset utility, never an automatic retry.
@@ -198,7 +199,7 @@ request -> router -> handler -> service -> repository/client
   durable worker claims/recovery and remote-publication safeguards are implemented and verified. Do not infer
   multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
-  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
+  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner filters and stable ties;
   template semantic ranking is exact SQL cosine with the existing fusion/tie policy in Rust.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
@@ -405,7 +406,7 @@ Real vector codec tests additionally require pgvector 0.8.6 provisioned once in 
 `quarry_extensions` schema of the selected `_test` database. Use the explicit
 `backend/tools/provision-pgvector.sql` procedure in `docs/postgresql-storage.md`; tests and
 application startup never install or drop the extension. Document storage/search and durable
-jobs now use schema 5.
+jobs now use schema 6.
 
 Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and resumes durable template stages. Tests never reset the development database.
 
@@ -446,7 +447,7 @@ connection preflight. PostgreSQL remains running after the launcher exits.
   before protected work, plus the retained state-dependent guards. Run the architecture suite
   (directly or through the full backend gate); static dependency checks alone do not prove order.
 - When a template operation changes, update and test the facade and native template routes,
-  headers, request bounds, owner/app scoping, and error contract.
+  headers, request bounds, owner scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 

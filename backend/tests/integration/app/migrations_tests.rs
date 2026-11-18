@@ -13,7 +13,16 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     .fetch_all(client.pool())
     .await
     .unwrap();
-    assert_eq!(tables.len(), 52); // schema 5 adds template embedding profiles and typed pairs
+    assert_eq!(tables.len(), 50); // schema 6 removes app registry and template memberships
+    assert!(!tables
+        .iter()
+        .any(|table| matches!(table.as_str(), "apps" | "app_templates")));
+    assert!(sqlx::query(
+        "INSERT INTO templates(template_id,template_json) VALUES('ownerless','{}')"
+    )
+    .execute(client.pool())
+    .await
+    .is_err());
     for table in [
         "quarry_files",
         "document_identity_manifests",
@@ -204,6 +213,14 @@ async fn explicit_mvp_reset_recreates_owned_schema_and_refuses_a_live_writer() {
         .execute(client.pool())
         .await
         .unwrap();
+    // Simulate the retired registry in a previous schema. Startup must refuse it intact;
+    // the explicit reset may remove exactly these recognized legacy product objects.
+    sqlx::raw_sql("CREATE TABLE apps(app_id TEXT PRIMARY KEY); CREATE TABLE app_templates(app_id TEXT REFERENCES apps(app_id), template_id TEXT REFERENCES templates(template_id)); UPDATE quarry_schema_version SET version=5;")
+        .execute(client.pool()).await.unwrap();
+    assert!(matches!(
+        migrate(&client, Default::default()).await,
+        Err(MigrationError::Incompatible)
+    ));
     let writer = client.clone().with_writer_lease().await.unwrap();
     let result = reset_product_schema(&client, Default::default()).await;
     assert!(
@@ -308,8 +325,10 @@ async fn deferred_template_pair_integrity_rejects_partial_or_stale_readiness() {
     )
     .await
     .unwrap();
+    crate::integration_support::seed_identity(&client, "template-integrity@example.invalid", 'i')
+        .await;
     sqlx::raw_sql(
-        "INSERT INTO templates(template_id,template_json) VALUES('t','{}');
+        "INSERT INTO templates(template_id,template_json,owner_user_id) VALUES('t','{}',1);
          INSERT INTO template_classification_status(template_id,status,input_fingerprint,schema_version,prompt_version,
              subject_embedding_document,subject_embedding_fingerprint,capability_embedding_document,capability_embedding_fingerprint,embedding_status)
          VALUES('t','ready','in',2,'p','s','sf','c','cf','pending');

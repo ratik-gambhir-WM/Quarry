@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 5;
+const VERSION: i64 = 6;
 // Startup only. Runtime guards are retained separately until worker/remote cutover.
 const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 const INTEGRITY_VIEWS: [&str; 3] = [
@@ -199,12 +199,18 @@ pub async fn reset_product_schema(
         .bind(crate::adapters::postgres::client::WRITE_LOCK)
         .execute(&mut *tx)
         .await?;
+    // Retired product tables are accepted only by this explicitly invoked reset.
     let allowed: std::collections::HashSet<_> = SCHEMA
         .lines()
         .filter_map(|line| line.strip_prefix("CREATE TABLE "))
         .filter_map(|line| line.split_whitespace().next())
         .map(|name| name.trim_matches('"'))
-        .chain(["quarry_schema_version", "notebook_cleanup"])
+        .chain([
+            "quarry_schema_version",
+            "notebook_cleanup",
+            "apps",
+            "app_templates",
+        ])
         .collect();
     let tables:Vec<String>=sqlx::query_scalar("SELECT relname FROM pg_class WHERE relnamespace=current_schema()::regnamespace AND relkind IN ('r','p','v','m','f')").fetch_all(&mut *tx).await?;
     if tables

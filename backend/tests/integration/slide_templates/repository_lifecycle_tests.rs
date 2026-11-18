@@ -111,7 +111,7 @@ async fn embed(repository: &PostgresTemplateRepository, subject: &[f64], capabil
 }
 
 #[tokio::test]
-async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
+async fn manual_retry_is_atomic_user_scoped_and_survives_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("retry.sqlite");
     let repository = crate::slide_template_test_support::repository(&path)
@@ -141,7 +141,7 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
         RetrySlideProcessingOutcome::NotFailed
     );
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Classification,
             &job.claim,
             "classification_timeout",
@@ -149,7 +149,7 @@ async fn manual_retry_is_atomic_app_scoped_and_survives_reopen() {
         )
         .await
         .unwrap();
-    let other = repository.for_app("Another_App").await.unwrap().unwrap();
+    let other = repository.other_user_fixture().await;
     assert_eq!(
         other.retry_failed_slide_processing("retry").await.unwrap(),
         RetrySlideProcessingOutcome::NotFound
@@ -220,7 +220,7 @@ async fn manual_embedding_retry_preserves_completed_artifacts_and_resets_only_em
         .unwrap()
         .unwrap();
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Embedding,
             &job.claim,
             "embedding_timeout",
@@ -293,7 +293,7 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
     assert_eq!(first.attempt_count, 1);
     // A database-clock retry in the future is not due.
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Classification,
             &first.claim,
             "classification_timeout",
@@ -386,7 +386,7 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
         .unwrap()
         .unwrap();
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Embedding,
             &job.claim,
             "embedding_unavailable",
@@ -412,7 +412,7 @@ async fn dual_vector_leases_retries_and_refreshes_are_durable() {
     );
     assert_eq!(
         repository
-            .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+            .search_slide_classifications("cloud", 10)
             .await
             .unwrap(),
         ["cloud"]
@@ -449,7 +449,7 @@ async fn stale_identical_input_attempts_cannot_publish_or_fail_a_reclaimed_succe
         .await
         .is_err());
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Classification,
             &stale.claim,
             "classification_timeout",
@@ -465,7 +465,7 @@ async fn stale_identical_input_attempts_cannot_publish_or_fail_a_reclaimed_succe
     assert_eq!(state.status, "processing");
     assert!(state.metadata.is_none());
     assert!(repository
-        .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+        .search_slide_classifications("cloud", 10)
         .await
         .unwrap()
         .is_empty());
@@ -491,7 +491,7 @@ async fn stale_identical_input_attempts_cannot_publish_or_fail_a_reclaimed_succe
         .await
         .is_err());
     repository
-        .record_stage_failure(
+        .record_slide_stage_failure(
             SlideProcessingStage::Embedding,
             &stale.claim,
             "embedding_timeout",
@@ -582,7 +582,7 @@ async fn invalid_or_mismatched_pairs_publish_nothing() {
     // Keyword readiness precedes semantic readiness.
     assert_eq!(
         repository
-            .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+            .search_slide_classifications("cloud", 10)
             .await
             .unwrap(),
         ["cloud"]
@@ -619,12 +619,12 @@ async fn content_refresh_invalidates_metadata_lexical_and_vectors_atomically() {
     assert!(state.metadata.is_none());
     assert!(state.subject_vector.is_none() && state.capability_vector.is_none());
     assert!(repository
-        .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+        .search_slide_classifications("cloud", 10)
         .await
         .unwrap()
         .is_empty());
     assert!(repository
-        .list_retrieval_classifications("Quarry_WestMonroe")
+        .list_retrieval_classifications()
         .await
         .unwrap()
         .is_empty());
@@ -671,10 +671,8 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
                 ["Test", "Owner", "coexist@example.test", "fixture-key", "Analyst"]).await?;
             Ok(())
          }).await.unwrap();
-        let repository = PostgresTemplateRepository::new(client.clone());
-        repository
-            .ensure_app("Quarry_WestMonroe", None)
-            .await
+        let repository = PostgresTemplateRepository::new(client.clone())
+            .user_scope(1)
             .unwrap();
         repository
             .insert_with_pending_classification(&record, &pending("class-v1"))
@@ -708,10 +706,8 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
         )
         .await
         .unwrap();
-        let repository = PostgresTemplateRepository::new(client.clone());
-        repository
-            .ensure_app("Quarry_WestMonroe", None)
-            .await
+        let repository = PostgresTemplateRepository::new(client.clone())
+            .user_scope(1)
             .unwrap();
         assert_eq!(
             repository.find_by_id("durable-import").await.unwrap(),
@@ -743,7 +739,7 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
         assert_eq!(classification.capability_vector, Some(vec![0.0, 1.0]));
         assert_eq!(
             repository
-                .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+                .search_slide_classifications("cloud", 10)
                 .await
                 .unwrap(),
             ["durable-import"]
@@ -768,13 +764,12 @@ async fn shared_database_reopens_import_assets_preview_metadata_and_both_vectors
 }
 
 #[tokio::test]
-async fn background_claims_never_process_another_apps_templates() {
+async fn background_claims_never_process_another_users_templates() {
     let repository =
         crate::slide_template_test_support::repository(std::path::Path::new(":memory:"))
             .await
             .unwrap();
-    let other = repository.for_app("Another_App").await.unwrap().unwrap();
-    other.ensure_app("Another_App", None).await.unwrap();
+    let other = repository.other_user_fixture().await;
     other
         .insert_with_pending_classification(&insert("foreign"), &pending("foreign-v1"))
         .await
@@ -925,9 +920,13 @@ async fn classified_batch_jobs_and_previews_survive_reopen_and_cancelled_publica
 async fn independent_template_pools_reject_stale_replacement_and_deletion() {
     use crate::adapters::postgres::client::PostgresClient;
     let (a, b) = PostgresClient::concurrent_test_clients().await;
-    let ra = PostgresTemplateRepository::new(a.clone());
-    ra.ensure_app("Quarry_WestMonroe", None).await.unwrap();
-    let rb = PostgresTemplateRepository::new(b.clone());
+    crate::integration_support::seed_identity(&a, "template-cas@example.invalid", 'c').await;
+    let ra = PostgresTemplateRepository::new(a.clone())
+        .user_scope(1)
+        .unwrap();
+    let rb = PostgresTemplateRepository::new(b.clone())
+        .user_scope(1)
+        .unwrap();
     let record = insert("cas-template");
     ra.insert_with_pending_classification(&record, &pending("v1"))
         .await

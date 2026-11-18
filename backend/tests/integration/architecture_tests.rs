@@ -366,19 +366,20 @@ fn product_services_do_not_reach_handler_owned_validation() {
 #[test]
 fn openai_provider_calls_use_rig_without_a_product_http_client() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let domain =
-        fs::read_to_string(root.join("src/domains/templates/slide_templates/providers.rs"))
-            .unwrap();
-    assert!(
-        !domain.contains("use rig::"),
-        "slide domain must use the provider adapter rather than Rig wire types"
-    );
     for file in [
         "src/adapters/openai/client.rs",
         "src/adapters/slide_templates/providers.rs",
         "src/domains/templates/slide_templates/providers.rs",
+        "src/domains/templates/slide_templates/processing/service.rs",
+        "src/domains/templates/slide_templates/processing/worker.rs",
     ] {
         let source = fs::read_to_string(root.join(file)).unwrap();
+        if file.starts_with("src/domains/") {
+            assert!(
+                !source.contains("use rig::"),
+                "{file} must use the provider adapter rather than Rig wire types"
+            );
+        }
         for forbidden in [
             "reqwest::Client",
             ".bearer_auth(",

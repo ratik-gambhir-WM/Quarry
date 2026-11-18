@@ -204,15 +204,14 @@ pub struct SlideRetrievalService {
 }
 
 impl SlideRetrievalService {
-    /// Validate and execute one app-scoped retrieval mode without exposing vectors.
-    pub async fn query(&self, app_id: &str, untrusted_input: &Value) -> anyhow::Result<Value> {
+    /// Validate and execute one user-scoped retrieval mode without exposing vectors.
+    pub async fn query(&self, untrusted_input: &Value) -> anyhow::Result<Value> {
         let input = parse_slide_query_input(untrusted_input)?;
         let repository = self.repository.clone();
-        let app = app_id.to_owned();
-        let app_records =
-            tokio::spawn(async move { repository.list_retrieval_classifications(&app).await })
+        let owned_records =
+            tokio::spawn(async move { repository.list_retrieval_classifications().await })
                 .await??;
-        let records = apply_filters(&app_records, &input.filters);
+        let records = apply_filters(&owned_records, &input.filters);
         if input.mode == "facets" {
             return build_facet_response(
                 &records,
@@ -236,29 +235,19 @@ impl SlideRetrievalService {
                 .collect(),
             "filter" => records,
             "text" => {
-                self.lexical(app_id, input.query.as_deref(), &records, "AND")
+                self.lexical(input.query.as_deref(), &records, "AND")
                     .await?
             }
             "semantic" => {
-                self.semantic(
-                    app_id,
-                    input.query.as_deref(),
-                    &records,
-                    &input.semantic_target,
-                )
-                .await?
+                self.semantic(input.query.as_deref(), &records, &input.semantic_target)
+                    .await?
             }
             "hybrid" => {
                 let lexical = self
-                    .lexical(app_id, input.query.as_deref(), &records, "AND")
+                    .lexical(input.query.as_deref(), &records, "AND")
                     .await?;
                 match self
-                    .semantic(
-                        app_id,
-                        input.query.as_deref(),
-                        &records,
-                        &input.semantic_target,
-                    )
+                    .semantic(input.query.as_deref(), &records, &input.semantic_target)
                     .await
                 {
                     Ok(semantic) if semantic.is_empty() && !records.is_empty() => {
@@ -278,7 +267,7 @@ impl SlideRetrievalService {
                 }
             }
             "similar" => {
-                let source = app_records
+                let source = owned_records
                     .iter()
                     .find(|record| {
                         Some(&record.template_id) == input.similar_to_template_id.as_ref()
@@ -287,13 +276,11 @@ impl SlideRetrievalService {
                     .ok_or_else(|| SlideRetrievalError::new("slide_not_available"))?;
                 // Stored source vectors are ranked in SQL; no query embedding provider is used.
                 let repository = self.repository.clone();
-                let (app, id) = (app_id.to_owned(), source.template_id.clone());
+                let id = source.template_id.clone();
                 let pair =
-                    tokio::spawn(
-                        async move { repository.find_slide_embedding_pair(&app, &id).await },
-                    )
-                    .await??
-                    .ok_or_else(|| SlideRetrievalError::new("slide_not_available"))?;
+                    tokio::spawn(async move { repository.find_slide_embedding_pair(&id).await })
+                        .await??
+                        .ok_or_else(|| SlideRetrievalError::new("slide_not_available"))?;
                 let candidates: Vec<_> = records
                     .into_iter()
                     .filter(|record| {
@@ -303,18 +290,16 @@ impl SlideRetrievalService {
                     .collect();
                 let subject = self
                     .rank_by_vector(
-                        app_id,
                         &pair.profile_id,
-                        pair.subject.clone(),
+                        pair.subject,
                         &candidates,
                         EmbeddingRole::Subject,
                     )
                     .await?;
                 let capability = self
                     .rank_by_vector(
-                        app_id,
                         &pair.profile_id,
-                        pair.capability.clone(),
+                        pair.capability,
                         &candidates,
                         EmbeddingRole::Capability,
                     )
@@ -324,27 +309,22 @@ impl SlideRetrievalService {
             _ => return Err(SlideRetrievalError::new("invalid_query").into()),
         };
         let selected = self
-            .retain_retrievable(app_id, ranked.into_iter().take(input.limit).collect())
+            .retain_retrievable(ranked.into_iter().take(input.limit).collect())
             .await?;
         let results = selected
             .iter()
-            .map(|record| project_record(record, &input.select, app_id))
+            .map(|record| project_record(record, &input.select))
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(json!({"mode_used":input.mode,"results":results,"warnings":warnings}))
     }
 
     /// Retrieve templates for a complete finding using content and layout signals independently.
-    pub async fn find_for_finding(
-        &self,
-        app_id: &str,
-        untrusted_input: &Value,
-    ) -> anyhow::Result<Value> {
-        finding::find_for_finding(self, app_id, untrusted_input).await
+    pub async fn find_for_finding(&self, untrusted_input: &Value) -> anyhow::Result<Value> {
+        finding::find_for_finding(self, untrusted_input).await
     }
 
     async fn lexical<'a>(
         &self,
-        app_id: &str,
         query: Option<&str>,
         records: &[&'a RetrievalClassificationRecord],
         operator: &str,
@@ -358,10 +338,9 @@ impl SlideRetrievalService {
             .map(|&record| (record.template_id.as_str(), record))
             .collect();
         let repository = self.repository.clone();
-        let app = app_id.to_owned();
         let ids = tokio::spawn(async move {
             repository
-                .search_slide_classifications(&app, &expression, 200)
+                .search_slide_classifications(&expression, 200)
                 .await
         })
         .await??;
@@ -373,7 +352,6 @@ impl SlideRetrievalService {
 
     async fn semantic<'a>(
         &self,
-        app_id: &str,
         query: Option<&str>,
         records: &[&'a RetrievalClassificationRecord],
         target: &str,
@@ -391,29 +369,16 @@ impl SlideRetrievalService {
         let vector = self.embed(js_trim(query)).await?;
         match target {
             "subject" => {
-                self.rank_by_vector(
-                    app_id,
-                    &profile_id,
-                    vector,
-                    &compatible,
-                    EmbeddingRole::Subject,
-                )
-                .await
+                self.rank_by_vector(&profile_id, vector, &compatible, EmbeddingRole::Subject)
+                    .await
             }
             "capability" => {
-                self.rank_by_vector(
-                    app_id,
-                    &profile_id,
-                    vector,
-                    &compatible,
-                    EmbeddingRole::Capability,
-                )
-                .await
+                self.rank_by_vector(&profile_id, vector, &compatible, EmbeddingRole::Capability)
+                    .await
             }
             "both" => Ok(reciprocal_rank_fusion(
                 &self
                     .rank_by_vector(
-                        app_id,
                         &profile_id,
                         vector.clone(),
                         &compatible,
@@ -421,13 +386,7 @@ impl SlideRetrievalService {
                     )
                     .await?,
                 &self
-                    .rank_by_vector(
-                        app_id,
-                        &profile_id,
-                        vector,
-                        &compatible,
-                        EmbeddingRole::Capability,
-                    )
+                    .rank_by_vector(&profile_id, vector, &compatible, EmbeddingRole::Capability)
                     .await?,
                 60.0,
             )),
@@ -439,17 +398,16 @@ impl SlideRetrievalService {
     /// The full compatible ranking is retained so fusion sees winners below any output limit.
     async fn rank_by_vector<'a>(
         &self,
-        app_id: &str,
         profile_id: &str,
         vector: CosineVector,
         records: &[&'a RetrievalClassificationRecord],
         role: EmbeddingRole,
     ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
         let repository = self.repository.clone();
-        let (app, profile) = (app_id.to_owned(), profile_id.to_owned());
+        let profile = profile_id.to_owned();
         let ranked = tokio::spawn(async move {
             repository
-                .rank_slide_embeddings(&app, &profile, role, &vector)
+                .rank_slide_embeddings(&profile, role, &vector)
                 .await
         })
         .await??;
@@ -474,11 +432,10 @@ impl SlideRetrievalService {
         Ok(scored.into_iter().map(|(record, _)| record).collect())
     }
 
-    /// Fresh owner/app recheck of the bounded selection, protecting against concurrent
+    /// Fresh owner recheck of the bounded selection, protecting against concurrent
     /// deletion or revocation after the ranking reads.
     async fn retain_retrievable<'a>(
         &self,
-        app_id: &str,
         selected: Vec<&'a RetrievalClassificationRecord>,
     ) -> anyhow::Result<Vec<&'a RetrievalClassificationRecord>> {
         let ids = selected
@@ -486,9 +443,8 @@ impl SlideRetrievalService {
             .map(|record| record.template_id.clone())
             .collect::<Vec<_>>();
         let repository = self.repository.clone();
-        let app = app_id.to_owned();
         let current =
-            tokio::spawn(async move { repository.retain_retrievable(&app, &ids).await }).await??;
+            tokio::spawn(async move { repository.retain_retrievable(&ids).await }).await??;
         Ok(selected
             .into_iter()
             .filter(|record| current.contains(&record.template_id))
@@ -644,7 +600,6 @@ fn apply_filters<'a>(
 fn project_record(
     record: &RetrievalClassificationRecord,
     select: &[String],
-    app_id: &str,
 ) -> anyhow::Result<Value> {
     let metadata = record
         .classification
@@ -678,7 +633,7 @@ fn project_record(
         );
     }
     Ok(
-        json!({"kind":record.kind,"previewUrl":record.preview_available.then(|| format!("/api/v1/templates/{}/preview?appId={}", record.template_id, percent_encode_component(app_id))),"sections":sections,"templateId":record.template_id,"title":record.title}),
+        json!({"kind":record.kind,"previewUrl":record.preview_available.then(|| format!("/api/v1/templates/{}/preview", record.template_id)),"sections":sections,"templateId":record.template_id,"title":record.title}),
     )
 }
 fn build_facet_response(
@@ -729,18 +684,6 @@ fn facet_values(metadata: &SlideRetrievalMetadata, facet: &str) -> anyhow::Resul
     }
 }
 
-fn percent_encode_component(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
-}
 fn locale_compare(left: &str, right: &str) -> std::cmp::Ordering {
     static COLLATOR: std::sync::LazyLock<icu_collator::CollatorBorrowed<'static>> =
         std::sync::LazyLock::new(|| {
@@ -750,25 +693,24 @@ fn locale_compare(left: &str, right: &str) -> std::cmp::Ordering {
     COLLATOR.compare(left, right)
 }
 
-/// App identity is captured by trusted context and never accepted in tool input.
+/// Tools receive user-scoped services from trusted context; tool input cannot select an owner.
 pub struct SlideAgentTools {
-    pub app_id: String,
     pub retrieval: Arc<SlideRetrievalService>,
     pub templates: super::super::ImportService,
 }
 impl SlideAgentTools {
     pub async fn get_slide(&self, input: &Value) -> anyhow::Result<Value> {
         let id = Self::parse_get_slide_input(input)?;
-        match self.templates.for_app(&self.app_id).await?.find(id).await? {
+        match self.templates.find(id).await? {
             Some(slide) => Ok(serde_json::to_value(slide)?),
             None => Ok(json!({"error":{"code":"slide_not_available"}})),
         }
     }
     pub async fn find_slides_for_finding(&self, input: &Value) -> anyhow::Result<Value> {
-        self.retrieval.find_for_finding(&self.app_id, input).await
+        self.retrieval.find_for_finding(input).await
     }
     pub async fn query_slides(&self, input: &Value) -> anyhow::Result<Value> {
-        self.retrieval.query(&self.app_id, input).await
+        self.retrieval.query(input).await
     }
     pub fn parse_get_slide_input(input: &Value) -> Result<&str, SlideRetrievalError> {
         let object = input

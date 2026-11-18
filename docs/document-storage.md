@@ -1,6 +1,6 @@
 # Document PostgreSQL storage
 
-Documents use PostgreSQL schema 5 for original bytes, immutable identities, chunks,
+Documents use PostgreSQL schema 6 for original bytes, immutable identities, chunks,
 full-precision pgvector embeddings, lexical indexes and recoverable processing jobs.
 Documents, notebooks and templates use PostgreSQL exclusively; no remote graph service is required.
 

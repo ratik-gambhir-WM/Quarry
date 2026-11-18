@@ -1,8 +1,8 @@
 //! Finding-oriented retrieval built on the common query ranking primitives.
 
 use super::{
-    all_topics, compatible_vectors, equal, percent_encode_component, reciprocal_rank_scores,
-    SlideRetrievalError, SlideRetrievalService,
+    all_topics, compatible_vectors, equal, reciprocal_rank_scores, SlideRetrievalError,
+    SlideRetrievalService,
 };
 use crate::domains::templates::slide_templates::retrieval::RetrievalClassificationRecord;
 use crate::domains::templates::slide_templates::retrieval::{
@@ -48,7 +48,6 @@ fn parse_finding_input(value: &Value) -> Result<FindingInput, SlideRetrievalErro
 /// Retrieve templates for a complete finding using content and layout signals independently.
 pub(super) async fn find_for_finding(
     retrieval: &SlideRetrievalService,
-    app_id: &str,
     untrusted_input: &Value,
 ) -> anyhow::Result<Value> {
     let input = parse_finding_input(untrusted_input)?;
@@ -61,10 +60,8 @@ pub(super) async fn find_for_finding(
         return Err(SlideRetrievalError::new("semantic_unavailable").into());
     };
     let repository = retrieval.repository.clone();
-    let app = app_id.to_owned();
     let records =
-        tokio::spawn(async move { repository.list_retrieval_classifications(&app).await })
-            .await??;
+        tokio::spawn(async move { repository.list_retrieval_classifications().await }).await??;
     let analysis = analyze_finding(&input.markdown, &records);
     let compatible: Vec<_> = records
         .iter()
@@ -93,12 +90,11 @@ pub(super) async fn find_for_finding(
         Vec::new()
     } else {
         retrieval
-            .lexical(app_id, Some(&lexical_terms.join(" ")), &compatible, "OR")
+            .lexical(Some(&lexical_terms.join(" ")), &compatible, "OR")
             .await?
     };
     let subject = retrieval
         .rank_by_vector(
-            app_id,
             &profile_id,
             subject_vector,
             &compatible,
@@ -107,7 +103,6 @@ pub(super) async fn find_for_finding(
         .await?;
     let capability = retrieval
         .rank_by_vector(
-            app_id,
             &profile_id,
             capability_vector,
             &compatible,
@@ -133,7 +128,6 @@ pub(super) async fn find_for_finding(
     });
     let selected = retrieval
         .retain_retrievable(
-            app_id,
             ranked
                 .into_iter()
                 .take(input.limit)
@@ -143,7 +137,7 @@ pub(super) async fn find_for_finding(
         .await?;
     let results = selected
         .into_iter()
-        .map(|record| explain_finding_match(record, &analysis, app_id))
+        .map(|record| explain_finding_match(record, &analysis))
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(json!({"results":results,"warnings":[]}))
 }
@@ -311,7 +305,6 @@ fn exact_finding_boost(record: &RetrievalClassificationRecord, analysis: &Findin
 fn explain_finding_match(
     record: &RetrievalClassificationRecord,
     analysis: &FindingAnalysis,
-    app_id: &str,
 ) -> anyhow::Result<Value> {
     let metadata = record
         .classification
@@ -375,7 +368,7 @@ fn explain_finding_match(
         match_reasons.push("Semantic subject and template-capability similarity".into());
     }
     Ok(
-        json!({"kind":record.kind,"matchedDomains":matched_domains,"matchedIntents":matched_intents,"matchedTopics":matched_topics,"matchReasons":match_reasons,"previewUrl":record.preview_available.then(|| format!("/api/v1/templates/{}/preview?appId={}", record.template_id, percent_encode_component(app_id))),"templateId":record.template_id,"title":record.title}),
+        json!({"kind":record.kind,"matchedDomains":matched_domains,"matchedIntents":matched_intents,"matchedTopics":matched_topics,"matchReasons":match_reasons,"previewUrl":record.preview_available.then(|| format!("/api/v1/templates/{}/preview", record.template_id)),"templateId":record.template_id,"title":record.title}),
     )
 }
 

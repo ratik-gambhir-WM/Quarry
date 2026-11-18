@@ -1,6 +1,6 @@
 # Shared deal projects: policy and recovery
 
-Current storage is PostgreSQL schema 5 with pgvector for all product persistence and search.
+Current storage is PostgreSQL schema 6 with pgvector for all product persistence and search.
 See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
 verification records below describe earlier implementations, not current prerequisites or commands.
 

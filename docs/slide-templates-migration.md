@@ -1,13 +1,15 @@
 # Slide Templates Studio migration evidence
 
-Current storage is PostgreSQL schema 5 with pgvector for all product persistence and search.
+Current storage is PostgreSQL schema 6 with pgvector for all product persistence and search.
+Templates are scoped only by authenticated user ownership; app registration and memberships
+were removed in schema 6. Legacy app/graph descriptions below are historical.
 See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
 verification records below describe earlier implementations, not current prerequisites or commands.
 
 ## Current implementation
 
 The maintained launcher uses embedded Axum templates and does not start the Node service.
-Fresh PostgreSQL schema 5 owns private templates, assets, previews, classification/embedding
+Fresh PostgreSQL schema 6 owns private templates, assets, previews, classification/embedding
 artifacts and durable jobs through the same asynchronous pool as other product records. Typed
 subject/capability vector pairs and readiness publish atomically in PostgreSQL; startup validates
 the SQL schema and resumes durable stages. There is no remote projection or startup reconciliation.

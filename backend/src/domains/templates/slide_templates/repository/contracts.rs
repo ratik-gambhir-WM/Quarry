@@ -1,10 +1,10 @@
 //! Focused template persistence capabilities backed by the same PostgreSQL repository.
 use super::super::{models::*, retrieval::*};
-use super::{check_publication, AppRegistration, RepositoryResult, StoredApp, DEFAULT_APP_ID};
+use super::{check_publication, RepositoryResult};
 use crate::shared::error::RepositoryError;
 use std::sync::Arc;
 
-/// Read image assets under the repository owner/app scope.
+/// Read image assets under the repository owner scope.
 #[async_trait::async_trait]
 pub trait TemplateAssetRepository: Send + Sync {
     /// Finds an asset only when it belongs to the requested template.
@@ -108,7 +108,7 @@ pub trait TemplateCatalogRepository: Send + Sync {
 pub trait TemplateProcessingRepository: Send + Sync {
     /// Whether this scope has unfinished stages, including delayed retries and leases.
     async fn has_pending_slide_processing(&self) -> RepositoryResult<bool>;
-    /// Atomically reset only a terminal failed stage in this app's saved template.
+    /// Atomically reset only a terminal failed stage in the owner's saved template.
     async fn retry_failed_slide_processing(
         &self,
         id: &str,
@@ -168,18 +168,15 @@ pub trait TemplateRetrievalRepository: Send + Sync {
     /// Classified metadata without vectors.
     async fn list_retrieval_classifications(
         &self,
-        app_id: &str,
     ) -> RepositoryResult<Vec<RetrievalClassificationRecord>>;
     async fn search_slide_classifications(
         &self,
-        app_id: &str,
         fts_query: &str,
         limit: usize,
     ) -> RepositoryResult<Vec<String>>;
     /// Exact SQL cosine ranking for one role and profile over the authorized catalog.
     async fn rank_slide_embeddings(
         &self,
-        app_id: &str,
         profile_id: &str,
         role: EmbeddingRole,
         query: &crate::adapters::postgres::vector::CosineVector,
@@ -187,18 +184,16 @@ pub trait TemplateRetrievalRepository: Send + Sync {
     /// A ready source pair visible in this scope, for `similar`.
     async fn find_slide_embedding_pair(
         &self,
-        app_id: &str,
         template_id: &str,
     ) -> RepositoryResult<Option<StoredEmbeddingPair>>;
-    /// Fresh bounded owner/app recheck of selected identities before delivery.
+    /// Fresh bounded owner recheck of selected identities before delivery.
     async fn retain_retrievable(
         &self,
-        app_id: &str,
         template_ids: &[String],
     ) -> RepositoryResult<std::collections::HashSet<String>>;
 }
 
-/// Composition boundary for owner/app scoping and consumers that coordinate multiple capabilities.
+/// Composition boundary for owner scoping and consumers that coordinate multiple capabilities.
 #[async_trait::async_trait]
 pub trait TemplateRepository:
     TemplateAssetRepository
@@ -212,19 +207,4 @@ pub trait TemplateRepository:
             "this repository does not implement user isolation",
         ))
     }
-    /// Returns an independent, immutable app scope sharing the same durable store.
-    async fn for_app(&self, app_id: &str) -> RepositoryResult<Option<Arc<dyn TemplateRepository>>> {
-        if app_id != DEFAULT_APP_ID {
-            return Err(RepositoryError::invalid(
-                "this repository does not implement app isolation",
-            ));
-        }
-        Ok(None)
-    }
-    async fn ensure_app(
-        &self,
-        app_id: &str,
-        registration: Option<&AppRegistration>,
-    ) -> RepositoryResult<StoredApp>;
-    async fn find_app(&self, app_id: &str) -> RepositoryResult<Option<StoredApp>>;
 }

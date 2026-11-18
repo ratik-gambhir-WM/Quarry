@@ -1,6 +1,6 @@
 # Personal notebook API and save recovery
 
-Current storage is fresh PostgreSQL schema 5. Notebook, document and template content and search are SQL-only; legacy storage is retired. See
+Current storage is fresh PostgreSQL schema 6. Notebook, document and template content and search are SQL-only; legacy storage is retired. See
 [PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 

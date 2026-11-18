@@ -83,7 +83,7 @@ pub(in crate::domains::templates) async fn export(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(
         request.headers(),
         "application/json",
@@ -125,7 +125,7 @@ async fn import_inner(
     batch: bool,
     classified: bool,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["kind"])?;
+    let pairs = query(request.uri(), &["kind"])?;
     let kind = kind(&pairs)?;
     headers(
         request.headers(),
@@ -191,7 +191,7 @@ async fn import_inner(
     })
     .await?;
     let location = format!(
-        "{}/catalog/{}?appId=Quarry_WestMonroe",
+        "{}/catalog/{}",
         super::super::route::SLIDE_TEMPLATE_PREFIX,
         template_id
     );
@@ -213,7 +213,7 @@ async fn import_inner(
         response.headers_mut().insert(
             header::LINK,
             header_value(&format!(
-                "<{}/catalog/{}/preview?appId=Quarry_WestMonroe>; rel=\"preview\"",
+                "<{}/catalog/{}/preview>; rel=\"preview\"",
                 super::super::route::SLIDE_TEMPLATE_PREFIX,
                 template_id
             ))?,
@@ -225,7 +225,7 @@ pub(in crate::domains::templates) async fn catalog(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["kind"])?;
+    let pairs = query(request.uri(), &["kind"])?;
     let filter = if pairs.iter().any(|(k, _)| k == "kind") {
         Some(kind(&pairs)?)
     } else {
@@ -240,7 +240,7 @@ pub(in crate::domains::templates) async fn previews(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["page"])?;
+    let pairs = query(request.uri(), &["page"])?;
     let page = pairs
         .iter()
         .find(|(k, _)| k == "page")
@@ -261,7 +261,7 @@ pub(in crate::domains::templates) async fn get(
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     let result = s.studio.get(id).await?.ok_or_else(absent)?;
     Ok(private(
@@ -273,7 +273,7 @@ pub(in crate::domains::templates) async fn delete(
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["expectedRevision"])?;
+    let pairs = query(request.uri(), &["expectedRevision"])?;
     let expected_revision = pairs
         .iter()
         .find(|(key, _)| key == "expectedRevision")
@@ -291,7 +291,7 @@ pub(in crate::domains::templates) async fn preview(
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     let preview = s.studio.preview(id.clone()).await?;
     let Some(p) = preview else {
@@ -325,7 +325,7 @@ pub(in crate::domains::templates) async fn asset(
     Path((id, asset)): Path<(String, String)>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     validate_id(&asset)?;
     let asset = s.studio.asset(id, asset).await?.ok_or_else(absent)?;
@@ -360,7 +360,7 @@ pub(in crate::domains::templates) async fn retry_processing(
     request: Request,
 ) -> SlideResult<Response> {
     validate_id(&id)?;
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(request.headers(), "application/json", 1024)?;
     let input: serde_json::Value = serde_json::from_slice(&bytes(request, 1024).await?)
         .map_err(|_| invalid("Retry requires an empty JSON object."))?;
@@ -379,11 +379,7 @@ pub(in crate::domains::templates) async fn retrieval(
     request: Request,
 ) -> SlideResult<Response> {
     validate_id(&id)?;
-    let pairs = query(
-        request.uri(),
-        request.headers(),
-        &["metadata", "embeddings"],
-    )?;
+    let pairs = query(request.uri(), &["metadata", "embeddings"])?;
     let flag = |name: &str| -> SlideResult<bool> {
         match pairs
             .iter()
@@ -408,7 +404,7 @@ pub(in crate::domains::templates) async fn insert(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(request.headers(), "multipart/form-data", 76 * 1024 * 1024)?;
     let (parts, body) = request.into_parts();
     let request = Request::from_parts(parts, body);

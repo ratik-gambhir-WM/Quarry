@@ -1,6 +1,6 @@
 # Backend validation and authorization boundaries
 
-Current storage is fresh PostgreSQL schema 5 with pgvector as the only canonical and search store;
+Current storage is fresh PostgreSQL schema 6 with pgvector as the only canonical and search store;
 All three domains use the same PostgreSQL pool. See
 [PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
