@@ -29,7 +29,7 @@ linking, projects, and a findings API are future work requiring a separate produ
 - There is no product findings model, route, or durable store. `backend/src/domains/diligence/mod.rs`
   documents intended ownership only. The fixture-based file-review findings and slide-template
   finding retrieval are separate features; do not use them as if they were the current deal's
-  findings. No backend, schema, Helix, Tauri IPC, or provider integration is needed for this UI slice.
+  findings. No backend, schema, legacy storage, Tauri IPC, or provider integration is needed for this UI slice.
 - Quarry's shared React/Vite app serves both web and desktop. Reuse the existing semantic tokens,
   current Deal Room card treatment and components under `frontend/src/components/ui/`; use the
   vendored ReUI data-grid already used by the Deal Room and Data Room for the table where its behavior

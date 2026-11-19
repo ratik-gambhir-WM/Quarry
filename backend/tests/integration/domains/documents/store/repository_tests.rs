@@ -46,7 +46,7 @@ async fn test_state() -> PostgresClient {
 
 async fn empty_postgres() -> PostgresClient {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrate(&postgres).await.unwrap();
+    migrate(&postgres, Default::default()).await.unwrap();
     postgres
 }
 

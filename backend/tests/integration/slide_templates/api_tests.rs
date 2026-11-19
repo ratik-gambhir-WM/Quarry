@@ -121,13 +121,6 @@ async fn svg_asset_responses_isolate_active_content() {
             ],
         ).await
         .unwrap();
-    connection
-        .execute(
-            "INSERT INTO app_templates VALUES ('Quarry_WestMonroe', ?1, CURRENT_TIMESTAMP)",
-            ["svg-template"],
-        )
-        .await
-        .unwrap();
     connection.execute(
         "INSERT INTO template_assets (asset_id, template_id, content_type, asset_data) VALUES (?1, ?2, ?3, ?4)",
         crate::pg_params!["svg-asset", "svg-template", "image/svg+xml", svg.as_slice()],
@@ -501,7 +494,7 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
         .expect("template id header");
     assert_eq!(
         headers[header::LOCATION],
-        format!("/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe")
+        format!("/api/v1/templates/slide-templates/catalog/{template_id}")
     );
     assert_eq!(headers["x-powerpoint-warning-count"], "1");
     assert_eq!(headers["x-template-preview-status"], "unavailable");
@@ -562,7 +555,7 @@ async fn import_persists_template_externalizes_asset_and_supports_reexport() {
         ).await
         .expect("seed a legacy zero-sized element");
     let get_request = Request::get(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe"
+        "/api/v1/templates/slide-templates/catalog/{template_id}"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -655,16 +648,9 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
         )
         .await
         .expect("seed template asset");
-    connection
-        .execute(
-            "INSERT INTO app_templates VALUES ('Quarry_WestMonroe',?1,CURRENT_TIMESTAMP)",
-            [template_id],
-        )
-        .await
-        .expect("grant seeded template to default app");
 
     let delete_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -693,7 +679,7 @@ async fn delete_template_removes_json_and_assets_and_returns_not_found_when_repe
     assert_eq!(asset_count, 0);
 
     let repeated_request = Request::delete(format!(
-        "/api/v1/templates/slide-templates/catalog/{template_id}?appId=Quarry_WestMonroe&expectedRevision=1"
+        "/api/v1/templates/slide-templates/catalog/{template_id}?expectedRevision=1"
     ))
     .body(Body::empty())
     .expect("valid request");
@@ -717,7 +703,6 @@ async fn imported_templates_filter_by_kind_and_serve_previews() {
         studio: Arc::new(SlideTemplates::new(
             repository,
             Arc::new(DisabledTemplatePreviewGenerator),
-            None,
             None,
             false,
         )),
@@ -1059,18 +1044,16 @@ impl SlideTemplateEndpoint {
             config.preview,
         );
         Self {
-            studio: Arc::new(SlideTemplates::new(repository, preview, None, None, false)),
+            studio: Arc::new(SlideTemplates::new(repository, preview, None, false)),
         }
     }
 }
 fn compose(endpoint: SlideTemplateEndpoint) -> Router {
     let studio = endpoint.studio;
     let facade = Arc::new(crate::domains::templates::service::TemplateService::new(
-        Some(studio.clone()),
+        Some(studio),
     ));
-    let api = crate::domains::templates::route::routes(facade).merge(
-        crate::domains::templates::slide_templates::route::routes(studio),
-    );
+    let api = crate::domains::templates::route::routes(facade);
     crate::create_router(
         api.layer(axum::Extension(crate::integration_support::test_actor())),
         &crate::AppConfig::default().http,

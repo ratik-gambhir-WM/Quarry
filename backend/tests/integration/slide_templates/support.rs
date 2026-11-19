@@ -1,12 +1,19 @@
 use crate::{adapters::postgres::client::PostgresClient, domains::templates::slide_templates::*};
 use std::{path::Path, sync::Arc};
+/// Template fixtures embed two-dimensional vectors in their own typed column family.
+pub const SCHEMA_DIMENSIONS: crate::app::migrations::SchemaDimensions =
+    crate::app::migrations::SchemaDimensions {
+        shared: 1536,
+        template: 2,
+    };
+
 pub async fn repository(path: &Path) -> anyhow::Result<PostgresTemplateRepository> {
     let client = if path == std::path::Path::new(":memory:") {
         PostgresClient::test_database().await?
     } else {
         PostgresClient::test_database_at(path).await?
     };
-    crate::app::migrations::migrate(&client).await?;
+    crate::app::migrations::migrate(&client, SCHEMA_DIMENSIONS).await?;
     let has_user = client
         .with_connection(async |connection| {
             connection
@@ -23,7 +30,6 @@ pub async fn repository(path: &Path) -> anyhow::Result<PostgresTemplateRepositor
             .await;
     }
     let repository = PostgresTemplateRepository::new(client).user_scope(1)?;
-    repository.ensure_app("Quarry_WestMonroe", None).await?;
     Ok(repository)
 }
 pub async fn import_fixture(
@@ -44,7 +50,6 @@ pub async fn studio() -> Arc<SlideTemplates> {
     Arc::new(SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
-        None,
         None,
         false,
     ))

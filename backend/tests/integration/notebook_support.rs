@@ -63,7 +63,9 @@ impl SavePipeline for FakePipeline {
 }
 pub(crate) async fn database() -> PostgresClient {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     crate::integration_support::seed_identity(&postgres, "one@example.invalid", 'a').await;
     crate::integration_support::seed_identity(&postgres, "two@example.invalid", 'b').await;
     postgres

@@ -1,4 +1,4 @@
-//! SQL document retrieval has no Helix dependency, including authorization and deletion.
+//! SQL document retrieval is PostgreSQL-owned, including authorization and deletion.
 use crate::domains::documents::test_support::*;
 #[tokio::test]
 async fn sql_document_search_filters_membership_before_limits_and_keeps_wire_metadata() {

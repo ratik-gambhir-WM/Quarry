@@ -42,7 +42,7 @@ local port:
 | shared API contract or transport | frontend web + desktop checks; backend checks; Tauri checks if relay/native code changed |
 | `frontend/src-tauri/**` | Tauri Rust checks plus frontend desktop typecheck/boundary checks |
 | `backend/**` | backend Rust checks; runtime smoke only with explicit disposable dependencies |
-| schema/Helix/migration | focused invariant tests plus full backend gates; no real data or destructive utility |
+| schema/vector/migration | focused invariant tests plus full backend gates; no real data or destructive utility |
 | docs/agent skills only | structural/content checks, links/paths, skill validation, `git diff --check` |
 
 There is no root test command and no CI-equivalent wrapper. Verify each touched build root.
@@ -116,9 +116,8 @@ that a check runs before a provider call, job start, or mutation.
 live under `backend/tests/integration/**`. Both are manually included modules, so do not use
 `cargo test --test <filename>`. Confirm a new test file is actually included.
 
-Do not use `cargo run` as a build check. It initializes/validates the selected PostgreSQL schema, requires live Helix, and
-initializes indexes. Runtime smoke testing is authorized only when the task needs it and the
-database/configuration is explicitly disposable. Never run `clear_helix` as verification.
+Do not use `cargo run` as a build check. It initializes/validates the selected PostgreSQL schema and resumes durable template stages. Runtime smoke testing is authorized only when the task needs it and the
+database/configuration is explicitly disposable. Never run destructive storage maintenance as verification.
 
 ## Tauri ladder
 
@@ -163,7 +162,7 @@ Do not claim contract compatibility from compilation alone.
 - Use real isolated schemas in a separately selected PostgreSQL database ending in `_test`, plus fake/test clients where appropriate. Tests never reset `Quarry`.
 - Do not read, copy, mutate, or delete `backend/data/` as verification.
 - Do not initialize incompatible or valuable data. Fresh-schema setup and restart validation must never delete records.
-- Do not call live OpenAI, Helix, WM AI, Microsoft Graph, or LibreOffice unless the task explicitly
+- Do not call live OpenAI, WM AI, Microsoft Graph, or LibreOffice unless the task explicitly
   requires an integration test and the environment/side effects are authorized.
 - Do not print `.env`, secrets, document contents, user email, or absolute sensitive paths.
 - If an external integration is unavailable, verify construction/mapping with unit tests and state
@@ -220,8 +219,7 @@ For PostgreSQL changes, include actual constraints/rollback, read snapshots, bou
 write-lease lifetime/loss, read independence before/during/after writer loss, concurrent resource
 lock/CAS primitives and captured template lexical parity. The global production write guard remains;
 test-only unguarded transactions prove primitives, not completed multi-instance domain safety.
-Domain claims/recovery and remote fencing still need their own integration evidence. Run retained
-cross-store compatibility tests only against an explicitly selected fresh Helix instance. Preserve
+Domain claims/recovery and remote fencing still need their own integration evidence. Preserve
 and report ownership of validation processes/ports, containers, volumes and schemas; clean only
 those created by the current task. See `docs/postgresql-storage.md`.
 
@@ -233,5 +231,5 @@ separate `quarry_extensions` schema of the selected `_test` database. Follow
 `reset_postgres --confirm-reset` utility as verification. Cover complete multi-batch rollback,
 deferred failure, old/new snapshots, cancellation, immutable image input, token/DB-clock fencing,
 identity convergence, profile/current authorization and legacy DTO/fusion behavior. Document
-repositories must have no Helix dependency; template Helix behavior is retained. Report
+repositories and template vector pairs must use PostgreSQL exclusively. Report
 large-corpus relevance/load and alternative-ranker evidence separately from correctness tests.

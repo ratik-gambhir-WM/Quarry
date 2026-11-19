@@ -70,11 +70,7 @@ fn worker(
             embedding_timeout: Duration::from_millis(30),
             lease_padding: Duration::from_millis(100),
             retry_base: Duration::ZERO,
-            now: Arc::new(Utc::now),
             random: Arc::new(|| 0.0),
-            import: Arc::new(ImportService::new(repository.clone())),
-            projection: None,
-            mutations: Arc::new(tokio::sync::Mutex::new(())),
             repository,
             service,
         },
@@ -92,7 +88,7 @@ async fn queue(repository: Arc<PostgresTemplateRepository>) -> String {
         .template_id
 }
 async fn terminal(repository: &PostgresTemplateRepository, id: &str) -> StoredSlideClassification {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             let state = repository
                 .find_slide_classification(id)
@@ -224,13 +220,11 @@ async fn worker_recovers_durable_pending_jobs_and_expired_leases_after_reopen() 
     let (pending, expired) = {
         let repo = Arc::new(support::repository(&path).await.unwrap());
         let first = queue(repo.clone()).await;
-        repo.claim_next_slide_classification(
-            "2020-01-01T00:00:00.000Z",
-            "2020-01-01T00:01:00.000Z",
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        // A zero-second database-clock lease is already expired after restart.
+        repo.claim_next_slide_classification(0)
+            .await
+            .unwrap()
+            .unwrap();
         let second = queue(repo).await;
         (second, first)
     };
@@ -372,13 +366,10 @@ async fn future_leases_are_recovered_without_another_notification() {
             .unwrap(),
     );
     let id = queue(repo.clone()).await;
-    repo.claim_next_slide_classification(
-        &iso(Utc::now()),
-        &iso(Utc::now() + chrono::Duration::milliseconds(100)),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    repo.claim_next_slide_classification(1)
+        .await
+        .unwrap()
+        .unwrap();
     let worker = worker(
         repo.clone(),
         Arc::new(support::FixtureClassifier),

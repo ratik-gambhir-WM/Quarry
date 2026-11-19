@@ -17,33 +17,17 @@ pub(super) fn validate_id(id: &str) -> SlideResult<()> {
     Ok(())
 }
 
-pub(super) fn query(
-    uri: &axum::http::Uri,
-    headers: &HeaderMap,
-    allowed: &[&str],
-) -> SlideResult<Vec<(String, String)>> {
+pub(super) fn query(uri: &axum::http::Uri, allowed: &[&str]) -> SlideResult<Vec<(String, String)>> {
     let pairs = url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
         .into_owned()
         .collect::<Vec<_>>();
-    for (index, (key, value)) in pairs.iter().enumerate() {
-        if key == "appId" {
-            if value != super::super::APP_ID {
-                return Err(invalid("The application scope is fixed by the server."));
-            }
-        } else if !allowed.contains(&key.as_str()) {
+    for (index, (key, _)) in pairs.iter().enumerate() {
+        if !allowed.contains(&key.as_str()) {
             return Err(invalid("The query contains an unsupported parameter."));
         }
         if pairs[..index].iter().any(|(k, _)| k == key) {
             return Err(invalid("Query parameters must not be repeated."));
         }
-    }
-    let app_headers = headers.get_all("x-app-id").iter().collect::<Vec<_>>();
-    if app_headers.len() > 1
-        || app_headers
-            .first()
-            .is_some_and(|h| h.to_str().ok() != Some(super::super::APP_ID))
-    {
-        return Err(invalid("The application scope is fixed by the server."));
     }
     Ok(pairs)
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::Router;
 
 use crate::{
-    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
+    adapters::postgres::client::PostgresClient,
     app::{
         bootstrap::{test_support::assemble_api, BootstrapError},
         config::AppConfig,
@@ -27,15 +27,12 @@ pub(crate) async fn test_application() -> Result<TestApplication, BootstrapError
     let postgres = PostgresClient::test_database()
         .await
         .map_err(BootstrapError::Postgres)?;
-    migrations::migrate(&postgres)
+    migrations::migrate(&postgres, Default::default())
         .await
         .map_err(BootstrapError::Migration)?;
-    let helix =
-        Arc::new(HelixClient::from_config(&config.helix).map_err(BootstrapError::HelixClient)?);
     let api = assemble_api(
         &config,
         postgres.clone(),
-        helix,
         reqwest::Client::new(),
         prompt_catalog(),
     );

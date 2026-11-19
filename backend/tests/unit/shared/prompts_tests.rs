@@ -7,10 +7,6 @@ fn loads_the_checked_in_catalog_and_keeps_required_prompt_bodies() {
     let catalog = PromptCatalog::load(Path::new("prompts")).unwrap();
 
     assert_eq!(
-        catalog.prompt(PromptId::HelixQueryExample),
-        "What is capital of Ohio and how was it founded?"
-    );
-    assert_eq!(
         catalog.prompt(PromptId::DefaultResponse),
         "Provide a helpful response."
     );
@@ -22,8 +18,8 @@ fn loads_the_checked_in_catalog_and_keeps_required_prompt_bodies() {
 #[test]
 fn parser_rejects_an_entry_without_a_text_fence() {
     let error = parse_asset(
-        "company_research.md",
-        "---\nschemaVersion: 1\ntitle: Test\nowner: quarry\n---\n## helix-query-example\n",
+        "document_summary.md",
+        "---\nschemaVersion: 1\ntitle: Test\nowner: quarry\n---\n## summary-system\n",
     )
     .unwrap_err();
 

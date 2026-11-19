@@ -11,6 +11,10 @@ impl TemplateService {
     pub fn new(studio: Option<Arc<super::slide_templates::SlideTemplates>>) -> Self {
         Self { studio }
     }
+    pub(super) fn studio(&self) -> Option<&Arc<super::slide_templates::SlideTemplates>> {
+        self.studio.as_ref()
+    }
+
     pub(crate) fn for_user(&self, user_id: i64) -> ServiceResult<Self> {
         match &self.studio {
             Some(studio) => Ok(Self::new(Some(Arc::new(

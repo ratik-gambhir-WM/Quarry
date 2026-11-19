@@ -8,7 +8,9 @@ use crate::{app::migrations, domains::memberships::repository::MembershipReposit
 #[tokio::test]
 async fn final_search_snapshot_excludes_foreign_deleted_historical_and_revoked_results() {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     sqlx::query(
         "ALTER TABLE document_identity_manifests DISABLE TRIGGER verify_document_search_set",
     )

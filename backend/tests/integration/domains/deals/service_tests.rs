@@ -29,7 +29,7 @@ fn input() -> SaveDealInput {
 #[tokio::test]
 async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrate(&postgres).await.unwrap();
+    migrate(&postgres, Default::default()).await.unwrap();
     let users_repository = UserRepository::new(postgres.clone());
     let users = UserService::new(users_repository.clone());
     let deals = DealService::new(
@@ -76,7 +76,7 @@ async fn saves_core_deal_and_empty_metadata_in_the_first_call() {
 #[tokio::test]
 async fn failed_extraction_preserves_metadata_revision_and_allows_retry() {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrate(&postgres).await.unwrap();
+    migrate(&postgres, Default::default()).await.unwrap();
     let users_repository = UserRepository::new(postgres.clone());
     let users = UserService::new(users_repository.clone());
     let deals_repository = DealRepository::new(postgres);
@@ -164,7 +164,7 @@ async fn extraction_retry_commits_once_and_rejects_edits_made_during_provider_wo
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrate(&postgres).await.unwrap();
+    migrate(&postgres, Default::default()).await.unwrap();
     let users_repository = UserRepository::new(postgres.clone());
     UserService::new(users_repository.clone())
         .create(AddUserInput {

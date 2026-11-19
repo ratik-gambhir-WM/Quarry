@@ -13,8 +13,7 @@ const DEFAULT_API_PORT: u16 = 3001;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_CORS_ORIGINS: &str = "http://127.0.0.1:1420,http://localhost:1420";
 
-const DEFAULT_HELIX_URL: &str = "http://127.0.0.1:6970";
-const DEFAULT_HELIX_VECTOR_DIMENSION: usize = 1536;
+const DEFAULT_EMBEDDING_DIMENSION: usize = 1536;
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
@@ -57,10 +56,9 @@ pub struct PostgresConfig {
     pub statement_timeout: Duration,
 }
 
+/// Shared document/notebook PostgreSQL vector dimension. Templates configure their own.
 #[derive(Clone, Debug)]
-pub struct HelixConfig {
-    pub url: String,
-    pub api_key: Option<SecretString>,
+pub struct EmbeddingConfig {
     pub vector_dimension: NonZeroUsize,
 }
 
@@ -113,7 +111,7 @@ pub struct PromptConfig {
 pub struct AppConfig {
     pub http: HttpConfig,
     pub postgres: PostgresConfig,
-    pub helix: HelixConfig,
+    pub embeddings: EmbeddingConfig,
     pub openai: Option<OpenAiConfig>,
     pub wm_ai: Option<WmAiConfig>,
     pub data_room: DataRoomConfig,
@@ -142,13 +140,13 @@ impl AppConfig {
             .map(|(key, value)| (key.into(), value.into()))
             .collect::<HashMap<_, _>>();
 
-        let helix = parse_helix_config(&values)?;
-        let openai = parse_openai_config(&values, helix.vector_dimension)?;
+        let embeddings = parse_embedding_config(&values)?;
+        let openai = parse_openai_config(&values, embeddings.vector_dimension)?;
 
         Ok(Self {
             http: parse_http_config(&values)?,
             postgres: parse_postgres_config(&values)?,
-            helix,
+            embeddings,
             openai,
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
@@ -179,11 +177,9 @@ impl Default for AppConfig {
                 acquire_timeout: Duration::from_secs(5),
                 statement_timeout: Duration::from_secs(30),
             },
-            helix: HelixConfig {
-                url: DEFAULT_HELIX_URL.to_string(),
-                api_key: None,
-                vector_dimension: NonZeroUsize::new(DEFAULT_HELIX_VECTOR_DIMENSION)
-                    .expect("default Helix vector dimension is non-zero"),
+            embeddings: EmbeddingConfig {
+                vector_dimension: NonZeroUsize::new(DEFAULT_EMBEDDING_DIMENSION)
+                    .expect("default embedding dimension is non-zero"),
             },
             openai: None,
             wm_ai: None,
@@ -301,23 +297,18 @@ fn parse_postgres_config(values: &HashMap<String, String>) -> Result<PostgresCon
     })
 }
 
-fn parse_helix_config(values: &HashMap<String, String>) -> Result<HelixConfig, String> {
-    let url = value(values, "HELIX_URL")
-        .unwrap_or(DEFAULT_HELIX_URL)
-        .to_string();
-    validate_helix_base_url(&url)?;
+fn parse_embedding_config(values: &HashMap<String, String>) -> Result<EmbeddingConfig, String> {
     let vector_dimension = parse_value(
         values,
-        "HELIX_VECTOR_DIMENSION",
-        DEFAULT_HELIX_VECTOR_DIMENSION,
+        "QUARRY_EMBEDDING_DIMENSION",
+        DEFAULT_EMBEDDING_DIMENSION,
     )?;
-    let vector_dimension = NonZeroUsize::new(vector_dimension)
-        .ok_or_else(|| "HELIX_VECTOR_DIMENSION must be greater than zero".to_string())?;
-    Ok(HelixConfig {
-        url,
-        api_key: value(values, "HELIX_API_KEY").map(SecretString::new),
-        vector_dimension,
-    })
+    if !(1..=16_000).contains(&vector_dimension) {
+        return Err("QUARRY_EMBEDDING_DIMENSION must be in 1..=16000".into());
+    }
+    let vector_dimension =
+        NonZeroUsize::new(vector_dimension).ok_or("invalid embedding dimension")?;
+    Ok(EmbeddingConfig { vector_dimension })
 }
 
 fn parse_openai_config(
@@ -344,7 +335,7 @@ fn parse_openai_config(
         _ => None,
     };
     if max_dimensions.is_some_and(|maximum| embedding_dimensions.get() > maximum) {
-        return Err("HELIX_VECTOR_DIMENSION exceeds the selected OPENAI_EMBEDDING_MODEL's supported dimensions".into());
+        return Err("QUARRY_EMBEDDING_DIMENSION exceeds the selected OPENAI_EMBEDDING_MODEL's supported dimensions".into());
     }
     Ok(Some(OpenAiConfig {
         api_key: SecretString::new(api_key),
@@ -494,26 +485,6 @@ fn validate_url(name: &str, value: &str) -> Result<(), String> {
         .map_err(|error| format!("invalid {name}: {error}"))
 }
 
-fn validate_helix_base_url(value: &str) -> Result<(), String> {
-    let parsed =
-        reqwest::Url::parse(value).map_err(|error| format!("invalid HELIX_URL: {error}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err("HELIX_URL must be an HTTP(S) instance base URL".to_string());
-    }
-    if !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || parsed.path() != "/"
-    {
-        return Err(
-            "HELIX_URL must be an instance base URL without a path, credentials, query, or fragment"
-                .to_string(),
-        );
-    }
-    Ok(())
-}
-
 fn normalize_deal_config_key(deal_id: &str) -> String {
     deal_id
         .chars()
@@ -585,8 +556,8 @@ fn parse_slide_templates_config(
         _ => return Err("QUARRY_SLIDE_TEMPLATES_PREVIEW must be disabled or chromium".into()),
     };
     let dimensions = parse_value(values, "OPENAI_SLIDE_EMBEDDING_DIMENSIONS", 1536usize)?;
-    if !(1..=16_384).contains(&dimensions) {
-        return Err("OPENAI_SLIDE_EMBEDDING_DIMENSIONS must be in 1..=16384".into());
+    if !(1..=16_000).contains(&dimensions) {
+        return Err("OPENAI_SLIDE_EMBEDDING_DIMENSIONS must be in 1..=16000".into());
     }
     let embedding_dimensions =
         NonZeroUsize::new(dimensions).ok_or("invalid slide embedding dimensions")?;

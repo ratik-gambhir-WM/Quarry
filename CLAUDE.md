@@ -64,16 +64,16 @@ not exist.
 ### Embedded templates
 
 - Templates run only inside Axum through `domains/templates/slide_templates`, with native
-  conversion, Chromium/CDP previews, shared durable PostgreSQL and Helix metadata/dual-vector
-  projection. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
+  conversion, Chromium/CDP previews and shared durable PostgreSQL/pgvector storage: claim-fenced
+  classification/lexical publication and typed subject/capability vector pairs. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
   the shared read-only SVG render surface.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
 - `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 2, checksums and catalog fingerprints.
+  `app/migrations.rs` initializes/validates version 5, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
-  schemas. Old SQLite files and Helix stores remain untouched; no import, fallback or reset exists.
+  schemas. Old SQLite files and retired graph stores remain untouched; no import, fallback or reset exists.
 - Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
@@ -145,11 +145,12 @@ request -> router -> handler -> service -> repository/client
 
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
-- Helix remains the graph/search projection, required at normal startup. Ingestion commits
-  PostgreSQL before indexing; graph failure preserves canonical records and exact-content retry
-  reuses the same identity and accepted image text. There is no distributed transaction or general
-  bulk reindex tool. Never delete canonical rows to conceal a graph failure.
-- PostgreSQL schema version 2 adds bounded resource revisions and retained deal lifecycle guards
+- Since schema 5, PostgreSQL with pgvector is the only canonical and search store for
+  documents, notebooks and templates; no route, worker or startup step opens a graph connection and
+  the launcher needs no Docker. Template stages use opaque claim tokens and database-clock leases; a
+  ready template has exactly its current subject and capability vectors (deferred pair check).
+  Never delete retained graph stores/volumes without separate authorization.
+- PostgreSQL schema version 5 adds bounded resource revisions and retained deal lifecycle guards
   to the former marker-18 layout. Version 1 is intentionally unsupported; select an empty database. Startup
   initializes an empty selected schema or validates its version, checksum, live catalog and owner/
   document readiness invariants. Incompatible nonempty layouts fail without deletion. No old-data
@@ -166,18 +167,17 @@ request -> router -> handler -> service -> repository/client
   multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
   BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
-  document and template Helix projection/search contracts remain unchanged.
+  template semantic ranking is exact SQL cosine with the existing fusion/tie policy in Rust.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
-- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook indexes. Template vector
-  dimensions are configured independently. A configuration change does not resize existing indexes;
+- Keep `QUARRY_EMBEDDING_DIMENSION` aligned with both document and notebook vector columns. Template vectors use
+  `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` as an independently rendered `vector(T)` family. A configuration change does not resize existing indexes;
   do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
   a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
   `docs/postgresql-storage.md` for the verified-empty-index case.
-- `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
-  drained operational procedure; never use it as verification. Document jobs/caches remain in memory.
-- See `docs/postgresql-storage.md` for server-only URL/pool configuration, fresh local graph port
-  6970, isolated PostgreSQL tests, backups and recovery.
+- Document jobs retain durable SQL inputs, attempts and results; preview caches remain in memory.
+- See `docs/postgresql-storage.md` for server-only URL/pool configuration, isolated PostgreSQL
+  tests, backups and recovery.
 
 ## Frontend development rules
 
@@ -348,7 +348,7 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 suites live under `backend/tests/integration/`. Both are included manually with `#[path]`. Use
 `cargo test <name-filter>` for focused tests. Do not invent `cargo test --test <file>` commands.
 
-Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and connects to Helix. Tests never reset the development database.
+Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and resumes durable template stages. Tests never reset the development database.
 
 ### Tauri shell (`frontend/src-tauri/`)
 
@@ -366,8 +366,8 @@ normal code check.
 
 The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
 embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped, check
-the configured database connection, and ensure Docker Desktop and the configured local Helix
-container are ready. PostgreSQL, Docker, and Helix remain running after the launcher exits.
+the configured database connection. Docker is not required. PostgreSQL remains running after the
+launcher exits.
 
 ### When changing a frontend route or feature
 
@@ -391,7 +391,7 @@ container are ready. PostgreSQL, Docker, and Helix remain running after the laun
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 
-### When changing PostgreSQL or Helix data shape
+### When changing PostgreSQL data shape
 
 - Define canonical ownership and stable IDs before coding.
 - Make forward migration and rollback/recovery behavior explicit.
@@ -432,14 +432,14 @@ Do not hand-edit or commit generated/local outputs unless the task explicitly re
 
 - `frontend/node_modules/`, `frontend/dist/`
 - `frontend/src-tauri/target/`, `frontend/src-tauri/gen/schemas/`
-- `backend/target/`, `backend/data/`, `backend/.helix/`
+- `backend/target/`, `backend/data/`
 - local `.env*` files and `*.log`
 
 `frontend/tsconfig.node.tsbuildinfo` is tracked even though it is generated. Never edit it by
 hand; review any regeneration carefully.
 
 The duplicate icons under `backend/icons/`, empty/stale backend capability artifacts, and
-`backend/helix.toml` naming are not proven product contracts. Resolve ownership before expanding
+any ignored retired storage remnants are not proven product contracts. Resolve ownership before expanding
 or deleting them.
 
 ## Documentation rules

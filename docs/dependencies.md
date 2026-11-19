@@ -25,8 +25,7 @@ its APIs to the versions resolved in Quarry's lockfiles.
 | [Rig](https://rig.rs/docs) (`rig-core`, imported as `rig`) | OpenAI Responses requests, streaming, structured output and embeddings | [adapters/openai/](../backend/src/adapters/openai/), [template providers](../backend/src/adapters/slide_templates/providers.rs) |
 | [reqwest](https://docs.rs/reqwest/) | HTTP transport for other server integrations; Rig owns its own bundled provider transport | [WM AI client](../backend/src/adapters/wm_ai/client.rs), [SharePoint adapter](../backend/src/adapters/sharepoint/) |
 | [SQLx](https://docs.rs/sqlx/) | Async PostgreSQL connections and transactions behind Quarry's typed query builders | [adapters/postgres/](../backend/src/adapters/postgres/), [schema.sql](../backend/src/app/schema.sql), [migrations.rs](../backend/src/app/migrations.rs) |
-| [pgvector Rust client](https://github.com/pgvector/pgvector-rust), [pgvector extension](https://github.com/pgvector/pgvector) | PostgreSQL vector encoding and document/notebook cosine retrieval | [vector.rs](../backend/src/adapters/postgres/vector.rs), [document search repository](../backend/src/domains/documents/store/search_repository.rs), [notebook search repository](../backend/src/domains/notebooks/search_repository.rs) |
-| [HelixDB Rust client](https://github.com/HelixDB/helix-db/tree/main/sdks/rust), [HelixDB docs](https://docs.helix-db.com/) | Embedded-template graph/vector projections; documents and notebooks use PostgreSQL | [adapters/helix/](../backend/src/adapters/helix/), [template graph](../backend/src/domains/templates/slide_templates/graph.rs) |
+| [pgvector Rust client](https://github.com/pgvector/pgvector-rust), [pgvector extension](https://github.com/pgvector/pgvector) | PostgreSQL vector encoding and document/notebook/template cosine retrieval | [vector.rs](../backend/src/adapters/postgres/vector.rs), [document search repository](../backend/src/domains/documents/store/search_repository.rs), [notebook search repository](../backend/src/domains/notebooks/search_repository.rs) |
 | [Serde](https://serde.rs/), [serde_json](https://docs.rs/serde_json/) | Typed JSON requests, responses and stored documents | Domain-owned models under [domains/](../backend/src/domains/) |
 | [Argon2](https://docs.rs/argon2/), [sha2](https://docs.rs/sha2/) | Password hashing, session-token digests and content identities | [identity service](../backend/src/domains/identity/service.rs), [shared/ids.rs](../backend/src/shared/ids.rs) |
 | [tracing](https://docs.rs/tracing/), [tracing-subscriber](https://docs.rs/tracing-subscriber/) | Structured diagnostics and logging configuration | [main.rs](../backend/src/main.rs); instrumentation across [backend/src/](../backend/src/) |
@@ -89,7 +88,7 @@ lockfile and existing `.npmrc`; this guide does not prescribe upgrades.
 | [LibreOffice](https://www.libreoffice.org/) | External Office-to-PDF conversion executable | [adapters/office/](../backend/src/adapters/office/) |
 | [Chromium DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/), [tungstenite](https://docs.rs/tungstenite/) | Installed Chromium browser controlled over WebSocket for template preview capture | [adapters/slide_templates/preview/](../backend/src/adapters/slide_templates/preview/) |
 
-PostgreSQL, its pgvector extension, Helix, LibreOffice and Chromium have runtime setup requirements
+PostgreSQL, its pgvector extension, LibreOffice and Chromium have runtime setup requirements
 beyond installing Rust/npm packages. See [Getting Started](../Getting%20Started.md),
 [PostgreSQL storage](postgresql-storage.md) and the
 [architecture configuration reference](ARCHITECTURE.md#11-configuration).

@@ -393,10 +393,11 @@ CREATE INDEX idx_notebook_chunks_profile ON notebook_chunks(profile_id,set_id);
 
 CREATE TABLE templates (
     revision BIGINT NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
- catalog_sequence BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
-                 template_id TEXT COLLATE "C" PRIMARY KEY,
-                 template_json TEXT COLLATE "C" NOT NULL CHECK ((template_json IS JSON))
-             , owner_user_id BIGINT REFERENCES users(id) ON DELETE RESTRICT);
+    catalog_sequence BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
+    template_id TEXT COLLATE "C" PRIMARY KEY,
+    template_json TEXT COLLATE "C" NOT NULL CHECK ((template_json IS JSON)),
+    owner_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT
+);
 
 CREATE TABLE template_assets (
                  asset_id TEXT COLLATE "C" PRIMARY KEY,
@@ -425,17 +426,17 @@ CREATE TABLE template_previews (
                  FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
              );
 
-CREATE TABLE apps (
-                 app_id TEXT COLLATE "C" PRIMARY KEY, display_name TEXT COLLATE "C" NOT NULL,
-                 metadata_json TEXT COLLATE "C" NOT NULL CHECK((metadata_json IS JSON)),
-                 created_at TEXT COLLATE "C" NOT NULL, last_seen_at TEXT COLLATE "C" NOT NULL
-             );
-
-CREATE TABLE app_templates (
-                 app_id TEXT COLLATE "C" NOT NULL REFERENCES apps(app_id) ON DELETE CASCADE,
-                 template_id TEXT COLLATE "C" NOT NULL REFERENCES templates(template_id) ON DELETE CASCADE,
-                 created_at TEXT COLLATE "C" NOT NULL, PRIMARY KEY(app_id, template_id)
-             );
+-- Template stage claims use opaque attempt tokens and database-clock epoch-second deadlines.
+-- Retry schedules are also database-clock epoch seconds; the API formats them as ISO text.
+CREATE TABLE template_embedding_profiles (
+        profile_id TEXT COLLATE "C" PRIMARY KEY CHECK(length(profile_id)=64),
+        provider TEXT COLLATE "C" NOT NULL CHECK(provider='openai'),
+        model TEXT COLLATE "C" NOT NULL CHECK(length(model) BETWEEN 1 AND 200),
+        dimensions BIGINT NOT NULL CHECK(dimensions BETWEEN 1 AND 16000),
+        metric TEXT COLLATE "C" NOT NULL CHECK(metric='cosine'),
+        preparation_version BIGINT NOT NULL CHECK(preparation_version=1),
+        UNIQUE(profile_id, dimensions)
+    );
 
 CREATE TABLE "template_classification_status" (
         template_id TEXT COLLATE "C" PRIMARY KEY,
@@ -446,28 +447,46 @@ CREATE TABLE "template_classification_status" (
         content_density TEXT COLLATE "C" CHECK (content_density IS NULL OR content_density IN ('low', 'medium', 'high')),
         embedding_status TEXT COLLATE "C" NOT NULL DEFAULT 'not_ready' CHECK (embedding_status IN ('not_ready', 'pending', 'processing', 'ready', 'failed')),
         subject_embedding_document TEXT COLLATE "C",
-        subject_embedding BYTEA,
         subject_embedding_fingerprint TEXT COLLATE "C",
         capability_embedding_document TEXT COLLATE "C",
-        capability_embedding BYTEA,
         capability_embedding_fingerprint TEXT COLLATE "C",
-        embedding_model TEXT COLLATE "C",
-        embedding_dimensions BIGINT CHECK (embedding_dimensions IS NULL OR embedding_dimensions > 0),
-        embedding_attempt_count BIGINT NOT NULL DEFAULT 0,
-        embedding_next_attempt_at TEXT COLLATE "C",
-        embedding_lease_expires_at TEXT COLLATE "C",
+        embedding_profile_id TEXT COLLATE "C" REFERENCES template_embedding_profiles(profile_id),
+        embedding_attempt_count BIGINT NOT NULL DEFAULT 0 CHECK (embedding_attempt_count >= 0),
+        embedding_next_attempt_at BIGINT,
+        embedding_claim_token TEXT COLLATE "C",
+        embedding_lease_until BIGINT,
         embedding_last_error_code TEXT COLLATE "C",
         input_fingerprint TEXT COLLATE "C" NOT NULL,
         classified_fingerprint TEXT COLLATE "C",
         schema_version BIGINT NOT NULL CHECK (schema_version = 2),
         prompt_version TEXT COLLATE "C" NOT NULL,
         model TEXT COLLATE "C",
-        attempt_count BIGINT NOT NULL DEFAULT 0,
-        next_attempt_at TEXT COLLATE "C",
-        lease_expires_at TEXT COLLATE "C",
+        attempt_count BIGINT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        next_attempt_at BIGINT,
+        claim_token TEXT COLLATE "C",
+        lease_until BIGINT,
         classified_at TEXT COLLATE "C",
         last_error_code TEXT COLLATE "C",
-        FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE
+        FOREIGN KEY (template_id) REFERENCES templates(template_id) ON DELETE CASCADE,
+        CHECK ((status = 'processing') = (claim_token IS NOT NULL AND lease_until IS NOT NULL)),
+        CHECK ((embedding_status = 'processing') = (embedding_claim_token IS NOT NULL AND embedding_lease_until IS NOT NULL)),
+        CHECK ((embedding_status = 'ready') = (embedding_profile_id IS NOT NULL)),
+        CHECK (embedding_status IN ('not_ready', 'failed') OR (subject_embedding_document IS NOT NULL
+            AND subject_embedding_fingerprint IS NOT NULL AND capability_embedding_document IS NOT NULL
+            AND capability_embedding_fingerprint IS NOT NULL))
+    );
+
+-- One typed vector per role for the current classification. A ready pair is validated at commit.
+CREATE TABLE template_embeddings (
+        template_id TEXT COLLATE "C" NOT NULL REFERENCES "template_classification_status"(template_id) ON DELETE CASCADE,
+        role TEXT COLLATE "C" NOT NULL CHECK (role IN ('subject', 'capability')),
+        profile_id TEXT COLLATE "C" NOT NULL,
+        dimensions BIGINT NOT NULL,
+        input_fingerprint TEXT COLLATE "C" NOT NULL,
+        embedding quarry_extensions.vector(TEMPLATE_VECTOR_DIMENSIONS) NOT NULL CHECK(quarry_extensions.vector_norm(embedding)>0)
+            CHECK((embedding OPERATOR(quarry_extensions.<=>) embedding) BETWEEN 0 AND 0.00001),
+        PRIMARY KEY (template_id, role),
+        FOREIGN KEY (profile_id, dimensions) REFERENCES template_embedding_profiles(profile_id, dimensions)
     );
 
 CREATE TABLE deal_deletions (
@@ -526,11 +545,13 @@ CREATE INDEX template_assets_template_id_idx
                  ON template_assets (template_id);
 CREATE INDEX template_metadata_kind_created_at_idx
                  ON template_metadata (kind, created_at DESC);
-CREATE INDEX app_templates_template_id_idx ON app_templates(template_id);
 CREATE INDEX slide_classifications_classification_jobs_idx
-        ON "template_classification_status" (status, next_attempt_at, lease_expires_at);
+        ON "template_classification_status" (status, next_attempt_at, lease_until);
 CREATE INDEX slide_classifications_embedding_jobs_idx
-        ON "template_classification_status" (embedding_status, embedding_next_attempt_at, embedding_lease_expires_at);
+        ON "template_classification_status" (embedding_status, embedding_next_attempt_at, embedding_lease_until);
+CREATE INDEX template_embeddings_profile_role_idx ON template_embeddings(profile_id, role, template_id);
+CREATE INDEX slide_classifications_embedding_profile_idx
+        ON "template_classification_status" (embedding_profile_id, template_id) WHERE embedding_status = 'ready';
 CREATE INDEX slide_classifications_schema_idx
         ON "template_classification_status" (schema_version, status, embedding_status);
 CREATE INDEX idx_notebooks_owner_recent
@@ -578,7 +599,7 @@ CREATE TRIGGER retire_deal_identity AFTER DELETE ON deals
     FOR EACH ROW EXECUTE FUNCTION retire_deal_identity();
 
 
--- Document search is one canonical PostgreSQL aggregate, independent of Helix.
+-- Document search is one canonical PostgreSQL aggregate.
 CREATE TABLE document_embedding_profiles (
     profile_id TEXT COLLATE "C" PRIMARY KEY,
     provider TEXT COLLATE "C" NOT NULL CHECK(provider='openai'),
@@ -692,3 +713,33 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_notebook_sear
 CREATE CONSTRAINT TRIGGER verify_notebook_chunk_set
 AFTER INSERT OR UPDATE OR DELETE ON notebook_chunks
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_notebook_search_set();
+
+-- A ready template has exactly the current subject and capability vectors for one profile.
+-- Any other stage has no vectors, so obsolete pairs can never be selected as current.
+CREATE VIEW template_embedding_integrity AS
+SELECT s.template_id
+FROM "template_classification_status" s
+LEFT JOIN template_embeddings e ON e.template_id=s.template_id
+GROUP BY s.template_id,s.embedding_status,s.embedding_profile_id,
+         s.subject_embedding_fingerprint,s.capability_embedding_fingerprint
+HAVING (s.embedding_status<>'ready' AND count(e.role)<>0)
+    OR (s.embedding_status='ready' AND (
+        count(e.role)<>2
+        OR count(*) FILTER (WHERE e.role='subject' AND e.profile_id=s.embedding_profile_id
+            AND e.input_fingerprint=s.subject_embedding_fingerprint)<>1
+        OR count(*) FILTER (WHERE e.role='capability' AND e.profile_id=s.embedding_profile_id
+            AND e.input_fingerprint=s.capability_embedding_fingerprint)<>1));
+CREATE FUNCTION verify_template_embedding_pair() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM template_embedding_integrity WHERE template_id=COALESCE(NEW.template_id,OLD.template_id)) THEN
+        RAISE EXCEPTION 'template embedding pair is incomplete or incompatible' USING ERRCODE='23514';
+    END IF;
+    RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER verify_template_embedding_status
+AFTER INSERT OR UPDATE ON "template_classification_status"
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_template_embedding_pair();
+CREATE CONSTRAINT TRIGGER verify_template_embedding_rows
+AFTER INSERT OR UPDATE OR DELETE ON template_embeddings
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_template_embedding_pair();

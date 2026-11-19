@@ -5,6 +5,7 @@ import { LazyPage } from "./app/LazyPage";
 import { ViewTransition } from "./components/ui/ViewTransition";
 import { AppShell } from "./components/layout/AppShell";
 import { QuarryButton } from "./components/ui/QuarryButton";
+import { Spinner } from "./components/ui/spinner";
 import { ThemeModeProvider } from "./hooks/useThemeMode";
 import { PageMetadata } from "./app/PageMetadata";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -56,9 +57,21 @@ class AuthPage extends Component<{ register?: boolean }, { failed: boolean }> {
       <Suspense
         fallback={
           <AppShell centered showFooter={false}>
-            <p role="status">
-              {register ? "Loading registration…" : "Loading sign in…"}
-            </p>
+            <div
+              aria-live="polite"
+              className="flex flex-col items-center justify-center gap-md py-xl"
+              role="status"
+            >
+              <Spinner
+                aria-hidden="true"
+                aria-label={undefined}
+                className="size-8 text-primary motion-reduce:animate-none"
+                role="presentation"
+              />
+              <p className="type-body-sm text-on-surface-variant">
+                {register ? "Loading registration…" : "Loading sign in…"}
+              </p>
+            </div>
           </AppShell>
         }
       >

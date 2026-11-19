@@ -75,9 +75,11 @@ service locator.
 
 PostgreSQL is the canonical store for users, deals, logical files, immutable file versions, and
 file bytes. Documents additionally commit chunks, pgvector embeddings, lexical metadata and durable
-processing results atomically in PostgreSQL. Helix remains required for template
-projections. This MVP cutover uses a fresh schema, with an explicitly invoked guarded reset;
-there is no populated-data migration or automatic reset. See [document storage](document-storage.md).
+processing results atomically in PostgreSQL. Notebook search sets and template classification,
+lexical postings and typed subject/capability vector pairs are also PostgreSQL-owned; schema 5
+retired the remote graph store entirely, so no graph service, Docker container or remote projection
+is required at startup. This MVP cutover uses a fresh schema, with an explicitly invoked guarded
+reset; there is no populated-data migration or automatic reset. See [document storage](document-storage.md).
 
 Quarry is a tested development foundation, not a production-secure deployment. Username/password
 authentication, revocable sessions, private-resource ownership, deal membership capabilities and bounded local auth throttling are
@@ -117,8 +119,7 @@ flowchart LR
 
     PreviewRunner[Native Chromium/CDP previews]
 
-    PostgreSQL[(PostgreSQL\ncanonical records and blobs)]
-    Helix[(Helix\nversioned graph and search)]
+    PostgreSQL[(PostgreSQL + pgvector\ncanonical records, blobs and search)]
     OpenAI[OpenAI]
     WmAi[WM AI services]
     Office[LibreOffice]
@@ -130,7 +131,6 @@ flowchart LR
     Adapters --> PreviewRunner
     PreviewRunner -->|injected JSON; same-origin assets only| WebUI
     Adapters --> PostgreSQL
-    Adapters --> Helix
     Adapters --> OpenAI
     Adapters --> WmAi
     Adapters --> Office
@@ -165,7 +165,7 @@ Quarry/
 │   ├── src/
 │   │   ├── app/                      configuration, composition, migrations, HTTP shell
 │   │   ├── domains/                  product modules with feature-owned routes and state
-│   │   ├── adapters/                 PostgreSQL, Helix, AI, Office, and SharePoint mechanisms
+│   │   ├── adapters/                 PostgreSQL/pgvector, AI, Office, and SharePoint mechanisms
 │   │   ├── shared/                   small cross-domain primitives and policies
 │   │   └── bin/                      operational and diagnostic utility binaries
 │   ├── tests/
@@ -173,8 +173,7 @@ Quarry/
 │   │   └── integration/              persistence, transport, router, and architecture suites
 │   ├── Cargo.toml                    backend crate manifest
 │   ├── Cargo.lock                    Rust lockfile
-│   ├── .env                          ignored local runtime configuration
-│   └── helix.toml                    local Helix metadata; launcher reads `[local.dev]` image/tag/digest
+│   └── .env                          ignored local runtime configuration
 └── plans/                            tracked, non-canonical implementation plans
 ```
 
@@ -193,38 +192,13 @@ root. Both modes reject conflicting listeners on ports 3001 and 1420. On macOS t
 existing Postgres.app 18 cluster if stopped, with optional `QUARRY_POSTGRES_BIN` and
 `QUARRY_POSTGRES_DATA_DIR` overrides; no cluster or database is created. Axum opens and retains
 its PostgreSQL pool during bootstrap, with no separate connection preflight or `check_database`
-build. Connection failure exits startup before the UI starts. The launcher starts Docker Desktop
-on macOS when its daemon is unavailable and waits for Docker and the Helix service at
-`127.0.0.1:6969`. The launcher first inspects the local container named by
-`QUARRY_HELIX_CONTAINER_NAME`, defaulting to `helix-quarry-v3-dev`. If it is absent, the launcher
-creates it with the digest-pinned image from `backend/helix.toml`'s `[local.dev]` section,
-the `unless-stopped` restart policy, and the loopback-only `127.0.0.1:6969:8080` port mapping.
-The metadata reader accepts whitespace and inline comments.
-The default reuses the existing `helix-quarry-v3-dev` graph; it does not migrate or reset data.
-For a fresh PostgreSQL deployment, explicitly select a separate graph with
-`QUARRY_HELIX_CONTAINER_NAME` and `QUARRY_HELIX_PORT`. Direct backend startup retains its
-port-6970 default; the launcher overrides `HELIX_URL` with its selected port.
-It sets `HELIX_DATA_DIR=/var/lib/helix` and mounts the named Docker volume
-`<container-name>-data` there. Helix's default storage is in memory: `DB_PATH=db/` and a
-restart policy alone do not preserve graph data when the server stops. The data volume is
-independent of the container; preserve it during container replacement and Docker cleanup.
-It starts that named container before waiting for the local runtime's `/healthz` endpoint, so an
-unrelated listener cannot satisfy readiness. Before reusing an existing named container, it compares the
-container image ID with the configured digest and fails without modifying a mismatch. This keeps
-the local Docker topology while preventing a stale v2 runtime from silently serving a v3 SDK. The
-launcher does not recreate or delete an existing container. It also rejects existing containers
-unless disk storage is enabled at `/var/lib/helix` and the expected named volume is mounted there
-read-write; an old memory-backed container requires an explicit operator cutover. Stop product
-writers and preserve/export any live graph before stopping that old container, retain the old
-container under a different name, and create the disk-backed replacement with the original name.
-Previously lost document projections still require exact-byte upload recovery (section 9.3);
-enabling disk storage cannot restore graph data already lost on an earlier stop.
-It then starts `cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001`,
-`HELIX_URL` set to the selected local graph;
+build. Connection failure exits startup before the UI starts. The launcher requires no Docker
+daemon or graph service and never inspects, starts or deletes containers or volumes.
+It then starts `cargo run --locked` from `backend/` with Axum pinned to `127.0.0.1:3001`;
 waits for `/api/v1/health`; and runs either `npm run dev:web` or `npm run dev:desktop` from
 `frontend/`. After Vite serves the internal preview route, the launcher reports readiness.
 The launcher stops the API and UI process groups when either child exits or the launcher
-receives a termination signal. PostgreSQL, Docker Desktop, and Helix remain running. Backend
+receives a termination signal. PostgreSQL remains running. Backend
 configuration, migrations, and Tauri's own `beforeDevCommand` remain owned by their build roots.
 Axum readiness does not require the UI renderer, so Vite can become ready before an import
 requests a screenshot.
@@ -283,7 +257,6 @@ uses the web runtime in its normal test mode unless a test directly exercises th
 | --- | --- | --- |
 | Vite | `http://localhost:1420` | Strict port; `/api` proxies to Axum |
 | Axum | `http://127.0.0.1:3001` | Configurable host/port |
-| Helix | `http://127.0.0.1:6970` | Required during normal backend bootstrap |
 
 An empty browser `VITE_API_BASE_URL` uses Vite's `/api` proxy in development. Static web hosting
 must rewrite application routes to `index.html` because web mode uses normal history URLs.
@@ -356,7 +329,9 @@ pending, with an accessible status announcement and disabled submission/back con
 motion leaves the indicator static; success navigates to the destination and failure restores the
 sign-in action with its error and retry path.
 
-The authentication boundary also catches failed sign-in/registration module loads. Its recovery
+While the sign-in or registration module loads, the authentication boundary shows a centered
+shared spinner and visible status text; reduced motion keeps the spinner static. The
+authentication boundary also catches failed sign-in/registration module loads. Its recovery
 screen keeps the product shell mounted, announces the error, and focuses the recovery heading.
 Reload page reloads the current web URL or desktop hash route, preserving the navigation entry
 while clearing the rejected lazy-module state; it does not repeatedly render the cached failure.
@@ -1292,7 +1267,7 @@ reference data. Freeform runs receive no implicit deal context; context is not d
 | GET | `/templates/{template_id}` | Read one bounded hydrated presentation document | Embedded template engine |
 | POST | `/templates/export` | Convert current presentation JSON into a downloadable PPTX | Embedded template engine |
 | POST | `/templates/import?mode=single\|batch` | Import one PPTX as one slide template or as one template per deck slide | Embedded template engine |
-| DELETE | `/templates/{template_id}` | Delete one template from Quarry's owner/app-scoped catalog | Embedded template engine |
+| DELETE | `/templates/{template_id}` | Delete one template from Quarry's owner-scoped catalog | Embedded template engine |
 
 The existing template facade routes remain available. The shared `importPptxTemplate` API retains
 its file/mode inputs and compact result, but the template buttons now use the native classified
@@ -1306,13 +1281,21 @@ then discard the unused hydrated JSON body. Neither waits for enrichment or retr
 write. CORS exposes these acknowledgment headers for configured cross-origin web builds. Gallery
 refresh failure offers refresh-only recovery. Classified actions require configured providers and do not receive an unclassified fallback.
 
-`TemplateService` delegates directly to `domains::templates::slide_templates` in Axum.
-Bootstrap's `assemble_api` initializes the repository, previews, providers, Helix projection,
-reconciliation and pending-job recovery once. `assemble_api_routes` shares that engine between
+`domains/templates/route.rs` owns both the compact product endpoints and the native
+`/templates/slide-templates` endpoints. Bootstrap mounts this combined router once; it derives
+the native routes from the same engine held by `TemplateService`, and omits them when that
+engine is unconfigured. Each endpoint family retains its own HTTP mappings, request limits,
+owner scoping and admission middleware.
+`TemplateService` adapts compact product DTOs and errors and delegates to
+`domains::templates::slide_templates` in Axum. The latter's `ImportService` and `ExportService`
+own conversion/import/export workflows; its repository is the single template persistence
+implementation shared by both endpoint families.
+Bootstrap's `assemble_api` initializes the repository, previews, providers and pending-job
+recovery once; there is no graph projection, startup reconciliation or catalog-wide re-embedding. `assemble_api_routes` shares that engine between
 facade and native routes; the application retains the same engine for shutdown. There is no
 alternate template backend, HTTP relay, or per-operation fallback.
 
-Both import modes select the fixed `Quarry_WestMonroe` scope. Existing imports accept one nonempty,
+Both import modes select the authenticated user scope. Existing imports accept one nonempty,
 safe-named `.pptx` multipart `files` part and explicit `mode=single|batch`, with 25 MiB file and
 26 MiB multipart caps. Single mode returns the existing “Use Import Deck Template instead” error
 for a multi-slide deck; it never retries as batch. Batch publication is atomic in the selected
@@ -1387,42 +1370,46 @@ asset responses retain image rendering but apply a CSP sandbox without permissio
 and network resources, and allow only inline
 styles and embedded data images; direct navigation cannot grant an SVG the API's origin.
 
-PostgreSQL is canonical; see [PostgreSQL storage and Helix](postgresql-storage.md).
+PostgreSQL is canonical and the only template store; see [PostgreSQL storage](postgresql-storage.md).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
-fresh final schema, equivalent to former SQLite marker 18; `app/migrations.rs` initializes or
-validates PostgreSQL schema version 3 with checksums and catalog fingerprints. There is no data
-migration or startup reset. Unknown or damaged layouts fail without deletion. Templates, image
-bytes, previews, metadata, memberships, classification and both embedding artifacts remain
-transactional. Indexed lexical term frequencies preserve the previous FTS5 weighted BM25 path;
-document search is PostgreSQL-owned and the Helix template projection remains operational. New databases start with an empty catalog; startup no longer seeds built-in templates.
+fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 6 with
+checksums and catalog fingerprints. There is no data migration or startup reset. Unknown or damaged
+layouts fail without deletion. Templates, image bytes, previews, metadata,
+classification, lexical postings and typed vector pairs are transactional. Indexed lexical term
+frequencies preserve the previous FTS5 weighted BM25 path unchanged. New databases start with an empty catalog; startup no longer seeds built-in templates.
 The retired built-in catalog assets, seeder, and catalog-specific tests have been removed;
 current template behavior tests use imported PPTX fixtures under `backend/tests/fixtures/`.
 Each new import records `templates.owner_user_id` from the verified bearer-session identity.
 Both facade and native route middleware derive immutable request scopes from that identity;
 clients cannot select another owner. Catalogs and pagination, documents, previews, image assets,
 classification/retrieval status and retries, updates, deletion, and export/insertion asset hydration
-all use the owner-filtered repository within the fixed Quarry app. Cross-owner IDs behave as
-missing records. The global worker and admission/mutation budgets remain shared; only trusted
-background processing and startup reconciliation use the unscoped repository. Helix remains an
-app-scoped recoverable projection with globally unique template IDs; PostgreSQL is the ownership
-authority and no public route returns raw Helix template results.
-Existing built-in and imported records are preserved with a null owner and hidden from all user
-catalogs; startup never guesses the importer or transfers these records to a new account.
-Users can reimport their original files to create owned copies. See
-[template ownership and rollout](template-ownership.md).
-Imported templates are physically removed after their last membership is deleted. Previously created standalone template files remain
-untouched and are not automatically imported.
+all use the owner-filtered repository. Cross-owner IDs behave as
+missing records. The global worker and admission budgets remain shared; only trusted background
+processing uses the unscoped repository. PostgreSQL is the ownership authority; vector ranking
+queries apply owner/profile predicates before any result leaves the database.
+Schema 6 requires `templates.owner_user_id` and removes the `apps` registry and
+`app_templates` memberships. Existing schema-5 databases fail intact at startup; use a fresh
+database or the explicit guarded MVP reset after draining the writer. No ownership is inferred
+and no catalog is imported. See [template ownership and rollout](template-ownership.md).
+Deleting an owned template physically removes its canonical row and cascades its artifacts
+in the same transaction. Previously created standalone template files remain untouched.
 
-Helix holds a recoverable template projection: a searchable `SlideTemplate` root, bounded
-`SlideTemplatePart` JSON fragments containing the complete document/metadata/classification record and preview descriptor,
-and separate `SlideTemplateSubject`/`SlideTemplateCapability` vector nodes. PostgreSQL image BLOBs remain
-the canonical binary assets. Projection writes follow PostgreSQL commits; failures report a saved-but-
-unconfirmed indexing outcome without deleting PostgreSQL data or falling back. Native classified imports
+Schema 6 stores template vectors as typed pgvector values. `template_embeddings` holds exactly
+one `subject` and one `capability` row per template, keyed by template and role, each carrying its
+embedding-profile ID, input fingerprint and a `vector(T)` value. T is the template dimension
+(`OPENAI_SLIDE_EMBEDDING_DIMENSIONS`), rendered independently of the shared document/notebook
+dimension, so neither family can resize the other. `template_embedding_profiles` identifies
+provider, model, dimensions, cosine metric and preparation version by a SHA-256 ID; equal dimensions
+never imply compatibility. The stage row's `embedding_profile_id` is the single readiness pointer:
+it is set exactly when `embedding_status='ready'`. A deferred constraint trigger over
+`template_embedding_integrity` requires a ready stage to have both roles for that profile with
+fingerprints equal to the current subject/capability input, and forbids vectors on any non-ready
+stage; startup validates the same view. PostgreSQL image BLOBs remain the canonical binary assets.
+Native classified imports
 require configured providers and a generated PNG before committing. They return `201 Created`
 with `retrieval.status: pending` after JSON, assets, metadata, preview and a pending
 `template_classification_status` row commit together. Preview failure returns 503 without inserting
-a template. The response retains template/preview links and headers; it never waits for providers
-or Helix. `POST /batch-import/classified` applies the same save-before-enrichment contract to
+a template. The response retains template/preview links and headers; it never waits for providers. `POST /batch-import/classified` applies the same save-before-enrichment contract to
 an entire raw PPTX deck (up to 100 slides, with the existing 25 MiB upload and 50 MiB response
 limits). ZIP validation/expansion runs once; slide parsing and single-slide preparation each use
 at most four scoped blocking workers, preserving deck order. Preview rendering has four shared
@@ -1441,15 +1428,23 @@ and do not fabricate vectors.
 Classified imports and manual retries notify an on-demand coordinator after committing PostgreSQL.
 Each leased stage runs as a short-lived Tokio task; the coordinator alternates classification and
 embedding stages with concurrency four and retires once no unfinished work remains. Bootstrap
-requests one recovery scan after embedded reconciliation. While work remains, one-second wake
+requests one recovery scan at startup. While work remains, one-second wake
 checks retain future retries and unexpired leases;
-new requests wake the same coordinator immediately. Classification commits
-metadata/FTS and embedding documents before embeddings run; a failed embedding preserves those
-artifacts. Each stage has up to three attempts, a 150-second operation timeout, 30-second lease
+new requests wake the same coordinator immediately. Each claim writes a fresh opaque token and a database-clock
+epoch-second lease (provider timeout plus padding, plus one second for the floored start). Success
+and failure must present the same token: classification success, under a parent-before-stage lock,
+commits normalized metadata, lexical postings and embedding input, clears obsolete vectors and queues
+the embedding stage, with the token/`processing`/unexpired-lease fence as the final conditional
+update. Embedding prepares and validates both roles outside SQL (`PreparedSlideEmbeddings`); one
+transaction upserts the profile, replaces the pair and publishes readiness under the same fence, so a
+missing role, profile/dimension mismatch, stale fingerprint or lost lease rolls back the whole pair.
+Failure recording matches the token, so an expired attempt cannot fail or overwrite a reclaimed
+successor with identical input. Classification and embedding stages update only their own columns.
+A failed embedding preserves completed classification artifacts. Each stage has up to three attempts, a 150-second operation timeout, 30-second lease
 padding and exponential retries starting at five seconds with up to 25% jitter. Retryable provider
 and persistence failures retry; permanent provider errors fail immediately. Missing or out-of-bounds
-classification previews fail explicitly instead of using a text-only fallback. Pending retry times,
-attempts, leases, sanitized error codes and terminal `failed`/`ready` states are durable. Process
+classification previews fail explicitly instead of using a text-only fallback. Pending retry times
+(database-clock epoch seconds, exposed as ISO text), attempts, leases, sanitized error codes and terminal `failed`/`ready` states are durable. Process
 restart resumes pending/due jobs and recovers expired leases. These are single-host workers, not a
 distributed queue; live pipeline changes require draining old writers. HTTP disconnects after commit
 do not cancel saved jobs. Shutdown stops claims, drains for five seconds, then cancels provider
@@ -1470,11 +1465,12 @@ same bounded worker after committing. A failed classification restarts from the 
 and resets dependent embedding work; an embedding-only failure preserves completed metadata and
 reuses its saved embedding documents. Each manual retry gets the normal three-attempt budget.
 Saved slides, previews and completed classification artifacts are retained; retry never re-imports
-or creates another template. The repository checks membership and status atomically, so duplicate
+or creates another template. The repository checks ownership and status atomically, so duplicate
 requests and active/successful/unclassified jobs cannot reset work (409); missing or out-of-scope
 templates return 404, and an unconfigured worker returns 503. The endpoint uses existing bearer
-authentication and fixed app scope, rejects nonempty JSON/unknown queries and retains `private,
-no-store`. Pending retries survive disconnects/restarts. No schema change is required.
+authentication and immutable owner scope, rejects nonempty JSON/unknown queries and retains `private,
+no-store`. Pending retries survive disconnects/restarts. A failed classification retry also clears
+that template's vectors, because only ready stages may hold a pair.
 
 `GET /catalog/{id}/retrieval` always returns `classification` and `embedding` progress objects
 (`status`, `attemptCount`, `nextAttemptAt`, `lastErrorCode`), even without artifact query flags.
@@ -1500,12 +1496,29 @@ the queued server job continues. **Refresh** only reads status and never restart
 The dialog preserves keyboard focus, internal scrolling, reduced motion and theme tokens, following
 the [Stealth UI menu and dialog patterns](https://www.stealth.pm/ui).
 
-Each worker stage refreshes Helix after PostgreSQL commits, serialized with HTTP deletion and bounded to
-ten seconds; projection failures are logged and
-reconciled at restart without deleting canonical data or retrying successful provider work.
-Startup reconciles only this fixed app's template projection from the shared PostgreSQL database,
-including stale deleted records. It does not clear document graph data. There is no
-new general reindex CLI or public search UI.
+SQL commit is semantic availability: there is no projection refresh, reconciliation worker,
+graph cleanup or process-local mutation mutex. Revisioned deletion removes membership or the
+canonical template and, through foreign-key cascades, its stage row, lexical postings and vectors in
+one transaction; a late stage then fails its parent/token fence. Changing classification input
+(`refresh_pending_slide_classification`) atomically clears metadata, lexical postings, embedding input
+and vectors. There is no general reindex CLI or public search UI.
+
+In-process retrieval (`SlideRetrievalService`, used by tests and future agent tools; no public
+search route) keeps modes `text`, `semantic`, `hybrid`, `filter`, `similar`, `by_id` and `facets`.
+Scoped metadata (never vectors) is read once and filtered in Rust with the existing taxonomy
+normalization. Semantic ranking runs exact pgvector cosine in SQL per role over the authorized,
+profile-matching catalog (`rank_slide_embeddings`) and returns the complete role ranking as IDs and
+similarities. There is no intermediate candidate cap: Rust intersects these rankings with the
+filtered candidates, preserves the existing score/recency/ICU-identity tie order and complete-list
+reciprocal-rank fusion (constant 60), then applies the final output limit. Winners below the output
+limit still fuse. `similar` loads the authorized source pair and ranks
+stored vectors without a query provider, excluding the source; foreign sources are
+`slide_not_available`. Hybrid degrades to lexical with `semantic_unavailable`; semantic without a
+provider fails explicitly; finding retrieval keeps its lexical/subject/capability fusion and
+`exact_finding_boost * 0.005`. Selected results get a bounded fresh owner recheck before
+delivery. Metadata, lexical and vector reads are separate read snapshots joined by that recheck,
+not one repeatable-read snapshot; metadata filtering and facets still hydrate the scoped metadata
+projection. HNSW/ANN, SQL-side metadata filtering and a single-snapshot retrieval call are deferred.
 
 Native Chromium screenshots reuse the existing hidden React SVG render page. The configured browser
 and reachable renderer remain runtime dependencies, including desktop development. External origins
@@ -1528,7 +1541,7 @@ revisions atomically; notebook deletion cascades; deletions fence jobs and casca
 
 `notebooks` owns native BlockNote validation, deterministic lossy Markdown, bounded preparation,
 durable save jobs, immutable PostgreSQL search sets/chunks and private content search. Bootstrap
-injects the server embedder only; notebook Helix publication/readback/index initialization/cleanup
+injects the server embedder only; notebook remote publication/readback/index initialization/cleanup
 have been retired. Four bounded workers export/chunk/embed outside SQL transactions. A final
 transaction commits native title/blocks/location/revision, every chunk/vector/lexical batch, active
 set replacement, terminal job result and slot release together. Any failure retains the old saved
@@ -1561,13 +1574,13 @@ on-demand coordinator drains local tasks, deletes linked chats, detaches private
 and cascades canonical files, versions, chunks, inputs and jobs in SQL. It verifies absence before
 completion and retains lifecycle reservations so deleted IDs cannot be reused. Historical phase
 strings remain compatible; current cleanup uses `sqlite`, `verifying`, `completed` without remote
-document fencing/purge. Existing Helix document data is outside the SQL receipt's erasure claim.
+document fencing/purge. Data in retired, untouched graph stores is outside the SQL receipt's erasure claim.
 See [permanent deletion](deal-permanent-deletion.md).
 
 PostgreSQL mutations take a transaction-scoped advisory lock for the selected schema on one
 pooled connection. This preserves aggregate ordering across cooperating processes while row
 constraints, revision checks and worker fences remain at the point of use. The fresh deployment
-uses a separate Helix store; old stores and binaries are not migrated. Client adapters expose acceptance/polling
+requires no graph store; retired graph stores and binaries are neither migrated nor deleted. Client adapters expose acceptance/polling
 and session-scoped invalidation for workspace/document/chat caches and notebook links. The shared
 Deals table shows owners a three-dot menu beside the project name. Its Delete deal confirmation
 requires the exact, case-sensitive phrase `delete {dealName}` before calling the existing adapter.
@@ -1588,12 +1601,10 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v3]
-    Bootstrap --> Helix[Construct Helix and initialize indexes]
+    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v5]
     Bootstrap --> Http[Construct shared reqwest client]
     Bootstrap --> Rig[Construct optional Rig OpenAI client]
     Postgres --> Adapters[Construct concrete adapters]
-    Helix --> Adapters
     Http --> Adapters
     Rig --> Adapters
     Adapters --> Domains[Construct domain services]
@@ -1609,7 +1620,7 @@ and selects concrete production adapters. [`backend/src/app/migrations.rs`](../b
 owns all product/auth/template PostgreSQL initialization and validation, without an old-data
 upgrade/reset path. Bootstrap connects one bounded asynchronous pool, validates the selected schema,
 passes clones of the same client to product and template repositories, initializes the template
-catalog and reconciles its Helix projection before binding routes. Bootstrap passes each
+catalog and requests one durable-stage recovery scan before binding routes. Bootstrap passes each
 domain only its required capabilities and
 merges the returned, already-state-bound routers; adding a feature does not widen shared request
 state.
@@ -1626,13 +1637,18 @@ state.
 | `domains/documents` | Document formats, canonical document store, ingestion/jobs, SQL chunk/search repositories, durable jobs, and viewing | Summary generation |
 | `domains/assistant::chat` | PostgreSQL thread/message persistence, owner resolution, bounded canonical context, default system-prompt selection, streaming lifecycle, and cancellation propagation | Authentication, provider-specific reasoning/tool state, or future `assistant::agent` work |
 | `domains/summaries` | Summary upload handling, prompting, and generation | Document persistence |
-| `adapters/*` | Concrete PostgreSQL, Helix, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
+| `adapters/*` | Concrete PostgreSQL/pgvector, OpenAI, WM AI, Office, and dormant SharePoint mechanisms | Axum handlers or product workflow |
 | `shared/*` | Small stable errors, identifiers, and file policies used by multiple domains | Feature-specific services or mutable application state |
 
 Embedded template persistence exposes asset, catalog/publication, processing-job, and retrieval
 capabilities in `slide_templates/repository/contracts.rs`, all implemented by the same PostgreSQL
-repository. The composite repository retains owner/app scoping and app registration for assembly
-and workflows that need multiple capabilities. Export receives only the asset interface, provider
+repository. The `repository/mod.rs` entry point owns the repository handle, owner scope helpers and
+shared record codecs. `catalog_repository.rs`, `processing_repository.rs` and
+`retrieval_repository.rs` implement their focused traits beside the corresponding SQL;
+`repository/mod.rs` also implements immutable authenticated user scoping. These are parts of one
+`PostgresTemplateRepository`, not separate stores or alternate implementations. Single and batch
+classified publication share a record-writing helper on the caller's retained transaction.
+The composite repository retains owner scoping for assembly and workflows that need multiple capabilities. Export receives only the asset interface, provider
 services/workers receive the processing interface, and retrieval receives its read interface.
 The facade constructs export from the same owner-scoped repository as import. Template, asset,
 preview, and pending-job publication retains its existing transaction boundaries.
@@ -1693,7 +1709,7 @@ service, model, table, or product capability.
 | `memberships` | Canonical deal roles, capabilities, registered-user access management, teams, revisions and transactional activity |
 | `workspaces` | Organization tenancy remains unimplemented |
 | `diligence`, `workflow`, `deliverables` | Conceptual product-work owners; backend scaffolds only |
-| `templates::{slide_templates}` | Five stable facade operations use authenticated owner scopes; the embedded engine provides native OOXML/insertion/catalog/assets/preview/classification/retrieval, the shared PostgreSQL canonical store, and Helix template/metadata/dual-vector projection |
+| `templates::{slide_templates}` | Five stable facade operations use authenticated owner scopes; the embedded engine provides native OOXML/insertion/catalog/assets/preview/classification/retrieval, and the shared PostgreSQL store with token-fenced durable stages, lexical postings and typed pgvector subject/capability pairs |
 | `notebooks` | Authenticated durable notebook/folder/note APIs, revision checks, durable save jobs/SSE, atomic Markdown/embedding/PostgreSQL search; web/desktop transports and explicit-save editor implemented; folder UI deferred |
 | `vaults`, `unified_search` | Conceptual knowledge/read-model owners; backend scaffolds only |
 | `activity`, `notifications` | Conceptual durable event and delivery owners; backend scaffolds only |
@@ -1791,9 +1807,10 @@ repositories map the resulting client error to their storage error at the reposi
   the shared two-operation capacity permit until processing finishes even if its request is dropped.
   Independent-slide preparation and asynchronous provider/database concurrency remain unchanged.
 - Document batch ingestion retains bounded unordered concurrency, default eight. Search retains
-  four bounded deal pipelines and eight Helix reads; hybrid admission/embedder bounds are unchanged.
-- Per-identity async locks, Helix write serialization/retries and the two-conversion/45-second
-  LibreOffice bounds remain. No provider or graph operation holds a relational transaction.
+  four bounded deal pipelines and eight SQL reads; hybrid admission/embedder bounds are unchanged.
+- Per-identity async locks and the two-conversion/45-second LibreOffice bounds remain. The
+  template facade's process-local mutation mutex was removed with the graph projection; SQL
+  parent locks, revisions and stage tokens provide correctness. No provider or graph operation holds a relational transaction.
 
 ## 9. Data architecture
 
@@ -1816,11 +1833,11 @@ wrapping titles, counts and horizontal scrolling. No matches retains the empty e
 This is a coordinated API compatibility change across Axum, web and desktop, retaining existing
 `/api/v1` endpoints and camelCase fields. Retired `active`, `on_hold`, `completed`, and `cancelled`
 deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses are unchanged.
-Use a fresh PostgreSQL database and separate isolated Helix store; leave old SQLite data alone.
+Use a fresh PostgreSQL database; leave old SQLite data and retired graph stores alone.
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
 [fresh storage and recovery](postgresql-storage.md).
 
-### 9.1 Shared PostgreSQL schema version 3
+### 9.1 Shared PostgreSQL schema version 6
 
 The pinned pgvector 0.4.2 Rust adapter uses SQLx 0.8.6 and an explicitly provisioned
 `quarry_extensions.vector` 0.8.6 server extension. Types/operators are qualified and vectors are
@@ -1863,7 +1880,6 @@ schema currently contains:
 | `quarry_file_blobs` | Original bytes keyed by version | Used |
 | `templates`, `template_metadata` | Canonical template JSON and catalog metadata/checksums | Embedded templates |
 | `template_assets`, `template_previews` | Image and PNG preview BLOBs with dimensions | Embedded templates |
-| `apps`, `app_templates` | Template app registry and memberships, including built-in deletion choices | Embedded templates |
 | `template_classification_status` | Classification/embedding progress, attempts, retry times, errors, leases, metadata, fingerprints, subject/capability vectors and model/dimensions | Durable embedded classification worker/retrieval |
 | `slide_classifications_fts` | Lexical fields and token lengths | Embedded keyword retrieval |
 | `template_lexical_terms` | Indexed Unicode 6.1 field frequencies | Compatible weighted BM25/prefix retrieval |
@@ -1898,8 +1914,10 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 4 includes the former marker-18 layout, bounded content revisions,
-durable deal lifecycle guards, and complete document/notebook search artifacts, with
+PostgreSQL schema version 6 includes the former marker-18 layout, bounded content revisions,
+durable deal lifecycle guards, complete document/notebook search artifacts and template
+embedding profiles/typed vector pairs (replacing schema 4's template BYTEA vectors and
+caller-clock lease text), removes template app registration/memberships and requires a user owner, with
 `bytea` assets, generated numeric IDs and safe-integer checks, C-collated text, preserved serialized
 JSON/timestamps, all existing checks, same-deal composite foreign keys and partial unique indexes.
 `slide_classifications_fts` stores lexical documents/lengths and `template_lexical_terms` indexes
@@ -1907,8 +1925,11 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates an empty selected schema or validates schema 4, checksum/catalog, owned indexes,
-extension readiness, ownership and complete document/notebook search sets. Unknown layouts fail without
+Startup creates an empty selected schema or validates schema 6, checksum/catalog, owned indexes,
+extension readiness, ownership, complete document/notebook search sets and template pair integrity.
+The schema renders two vector dimension families: the shared document/notebook dimension and the
+independent template dimension. Schema 4 and 5 databases are refused; select a fresh database or run the
+explicit reset. Unknown layouts fail without
 deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
 rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
 objects atomically. It has no old-data backfill and never runs at ordinary startup. Old stores
@@ -1964,7 +1985,7 @@ worker or remote publication safety; the production global write controls remain
 ### 9.2 Canonical document chunks and search
 
 Document file/version/chunk relationships use SQL foreign keys and joins. There is no document
-Helix module, publication request, index initialization, candidate scan or remote deletion fence.
+remote graph module, publication request, index initialization, candidate scan or remote deletion fence.
 `store/repository.rs`, `store/search_repository.rs`, `store/identity_repository.rs`,
 `store/access_repository.rs` and `ingestion/repository.rs` own data access. The shared adapter
 contains reusable mechanisms only.
@@ -1973,7 +1994,7 @@ retain uniqueness and one-current rules. Stable IDs, spans, attribution and orig
 
 Search uses profile-scoped exact cosine and GIN-indexed English/technical lexical channels.
 Both hybrid branches share a read-only snapshot per deal, followed by bounded final authorization.
-No ANN index is enabled. Template Helix SDK/index/transport behavior is retained; notebooks use SQL search sets.
+No ANN index is enabled. Notebooks use SQL search sets and templates use typed SQL vector pairs.
 Their dimension conflicts still require an explicitly scoped operational procedure; ordinary
 startup never clears stores or recreates indexes. See [document storage](document-storage.md).
 
@@ -2035,7 +2056,7 @@ Both transports omit `dealId` on creation and use the response identity. Older c
 still submit the retired field, but must use the returned ID. The `/api` compatibility mount
 uses the same UUID-generating handler.
 
-Deal creation has no Helix write. Its entire durable aggregate lives in one
+Deal creation persists its entire durable aggregate in one
 PostgreSQL transaction, so an invalid reference or failed child insert leaves no deal, metadata,
 assignment, or scope behind. The same applies to scalar/collection replacement on update; metadata
 is retained. Previously and explicitly saved directory companies are independent records. Document
@@ -2145,8 +2166,6 @@ thread run endpoint; no client-supplied history or temporary generation endpoint
 | `VITE_API_BASE_URL` | Browser bundle | Axum base URL; empty dev value uses Vite proxy | Public build-time value; never a secret |
 | `VITE_WORKSPACE_DATA_SOURCE` | Browser/desktop UI bundle | `api` (default) or explicit `demo` workspace deals | Public build-time mode; never a secret |
 | `QUARRY_API_BASE_URL` | Tauri Rust process | Axum base URL for desktop relay | Native runtime config; HTTPS or loopback HTTP |
-| `QUARRY_HELIX_CONTAINER_NAME` | Root launcher | Local Helix container to inspect, create when absent, and start; defaults to `helix-quarry-v3-dev`; its persistent Docker volume is `<container-name>-data` | Local development identifier; not passed to application runtimes |
-| `QUARRY_HELIX_PORT` | Root launcher | Loopback port for the selected isolated Helix container; defaults to `6969` | Must match the existing container binding; passed as `HELIX_URL` to Axum |
 | `QUARRY_POSTGRES_BIN` | Root launcher | PostgreSQL tools directory; defaults to `/Applications/Postgres.app/Contents/Versions/18/bin` | Local path; macOS existing-cluster startup only |
 | `QUARRY_POSTGRES_DATA_DIR` | Root launcher | Existing cluster directory; defaults to `$HOME/Library/Application Support/Postgres/var-18` | Local path; never initialized or replaced by the launcher |
 
@@ -2171,9 +2190,7 @@ pins it to the loopback API.
 | `QUARRY_DATABASE_ACQUIRE_TIMEOUT_SECONDS` | 5; integer 1–60 |
 | `QUARRY_DATABASE_STATEMENT_TIMEOUT_SECONDS` | 30; integer 1–300; also bounds lock waits and idle transactions |
 | `QUARRY_PROMPTS_DIR` | `prompts`; relative to the backend process working directory; must contain the four startup-validated catalog assets |
-| `HELIX_URL` | `http://127.0.0.1:6970`; origin only (no `/v2/query` path, credentials, query, or fragment) |
-| `HELIX_API_KEY` | optional secret |
-| `HELIX_VECTOR_DIMENSION` | `1536`; positive integer shared by document/notebook PostgreSQL vector columns and ingestion/query embedding validation; the name is retained for compatibility. Template Helix dimensions are independent; changes require a fresh/reset SQL target or an explicitly scoped data-preserving operation |
+| `QUARRY_EMBEDDING_DIMENSION` | `1536`; integer 1–16000 shared by document/notebook PostgreSQL vector columns and ingestion/query embedding validation. Template vectors use `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` (1–16000, default 1536) as an independent typed column family. Either change selects a different schema checksum and requires a fresh/reset SQL target |
 | `QUARRY_HYBRID_SEARCH_ENABLED` | `false`; explicit hybrid rollout switch; requires reviewed disposable performance/relevance evidence |
 | `QUARRY_SEARCH_DEAL_CONCURRENCY` | 4; 1–32 active deal pipelines per search |
 | `QUARRY_SEARCH_SQL_READS` | 8; 1–64 process-service document SQL reads, including legacy operations |
@@ -2323,7 +2340,12 @@ locally because its verbose trace target includes request/response bodies. Quarr
 sanitized diagnostics outside that scope. Enabling Rig's model catalog requires resolving this
 compatibility issue. Slide-provider wire requests, OpenAI envelope decoding, and Rig execution live in
 `adapters/slide_templates/providers.rs`. The domain provider module retains its ports, taxonomy and
-metadata normalization, input/vector integrity policy, and classification lifecycle. A shared embedding
+metadata normalization and provider input/vector integrity policy. `processing/service.rs` owns
+classification and embedding preparation/publication; `processing/worker.rs` owns durable claims,
+retry scheduling and shutdown. `service/mod.rs` retains the existing scoped service handles, with
+import, export and catalog implementations in `service/{import,export,catalog}.rs` and shared asset
+conversion in `service/assets.rs`. Catalog methods remain on the existing `ImportService` interface;
+this split does not add another service instance or change the facade contract. A shared embedding
 pair operation applies the same dimension and vector checks to combined processing and embedding
 retries. The durable worker uses an exhaustive stage enum for retry policy and failure recording;
 persisted stage codes, attempt budgets, timeout/cancellation behavior, and publication order are
@@ -2346,16 +2368,16 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- Helix remains required during bootstrap for template projections. Document startup
-  validates PostgreSQL vector profiles and indexes and submits no Helix document-index DDL.
+- No graph store is contacted. Startup validates PostgreSQL schema 6, pgvector, document vector
+  profiles, notebook and template pair integrity, and indexes.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
-  `HELIX_VECTOR_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
+  `QUARRY_EMBEDDING_DIMENSION` as its embeddings `dimensions` request parameter so indexed and
   generated vectors use one configured size. Known v3 model maxima are checked at configuration
   parsing: 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
   A model/dimension change requires compatible document/notebook SQL schemas and exact profiles;
   changing configuration cannot convert existing vectors.
-  The historical local 3072-dimensional trial and its authorized Helix document reset are recorded in
+  The historical local 3072-dimensional trial and its authorized historical document reset are recorded in
   [Hybrid document search](hybrid-document-search.md). Repository defaults remain small/1536.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
   parse or wire them into the product application.
@@ -2379,7 +2401,7 @@ All fields are required if any one is present:
 - LibreOffice runs with fixed arguments, isolated temporary/profile directories, bounded output,
   concurrency, and a timeout.
 - Embedded template responses retain bounded JSON/PPTX/preview sizes, decoded-image and pixel
-  budgets, private no-store headers and authenticated owner/app scopes. Native Chromium previews
+  budgets, private no-store headers and authenticated owner scopes. Native Chromium previews
   block navigation and subresources outside the configured frontend origin except `blob:` and `data:`.
 
 ### 12.2 Development-only or missing controls
@@ -2510,15 +2532,15 @@ repositories, services, router contracts, deterministic hybrid overlap/single em
 request/provider/read bounds, immutable-identity freshness, final access, independent query embeddings
 and provider cancellation,
 multipart boundaries, PDF/DOCX/XLSX/PPTX/image parsing and chunking, Office ZIP limits,
-graph-request preflight, Helix query construction and v3 response mapping,
+graph-request preflight,
 OpenAI/WM mapping, stored previews, bounded declared and streamed template bodies,
 template service error mapping, template
 HTTP headers/status/body, two-account template ownership on both API mounts, unassigned-record
 preservation and fresh-schema validation, shared-worker processing of owned imports, and isolated SharePoint behavior.
 
-The ignored Helix v3 compatibility test is an opt-in local-Docker suite. It requires
-`QUARRY_HELIX_COMPAT_URL` and verifies DDL readiness, graph writes, reads, replacement, and scoped
-search against the pinned local image; it never starts or changes a developer's default container.
+Template SQL suites cover stage-token fences (stale identical-input attempts cannot publish or
+fail a successor), deferred pair integrity, independent template/shared vector dimensions, exact
+SQL cosine parity with a reference implementation, profile/owner scoping and provider-free `similar`.
 The opt-in browser tests also require installed Chromium and loopback access. Their test helper
 honors `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH`; the tab-backgrounding test requires full Chrome or
 Chromium rather than the headless-shell executable. The ignored `notebook_visual_fixture` and
@@ -2543,14 +2565,11 @@ when stopped, using `pg_ctl` from `QUARRY_POSTGRES_BIN` and the selected
 `QUARRY_POSTGRES_DATA_DIR`. It never initializes a cluster or creates a database. Other PostgreSQL
 installations must already be running if these local tools/storage are unavailable. Axum opens
 its PostgreSQL pool during normal bootstrap and exits on connection failure; the launcher performs
-no separate database connection check and starts the UI only after API readiness. PostgreSQL, Docker,
-and Helix remain running after launcher exit; only the API and selected UI are supervised children.
-The launcher opens Docker Desktop when necessary, creates an
-absent configured Helix container from `backend/helix.toml` with disk storage and a persistent
-named volume, and starts it before Axum. Existing memory-backed or incorrectly mounted containers
-fail the storage guard without being changed.
+no separate database connection check and starts the UI only after API readiness. PostgreSQL
+remains running after launcher exit; only the API and selected UI are supervised children. The
+launcher requires no Docker daemon and never touches containers or volumes.
 
-Launcher syntax, PostgreSQL startup/failure handling, and Helix storage guards can be checked
+Launcher syntax, PostgreSQL startup/failure handling, and the absence of Docker/graph setup can be checked
 with isolated command stubs, without starting product services:
 
 ```sh
@@ -2609,8 +2628,8 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 ```
 
 Backend `cargo run` is a runtime/integration operation, not a harmless compile check: it opens and
-initializes/validates the selected PostgreSQL schema, requires Helix, and initializes indexes. Use it only with known disposable/local
-configuration. Never use `clear_helix` as verification.
+initializes/validates the selected PostgreSQL schema and resumes durable template stages. Use it only with known disposable/local
+configuration. Never delete retired graph volumes as verification.
 
 ### 14.4 Pull-request CI
 
@@ -2639,7 +2658,7 @@ uses Node 24, Rust 1.99.0, npm's lockfile, both Cargo lockfiles, and Ubuntu 24.0
 - `lint` runs Rust formatting and Clippy (including backend redundant-clone checks), both
   TypeScript targets, and the runtime-boundary check. There is no ESLint/Prettier configuration.
 
-Ignored external Helix/Chromium/visual fixture suites remain explicit opt-ins. CI does not
+Ignored external Chromium/visual fixture suites remain explicit opt-ins. CI does not
 start the product server, contact AI providers, or reset a development database. Limit Rust
 suite concurrency to four threads in CI to bound simultaneous PostgreSQL pools.
 
@@ -2662,12 +2681,12 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
 | Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 4 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
+| Persistence | Fresh PostgreSQL schema 6 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
 | Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
 | Document jobs | SQL inputs, attempt fencing, terminal replay and polled SSE | Uncheckpointed provider calls may repeat after restart; global writer controls remain |
-| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Embedded imports are private to their authenticated owner and survive restart; unassigned older records are preserved but hidden; startup reconciles Helix from canonical PostgreSQL |
+| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Embedded imports are private to their authenticated owner and survive restart; unassigned older records are preserved but hidden; no graph projection or startup reconciliation exists |
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
@@ -2693,8 +2712,8 @@ current-state reference.
 7. Keep each domain vertically cohesive: handlers remain transport-oriented, services
    use-case-oriented, and owned repositories storage-oriented. Cross-domain calls use narrow
    public facades; request code never reaches another feature's repository or a concrete adapter.
-8. Treat PostgreSQL as canonical and Helix as a recoverable projection unless an explicit architecture
-   change assigns a different owner.
+8. Treat PostgreSQL (with pgvector) as the only canonical and search store unless an explicit
+   architecture change assigns a different owner.
 9. Preserve exact-content idempotency and deterministic document/version/chunk IDs after `file_id`
    selection; do not assume changed-content uploads retain logical-file identity.
 10. Never confuse browser/Tauri validation, CORS, or route state with server authorization.
@@ -2738,7 +2757,6 @@ current-state reference.
 | Cross-domain primitives | `backend/src/shared/` |
 | Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/integration/app/migrations_tests.rs`](../backend/tests/integration/app/migrations_tests.rs) |
 | Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs) |
-| Versioned graph rollout and recovery | [Helix versioned file graph](#92-helix-versioned-file-graph) |
 
 ## 19. Glossary
 
@@ -2749,12 +2767,12 @@ current-state reference.
 | Platform capability | Host-specific operation such as native folder selection or export |
 | Tauri gateway | The desktop IPC/Rust transport hop to Axum, plus native capabilities |
 | Product API | Axum's versioned `/api/v1` contract |
-| Template service | Native template engine inside Axum, backed by shared PostgreSQL and Helix |
+| Template service | Native template engine inside Axum, backed by shared PostgreSQL/pgvector |
 | Composition root | Vite/runtime selection on the client; `bootstrap.rs` on the server |
 | Canonical store | PostgreSQL records and blobs used for recovery and product persistence |
-| Search storage | PostgreSQL document chunks and indexes; template Helix projections remain recoverable-domain concerns |
+| Search storage | PostgreSQL document chunks, notebook search sets and template lexical postings/typed vector pairs |
 | Logical file | A `quarry_files` record that can own immutable versions; changed-content upload currently creates a new one |
-| Current version | The version marked current in canonical PostgreSQL; Helix should project it but can be absent or stale after a partial indexing failure |
+| Current version | The version marked current in canonical PostgreSQL |
 | Document job | Process-local ingestion task exposed through an SSE event stream |
 | Development fixture | Static UI data used for demos/fallbacks, not server authority |
 

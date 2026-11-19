@@ -18,8 +18,8 @@ Statuses remain `pending`, `running`, `retrying`, `blocked`, `completed`. Histor
 `draining`, `fencing`, `sqlite`, `graph`, `verifying`, `completed` remain accepted wire values.
 New work drains, passes through `sqlite`, verifies SQL absence and completes; transient phases
 may be skipped. `sqlite` means canonical PostgreSQL cleanup. There is no document remote fence,
-remote purge, index scan or Helix verification call. Schema-2 receipts are not imported in the
-user-selected fresh MVP cutover. Old document Helix nodes are ignored, not certified erased.
+remote purge, index scan or legacy storage verification call. Schema-2 receipts are not imported in the
+user-selected fresh MVP cutover. Old document legacy storage nodes are ignored, not certified erased.
 
 ## Worker and safety
 
@@ -45,7 +45,7 @@ No PostgreSQL transaction waits across provider or native conversion work.
 The shared global writer lease and mutation serialization remain. This change does not certify
 general multi-instance workers. SQL deletion does not erase WAL/free pages, backups, provider
 retention or copies already held by clients. It does not run VACUUM, a global graph clear or the
-explicit MVP reset utility. Notebook/template Helix traffic remains unchanged.
+explicit MVP reset utility. Notebook/template legacy storage traffic remains unchanged.
 
 ## Verification and rollout
 

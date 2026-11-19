@@ -31,7 +31,9 @@ pub(crate) fn company_input(name: &str) -> CompanyInput {
 
 pub(crate) async fn seeded_database() -> DatabaseFixture {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     seed_identity(&postgres, OWNER_EMAIL, 'a').await;
     seed_identity(&postgres, "crud-other@example.invalid", 'b').await;
     let users = UserRepository::new(postgres.clone());

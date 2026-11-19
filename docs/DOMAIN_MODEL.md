@@ -1,8 +1,10 @@
 # Quarry domain and data model
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 6 with pgvector as the only canonical and search store;
+All three domains use the same PostgreSQL pool. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) is authoritative for current storage.
 
 # Version 1
 
@@ -32,7 +34,7 @@ pattern, attachment compatibility, and execution responsibilities.
 
 Quarry's Axum backend is a modular monolith. A domain is a product capability boundary, not a
 deployment boundary or necessarily a database table. An implemented domain may own routes,
-handlers, services, domain models, and persistence ports. Concrete PostgreSQL, Helix, AI, Office, and
+handlers, services, domain models, and persistence ports. Concrete PostgreSQL, AI, Office, and
 external-service mechanisms live under `backend/src/adapters/` and are injected at bootstrap.
 
 The directory tree deliberately contains both active modules and comment-only ownership markers:
@@ -59,11 +61,11 @@ and tests first.
 | `memberships` | Deal roles/capabilities, teams, optimistic access revisions and durable activity | `deal_memberships`, `deal_teams`, assignments, revisions and activity | No organization tenancy or independent team access |
 | `deals` | Deal lifecycle, metadata, data-source selection, and file-assisted key-question extraction | `deals`, `deal_metadata` | Archive sets `archivedAt` while retaining the stage; authenticated identity is supplied by handlers; creator provenance is immutable |
 | `data_rooms` | Browse and preview a deal's configured local filesystem source | None of its own | Reads a local root from deal metadata or server configuration; does not own stored document blobs or activate SharePoint |
-| `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`; Helix projection | PostgreSQL is canonical; Helix is a search projection; jobs and locks are process-local |
+| `documents` | Parse, ingest, persist, version, index, search, and view deal documents | `quarry_files`, `quarry_file_versions`, `quarry_file_blobs`, `document_chunks`, durable jobs | PostgreSQL owns canonical content, search artifacts and job recovery |
 | `summaries` | Summarize uploaded files | None | Authenticated; OpenAI-backed when configured |
 | `assistant::chat` | Saved conversations, bounded completed-turn history, and streamed generation | PostgreSQL-backed threads, messages, and runs | Authenticated owner-scoped access; current-turn file bytes are not retained for reuse; Rig executes provider requests without owning the chat lifecycle |
 | `research` | Forward WM AI file, index, status, and GraphRAG workflows | None in Quarry | Operates on upstream WM AI models; broader product research ownership is not implemented |
-| `templates` | App-scoped slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog and Helix projection inside Axum | Authenticated owner/app scope; no deal ownership implied |
+| `templates` | User-owned slide templates, import/export, previews, assets and retrieval | Shared PostgreSQL catalog, lexical postings and typed vector pairs inside Axum | Authenticated user scope; no deal ownership implied |
 | `system` | Health/capability/database-status operations | Reads infrastructure state only | Health is shallow; database status can expose a server path and has development-only posture |
 | `dev_support` | Demo greeting/login-event behavior | None | Explicitly development/demo behavior, not a product identity or event domain |
 
@@ -82,7 +84,7 @@ capabilities each domain receives and merges already-state-bound feature routers
 | `workflow` | Durable tasks, approvals, and workflow execution | Reserved; there is no durable queue or workflow engine |
 | `deliverables` | Generated/user-managed deal artifacts and provenance | Reserved; current completed/in-progress UI has no backing API |
 | `vaults` | Durable knowledge collections and access rules | Reserved; current vault screens are presentation/staging experiences |
-| `notebooks` | Owner-scoped notebooks, folders, native notes, durable save jobs and Helix projection | Durable API, both transports and explicit-save editor; folder UI deferred |
+| `notebooks` | Owner-scoped notebooks, folders, native notes, durable save jobs and PostgreSQL search sets | Durable API, both transports and explicit-save editor; folder UI deferred |
 | `unified_search` | Authorized cross-domain search composition | Reserved; implemented search is document-chunk search only |
 | Future `assistant::agent` | Tool execution and reasoning lifecycle | Not implemented; Rig Agent and AgentRunner remain deferred, independently of implemented `assistant::chat` |
 | `activity` | Durable product activity history | Reserved; frontend activity logs are session-local and separate |
@@ -113,10 +115,8 @@ flowchart LR
     Research --> WMAI[WM AI adapters]
     Templates --> Embedded[Embedded slide templates]
     Embedded --> PostgreSQL
-    Embedded --> Helix
     DataRooms --> FS[Configured server filesystem]
     Documents --> PostgreSQL[(PostgreSQL)]
-    Documents --> Helix[(Helix)]
 ```
 
 Cross-domain dependencies use small public facades rather than another domain's private handler,
@@ -139,10 +139,11 @@ when adding or reviewing a check rather than inferring its owner from a domain n
 
 ## 4. Canonical relational model
 
-PostgreSQL schema 2 is canonical and recreates the final former SQLite marker-18 layout directly.
+PostgreSQL schema 6 is canonical and extends the former SQLite marker-18 data model.
+Templates require a user owner and have no app registry or app memberships.
 It includes membership/activity, document identity/image checkpoints, private templates, notebooks
 and deletion receipts. There is no old-data migration. The table inventory is in
-[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-2).
+[Architecture](ARCHITECTURE.md#91-shared-postgresql-schema-version-6).
 
 ```mermaid
 erDiagram
@@ -245,39 +246,27 @@ The ordinary ingestion lifecycle is:
 
 1. Validate the deal/request and compute the uploaded content hash.
 2. Look for a current PostgreSQL attachment with the same deal and exact content hash.
-3. If both PostgreSQL and Helix already contain the same current version, report the upload as
+3. If PostgreSQL already contains the same complete current version, report the upload as
    successfully skipped.
 4. Otherwise parse PDF/DOCX/XLSX/PPTX or cached/generated image descriptions, produce normalized chunks, and generate embeddings.
-5. Persist the file, immutable version/blob, exact identity manifest, uploader and activity in one PostgreSQL transaction.
-6. Project the committed file/version/chunks into Helix.
+5. Publish the file, immutable version/blob, exact identity manifest, chunks, embeddings, lexical
+   metadata, uploader/activity and terminal job result in one PostgreSQL transaction.
 
 Parsers assign a new random `file_id`. Exact-content re-upload can reuse a committed file ID, but
 changed content normally becomes a new logical file rather than version 2. The schema and
 repository support later versions when a caller explicitly supplies the same file ID; ordinary
 ingestion does not yet resolve changed bytes to an earlier logical attachment.
 
-## 6. Helix search projection
+## 6. PostgreSQL search artifacts
 
-Helix is not a second canonical store. It contains the query-oriented projection:
+`document_chunks` stores ordered text, typed pgvector embeddings, hashes, token counts,
+page/character ranges and section paths under the canonical file version and embedding profile.
+GIN lexical metadata and exact scoped cosine ranking use the same PostgreSQL aggregate.
 
-```text
-QuarryFile
-  ├── HAS_VERSION ───────> FileVersion
-  └── CURRENT_VERSION ───> FileVersion
-FileVersion
-  └── HAS_CHUNK ─────────> FileChunk
-```
-
-- `QuarryFile` projects canonical deal ID, file ID and display name.
-- `FileVersion` projects immutable version/content metadata and index generation.
-- `FileChunk` projects ordered text, embedding, hashes, token count, page/character ranges,
-  section path, and timestamps.
-- Keyword/vector search derive accessible deals from the authenticated actor or authorize one explicit deal. Canonical current/live chunk candidates are selected and verified before ranking and rechecked before exposing text.
-
-PostgreSQL commits before Helix indexing. If the Helix write fails, the canonical PostgreSQL version and
-blob remain committed. Re-uploading the exact bytes can reuse that identity and retry projection.
-There is no general PostgreSQL-to-Helix reindex command, so canonical rows must not be deleted merely
-to hide a projection failure.
+Ingestion publishes the complete canonical document and search set atomically. Accepted input and
+image checkpoints remain independently retryable; failed publication preserves the previous complete
+version. Search selects authorized current/live candidates and rechecks bounded selected results
+before exposing text. See [document storage](document-storage.md) for integrity and recovery.
 
 ## 7. Non-canonical read and process models
 
@@ -310,9 +299,9 @@ Research aggregate today.
 
 The maintained web/desktop launcher selects embedded templates in Axum. PostgreSQL stores
 owner-scoped template documents, binary assets, generated previews, classification/embedding
-artifacts and durable processing jobs. Helix holds their app-scoped metadata and dual-vector
-projection. Catalog and binary reads resolve ownership from PostgreSQL before exposing content;
-startup reconciles the template projection from canonical records. New databases have no seeded
+artifacts, typed subject/capability vector pairs, lexical postings and durable processing jobs.
+Catalog, search and binary reads enforce app/owner scope in PostgreSQL before exposing content;
+startup validates complete vector pairs and resumes durable stages. New databases have no seeded
 built-in catalog. Imported templates survive application restart.
 
 The stable Quarry facade returns compact import counts; native embedded endpoints also expose
@@ -359,18 +348,16 @@ content by relocating notes to root and incrementing revisions; notebook deletio
 
 `notebook_save_jobs` stores actor-scoped operation IDs/request hashes, immutable accepted input,
 committed revision, pinned pipeline fingerprint, state/stage, attempt/sequence, leases and sanitized
-terminal outcomes. A completed save confirms both PostgreSQL and a published Helix revision. Failed
-indexing retains canonical content and supports retry without reapplying the mutation. Independent
-`notebook_cleanup` tombstones survive parent cascades and drive recoverable physical graph cleanup.
-Helix's notebook revision/chunk labels are separate from document and template projections. There
-is no notebook search integration yet. See [notebook API and recovery](notebook-api.md).
+terminal outcomes. A completed save commits the native snapshot, active pgvector/GIN search set
+and terminal result atomically. Failed preparation preserves the previous saved revision and can
+retry from immutable accepted input. SQL cascades remove search artifacts with their owning note. See [notebook API and recovery](notebook-api.md).
 
 ## 8. State ownership by durability
 
 | Class | Current examples | Owner | Lifetime/recovery |
 | --- | --- | --- | --- |
 | Canonical durable state | Users, deals, metadata, files, versions, blobs, notebooks/folders/notes/save jobs | PostgreSQL through owning domain repositories | Survives restart; subject to current schema migration policy |
-| Search projection | File/version/chunk graph | Helix through `documents::graph` | Rebuild intended from PostgreSQL, but general tooling is missing |
+| Search artifacts | Document chunks, notebook search sets, template vector pairs and lexical metadata | PostgreSQL through owning domain repositories | Published atomically with canonical readiness |
 | External read/process state | WM AI indexes/results | External provider; Quarry adapter/service maps it | Provider-defined |
 | Server ephemeral state | Document jobs, ingestion locks, Office preview cache | Owning service/process | Lost on restart; not multi-instance |
 | Desktop ephemeral authority | Authorized local roots | Tauri process | Lost on desktop restart |
@@ -384,7 +371,6 @@ is no notebook search integration yet. See [notebook API and recovery](notebook-
 - Personal notebooks/chats are durable and private; shared notebooks/chats, persistent PDF
   annotations/findings and live co-editing remain deferred.
 - Changed-content uploads normally create a new logical file rather than version 2.
-- Resumable deal-scope migration exists; a general canonical-to-Helix rebuild/outbox does not.
 - Document jobs, caches and locks remain process-local; notebook save jobs have a separate durable lifecycle.
 - Local source authorization stays creator/current-owner only. SharePoint import remains unwired.
 - Diligence findings, deliverables, vaults and notifications do not gain a durable implementation
@@ -413,8 +399,8 @@ When adding or changing a domain model:
    Tauri validation are not authorization.
 7. For PostgreSQL changes, define forward migration and recovery behavior, update migration/invariant
    tests, and protect existing local data. The current pre-v6 migration is destructive.
-8. For Helix changes, preserve PostgreSQL ownership, deterministic projection identity, and the
-   reindex/rollback constraints in `ARCHITECTURE.md`.
+8. For search-artifact changes, preserve PostgreSQL ownership, profile identity, atomic publication
+   and the recovery constraints in `ARCHITECTURE.md`.
 9. Update this document when domain ownership or model semantics change, and update
    [`ARCHITECTURE.md`](ARCHITECTURE.md) when the runtime boundary, route/API, schema, integration,
    security posture, or operational behavior also changes.
@@ -429,9 +415,9 @@ When adding or changing a domain model:
 - Local Data Room read model: [`backend/src/domains/data_rooms/`](../backend/src/domains/data_rooms/)
 - Document canonical store: [`backend/src/domains/documents/store/`](../backend/src/domains/documents/store/)
 - Document ingestion and identity mapping: [`backend/src/domains/documents/ingestion/`](../backend/src/domains/documents/ingestion/)
-- Helix projection/search model: [`backend/src/domains/documents/graph/`](../backend/src/domains/documents/graph/)
+- Document search model: [`backend/src/domains/documents/store/search_repository.rs`](../backend/src/domains/documents/store/search_repository.rs)
 - Shared identifier functions: [`backend/src/shared/ids.rs`](../backend/src/shared/ids.rs)
 - Frontend transport DTOs: [`frontend/src/contracts/quarryApi.ts`](../frontend/src/contracts/quarryApi.ts)
 - Frontend presentation models: [`frontend/src/data/`](../frontend/src/data/)
 - Current runtime/API/data architecture: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
-- Versioned Helix rollout and recovery: [`ARCHITECTURE.md` section 9.2](ARCHITECTURE.md#92-helix-versioned-file-graph)
+- Document search and recovery: [`ARCHITECTURE.md` section 9.2](ARCHITECTURE.md#92-canonical-document-chunks-and-search)

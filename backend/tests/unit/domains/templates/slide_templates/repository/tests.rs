@@ -63,3 +63,15 @@ fn template_insert(template_id: &str) -> TemplateInsert {
         preview: None,
     }
 }
+
+impl PostgresTemplateRepository {
+    pub(crate) async fn other_user_fixture(&self) -> Self {
+        crate::integration_support::seed_identity(
+            &self.client,
+            "other-template-owner@example.invalid",
+            'o',
+        )
+        .await;
+        Self::new(self.client.clone()).user_scope(2).unwrap()
+    }
+}

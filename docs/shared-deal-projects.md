@@ -1,11 +1,11 @@
 # Shared deal projects: policy and recovery
 
-Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
-Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
-reset and verification records below describe the earlier implementation, not current commands.
+Current storage is PostgreSQL schema 6 with pgvector for all product persistence and search.
+See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
+verification records below describe earlier implementations, not current prerequisites or commands.
 
-The existing deal is the shared project. PostgreSQL owns access, files, attribution and activity;
-Helix owns a recoverable document projection. Teams organize active deal members and never grant
+The existing deal is the shared project. PostgreSQL owns access, files, attribution, activity
+and document search artifacts. Teams organize active deal members and never grant
 access on their own. Organization tenancy, email invitations/guests, shared notebooks/chats,
 persistent PDF comments/findings and live co-editing remain deferred.
 
@@ -125,7 +125,7 @@ or validates its recorded checksum, live catalog, ownership and document-readine
 It does not upgrade or import former SQLite profiles. All aggregate writes retain the shared
 transaction lock and point-of-use permission/revision guards; reads use repeatable-read snapshots.
 
-Back up PostgreSQL and its matching Helix projection/configuration, drain writers before restore,
+Back up PostgreSQL and its matching legacy storage projection/configuration, drain writers before restore,
 and keep canonical rows after graph failures. Exact-byte upload can repair an accepted version's
 projection without creating a second identity. There is no automatic reset, old-data migration or
 general reindex tool. See [storage and recovery](postgresql-storage.md) and the
@@ -146,7 +146,7 @@ attribution, rebuilds files without the obsolete user-valued workspace column/in
 foreign keys/layout/owners and advances the marker. Legacy versions retain null uploader attribution;
 one system membership-backfill event per deal does not invent historical upload events.
 
-The one-time Helix scope migration was executed for the selected local store and its source and
+The one-time legacy storage scope migration was executed for the selected local store and its source and
 CLI were removed after verification, as requested. It is not a maintained product command.
 The matching cold graph export, consistent pre-upgrade SQLite backup, maintenance executable and
 source checkpoint remain together in ignored local backup storage for controlled recovery.
@@ -179,7 +179,7 @@ old creator-scoped writers with deal-scoped readers.
 Before new writes, rollback restores the matching drained SQLite backup/binary **and** compatible
 graph/index state. After shared writes, preserve/export new records before choosing recovery.
 A SQLite-only rollback cannot restore removed graph properties or index definitions. Never use
-`clear_helix`, automatic reset or automatic downgrade for this rollout. A general graph rebuild
+the retired graph maintenance utilities, automatic reset or automatic downgrade for this rollout. A general graph rebuild
 and collaboration outbox remain unimplemented.
 
 ## Historical SQLite schema 15 image recovery
@@ -194,7 +194,7 @@ vision, re-embeds the accepted chunks, and keeps the manifest's IDs. A differing
 rejected rather than overwritten.
 
 Drain writers and retain a consistent pre-upgrade SQLite backup with its matching binary before
-rollout. Deploy the schema-15 backend; existing web/desktop API contracts and Helix schemas are
+rollout. Deploy the schema-15 backend; existing web/desktop API contracts and legacy storage schemas are
 unchanged. Verify schema upgrade/reopen, exact-byte image recovery after a graph failure, and
 unchanged version/chunk identities using disposable data. No reset or graph clear is required.
 Rollback requires a drained window and the matching pre-upgrade database/binary; preserve/export

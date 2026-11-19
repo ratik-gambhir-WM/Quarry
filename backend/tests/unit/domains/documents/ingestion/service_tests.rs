@@ -291,7 +291,7 @@ async fn failed_office_parsing_releases_its_concurrency_permit() {
 }
 
 #[tokio::test]
-async fn sql_image_retry_reuses_checkpointed_vision_text_and_never_calls_helix() {
+async fn sql_image_retry_reuses_checkpointed_vision_text() {
     use axum::{routing::post, Json, Router};
     use serde_json::{json, Value};
     use std::{

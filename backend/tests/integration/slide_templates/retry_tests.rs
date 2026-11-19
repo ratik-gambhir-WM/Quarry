@@ -54,7 +54,6 @@ fn configured(
         repository,
         Arc::new(support::FixturePreview),
         Some(service),
-        None,
         false,
     ))
 }
@@ -233,7 +232,7 @@ async fn retry_validates_transport_missing_templates_and_configuration() {
     request
         .headers_mut()
         .insert("x-app-id", "OtherApp".parse().unwrap());
-    assert_eq!(send(&app, request).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(send(&app, request).await.0, StatusCode::NOT_FOUND);
     let mut request = retry("missing");
     request
         .headers_mut()

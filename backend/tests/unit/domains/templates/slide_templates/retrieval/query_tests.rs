@@ -17,7 +17,7 @@ fn record(id: &str, created_at: &str) -> RetrievalClassificationRecord {
             "templateId":id,"attemptCount":1,"embeddingAttemptCount":1,
             "embeddingStatus":"ready","inputFingerprint":"input",
             "promptVersion":"test","schemaVersion":1,"status":"ready",
-            "subjectVector":[1.0,0.0],"capabilityVector":[0.0,1.0]
+            "subjectVector":null,"capabilityVector":null
         }
     }))
     .unwrap()
@@ -50,18 +50,25 @@ fn fusion_accumulates_ranks_and_borrows_the_first_record_for_duplicate_ids() {
 }
 
 #[test]
-fn vector_ranking_and_fusion_preserve_recency_and_id_ties_without_copying_records() {
+fn fusion_preserves_recency_and_id_ties_without_copying_records() {
     let older = record("older", "2026-01-01");
     let b = record("b", "2026-02-01");
     let a = record("a", "2026-02-01");
-    let records = [&older, &b, &a];
-    let ranked = rank_by_vector(&[1.0, 0.0], &records, VectorRole::Subject).unwrap();
-    for (actual, expected) in ranked.iter().zip([&a, &b, &older]) {
-        assert!(std::ptr::eq(*actual, expected));
-    }
     let fused = reciprocal_rank_fusion(&[&older, &b, &a], &[&a, &b, &older], 60.0);
     for (actual, expected) in fused.iter().zip([&a, &older, &b]) {
         assert!(std::ptr::eq(*actual, expected));
     }
-    assert!(rank_by_vector(&[1.0], &records, VectorRole::Subject).is_err());
+}
+
+#[test]
+fn only_ready_pairs_of_the_query_profile_are_compatible() {
+    let mut ready = record("ready", "2026-01-01");
+    ready.classification.embedding_profile_id = Some("profile".into());
+    assert!(compatible_vectors(&ready, Some("profile")));
+    assert!(!compatible_vectors(&ready, Some("other")));
+    assert!(!compatible_vectors(&ready, None));
+    ready.classification.embedding_status = "pending".into();
+    assert!(!compatible_vectors(&ready, Some("profile")));
+    let unready = record("unready", "2026-01-01");
+    assert!(!has_ready_vectors(&unready));
 }

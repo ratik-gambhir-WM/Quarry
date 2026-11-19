@@ -2,8 +2,7 @@
 
 PostgreSQL setup: use the existing server with a dedicated database named `Quarry`; export
 `QUARRY_DATABASE_URL=postgresql://localhost/Quarry` before launching. Tests use the separate
-`Quarry_test` database. The launcher reuses `helix-quarry-v3-dev` on port 6969 and preserves its data.
-Select a separate graph explicitly for a fresh PostgreSQL deployment. See [storage setup and recovery](docs/postgresql-storage.md).
+`Quarry_test` database. Both need the pgvector extension provisioned once. Docker is not required: PostgreSQL is the only store. See [storage setup and recovery](docs/postgresql-storage.md).
 
 This guide covers local development for Quarry's browser and desktop applications.
 For a product overview and upcoming features, see the [README](README.md).
@@ -21,16 +20,14 @@ Run commands from the repository root unless a section names a different directo
 | Git | Required to clone and work with the repository |
 | Node.js and npm | Use Node.js 22.12 or newer in the Node 22 line, or a newer supported LTS; the current Vite dependency requires `^20.19.0` or `>=22.12.0` |
 | Rust and Cargo | Rust 1.97.1 or newer, with `rustfmt` and Clippy; the backend declares this minimum for Rig 0.46 |
-| Docker | Docker Desktop on macOS, or a running Docker Engine on Linux |
 | PostgreSQL | Existing local service with a fresh `Quarry` database; PostgreSQL 18 was validated |
 | Bash and curl | Required by the root launcher |
 | Tauri system dependencies | Required for the native desktop app; follow the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform |
 | Chromium | Required for embedded template previews; configure an installed executable as described below |
 | LibreOffice | Required for supported Office-to-PDF conversion flows |
 
-Install Node.js from [nodejs.org](https://nodejs.org/en/download), Rust through
-[rustup](https://www.rust-lang.org/tools/install), and Docker through the
-[Docker installation guide](https://docs.docker.com/get-started/get-docker/).
+Install Node.js from [nodejs.org](https://nodejs.org/en/download) and Rust through
+[rustup](https://www.rust-lang.org/tools/install).
 The repository does not pin an exact Node or Rust toolchain version.
 
 On macOS, install Xcode or its command-line tools for native builds:
@@ -47,7 +44,6 @@ node --version
 npm --version
 rustc --version
 cargo --version
-docker --version
 curl --version
 ```
 
@@ -90,7 +86,7 @@ browser bundle. The backend does not read the external service's environment fil
 | `QUARRY_SLIDE_TEMPLATES_PREVIEW` | Backend | `chromium` by default; `disabled` turns preview generation off |
 | `QUARRY_SOFFICE` | Backend | Optional LibreOffice executable override |
 | `QUARRY_DATABASE_URL` | Backend | Required server-only PostgreSQL URL, e.g. `postgresql://localhost/Quarry` |
-| `HELIX_URL` | Backend | Helix origin; defaults to `http://127.0.0.1:6970` |
+| `QUARRY_EMBEDDING_DIMENSION` | Backend | Shared document/notebook vector dimension, default `1536` |
 
 Embedded previews can discover installed Chromium/Playwright caches. If discovery fails,
 set `QUARRY_SLIDE_TEMPLATES_CHROMIUM_PATH` or disable previews when that capability is not needed.
@@ -105,12 +101,6 @@ does not convert existing data.
 
 ## Start the application
 
-Open Docker Desktop once and complete its setup, or start Docker Engine on Linux. Confirm:
-
-```sh
-docker info
-```
-
 From the repository root, choose one target:
 
 ```sh
@@ -121,8 +111,7 @@ From the repository root, choose one target:
 ./quarry desktop
 ```
 
-The launcher starts an existing Postgres.app 18 cluster and Docker Desktop if needed on macOS,
-prepares Helix, and starts the backend, which opens its PostgreSQL pool during bootstrap.
+The launcher starts an existing Postgres.app 18 cluster if needed on macOS and starts the backend, which opens its PostgreSQL pool during bootstrap.
 There is no separate database connection preflight. If the connection fails, startup exits
 without starting the UI; otherwise the selected UI starts after the API is ready.
 Open [localhost:1420](http://localhost:1420) for the web target; the desktop target opens a Tauri
@@ -132,26 +121,14 @@ Templates run inside the backend and persist in Quarry's shared PostgreSQL datab
 The browser and desktop app call the backend. The launcher always selects embedded templates
 and runs template processing inside Axum.
 
-### Helix and local storage
+### Local storage
 
-The launcher creates the `helix-quarry-v3-dev` container if absent, using the digest-pinned image
-in [`backend/helix.toml`](backend/helix.toml). It maps host port `6969` to container port `8080`,
-waits for `/healthz`, and stores graph data in the Docker volume `helix-quarry-v3-dev-data`.
-The Helix CLI is not required.
-
-An existing container is reused only if its image and persistent storage configuration match.
-The launcher does not replace incompatible containers. To select a compatible container with
-another name:
-
-```sh
-QUARRY_HELIX_CONTAINER_NAME=existing_helix_container ./quarry web
-```
-
-That container must use host port `6969` (or set `QUARRY_HELIX_PORT` to its binding) and its matching `<container-name>-data` volume.
-Preserve existing data before deliberately replacing any container. PostgreSQL is the canonical
-product store; Helix is the required graph/search projection. Startup initializes an empty
-PostgreSQL schema or validates version 2 and its catalog; it also initializes graph indexes. Consult the architecture's recovery procedures if an
-existing database or projection is incompatible; do not delete stores as a setup shortcut.
+PostgreSQL (with pgvector) is the only product store: documents, notebooks and templates,
+including template classification, lexical postings and vectors. Startup initializes an empty
+PostgreSQL schema or validates version 5 and its catalog. A database from an earlier schema is
+refused intact; use a fresh database or the explicit guarded reset in
+[storage setup and recovery](docs/postgresql-storage.md). Do not delete stores as a setup shortcut.
+Retired storage containers and volumes are left untouched.
 
 ### Local addresses
 
@@ -159,28 +136,19 @@ existing database or projection is incompatible; do not delete stores as a setup
 | --- | --- | --- |
 | Web UI / desktop development UI | `http://localhost:1420` | Both launcher targets |
 | Backend API | `http://127.0.0.1:3001` | Health: `/api/v1/health` |
-| Helix (launcher) | `http://127.0.0.1:6969` | Required by normal backend startup |
 
 ### Stop the application
 
 Keep the launcher terminal open. Press `Ctrl-C` to stop the backend and selected UI. If an
-application process exits, the launcher stops its other application processes too. PostgreSQL,
-Docker, and Helix remain running.
-
-Stop Helix separately when appropriate:
-
-```sh
-docker stop helix-quarry-v3-dev
-```
-
-Stopping the container preserves its named volume.
+application process exits, the launcher stops its other application processes too. PostgreSQL
+remains running.
 
 ## Development and build commands
 
 ### Frontend
 
 Run from `frontend/`. These commands start only the selected frontend target; the backend
-and Helix must already be available for API workflows.
+must already be available for API workflows.
 
 | Command | Purpose |
 | --- | --- |
@@ -204,7 +172,7 @@ For standalone runtime work, run from `backend/`:
 cargo run --locked
 ```
 
-This loads `backend/.env`, connects to PostgreSQL and initializes/validates the selected schema, connects to Helix, and initializes indexes.
+This loads `backend/.env`, connects to PostgreSQL, initializes/validates the selected schema and resumes durable template stages.
 It is a runtime operation, not a compilation check. Do not run it alongside the root launcher
 on the same port. Client code targets `/api/v1`; `/api` is a temporary compatibility mount.
 
@@ -258,7 +226,7 @@ Backend tests are manually included from `tests/unit/` and `tests/integration/`;
 independent `cargo test --test <file>` targets. Database-backed tests require a separate `_test`
 PostgreSQL database and create isolated schemas; other capabilities use test clients.
 Some opt-in tests require explicitly selected disposable services and remain ignored in the normal
-suite. Do not enable them against a live store. Do not use startup, `clear_helix`, or destructive graph maintenance as verification commands.
+suite. Do not enable them against a live store. Do not use startup or destructive database maintenance as verification commands.
 
 Before adding or moving backend validation or authorization, use the
 [boundary placement decision and review checklist](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
@@ -287,13 +255,8 @@ contract changes. Reserve `npm run build:desktop` for packaging/release validati
 - **Node version error:** check `node --version`; use a version compatible with the installed Vite dependency.
 - **Port already in use:** check `3001` and `1420`. Stop the owning
   process intentionally; the launcher will not stop an unknown listener.
-- **Helix vector-dimension conflict:** the configured `HELIX_VECTOR_DIMENSION` must match the
-  existing document index. Align the setting only after confirming the intended embedding size;
-  changing the index requires a planned rebuild. Do not delete the graph to bypass the conflict.
-- **Docker or Helix timeout:** check `docker info`, `docker ps -a`, and
-  `docker logs helix-quarry-v3-dev`. Confirm registry access and the pinned image configuration.
-- **Helix image/storage mismatch:** preserve the live graph and follow the architecture's cutover
-  procedure. The launcher intentionally leaves the incompatible container untouched.
+- **Incompatible PostgreSQL schema:** the database was created by an earlier schema version or a
+  different dimension setting. Use a fresh database or the guarded reset; startup never drops data.
 - **Embedded template preview failure:** check Chromium discovery or set its absolute executable
   path. Ensure the UI's `/_internal/template-preview` route is available.
 - **Legacy preview failure:** run `npx playwright install chromium` in the external service checkout.
@@ -315,7 +278,7 @@ contract changes. Reserve `npm run build:desktop` for packaging/release validati
 
 Web and desktop share the same product behavior. Web uses `BrowserRouter` and browser HTTP;
 desktop uses `HashRouter` and Tauri IPC to the same backend. PostgreSQL owns durable product and
-embedded template data; Helix is a recoverable projection. Document jobs and several caches
+embedded template data, including all search artifacts. Document jobs and several caches
 remain in memory. Authentication and membership checks are implemented, but production tenancy,
 identity lifecycle, CI, and deployment automation remain incomplete.
 

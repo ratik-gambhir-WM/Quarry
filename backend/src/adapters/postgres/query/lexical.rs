@@ -94,13 +94,12 @@ fn prefixes(expression: &str) -> Result<(Vec<(String, bool)>, bool), PostgresErr
 }
 pub(crate) fn search_query(
     owner: Option<i64>,
-    app: &str,
     expression: &str,
     limit: usize,
 ) -> Result<SqlQuery, PostgresError> {
     let (prefixes, all) = prefixes(expression)?;
     let total = prefixes.len();
-    let mut params = vec![SqlValue::from(owner), SqlValue::from(app)];
+    let mut params = vec![SqlValue::from(owner)];
     let mut values = Vec::new();
     for (i, (term, prefix)) in prefixes.into_iter().enumerate() {
         let mut upper = term.chars().collect::<Vec<_>>();
@@ -121,7 +120,7 @@ pub(crate) fn search_query(
         ));
     }
     // Both document frequency and document length use the complete lexical corpus,
-    // matching FTS5 even when results are filtered by app/owner.
+    // matching FTS5 even when results are filtered by owner.
     let sql = format!(
         r#"
         WITH prefixes(ordinal,term,upper_bound,is_prefix) AS (VALUES {}),
@@ -140,9 +139,9 @@ pub(crate) fn search_query(
             GROUP BY h.template_id
         )
         SELECT r.template_id FROM ranks r
-        JOIN templates t USING(template_id) JOIN app_templates a USING(template_id)
+        JOIN templates t USING(template_id)
         JOIN template_classification_status s USING(template_id)
-        WHERE t.owner_user_id IS NOT DISTINCT FROM $1::bigint AND a.app_id=$2
+        WHERE t.owner_user_id IS NOT DISTINCT FROM $1::bigint
           AND s.metadata_json IS NOT NULL AND s.schema_version=2 {}
         ORDER BY r.score ASC,r.template_id COLLATE "C" ASC LIMIT {}
     "#,
@@ -164,12 +163,11 @@ pub(crate) fn search_query(
 pub(crate) async fn search(
     client: &PostgresClient,
     owner: Option<i64>,
-    app: &str,
     expression: &str,
     limit: usize,
 ) -> Result<Vec<String>, PostgresError> {
     client
-        .read_with_async(search_query(owner, app, expression, limit), |r| r.get(0))
+        .read_with_async(search_query(owner, expression, limit), |r| r.get(0))
         .await
 }
 #[cfg(test)]

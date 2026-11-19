@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
+    adapters::postgres::client::PostgresClient,
     app::{bootstrap::assemble_api_routes, migrations},
     domains::templates::slide_templates::*,
     integration_support, slide_template_test_support as support, AppConfig,
@@ -17,14 +17,12 @@ const PPTX: &str = "application/vnd.openxmlformats-officedocument.presentationml
 
 async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres.clone()));
-    repository
-        .ensure_app("Quarry_WestMonroe", None)
-        .await
-        .unwrap();
     let classification = Arc::new(SlideClassificationService::new(
         SlideClassificationServiceOptions {
             classifier: Arc::new(support::FixtureClassifier),
@@ -41,7 +39,6 @@ async fn application() -> (Router, PostgresClient, Arc<SlideTemplates>) {
         repository,
         Arc::new(support::FixturePreview),
         Some(classification),
-        None,
         false,
     ));
     let config = AppConfig::default();
@@ -369,13 +366,10 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
     let base = PostgresTemplateRepository::new(postgres.clone());
     for user in [1, 2] {
         let scoped = base.for_user(user).unwrap();
-        let records = scoped
-            .list_retrieval_classifications("Quarry_WestMonroe")
-            .await
-            .unwrap();
+        let records = scoped.list_retrieval_classifications().await.unwrap();
         assert_eq!(records.len(), 1);
         let matches = scoped
-            .search_slide_classifications("Quarry_WestMonroe", "cloud", 10)
+            .search_slide_classifications("cloud", 10)
             .await
             .unwrap();
         assert_eq!(matches, [records[0].template_id.clone()]);
@@ -397,28 +391,20 @@ async fn all_import_modes_persist_authenticated_ownership_and_resume_shared_work
 }
 
 #[tokio::test]
-async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_changes() {
+async fn templates_require_a_user_owner_and_reject_owner_changes() {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     integration_support::seed_identity(&postgres, "first@example.com", 'a').await;
     integration_support::seed_identity(&postgres, "second@example.com", 'b').await;
     let base = PostgresTemplateRepository::new(postgres);
-    base.ensure_app("Quarry_WestMonroe", None).await.unwrap();
-    // Old shared imports remain canonical, with no inferred owner.
-    let legacy = ImportService::new(Arc::new(base.clone()))
+    // The global worker repository cannot publish ownerless templates.
+    assert!(ImportService::new(Arc::new(base.clone()))
         .import(&pptx::write(&document()).unwrap(), TemplateKind::Diagram)
         .await
-        .unwrap();
-    for user in [1, 2] {
-        let scoped = base.for_user(user).unwrap();
-        assert!(scoped.list(None).await.unwrap().is_empty());
-        assert!(scoped
-            .find_by_id(&legacy.template_id)
-            .await
-            .unwrap()
-            .is_none());
-        assert!(!scoped.delete(&legacy.template_id, 1).await.unwrap());
-    }
+        .is_err());
+    assert!(base.list(None).await.unwrap().is_empty());
     let owner = base.for_user(1).unwrap();
     assert!(owner.for_user(2).is_err());
     let imported = ImportService::new(owner.clone())
@@ -444,14 +430,14 @@ async fn user_scoped_repository_hides_unassigned_records_and_rejects_owner_chang
         .unwrap()
         .is_some());
     assert!(base
-        .find_by_id(&legacy.template_id)
+        .find_by_id(&imported.template_id)
         .await
         .unwrap()
         .is_some());
 }
 
 #[tokio::test]
-async fn foreign_template_deletion_never_touches_its_graph_projection() {
+async fn foreign_template_deletion_is_denied_and_preserves_the_owner_template() {
     let (_, postgres, application_studio) = application().await;
     let repository = Arc::new(PostgresTemplateRepository::new(postgres));
     let owner = repository.for_user(1).unwrap();
@@ -459,16 +445,10 @@ async fn foreign_template_deletion_never_touches_its_graph_projection() {
         .import(&pptx::write(&document()).unwrap(), TemplateKind::Diagram)
         .await
         .unwrap();
-    // Any attempted graph deletion would fail against this unavailable local transport.
-    let graph = Arc::new(graph::TemplateGraph::new(
-        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
-        std::num::NonZeroUsize::new(2).unwrap(),
-    ));
     let studio = SlideTemplates::new(
         repository,
         Arc::new(DisabledTemplatePreviewGenerator),
         None,
-        Some(graph),
         false,
     );
     assert!(!studio

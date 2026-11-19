@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex as StdMutex, Weak,
 };
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Semaphore;
 
 struct CancelOnDrop(RequestCancellation);
 impl Drop for CancelOnDrop {
@@ -21,8 +21,6 @@ pub struct SlideTemplates {
     worker: Option<Arc<SlideClassificationWorker>>,
     capacity: Arc<Semaphore>,
     admission: Arc<Semaphore>,
-    mutations: Arc<Mutex<()>>,
-    projection: Option<Arc<super::graph::TemplateGraph>>,
     pub(super) allow_embeddings: bool,
     stopping: Arc<AtomicBool>,
     active: Arc<StdMutex<Vec<Weak<AtomicBool>>>>,
@@ -43,14 +41,12 @@ impl SlideTemplates {
         repository: Arc<dyn TemplateRepository>,
         preview: Arc<dyn TemplatePreviewGenerator>,
         classification: Option<Arc<SlideClassificationService>>,
-        projection: Option<Arc<super::graph::TemplateGraph>>,
         allow_embeddings: bool,
     ) -> Self {
         let import = Arc::new(ImportService::with_preview_generator(
             repository.clone(),
             preview,
         ));
-        let mutations = Arc::new(Mutex::new(()));
         let worker = classification.map(|service| {
             Arc::new(SlideClassificationWorker::new(
                 SlideClassificationWorkerOptions {
@@ -61,13 +57,9 @@ impl SlideTemplates {
                     embedding_timeout: std::time::Duration::from_secs(150),
                     lease_padding: std::time::Duration::from_secs(30),
                     retry_base: std::time::Duration::from_secs(5),
-                    now: Arc::new(chrono::Utc::now),
                     random: Arc::new(|| f64::from(uuid::Uuid::new_v4().as_bytes()[0]) / 255.0),
                     repository: repository.clone(),
                     service,
-                    import: import.clone(),
-                    projection: projection.clone(),
-                    mutations: mutations.clone(),
                 },
             ))
         });
@@ -77,8 +69,6 @@ impl SlideTemplates {
             worker,
             capacity: Arc::new(Semaphore::new(2)),
             admission: Arc::new(Semaphore::new(4)),
-            mutations,
-            projection,
             allow_embeddings,
             stopping: Arc::new(AtomicBool::new(false)),
             active: Arc::new(StdMutex::new(Vec::new())),
@@ -317,12 +307,6 @@ impl SlideTemplates {
                 "Slide classification is not configured.",
             )
         })?;
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
-            )
-        })?;
         self.run_queued(worker.clone(), move |import, _, _| async move {
             import.retry_failed_processing(&id).await
         })
@@ -337,55 +321,21 @@ impl SlideTemplates {
             .await
     }
     pub async fn import(&self, bytes: Vec<u8>, kind: TemplateKind) -> SlideResult<ImportResponse> {
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
-            )
-        })?;
-        let result = self
-            .run(move |i, _, c| async move { i.import_cancellable(&bytes, kind, &c).await })
-            .await?;
-        self.project(&result.template_id).await?;
-        Ok(result)
+        self.run(move |i, _, c| async move { i.import_cancellable(&bytes, kind, &c).await })
+            .await
     }
     pub async fn batch(
         &self,
         bytes: Vec<u8>,
         kind: TemplateKind,
     ) -> SlideResult<BatchImportResponse> {
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
-            )
-        })?;
-        let result = self
-            .run(move |i, _, c| async move { i.batch_import_cancellable(&bytes, kind, &c).await })
-            .await?;
-        for template in &result.templates {
-            self.project(&template.template_id).await?;
-        }
-        Ok(result)
+        self.run(move |i, _, c| async move { i.batch_import_cancellable(&bytes, kind, &c).await })
+            .await
     }
     pub async fn delete(&self, id: String, expected_revision: i64) -> SlideResult<bool> {
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
-            )
-        })?;
-        let key = id.clone();
-        let removed = self
-            .run(move |i, _, _| async move { i.delete(&key, expected_revision).await })
-            .await?;
-        // An inaccessible ID must never delete another owner's graph projection.
-        if removed {
-            if let Some(index) = &self.projection {
-                index.delete(&id).await.map_err(|_| projection_failure())?;
-            }
-        }
-        Ok(removed)
+        // One revisioned PostgreSQL transaction removes membership or canonical artifacts.
+        self.run(move |i, _, _| async move { i.delete(&id, expected_revision).await })
+            .await
     }
     pub async fn classified(
         &self,
@@ -396,12 +346,6 @@ impl SlideTemplates {
             unavailable(
                 "slide_classification_unavailable",
                 "Slide classification is not configured.",
-            )
-        })?;
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
             )
         })?;
         self.run_queued(worker.clone(), move |i, _, c| async move {
@@ -420,12 +364,6 @@ impl SlideTemplates {
                 "Slide classification is not configured.",
             )
         })?;
-        let _mutation = self.mutations.clone().try_lock_owned().map_err(|_| {
-            unavailable(
-                "template_busy",
-                "Template writes are busy. Try again shortly.",
-            )
-        })?;
         self.run_queued(worker.clone(), move |import, _, cancellation| async move {
             import
                 .queue_classified_batch_import(bytes, kind, &cancellation)
@@ -433,43 +371,6 @@ impl SlideTemplates {
         })
         .await
     }
-    pub async fn reconcile(&self) -> SlideResult<()> {
-        if let Some(index) = &self.projection {
-            // Reconcile only Quarry's template projection from canonical shared PostgreSQL records.
-            let catalog = self.catalog(None).await?;
-            let ids = catalog
-                .templates
-                .iter()
-                .map(|t| t.template_id.clone())
-                .collect::<Vec<_>>();
-            index
-                .reconcile(&ids)
-                .await
-                .map_err(|_| projection_failure())?;
-            for id in ids {
-                self.project(&id).await?;
-            }
-        }
-        Ok(())
-    }
-    async fn project(&self, id: &str) -> SlideResult<()> {
-        if let Some(index) = &self.projection {
-            let id = id.to_owned();
-            let record = self
-                .run(move |i, _, _| async move { i.projection_record(&id).await })
-                .await?;
-            if let Some(record) = record {
-                index
-                    .upsert(record)
-                    .await
-                    .map_err(|_| projection_failure())?;
-            }
-        }
-        Ok(())
-    }
-}
-fn projection_failure() -> SlideTemplateError {
-    unavailable("template_projection_failed","The template change was saved in PostgreSQL, but Helix indexing could not be confirmed. Refresh before retrying.")
 }
 pub(super) fn unavailable(code: &'static str, message: &'static str) -> SlideTemplateError {
     SlideTemplateError::new(FailureKind::Unavailable, code, message)

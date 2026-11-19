@@ -6,7 +6,9 @@ use crate::{
 };
 async fn fixture() -> DeletionRepository {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     seed_identity(&postgres, "deletion-owner@example.com", 'a').await;
     seed_identity(&postgres, "deletion-member@example.com", 'b').await;
     postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DELETE-A',1,'Synthetic','buy_side','unknown','pipeline','now','now'),('KEEP-B',2,'Synthetic','buy_side','unknown','pipeline','now','now');

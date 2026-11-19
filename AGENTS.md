@@ -74,17 +74,18 @@ configuration. Do not invent scripts that do not exist.
 
 ### Embedded templates
 
+- Templates are scoped only to authenticated users; no app registry or app membership remains.
 - Templates run only inside Axum through `domains/templates/slide_templates`, with native
-  conversion, Chromium/CDP previews, shared durable PostgreSQL and Helix metadata/dual-vector
-  projection. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
+  conversion, Chromium/CDP previews and shared durable PostgreSQL/pgvector storage: claim-fenced
+  classification/lexical publication and typed subject/capability vector pairs. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
   the shared read-only SVG render surface.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
-- `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 4, checksums and catalog fingerprints.
+- `app/schema.sql` owns the fresh PostgreSQL schema, extending the former SQLite marker-18 data model;
+  `app/migrations.rs` initializes/validates version 6, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
-  schemas. Old SQLite files and Helix stores remain outside schema initialization; no import/fallback exists.
+  schemas. Old SQLite files and retired graph stores remain outside schema initialization; no import/fallback exists.
   The explicitly invoked `reset_postgres --confirm-reset` MVP utility recreates recognized SQL
   product objects atomically, refuses unrelated objects/active writers, and never runs at startup.
 - Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
@@ -167,20 +168,24 @@ request -> router -> handler -> service -> repository/client
   choose between migration and recreation unless they explicitly request data preservation.
   Use the guarded reset utility when recreating the full product schema. Keep recreation an
   explicit development operation, never automatic startup or failure-recovery behavior, and
-  leave unrelated databases, SQLite files and Helix stores alone. Revisit and replace this
+  leave unrelated databases, SQLite files and retired graph stores alone. Revisit and replace this
   temporary policy with a data-preserving migration policy when the product matures.
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
 - Documents own chunks, pgvector embeddings, GIN lexical metadata, original bytes, identities,
-  activity and durable job results in PostgreSQL schema 4. One retained transaction publishes the
+  activity and durable job results in PostgreSQL schema 6. One retained transaction publishes the
   complete document; accepted input/image checkpoints are separate from canonical commit.
   See `docs/document-storage.md` for profiles, readiness, limits, attempts and recovery.
 - Notebook native snapshots, active pgvector/GIN artifacts and terminal save jobs commit atomically;
   accepted snapshots never establish a saved revision. Preserve private owner scoping and 256/32 slots.
-- Helix remains required at startup for template projections. There is no live document or notebook
-  Helix query, index initialization or deletion call. Never clear retained stores for verification.
-- Startup initializes an empty selected schema or validates schema 4, checksums, catalog/indexes,
-  vector extension readiness and document/notebook complete-set invariants. It never drops data. Unknown
+- Since schema 5, PostgreSQL with pgvector is the only canonical and search store for
+  documents, notebooks and templates; no route, worker or startup step opens a graph connection, and
+  the launcher needs no Docker. Template stages use opaque claim tokens and database-clock leases;
+  a ready template has exactly its current subject and capability vectors (deferred pair check).
+  The architecture suite rejects retired graph publication and projection paths. Never delete retained graph
+  stores/volumes without separate authorization.
+- Startup initializes an empty selected schema or validates schema 6, checksums, catalog/indexes,
+  vector extension readiness and document/notebook/template complete-set invariants. It never drops data. Unknown
   nonempty layouts fail intact; there is no populated-schema upgrade, import or fallback. An MVP
   reset follows the dated MVP policy above and uses the guarded reset utility, never an automatic retry.
 - One application writer lease is retained by the pool's dedicated session through router and
@@ -194,20 +199,19 @@ request -> router -> handler -> service -> repository/client
   durable worker claims/recovery and remote-publication safeguards are implemented and verified. Do not infer
   multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
-  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
-  template Helix projection/search contracts remain unchanged; document retrieval is SQL-owned.
+  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner filters and stable ties;
+  template semantic ranking is exact SQL cosine with the existing fusion/tie policy in Rust.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
-- Keep `HELIX_VECTOR_DIMENSION` aligned with both document and notebook PostgreSQL vector columns. Template vector
-  dimensions are configured independently. A configuration change does not resize existing indexes;
+- Keep `QUARRY_EMBEDDING_DIMENSION` aligned with both document and notebook PostgreSQL vector columns. Template vectors use
+  `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` as an independently rendered `vector(T)` family. A configuration change does not resize existing indexes;
   do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
   a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
   `docs/postgresql-storage.md` for the verified-empty-index case.
-- `clear_helix` is destructive. Run it only with explicit authorization, matching backups and a
-  drained operational procedure; never use it as verification. Document jobs are durable SQL
+- Document jobs are durable SQL
   inputs/attempts/results; preview caches remain in memory. Query embeddings are not cached.
-- See `docs/postgresql-storage.md` for server-only URL/pool configuration, default existing graph port
-  6969, isolated PostgreSQL tests, backups and recovery.
+- See `docs/postgresql-storage.md` for server-only URL/pool configuration, isolated PostgreSQL
+  tests, backups and recovery.
 
 ## Frontend development rules
 
@@ -402,9 +406,9 @@ Real vector codec tests additionally require pgvector 0.8.6 provisioned once in 
 `quarry_extensions` schema of the selected `_test` database. Use the explicit
 `backend/tools/provision-pgvector.sql` procedure in `docs/postgresql-storage.md`; tests and
 application startup never install or drop the extension. Document storage/search and durable
-jobs now use schema 4.
+jobs now use schema 6.
 
-Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and connects to Helix. Tests never reset the development database.
+Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and resumes durable template stages. Tests never reset the development database.
 
 ### Tauri shell (`frontend/src-tauri/`)
 
@@ -421,10 +425,9 @@ normal code check.
 ## Change checklists
 
 The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
-embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped and ensure
-Docker Desktop and the configured local Helix container are ready. Axum opens its PostgreSQL pool
-during bootstrap; there is no separate database connection preflight. PostgreSQL, Docker, and Helix
-remain running after the launcher exits.
+embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped. Docker is
+not required. Axum opens its PostgreSQL pool during bootstrap; there is no separate database
+connection preflight. PostgreSQL remains running after the launcher exits.
 
 ### When changing a frontend route or feature
 
@@ -444,16 +447,16 @@ remain running after the launcher exits.
   before protected work, plus the retained state-dependent guards. Run the architecture suite
   (directly or through the full backend gate); static dependency checks alone do not prove order.
 - When a template operation changes, update and test the facade and native template routes,
-  headers, request bounds, owner/app scoping, and error contract.
+  headers, request bounds, owner scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 
-### When changing PostgreSQL or Helix data shape
+### When changing PostgreSQL data shape
 
 - Define canonical ownership and stable IDs before coding.
 - For PostgreSQL, follow the dated MVP schema policy above: table recreation is acceptable;
   preserving migrations/backfills are required only when explicitly requested. State the reset
-  scope and recovery behavior. Keep Helix rollout/recovery behavior explicit separately.
+  scope and recovery behavior.
 - Preserve data outside the intended PostgreSQL reset scope; use temporary databases in tests.
 - Verify transactionality, idempotency, foreign keys, current-version uniqueness, and failure paths.
 - Update the canonical architecture and recovery procedure when the operational rollout changes.
@@ -491,14 +494,14 @@ Do not hand-edit or commit generated/local outputs unless the task explicitly re
 
 - `frontend/node_modules/`, `frontend/dist/`
 - `frontend/src-tauri/target/`, `frontend/src-tauri/gen/schemas/`
-- `backend/target/`, `backend/data/`, `backend/.helix/`
+- `backend/target/`, `backend/data/`
 - local `.env*` files and `*.log`
 
 `frontend/tsconfig.node.tsbuildinfo` is tracked even though it is generated. Never edit it by
 hand; review any regeneration carefully.
 
 The duplicate icons under `backend/icons/`, empty/stale backend capability artifacts, and
-`backend/helix.toml` naming are not proven product contracts. Resolve ownership before expanding
+any ignored retired storage remnants are not proven product contracts. Resolve ownership before expanding
 or deleting them.
 
 ## Documentation rules

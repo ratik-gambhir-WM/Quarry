@@ -46,7 +46,9 @@ async fn assert_chat_revocation(deleting: bool) {
     };
     let mut upstream = RevocationServer::start().await;
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     seed_identity(&postgres, "owner@example.com", 'a').await;
     seed_identity(&postgres, "member@example.com", 'b').await;
     postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('REVOKE-CHAT',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('REVOKE-CHAT',1,'owner','now','now'),('REVOKE-CHAT',2,'viewer','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('REVOKE-CHAT');").await }).await.unwrap();
@@ -239,7 +241,9 @@ async fn completed_request_replays_without_provider_or_current_deal_context() {
         },
     };
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     let users = UserRepository::new(postgres.clone());
     let user = users
         .create(AddUserInput {
@@ -349,7 +353,9 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
     let postgres = PostgresClient::test_database_at(directory.path().join("references.sqlite"))
         .await
         .unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     postgres.with_connection(async |c| {
         c.execute("INSERT INTO users (id,first_name,last_name,email,username,password_hash) VALUES (1,'Test','Owner','one@example.com','one','unusable'),(2,'Test','Other','two@example.com','two','unusable')", Vec::<crate::adapters::postgres::query::SqlValue>::new()).await?;
         for deal in ["DEAL-A", "DEAL-B"] {

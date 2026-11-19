@@ -180,7 +180,6 @@ fn domains_and_adapters_preserve_dependency_direction() {
 fn product_infrastructure_is_constructed_only_in_bootstrap() {
     let constructors = [
         "PostgresClient::connect(",
-        "HelixClient::from_config(",
         "OpenAiClient::from_config(",
         "OfficeConverter::new(",
         "FileUploadServiceClient::new(",
@@ -190,16 +189,12 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
         "HeadlessTemplatePreviewGenerator::new(",
         "OpenAISlideClassifier::new(",
         "OpenAISlideEmbedder::new(",
-        "TemplateGraph::new(",
         "UserRepository::new(",
         "DealRepository::new(",
         "CompanyRepository::new(",
         "NotebookRepository::new(",
         "NotebookPipeline::new(",
         "DocumentStore::new(",
-        "DocumentGraphReader::new(",
-        "DocumentGraphWriter::new(",
-        "DocumentGraphSearch::new(",
         "IdentityRepository::new(",
         "ResourceAccess::new(",
         "MembershipRepository::new(",
@@ -371,19 +366,20 @@ fn product_services_do_not_reach_handler_owned_validation() {
 #[test]
 fn openai_provider_calls_use_rig_without_a_product_http_client() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let domain =
-        fs::read_to_string(root.join("src/domains/templates/slide_templates/providers.rs"))
-            .unwrap();
-    assert!(
-        !domain.contains("use rig::"),
-        "slide domain must use the provider adapter rather than Rig wire types"
-    );
     for file in [
         "src/adapters/openai/client.rs",
         "src/adapters/slide_templates/providers.rs",
         "src/domains/templates/slide_templates/providers.rs",
+        "src/domains/templates/slide_templates/processing/service.rs",
+        "src/domains/templates/slide_templates/processing/worker.rs",
     ] {
         let source = fs::read_to_string(root.join(file)).unwrap();
+        if file.starts_with("src/domains/") {
+            assert!(
+                !source.contains("use rig::"),
+                "{file} must use the provider adapter rather than Rig wire types"
+            );
+        }
         for forbidden in [
             "reqwest::Client",
             ".bearer_auth(",
@@ -399,20 +395,12 @@ fn openai_provider_calls_use_rig_without_a_product_http_client() {
 }
 
 #[test]
-fn document_data_access_is_repository_owned_and_has_no_helix_dependency() {
+fn document_data_access_is_repository_owned_and_has_no_graph_dependency() {
     for (path, source) in rust_sources("src/domains/documents") {
-        for forbidden in [
-            "helix_db",
-            "adapters::helix",
-            "DocumentGraphReader",
-            "DocumentGraphWriter",
-            "helix.file_",
-            "helix.document_indexes",
-            "helix.deletion",
-        ] {
+        for forbidden in ["DocumentGraphReader", "DocumentGraphWriter"] {
             assert!(
                 !source.contains(forbidden),
-                "{path}: document Helix dependency {forbidden}"
+                "{path}: document graph dependency {forbidden}"
             );
         }
     }
@@ -432,19 +420,38 @@ fn document_data_access_is_repository_owned_and_has_no_helix_dependency() {
 }
 
 #[test]
-fn notebook_storage_and_workers_have_no_helix_publication_or_cleanup_path() {
+fn notebook_storage_and_workers_have_no_remote_cleanup_path() {
     for (path, source) in rust_sources("src/domains/notebooks") {
-        for forbidden in [
-            "helix_db",
-            "adapters::helix",
-            "helix.notebooks",
-            "notebook_cleanup",
-        ] {
+        assert!(
+            !source.contains("notebook_cleanup"),
+            "{path}: retired notebook cleanup dependency"
+        );
+    }
+}
+
+#[test]
+fn template_storage_has_no_graph_projection_or_legacy_vector_encoding() {
+    for (path, source) in rust_sources("src") {
+        let lowered = source.to_lowercase();
+        for forbidden in ["templategraph", "template_projection"] {
             assert!(
-                !source.contains(forbidden),
-                "{path}: retired notebook dependency {forbidden}"
+                !lowered.contains(forbidden),
+                "{path}: retired graph dependency {forbidden}"
             );
         }
     }
-    assert!(!include_str!("../../src/app/bootstrap.rs").contains("helix.notebooks"));
+    for (path, source) in rust_sources("src/domains/templates") {
+        for forbidden in [
+            "subject_embedding BYTEA",
+            "serialize_embedding",
+            "deserialize_embedding",
+            "cosine_similarity",
+            "Mutex<()>",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path}: template vectors/serialization must stay in PostgreSQL ({forbidden})"
+            );
+        }
+    }
 }

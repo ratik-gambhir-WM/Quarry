@@ -320,58 +320,6 @@ async fn rig_slide_models_keep_stage_specific_timeout_and_rate_limit_errors() {
     server.stop().await;
 }
 
-struct PairEmbedder {
-    capability: Vec<f64>,
-}
-impl SlideEmbedder for PairEmbedder {
-    fn embed<'a>(&'a self, text: &'a str) -> ProviderFuture<'a, Vec<f64>> {
-        Box::pin(async move {
-            Ok(if text == "subject" {
-                vec![1.0, 0.5]
-            } else {
-                self.capability.clone()
-            })
-        })
-    }
-}
-
-#[tokio::test]
-async fn embedding_pairs_infer_dimensions_and_reject_invalid_capability_vectors() {
-    use crate::slide_template_test_support as support;
-    for dimensions in [None, Some(2)] {
-        for (capability, valid) in [
-            (vec![0.5, 1.0], true),
-            (vec![1.0], false),
-            (vec![0.0, 0.0], false),
-            (vec![f64::NAN, 1.0], false),
-        ] {
-            let service = SlideClassificationService::new(SlideClassificationServiceOptions {
-                classifier: Arc::new(support::FixtureClassifier),
-                classification_model: "fixture".into(),
-                embedder: Arc::new(PairEmbedder { capability }),
-                embedding_dimensions: dimensions,
-                embedding_max_text_bytes: 32000,
-                embedding_model: "fixture".into(),
-                input_limits: Default::default(),
-                repository: Arc::new(
-                    support::repository(std::path::Path::new(":memory:"))
-                        .await
-                        .unwrap(),
-                ),
-            });
-            let pair = service.embed_pair("subject", "capability").await;
-            if valid {
-                let pair = pair.unwrap();
-                assert_eq!(pair.dimensions, 2);
-                assert_eq!(pair.subject_vector, [1.0, 0.5]);
-                assert_eq!(pair.capability_vector, [0.5, 1.0]);
-            } else {
-                assert!(pair.is_err());
-            }
-        }
-    }
-}
-
 #[test]
 fn classification_wire_errors_keep_precedence_over_refusals_but_skip_incomplete_json() {
     for (status, text, code) in [

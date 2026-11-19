@@ -1,7 +1,8 @@
 # Password authentication and session design
 
-Current storage is fresh PostgreSQL schema 2 with retained Helix. See
-[PostgreSQL storage and Helix](postgresql-storage.md) for setup, tests and recovery; former
+Current storage is fresh PostgreSQL schema 6 with pgvector as the only canonical and search store;
+All three domains use the same PostgreSQL pool. See
+[PostgreSQL storage](postgresql-storage.md) for setup, tests and recovery; former
 SQLite marker upgrades are historical and are not executed by this runtime.
 
 Implemented 2026-10-28 for the web and Tauri distributions. This document describes the current
@@ -123,10 +124,10 @@ together. The existing password/session, per-resource ownership and consistency-
 remain unchanged. Direct configuration requires a server-only `QUARRY_DATABASE_URL`.
 
 This deployment starts with a fresh `Quarry` database and a separate
-`helix-quarry-postgres-dev` store on port 6970. Existing SQLite files and the old port-6969 graph
+the former local graph store store on port 6970. Existing SQLite files and the old port-6969 graph
 are preserved; no profiles, passwords or documents are imported or reset. Startup initializes or
 validates version 1 and refuses incompatible nonempty layouts without deletion. Follow
-[PostgreSQL storage and Helix](postgresql-storage.md) for backups and drained recovery.
+[PostgreSQL storage](postgresql-storage.md) for backups and drained recovery.
 
 ## Verification and limits
 

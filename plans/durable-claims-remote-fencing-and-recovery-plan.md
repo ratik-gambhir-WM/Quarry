@@ -1,14 +1,18 @@
 # Concurrent writers continuation: durable claims, remote fencing and recovery
 
+Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
+Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+operations and maintenance instructions below are historical, not executable rollout guidance.
+
 Date: 2026-11-12. Status: proposed implementation for a separate follow-up PR.
 
-Storage direction update, 2026-11-12: the user has selected complete Helix removal in favor of
+Storage direction update, 2026-11-12: the user has selected complete legacy storage removal in favor of
 PostgreSQL/pgvector. Follow the [document](documents-postgres-pgvector-migration-plan.md),
 [notebook](notebooks-postgres-pgvector-migration-plan.md) and
 [template/retirement](templates-postgres-pgvector-migration-plan.md) plans for that work.
-They supersede this file's proposed Helix projection intent, remote generation/delete fencing,
+They supersede this file's proposed legacy storage projection intent, remote generation/delete fencing,
 cross-store cleanup/reconciliation and remote-index recovery once each domain becomes SQL-only.
-Do not build new Helix fencing for a dependency being removed. Their per-document/per-note atomic
+Do not build new legacy storage fencing for a dependency being removed. Their per-document/per-note atomic
 commit boundaries also replace the older canonical-commit-then-remote-publication stages below.
 The shared lock order in document Plan 1 supersedes this file's slot-before-parent ordering;
 use one protocol across admission, parent deletion, final commit and slot release.
@@ -42,7 +46,7 @@ worker safety is enabled today.
 The user authorized recreating the fresh SQL source without retaining old data. This
 superseded the former version-1 data-preserving migration requirement. Startup still
 never resets a database. No development database, real `.env`, old SQLite store or
-existing Helix store was changed by verification.
+existing legacy store was changed by verification.
 
 Recorded foundation checks: 536 backend tests passed, 14 opt-in tests ignored; 652
 frontend tests passed across 99 files; 26 desktop Rust tests passed. Formatting, checks,
@@ -60,7 +64,7 @@ results to rerun after implementation, not proof of distributed recovery or remo
 - Durable notebook jobs, template stages and deletion receipts exist, but their admission,
   claim, checkpoint, cleanup and recovery protocols are not yet safe across instances.
 - Template classification parent locks protect short SQL stages, not the lifetime of a
-  provider attempt. The facade/worker mutation mutex and Helix client mutex remain local.
+  provider attempt. The facade/worker mutation mutex and legacy storage client mutex remain local.
 - App registration updates supplied fields only and builtin refresh locks its template;
   new-app versus builtin attachment/reconciliation still needs a concurrency protocol.
 - Remote generation/deletion enforcement, replica-wide quotas, real two-process recovery
@@ -75,13 +79,13 @@ invariants. Do not replace the old controls with a universal row, table-wide wri
 application mutex or SQL lock held around network work.
 
 Preserve PostgreSQL canonical ownership, immutable file versions, accepted image text,
-exact-content identity reuse, Helix projection separation, membership/session revocation,
+exact-content identity reuse, legacy storage projection separation, membership/session revocation,
 atomic activity, notebook submitted snapshots and operation IDs, bounded work, cancellation
 rollback and the existing revision contracts. Keep `/api/v1`, camelCase JSON, multipart
 limits, SSE event names, `sqliteCommitted` and deletion phase `sqlite`. Web and desktop
 remain aligned; Tauri remains a transport/native boundary.
 
-No provider, Helix, Office, preview or filesystem conversion call may run inside a SQL
+No provider, legacy storage, Office, preview or filesystem conversion call may run inside a SQL
 transaction. No read replicas, multi-primary database, message broker, collaborative
 merging, profile API, new template edit UI or SharePoint integration is required.
 
@@ -138,7 +142,7 @@ version/revision, monotonic generation, desired action and recoverable stage. Re
 complete checkpoints; add domain-owned intent only where a gap exists. SQL commit precedes
 projection and graph failure never deletes canonical records to conceal the failure.
 
-First prove Helix's actual conditional transaction behavior against a disposable pinned
+First prove legacy storage's actual conditional transaction behavior against a disposable pinned
 server. At every remote setup/chunk/publish/delete operation, obsolete generations and
 operations must be rejected atomically at the remote point of use. A SQL check immediately
 before HTTP, a content hash, a local mutex or lease expiry alone is not a fence.
@@ -271,9 +275,9 @@ such as `backend/src/bin/embedding.rs` for fence compatibility without invoking 
 
 ## 5. Verification and failure matrix
 
-Use explicit disposable PostgreSQL `_test` schemas and a separate fresh Helix store. Test real
+Use explicit disposable PostgreSQL `_test` schemas and a separate fresh legacy store. Test real
 remote behavior as well as fakes. Retain identities/ports/schema ownership, clean only task-owned
-resources and never inspect `.env`, reset development data, invoke `clear_helix` or spend on live
+resources and never inspect `.env`, reset development data, invoke the retired graph maintenance utilities or spend on live
 providers as routine verification. New backend tests/support stay under `backend/tests/` and must
 be manually wired (`autotests = false`). Use barriers/observable lock waits, not sleep-based ordering.
 

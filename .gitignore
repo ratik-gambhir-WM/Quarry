@@ -7,7 +7,6 @@
 # an accidental alternate file cannot expose secrets through version control.
 backend/.env
 backend/.env.*
-backend/.helix/
 backend/data/
 backend/target/
 

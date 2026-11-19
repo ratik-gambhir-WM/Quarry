@@ -1,9 +1,8 @@
 # Document PostgreSQL storage
 
-Documents use PostgreSQL schema 3 for original bytes, immutable identities, chunks,
+Documents use PostgreSQL schema 6 for original bytes, immutable identities, chunks,
 full-precision pgvector embeddings, lexical indexes and recoverable processing jobs.
-The document runtime has no Helix reader, writer, index initialization or deletion call.
-Notebooks and templates retain their existing Helix integrations and normal startup dependencies.
+Documents, notebooks and templates use PostgreSQL exclusively; no remote graph service is required.
 
 ## Ownership
 
@@ -50,8 +49,8 @@ Batches allow at most 10,000 contiguous one-based chunks, 128 KiB of text and no
 text per chunk, and 128 MiB of accumulated text/technical-text/section/full-vector payload. Sections are bounded
 to 8 KiB. Original transport bounds
 remain 50 MiB. Stored vectors use `vector(D)` with D rendered from server configuration into the
-checksummed schema. The historical `HELIX_VECTOR_DIMENSION` setting still supplies the common
-document/notebook dimension during their staged migration. Changing D requires a compatible
+checksummed schema. `QUARRY_EMBEDDING_DIMENSION` supplies the common document/notebook dimension.
+Changing D requires a compatible
 fresh schema; changing models does not silently reinterpret existing profiles.
 
 The deferred manifest constraint and startup integrity view check exact counts, contiguous
@@ -122,25 +121,24 @@ immutable identity ties. Legacy keyword scores remain reciprocal per-deal ranks.
 Deletion cascades SQL chunks, manifests, input claims and jobs while retaining the deal lifecycle
 reservation and receipt. Historical phase strings remain accepted; new cleanup passes through
 `sqlite` to `verifying` and `completed`, with no remote document fence/purge. Existing source bytes
-still supply stored viewing/conversion; snippets never reconstruct originals. Old Helix document
+still supply stored viewing/conversion; snippets never reconstruct originals. Old legacy storage document
 nodes are ignored and are not claimed erased by a SQL receipt or reset. Schema-2 receipts are not
 imported in this explicitly fresh MVP cutover.
 
-## Document Helix cleanup inventory
+## Document legacy storage cleanup inventory
 
 The prior `DocumentGraphReader`, `DocumentGraphWriter`, `DocumentGraphSearch`,
 `PreparedDocumentGraph`, graph-only file/version/publication responses and the entire document
-`graph/` module were removed. The fourteen document index specifications and operation families
-`helix.document_indexes.*`, `helix.file_version.*`, `helix.file_chunk.*`, `helix.deletion.*` have
-zero live source callers. Stable flattened chunk DTOs moved to `store/chunk.rs`. Canonical file
+`graph/` module were removed. The fourteen remote index specifications and their initialization,
+publication, file/version/chunk reads, search and deletion operations have no live source callers. Stable flattened chunk DTOs moved to `store/chunk.rs`. Canonical file
 aggregate tests remain under `store/repository_tests.rs`; obsolete graph serialization/live-runtime
 tests were replaced by SQL rollback, read/search, lease, identity and deletion behavior tests.
-An architecture guard rejects document Helix dependencies and feature SQL in the shared adapter.
+An architecture guard rejects document legacy storage dependencies and feature SQL in the shared adapter.
 
 Bootstrap no longer initializes document indexes. Search/full-catalog graph scans and remote
-deal document fences/purges are gone. Notebook/template startup, SDK/config, Docker/launcher
-setup and retained generic `embedding`, `helix_query`, `clear_helix` utilities remain. Those
-utilities were inspected, not executed; none is a live document storage caller. A reset or SQL
+deal document fences/purges are gone. The template SQL cutover (schema 5) later removed the
+remaining graph SDK/configuration, Docker/launcher setup and graph maintenance utilities
+without executing them; the generic OpenAI `embedding` diagnostic binary remains. A reset or SQL
 deal receipt does not certify old remote document erasure.
 
 ## Verification and limits
@@ -207,7 +205,7 @@ An earlier full run exposed a deletion HTTP test timing assumption: SQL cleanup 
 before a subsequent archive request, yielding 404 rather than pending-deletion 409. The assertion
 now accepts both valid rejection states; retained lifecycle tests cover the pending drain guard.
 A sandboxed database test invocation was denied local socket access; the authorized isolated
-database run above passed. No live provider, Chromium or notebook/template Helix integration was
+database run above passed. No live provider, Chromium or notebook/template legacy storage integration was
 invoked. Eight retained interactive/external-integration tests remain ignored; the ninth ignored
 test is the synthetic measurement explicitly run above. Native Tauri Rust and manual UI inspection
 were outside this backend-only source change. Vite emitted its vendor chunk warning; all repository
@@ -233,5 +231,5 @@ Read-only SQL checks confirmed schema version 3, 46 product tables, configured
 `quarry_extensions.vector(3072)` embeddings, vector extension 0.8.6 and zero invalid/unready
 indexes. Users, deals, files, chunks and document jobs were empty. The extension prerequisite
 remains provisioned in `Quarry` and `Quarry_test`. Port 3001 was verified without a listener;
-the API was left stopped as requested. No old Helix/SQLite store was cleared, and no server
+the API was left stopped as requested. No old legacy storage/SQLite store was cleared, and no server
 was started for validation.

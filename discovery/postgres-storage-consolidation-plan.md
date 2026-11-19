@@ -1,8 +1,13 @@
-# Replace SQLite with PostgreSQL; retain Helix
+# Replace SQLite with PostgreSQL; retain legacy storage
+
+Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
+Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Updated: November 11, 2026
 
-Status: implemented November 11, 2026. The canonical database is **`Quarry`**; Helix is retained.
+Historical status: implemented November 11, 2026 with PostgreSQL canonical storage and a separate
+search projection. Schema 5 supersedes that topology; see the current architecture linked above.
 See [current storage and recovery](../docs/postgresql-storage.md) and
 [implementation verification](../docs/postgresql-storage-verification.md). The sections below
 retain the original design input and planning-time observations.
@@ -10,11 +15,11 @@ retain the original design input and planning-time observations.
 ## 1. Objective and scope
 
 Replace Quarry's shared SQLite persistence with PostgreSQL on the user's existing local
-PostgreSQL instance. **Keep Helix as Quarry's graph database and graph/search projection.**
+PostgreSQL instance. **Keep legacy storage as Quarry's graph database and graph/search projection.**
 This is a relational storage replacement: recreate the current tables, integrate the
 PostgreSQL adapter, and verify that existing functionality and query behavior still work.
 
-The current user request supersedes this document's earlier proposal to eliminate Helix.
+The current user request supersedes this document's earlier proposal to eliminate legacy storage.
 Preserve existing routes, DTOs, authorization, queries' meaning and results, file/version
 identities, search behavior, notebook saves, embedded templates, and error/retry semantics.
 Translate SQLite-specific SQL where PostgreSQL requires it; do not redesign the product,
@@ -22,13 +27,13 @@ move graph queries to SQL, or introduce new client contracts as part of this por
 
 **No existing data needs to be migrated.** Start with a fresh Quarry PostgreSQL database
 and fresh users, deals, uploads, notebooks and templates. Do not implement SQLite exports,
-Helix extraction, historical backfills, dual relational writes, or data rollback tooling.
+legacy storage extraction, historical backfills, dual relational writes, or data rollback tooling.
 Old MVP data may be left in place; deleting it is not required for this work. No databases,
 files, containers, volumes, or configuration are changed by this planning task.
 
-Use a fresh, isolated Helix store alongside the fresh PostgreSQL database for implementation
-validation. Retaining the Helix technology does not require attaching orphaned old graph
-records to an empty canonical database. Prefer leaving the existing SQLite and Helix stores
+Use a fresh, isolated legacy store alongside the fresh PostgreSQL database for implementation
+validation. Retaining the legacy storage technology does not require attaching orphaned old graph
+records to an empty canonical database. Prefer leaving the existing SQLite and legacy stores
 alone; any optional reset must target explicitly selected disposable resources, never run
 implicitly during startup, and never affect another application on the shared instance.
 
@@ -43,17 +48,17 @@ The maintained architecture and current code override older planning notes and s
 | --- | --- | --- |
 | Identity, auth, deals, companies, memberships, activity, assistant | Shared SQLite | Equivalent PostgreSQL tables, constraints and transactions |
 | Original documents | SQLite files, immutable versions, BLOBs, current-content claims, identity manifests and accepted image checkpoints | Same canonical records in PostgreSQL; bytes remain database-owned |
-| Document graph/search | Helix file/version/chunk nodes, edges, embeddings, keyword/vector queries and publication | Retain Helix, its query contracts and graph identities |
-| Notebooks | SQLite notes, durable jobs and cleanup; Helix revision/chunk projection | PostgreSQL canonical notes/jobs/cleanup plus the existing Helix projection |
-| Embedded templates | SQLite catalog/assets/previews/classification, canonical embedding artifacts and FTS5; Helix metadata/dual-vector projection | PostgreSQL canonical tables and lexical replacement; retain Helix projection and retrieval |
-| Permanent deal deletion | SQLite durable receipts/barriers/cleanup targets; Helix graph purge | PostgreSQL receipts/barriers/targets; retain Helix purge and verification |
+| Document graph/search | legacy storage file/version/chunk nodes, edges, embeddings, keyword/vector queries and publication | Retain legacy storage, its query contracts and graph identities |
+| Notebooks | SQLite notes, durable jobs and cleanup; legacy storage revision/chunk projection | PostgreSQL canonical notes/jobs/cleanup plus the existing legacy storage projection |
+| Embedded templates | SQLite catalog/assets/previews/classification, canonical embedding artifacts and FTS5; legacy storage metadata/dual-vector projection | PostgreSQL canonical tables and lexical replacement; retain legacy storage projection and retrieval |
+| Permanent deal deletion | SQLite durable receipts/barriers/cleanup targets; legacy graph purge | PostgreSQL receipts/barriers/targets; retain legacy storage purge and verification |
 | Document jobs/caches | Process-local memory | Remain process-local |
 
-PostgreSQL replaces canonical relational persistence. It does not replace Helix, make
+PostgreSQL replaces canonical relational persistence. It does not replace legacy storage, make
 cross-store writes atomic, make in-memory jobs durable, or add new search capabilities.
 No pgvector dependency or PostgreSQL graph/chunk/vector-query schema is needed for this swap.
 Keep canonical template embedding artifacts in PostgreSQL because they already belong to
-SQLite today; this does not move their Helix similarity-search role into PostgreSQL.
+SQLite today; this does not move their legacy storage similarity-search role into PostgreSQL.
 
 ## 3. Target architecture and local setup
 
@@ -66,10 +71,10 @@ Shared React web / Tauri desktop
               |
        domain repositories
           /          \
- async PostgreSQL    retained Helix adapters
+ async PostgreSQL    retained legacy storage adapters
  adapter / pool      graph writers / readers / search
         |                       |
- existing local PostgreSQL      Helix graph database
+ existing local PostgreSQL      legacy graph database
  dedicated Quarry database      isolated fresh dev/test stores
  - canonical relational rows    - file/version/chunk graph
  - original bytes and assets    - document embeddings/search
@@ -119,7 +124,7 @@ domain repositories, bootstrap, maintenance utilities and tests; port or retire 
 Do not retain the SQLite adapter as a runtime fallback. Remove `backend/src/adapters/sqlite/`
 and its module registration only after all active product consumers have moved, equivalent
 adapter/repository tests and the full backend gates pass against the intended test setup,
-and the final runtime has been verified with PostgreSQL and Helix. Remove obsolete SQLite
+and the final runtime has been verified with PostgreSQL and legacy storage. Remove obsolete SQLite
 dependencies and tests only after confirming no supported consumer still needs them.
 
 All database credentials remain server-side and redacted. Web and Tauri still call only
@@ -176,7 +181,7 @@ checks, indexes and unique/partial constraints. Map SQLite-specific features del
   team-creation rules and all existing transaction guards. Exactly one owner still needs
   the workflow's transactional checks, not just a partial unique index.
 - Keep identity manifests, chunk identities and accepted image checkpoints as the canonical
-  authority for validating Helix. Fresh initialization must establish the equivalent fresh
+  authority for validating legacy storage. Fresh initialization must establish the equivalent fresh
   readiness state through validated schema/setup code; do not fabricate historical
   migration receipts, remove live integrity checks or require old data backfills.
 
@@ -212,9 +217,9 @@ SQLite's single-writer behavior must not be assumed under PostgreSQL concurrency
   blocking work. Remove SQLite-only writer leases/read-pool mechanics only after reviewing
   the lifecycle protections they supplied; retain equivalent protection where still needed.
 
-## 6. Retain Helix queries and cross-store behavior
+## 6. Retain legacy storage queries and cross-store behavior
 
-Keep Helix SDK/adapters, graph schema, node/edge names, query DSL, graph indexes, embedding
+Keep legacy storage SDK/adapters, graph schema, node/edge names, query DSL, graph indexes, embedding
 models/dimensions, size bounds, publication rules and query limits. Preserve current document
 keyword/vector/hybrid behavior and configured rollout flags. No new PostgreSQL document
 chunk tables, graph extension, pgvector search, HNSW index or ranking/fusion redesign is
@@ -224,12 +229,12 @@ from SQLite to PostgreSQL.
 Document ingestion keeps its existing sequence:
 
 1. Validate authorization, parser output, identities, embeddings, chunk invariants and the
-   retained Helix write plan, including bounded request sizes, before canonical persistence.
+   retained legacy storage write plan, including bounded request sizes, before canonical persistence.
 2. Commit file/version/blob, content claim, identity manifest, accepted image checkpoint and
    upload activity in PostgreSQL. Concurrent identical uploads must converge as today.
-3. Run existing Helix setup, bounded chunk writes and final graph publication. Preserve the
+3. Run existing legacy storage setup, bounded chunk writes and final graph publication. Preserve the
    older complete published generation until final publication succeeds.
-4. If Helix fails after the PostgreSQL commit, report the committed identity and retain the
+4. If legacy storage fails after the PostgreSQL commit, report the committed identity and retain the
    canonical records. Exact-content re-upload must recover the same identity and retry the
    missing projection, including reusing accepted image text rather than redescribing it.
 
@@ -242,19 +247,19 @@ matching semantics. Do not promise a general bulk reindex tool that does not exi
 Keep any existing public fields or durable phase values named `sqliteCommitted` or `sqlite`
 when needed for contract compatibility, mapping them to canonical PostgreSQL commit/cleanup
 semantics and documenting the historical name. Review all such uses; do not falsely report
-that PostgreSQL and Helix committed atomically or rename wire values accidentally.
+that PostgreSQL and legacy storage committed atomically or rename wire values accidentally.
 
 ### Notebook and template flows
 
 - Notebook canonical notes, immutable save snapshots, jobs, leases, retry/checkpoint/SSE
   state and cleanup tombstones move to PostgreSQL. Keep `QuarryNotebookRevision` and
-  `QuarryNotebookChunk` in Helix, the same revision publication and stale-worker guards,
+  `QuarryNotebookChunk` in legacy storage, the same revision publication and stale-worker guards,
   private ownership, graph deletion/recovery and saved-but-not-indexed outcomes.
 - Template JSON, owner/app memberships, metadata, assets/previews, classification state and
   both canonical embedding artifacts move to PostgreSQL. Keep `SlideTemplate`,
-  `SlideTemplatePart`, `SlideTemplateSubject` and `SlideTemplateCapability` in Helix,
+  `SlideTemplatePart`, `SlideTemplateSubject` and `SlideTemplateCapability` in legacy storage,
   including request partitioning, graph projection/reconciliation, app scoping and dual-
-  vector retrieval. Do not eliminate startup Helix reconciliation.
+  vector retrieval. Do not eliminate startup legacy storage reconciliation.
 - Port the SQLite-only template FTS5 path behind its existing repository contract. A
   PostgreSQL full-text index may replace its mechanism, but must preserve query parsing,
   field weighting intent, AND/OR, punctuation, technical identifiers, diacritics, owner/app
@@ -262,9 +267,9 @@ that PostgreSQL and Helix committed atomically or rename wire values accidentall
   removal and use them as acceptance criteria. PostgreSQL native ranks are not numerically
   identical to FTS5 BM25: do not silently accept a relevance change; provide a compatible
   ranking/query implementation or explicitly resolve any parity gap before completing the
-  port. Document/Helix search remains unchanged.
+  port. Document/legacy storage search remains unchanged.
 - Keep permanent deal deletion's durable receipt, admission barrier, drains, canonical
-  cleanup, Helix purge, verification and restart recovery. A database swap must not leave
+  cleanup, legacy storage purge, verification and restart recovery. A database swap must not leave
   orphaned graph results visible or mark deletion complete before graph verification.
 - Templates run inside Axum; there is no separate template service or product SQLite fallback.
 
@@ -279,18 +284,18 @@ that PostgreSQL and Helix committed atomically or rename wire values accidentall
 - Replace product `QUARRY_DATABASE_PATH`/SQLite storage configuration in the implemented
   runtime. Do not reuse a path variable as a URL or expose credentials through `VITE_*`,
   Tauri payloads or logs. Local setup is implementation work; do not edit `.env` now.
-- **Retain `HELIX_URL`, `HELIX_API_KEY`, `HELIX_VECTOR_DIMENSION`, graph configuration and
-  independent template embedding settings.** Normal bootstrap still requires Helix and
+- **Retain the previous graph connection and vector-dimension settings, graph configuration and
+  independent template embedding settings.** Normal bootstrap still requires legacy storage and
   awaits its indexes; PostgreSQL readiness does not replace graph readiness.
 - Update `./quarry web` and `./quarry desktop` to verify the selected PostgreSQL connection
-  as well as their existing Helix prerequisite. Preserve Docker/Helix supervision and
+  as well as their existing legacy storage prerequisite. Preserve Docker/legacy storage supervision and
   shutdown behavior. Reuse the existing PostgreSQL service; do not start a second one or
-  stop shared PostgreSQL/Helix services when Axum/UI exits.
-- Align fresh PostgreSQL development/test databases with isolated fresh Helix stores and
+  stop shared PostgreSQL/legacy storage services when Axum/UI exits.
+- Align fresh PostgreSQL development/test databases with isolated fresh legacy stores and
   use matching configuration. Never point tests at the existing development graph by
   accident or fall back to SQLite after a PostgreSQL connection failure.
 - After all relational consumers are ported, remove unused product SQLite dependencies,
-  SQLite-only adapters/tests and obsolete SQLite reset tools. Preserve Helix adapters,
+  SQLite-only adapters/tests and obsolete SQLite reset tools. Preserve legacy storage adapters,
   queries, SDK, tests and supported maintenance capabilities. Do not run destructive tools
   as verification or delete old database files/volumes as cleanup.
 
@@ -298,15 +303,15 @@ that PostgreSQL and Helix committed atomically or rename wire values accidentall
 
 | Step | Work | Exit evidence |
 | --- | --- | --- |
-| 1. Capture baseline | Inventory final marker-18 schema, SQLite consumers, Helix boundaries and current query/route tests; identify local PostgreSQL and isolated test targets | Complete table/query matrix; no unrelated data/configuration changes |
+| 1. Capture baseline | Inventory final marker-18 schema, SQLite consumers, legacy storage boundaries and current query/route tests; identify local PostgreSQL and isolated test targets | Complete table/query matrix; no unrelated data/configuration changes |
 | 2. Add PostgreSQL foundation | Replace the SQLite adapter responsibilities with a PostgreSQL adapter, driver/pool, redacted config, parameterized query module, initial schema/version validation and disposable test support | Adapter tests, fresh init/restart, incompatible-schema rejection and actual constraint tests pass |
 | 3. Port relational repositories | Identity/auth, deals/companies, access/memberships/activity, assistant and deletion state | Equivalent domain/route results, concurrency, transactions and errors |
-| 4. Port documents | Canonical blobs, versions, content claims, identity/image checkpoints and graph-facing canonical lookups | Upload/preview/deduplication parity; unchanged Helix writes/search; commit-then-index failure recovery |
-| 5. Port notebooks/templates | Notes/jobs/cleanup, catalog/assets/previews/classification/artifacts and FTS equivalent | Same saves/retries/recovery, lexical results and retained Helix projections/retrieval |
-| 6. Wire final runtime | PostgreSQL repositories plus retained Helix in bootstrap/config/launchers; remove the SQLite adapter and dead product SQLite code after the adapter replacement gates pass | Both clients run against PostgreSQL + Helix; all active consumers ported; no product SQLite adapter or fallback |
+| 4. Port documents | Canonical blobs, versions, content claims, identity/image checkpoints and graph-facing canonical lookups | Upload/preview/deduplication parity; unchanged legacy storage writes/search; commit-then-index failure recovery |
+| 5. Port notebooks/templates | Notes/jobs/cleanup, catalog/assets/previews/classification/artifacts and FTS equivalent | Same saves/retries/recovery, lexical results and retained legacy storage projections/retrieval |
+| 6. Wire final runtime | PostgreSQL repositories plus retained legacy storage in bootstrap/config/launchers; remove the SQLite adapter and dead product SQLite code after the adapter replacement gates pass | Both clients run against PostgreSQL + legacy storage; all active consumers ported; no product SQLite adapter or fallback |
 | 7. Verify/document | Full gates, fresh-data product flows, query plans, updated operational guidance | Acceptance below passes; limitations reported; no migration/backfill system built |
 
-The final runtime is PostgreSQL **and Helix**, with no product SQLite dependency. Intermediate
+The final runtime is PostgreSQL **and legacy storage**, with no product SQLite dependency. Intermediate
 compile paths are temporary implementation details, not a permanent dual-relational deployment.
 
 ## 9. Verification and acceptance
@@ -314,8 +319,8 @@ compile paths are temporary implementation details, not a permanent dual-relatio
 Convert relational test factories from in-memory SQLite to real isolated PostgreSQL test
 namespaces. Assert the disposable test target before any reset, use separate connections/
 namespaces for concurrent tests, and clean up only resources created by those tests. Keep
-Helix unit/contract suites and run cross-store tests against an isolated Helix target.
-Mocks alone do not establish PostgreSQL constraints or PostgreSQL/Helix interoperability.
+legacy storage unit/contract suites and run cross-store tests against an isolated legacy storage target.
+Mocks alone do not establish PostgreSQL constraints or PostgreSQL/legacy storage interoperability.
 
 Required fresh-data scenarios:
 
@@ -328,23 +333,23 @@ Required fresh-data scenarios:
 - PDF, DOCX, XLSX, PPTX and image upload/preview; byte-for-byte original retrieval; exact
   and concurrent duplicates; explicit version history; current/deleted-file constraints.
 - Mid-transaction failures leave no partial relational aggregate, activity or advanced
-  current-content claim. Helix failure after commit retains PostgreSQL data and exact-
+  current-content claim. legacy storage failure after commit retains PostgreSQL data and exact-
   content retry repairs the graph with the same IDs and accepted image text.
-- Helix partial-batch failure, terminal publication, identity/header mismatch, keyword/
+- legacy storage partial-batch failure, terminal publication, identity/header mismatch, keyword/
   vector/hybrid retrieval and preview navigation retain current behavior. Preserve ranking,
   limits, deterministic ties, model/dimension checks and authorization before/after ranking.
 - Two users with private/shared deals: inaccessible results never leak; templates and
   notebooks stay private. Verify deletion/revocation during reads and stream/worker work.
 - Notebook save/retry/restart, conflicts, expired leases, stale workers, durable SSE/status,
-  deletion tombstones and Helix cleanup preserve current checkpoint semantics.
+  deletion tombstones and legacy storage cleanup preserve current checkpoint semantics.
 - Templates import/list/assets/previews/insertion, owner/app filtering, FTS parity fixtures,
   both embedding roles, classification leases/fingerprints/retries, restart reconciliation
   and graph deletion work together.
 - Permanent deal deletion resumes across restart and completes only after canonical cleanup
-  and retained Helix purge/verification. Lost responses replay existing durable receipts.
+  and retained legacy storage purge/verification. Lost responses replay existing durable receipts.
 - Pool exhaustion/disconnection produces bounded sanitized failures. Safe retries cannot
   duplicate activity/jobs, lose committed IDs or bypass authorization/revision guards.
-- New PostgreSQL records and Helix projections remain usable after restart. Query-plan
+- New PostgreSQL records and legacy storage projections remain usable after restart. Query-plan
   review confirms indexed authorization joins, content claims, job claims, pagination and
   template lexical retrieval without unbounded scans or Rust-side full-dataset loading.
 
@@ -359,7 +364,7 @@ cargo test --locked --all-targets
 
 Keep all test/support code under `backend/tests/` and manually wire suites into the crate's
 test-only module tree (`autotests = false`). Database-backed tests must actually run against
-the disposable targets; skipped integration suites are not passing evidence. Retain Helix
+the disposable targets; skipped integration suites are not passing evidence. Retain legacy storage
 architecture/SDK checks and replace SQLite-specific expectations with PostgreSQL equivalents.
 
 Verify unchanged shared-client contracts from `frontend/`:
@@ -387,14 +392,14 @@ verification, leaving shared services alone. Finish with `git diff --check` and 
 
 When implementation lands, update `docs/ARCHITECTURE.md`, related authentication/notebook/
 shared-deal/template/recovery documents, onboarding/configuration instructions, `AGENTS.md`
-and affected project skills to describe **PostgreSQL canonical storage plus Helix graph/search**.
-Replace obsolete SQLite setup/reset guidance while retaining and adapting Helix procedures.
+and affected project skills to describe **PostgreSQL canonical storage plus legacy graph/search**.
+Replace obsolete SQLite setup/reset guidance while retaining and adapting legacy storage procedures.
 State the retained commit-before-indexing failure/retry behavior; do not claim cross-store
 atomicity, a general reindex command, new durable jobs or an implemented data migration.
 
-Done means the existing product works with freshly recreated PostgreSQL tables and Helix,
+Done means the existing product works with freshly recreated PostgreSQL tables and legacy storage,
 all relational consumers use PostgreSQL, and the table/query/transaction/authorization and
-cross-store acceptance checks pass. No Helix replacement, pgvector conversion, general
+cross-store acceptance checks pass. No legacy storage replacement, pgvector conversion, general
 idempotency redesign, data migration or old-data cleanup is required. Record any unresolved
 behavioral/query parity gap explicitly rather than weakening tests to make the port pass.
 
@@ -403,7 +408,7 @@ behavioral/query parity gap explicitly rather than weakening tests to make the p
 Use these current repository sources during implementation:
 
 - [Canonical architecture](../docs/ARCHITECTURE.md), especially backend composition, schema,
-  Helix, cross-store consistency, request flows, configuration and verification.
+  legacy storage, cross-store consistency, request flows, configuration and verification.
 - [Final schema/upgrades](../backend/src/app/migrations.rs),
   [bootstrap](../backend/src/app/bootstrap.rs), [configuration](../backend/src/app/config.rs),
   [backend manifest](../backend/Cargo.toml), [lockfile](../backend/Cargo.lock), [launcher](../quarry).
@@ -418,15 +423,15 @@ Use these current repository sources during implementation:
   [search](../backend/src/domains/documents/search/service.rs).
 - [Notebook repository](../backend/src/domains/notebooks/repository.rs),
   [jobs](../backend/src/domains/notebooks/job_repository.rs),
-  [Helix pipeline](../backend/src/domains/notebooks/graph.rs).
+  [legacy storage pipeline](../backend/src/domains/notebooks/graph.rs).
 - [Template repository](../backend/src/domains/templates/slide_templates/repository.rs),
   [classification/lexical storage](../backend/src/domains/templates/slide_templates/repository/classification.rs),
-  [Helix projection](../backend/src/domains/templates/slide_templates/graph.rs).
+  [legacy storage projection](../backend/src/domains/templates/slide_templates/graph.rs).
 - [Deletion repository](../backend/src/domains/deals/deletion/repository.rs),
   [integration suites](../backend/tests/integration/), [frontend scripts](../frontend/package.json).
 
 Planning verification: review local links, table coverage against the final schema, commands
-against manifests, remaining Helix-replacement language, and `git diff --check`. PostgreSQL
+against manifests, remaining legacy storage-replacement language, and `git diff --check`. PostgreSQL
 connection details/readiness are unverified here. No database or runtime tests run for this
 plan-only edit. Architecture impact: none — this revises proposed future work without
 changing the current runtime, schema, contracts or configuration.

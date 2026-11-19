@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{helix::client::HelixClient, postgres::client::PostgresClient},
+    adapters::postgres::client::PostgresClient,
     app::{
         bootstrap::test_support::assemble_api, config::AppConfig, http::create_router, migrations,
     },
@@ -11,11 +11,12 @@ use axum::{
     Router,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
 use tower::ServiceExt;
 async fn app() -> (Router, PostgresClient) {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrations::migrate(&postgres).await.unwrap();
+    migrations::migrate(&postgres, Default::default())
+        .await
+        .unwrap();
     seed_identity(&postgres, "deletion-owner@example.com", 'a').await;
     seed_identity(&postgres, "deletion-member@example.com", 'b').await;
     postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'Synthetic','buy_side','unknown','pipeline','now','now'); INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DEAL-DELETE-HTTP',1,'owner','now','now'),('DEAL-DELETE-HTTP',2,'manager','now','now'); INSERT INTO deal_access_revisions(deal_id) VALUES('DEAL-DELETE-HTTP');").await }).await.unwrap();
@@ -23,7 +24,6 @@ async fn app() -> (Router, PostgresClient) {
     let api = assemble_api(
         &config,
         postgres.clone(),
-        Arc::new(HelixClient::with_config("http://127.0.0.1:1", None).unwrap()),
         reqwest::Client::new(),
         prompt_catalog(),
     );

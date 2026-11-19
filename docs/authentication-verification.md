@@ -1,8 +1,8 @@
 # Authentication implementation verification
 
-Storage update (November 11, 2026): PostgreSQL database `Quarry` now replaces canonical SQLite;
-Helix is retained. See [current setup and recovery](postgresql-storage.md). SQLite upgrade,
-reset and verification records below describe the earlier implementation, not current commands.
+Current storage is PostgreSQL schema 6 with pgvector for all product persistence and search.
+See [current setup and recovery](postgresql-storage.md). Dated SQLite, graph-storage, reset and
+verification records below describe earlier implementations, not current prerequisites or commands.
 
 Date: 2026-10-28. Scope: schema 11, password/session API, resource ownership, HTTP/Tauri
 transports, global user provider, login/register/account UI, and the wider West Monroe form.
@@ -41,7 +41,7 @@ its focused rerun and the subsequent full default backend suite passed. A pre-ex
 iterator lint from the newer Clippy toolchain was fixed with equivalent `as_chunks` iteration.
 Vite builds retain warnings for existing large dependency chunks.
 
-The seven ignored backend tests require explicitly isolated Helix validation instances or
+The seven ignored backend tests require explicitly isolated legacy storage validation instances or
 full Chromium/OS integration conditions. They were not enabled for this authentication task.
 The skill-creator Python validator could not run because the default Python lacks PyYAML;
 the changed skill's unchanged frontmatter was successfully parsed and name-checked with Ruby
@@ -49,7 +49,7 @@ Psych instead.
 
 ## Runtime and development reset
 
-The user selected `helix-quarry-v3-dev` on port 6969. Its image matched the repository pin and
+The user selected the former local graph store on port 6969. Its image matched the repository pin and
 it had no mounts. No backend was listening on port 3001 before the reset. The selected container
 was stopped, removed, recreated with an empty store from the same pinned image and restarted.
 The explicit offline command was run from `backend/`:
@@ -59,12 +59,12 @@ target/debug/reset_development --discard /Users/rgambhir/Quarry/backend/data/qua
 ```
 
 The shared canonical SQLite schema is now 11. There is one maintained development database
-location and one launcher-managed Helix instance for normal application use. The test-created
+location and one launcher-managed legacy storage instance for normal application use. The test-created
 smoke account was removed afterward while the backend was stopped; other newly created records
 were retained. No `.env` contents, provider secrets, password hashes, or live session tokens were
 printed or committed.
 
-A backend started with the explicit canonical database path and selected Helix URL passed live
+A backend started with the explicit canonical database path and selected legacy storage URL passed live
 registration, login, current-user retrieval, authenticated deal listing, logout and revoked-token
 rejection. After rebuilding/restarting, login still succeeded and non-West Monroe registration
 was rejected. These smoke requests made no AI/provider calls.
@@ -81,7 +81,7 @@ claimed as verified. The shared desktop UI build, native gateway tests and full 
 passed. Packaging/release validation was not run.
 
 All task-owned Vite, Tauri and backend processes were stopped; ports 1420 and 3001 were checked
-free. The canonical Helix service remains running for normal development.
+free. The canonical legacy storage service remains running for normal development.
 
 ## Review and architecture impact
 

@@ -109,7 +109,7 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 
 Tests use isolated schemas in the separate `_test` database and local mock servers. Preserve
 the existing pgvector prerequisite and opt-in integration boundaries. Do not use application
-startup, development data resets, or Helix clearing as verification.
+startup, development data resets, or legacy storage clearing as verification.
 
 Review the final diff for behavior, dependency direction, error handling, ownership/copies, and
 unrelated changes. Run `git diff --check` and recheck status. Update `docs/ARCHITECTURE.md` for the

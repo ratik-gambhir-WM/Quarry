@@ -1,5 +1,5 @@
 //! Native HTTP mappings; Quarry supplies request IDs, timeout, tracing and CORS.
-pub(super) mod auth;
+pub(in crate::domains::templates) mod auth;
 use validate::{headers, invalid, kind, query, too_large, validate_id};
 mod validate;
 use axum::{
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::{error::FailureKind, *};
 #[derive(Clone)]
-pub(super) struct EndpointState {
+pub(in crate::domains::templates) struct EndpointState {
     pub studio: Arc<SlideTemplates>,
 }
 impl IntoResponse for SlideTemplateError {
@@ -79,11 +79,11 @@ fn powerpoint(result: ExportedPowerPoint) -> SlideResult<Response> {
     );
     Ok(private(response))
 }
-pub(super) async fn export(
+pub(in crate::domains::templates) async fn export(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(
         request.headers(),
         "application/json",
@@ -95,25 +95,25 @@ pub(super) async fn export(
         .await?;
     powerpoint(s.studio.export(input).await?)
 }
-pub(super) async fn import(
+pub(in crate::domains::templates) async fn import(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, false).await
 }
-pub(super) async fn batch_import(
+pub(in crate::domains::templates) async fn batch_import(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, true, false).await
 }
-pub(super) async fn import_classified(
+pub(in crate::domains::templates) async fn import_classified(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
     import_inner(s, request, false, true).await
 }
-pub(super) async fn batch_import_classified(
+pub(in crate::domains::templates) async fn batch_import_classified(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
@@ -125,7 +125,7 @@ async fn import_inner(
     batch: bool,
     classified: bool,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["kind"])?;
+    let pairs = query(request.uri(), &["kind"])?;
     let kind = kind(&pairs)?;
     headers(
         request.headers(),
@@ -191,8 +191,8 @@ async fn import_inner(
     })
     .await?;
     let location = format!(
-        "{}/catalog/{}?appId=Quarry_WestMonroe",
-        super::route::PREFIX,
+        "{}/catalog/{}",
+        super::super::route::SLIDE_TEMPLATE_PREFIX,
         template_id
     );
     response
@@ -213,19 +213,19 @@ async fn import_inner(
         response.headers_mut().insert(
             header::LINK,
             header_value(&format!(
-                "<{}/catalog/{}/preview?appId=Quarry_WestMonroe>; rel=\"preview\"",
-                super::route::PREFIX,
+                "<{}/catalog/{}/preview>; rel=\"preview\"",
+                super::super::route::SLIDE_TEMPLATE_PREFIX,
                 template_id
             ))?,
         );
     }
     Ok(private(response))
 }
-pub(super) async fn catalog(
+pub(in crate::domains::templates) async fn catalog(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["kind"])?;
+    let pairs = query(request.uri(), &["kind"])?;
     let filter = if pairs.iter().any(|(k, _)| k == "kind") {
         Some(kind(&pairs)?)
     } else {
@@ -236,11 +236,11 @@ pub(super) async fn catalog(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn previews(
+pub(in crate::domains::templates) async fn previews(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["page"])?;
+    let pairs = query(request.uri(), &["page"])?;
     let page = pairs
         .iter()
         .find(|(k, _)| k == "page")
@@ -256,24 +256,24 @@ pub(super) async fn previews(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn get(
+pub(in crate::domains::templates) async fn get(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     let result = s.studio.get(id).await?.ok_or_else(absent)?;
     Ok(private(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn delete(
+pub(in crate::domains::templates) async fn delete(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    let pairs = query(request.uri(), request.headers(), &["expectedRevision"])?;
+    let pairs = query(request.uri(), &["expectedRevision"])?;
     let expected_revision = pairs
         .iter()
         .find(|(key, _)| key == "expectedRevision")
@@ -286,12 +286,12 @@ pub(super) async fn delete(
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
-pub(super) async fn preview(
+pub(in crate::domains::templates) async fn preview(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     let preview = s.studio.preview(id.clone()).await?;
     let Some(p) = preview else {
@@ -320,12 +320,12 @@ pub(super) async fn preview(
     );
     Ok(private(response))
 }
-pub(super) async fn asset(
+pub(in crate::domains::templates) async fn asset(
     Extension(s): Extension<EndpointState>,
     Path((id, asset)): Path<(String, String)>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     validate_id(&id)?;
     validate_id(&asset)?;
     let asset = s.studio.asset(id, asset).await?.ok_or_else(absent)?;
@@ -354,13 +354,13 @@ pub(super) async fn asset(
     }
     Ok(private(response))
 }
-pub(super) async fn retry_processing(
+pub(in crate::domains::templates) async fn retry_processing(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
     validate_id(&id)?;
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(request.headers(), "application/json", 1024)?;
     let input: serde_json::Value = serde_json::from_slice(&bytes(request, 1024).await?)
         .map_err(|_| invalid("Retry requires an empty JSON object."))?;
@@ -373,17 +373,13 @@ pub(super) async fn retry_processing(
     ))
 }
 
-pub(super) async fn retrieval(
+pub(in crate::domains::templates) async fn retrieval(
     Extension(s): Extension<EndpointState>,
     Path(id): Path<String>,
     request: Request,
 ) -> SlideResult<Response> {
     validate_id(&id)?;
-    let pairs = query(
-        request.uri(),
-        request.headers(),
-        &["metadata", "embeddings"],
-    )?;
+    let pairs = query(request.uri(), &["metadata", "embeddings"])?;
     let flag = |name: &str| -> SlideResult<bool> {
         match pairs
             .iter()
@@ -404,11 +400,11 @@ pub(super) async fn retrieval(
         json_response(&s.studio, StatusCode::OK, move || Ok(result)).await?,
     ))
 }
-pub(super) async fn insert(
+pub(in crate::domains::templates) async fn insert(
     Extension(s): Extension<EndpointState>,
     request: Request,
 ) -> SlideResult<Response> {
-    query(request.uri(), request.headers(), &[])?;
+    query(request.uri(), &[])?;
     headers(request.headers(), "multipart/form-data", 76 * 1024 * 1024)?;
     let (parts, body) = request.into_parts();
     let request = Request::from_parts(parts, body);

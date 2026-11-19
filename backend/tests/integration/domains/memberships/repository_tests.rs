@@ -8,7 +8,7 @@ use crate::{
 };
 async fn fixture() -> (PostgresClient, MembershipRepository, DealRepository) {
     let db = PostgresClient::test_database().await.unwrap();
-    migrate(&db).await.unwrap();
+    migrate(&db, Default::default()).await.unwrap();
     db.with_connection(async |connection| {
         for user_id in 1..=6 {
             connection.execute(

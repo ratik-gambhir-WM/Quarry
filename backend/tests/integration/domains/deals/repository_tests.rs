@@ -18,7 +18,7 @@ fn fields() -> DealFields {
 }
 async fn fixture() -> (PostgresClient, DealRepository, CompanyRepository, i64) {
     let postgres = PostgresClient::test_database().await.unwrap();
-    migrate(&postgres).await.unwrap();
+    migrate(&postgres, Default::default()).await.unwrap();
     let user = UserRepository::new(postgres.clone())
         .create(AddUserInput {
             first_name: "Test".into(),
