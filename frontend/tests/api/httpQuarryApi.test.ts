@@ -6,6 +6,18 @@ import { testTemplateRetrieval } from "@/test/fixtures/templateRetrieval";
 import { clearActivityLog, getActivityLogEntries } from "@/lib/activityLog";
 
 describe("httpQuarryApi", () => {
+  it("requests document classification with an encoded path and generation guard", async () => {
+    const payload = { versionId: "a".repeat(64), runStatus: "completed", generation: 2, lastErrorCode: null, result: null };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      httpQuarryApi.requestDocumentClassification("DEAL / 1", "a".repeat(64), 1),
+    ).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/deals/DEAL%20%2F%201/documents/${"a".repeat(64)}/classification`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ expectedGeneration: 1 }) }),
+    );
+  });
   it("explicitly retries a failed slide once through the versioned POST endpoint", async () => {
     const payload = { templateId: "template-one", stage: "embedding" };
     const fetchMock = vi.fn().mockResolvedValue(Response.json(payload, { status: 202 }));

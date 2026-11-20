@@ -9,4 +9,5 @@
 - Shared components import `@quarry/runtime`; they do not import raw HTTP or Tauri modules.
 - Tauri imports are confined to `src/platform/runtime.desktop.ts`.
 
-See the repository root README and ADR 0001 for configuration and boundary details.
+See [Getting Started](../Getting%20Started.md) for configuration and commands, and the
+[root architecture](../ARCHITECTURE.md#4-distribution-and-runtime-composition) for runtime boundaries.

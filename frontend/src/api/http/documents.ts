@@ -4,6 +4,7 @@ import type {
   HybridDocumentResponse,
   DealDocumentPdf,
   DealDocumentSummary,
+  DocumentClassification,
   DealDocumentText,
   FileChunkKeywordSearch,
   FileChunkVectorSearch,
@@ -96,6 +97,17 @@ async function requestPdfBytes(path: string): Promise<DealDocumentPdf> {
 function listDealDocuments(dealId: string) {
   return get<DealDocumentSummary[]>(
     `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
+  );
+}
+
+function requestDocumentClassification(
+  dealId: string,
+  fileId: string,
+  expectedGeneration: number,
+) {
+  return post<DocumentClassification, { expectedGeneration: number }>(
+    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/classification`,
+    { expectedGeneration },
   );
 }
 
@@ -252,6 +264,7 @@ function previewDealDocument(dealId: string, relativePath: string) {
 export const httpDocumentsApi: Pick<
   QuarryApi,
   | "listDealDocuments"
+  | "requestDocumentClassification"
   | "getDealDocumentPdf"
   | "getDealDocumentText"
   | "processDocuments"
@@ -267,6 +280,7 @@ export const httpDocumentsApi: Pick<
   | "searchDealDocumentChunksByVector"
 > = {
   listDealDocuments,
+  requestDocumentClassification,
   getDealDocumentPdf,
   getDealDocumentText,
   processDocuments,

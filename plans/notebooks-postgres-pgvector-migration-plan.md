@@ -1,14 +1,14 @@
 # Plan 2: atomic notebook saves and PostgreSQL search
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Date: 2026-11-12. Status: proposed follow-up PR; no implementation or data changes.
 Depends on the shared extension/vector/bulk/search contract in
 [Plan 1](documents-postgres-pgvector-migration-plan.md#2-common-storage-and-search-decisions-for-all-three-plans).
 Followed by [templates and final legacy storage retirement](templates-postgres-pgvector-migration-plan.md).
-Baseline: [notebook API](../docs/notebook-api.md) and [architecture](../docs/ARCHITECTURE.md).
+Baseline: [notebook API](../ARCHITECTURE.md#77-personal-notebooks-and-durable-saves) and [architecture](../ARCHITECTURE.md).
 
 ## 1. Outcome and deliberate behavior change
 

@@ -11,7 +11,7 @@ valuable local data or external infrastructure.
 ## Read before editing
 
 1. Read the root `AGENTS.md` and the relevant backend, data, API, configuration, and security
-   sections of `docs/ARCHITECTURE.md`.
+   sections of `ARCHITECTURE.md`.
 2. Run `git status --short` and preserve unrelated work.
 3. Confirm exact crate versions in `backend/Cargo.toml` and `Cargo.lock`. Quarry currently uses
    Axum 0.8, Tower 0.5, tower-http 0.7, Tokio 1, reqwest 0.13, SQLx 0.8.6 (PostgreSQL/Tokio/Rustls), and pgvector 0.4.2.
@@ -21,30 +21,30 @@ valuable local data or external infrastructure.
 ## Preserve the dependency graph
 
 ```text
-main -> AppConfig -> bootstrap -> clients/repositories/services -> AppState
+main -> AppConfig -> bootstrap -> clients/repositories/services -> feature routers with private state
 request -> router -> handler -> service -> repository/client
 ```
 
 - `main.rs`: tracing, config, bootstrap, bind, serve, shutdown.
 - `config.rs`: all ambient environment parsing, defaults, validation, and secret wrappers.
-- `bootstrap.rs`: bounded PostgreSQL pool and retained writer lease, fresh-schema validation, clients, repositories, services and state.
-- `state.rs`: cheap-to-clone `Arc<Service>` handles for Axum handlers.
-- `routes/`: route/middleware composition.
-- `handlers/`: extract/validate transport input, invoke service, adapt response.
-- `services/`: orchestration and preconditions derived from loaded or upstream state.
-- `repository/`: PostgreSQL persistence and search operations.
+- `app/bootstrap.rs`: bounded PostgreSQL pool and retained writer lease, schema validation, clients, repositories and services.
+- `app/http/`: global HTTP middleware and API mounts.
+- `domains/<feature>/route.rs`: feature route composition and private HTTP state binding before merge.
+- Feature `handler.rs`/`*_handler.rs`: extract/validate transport input, invoke service, adapt response.
+- Feature `service.rs`/`*_service.rs`: orchestration and preconditions derived from loaded or upstream state.
+- Feature `repository.rs`/`*_repository.rs`: owned PostgreSQL persistence and search operations.
 - `adapters/`, domain parsers, and query/model modules: concrete infrastructure and pure mechanisms.
 
 Services and repositories must not depend on `AppState`, read ambient configuration, or construct
 infrastructure clients. Handlers must not import repositories or construct clients. Current
-architecture tests enforce the `AppState` and ambient-configuration rules and check handler
-repository imports/client construction; extend them when a new forbidden dependency pattern is
-introduced.
+architecture tests reject global `AppState`, enforce feature router state binding, and reject
+lower-layer ambient configuration reads, handler repository imports and client construction.
+Extend them when a new forbidden dependency pattern is introduced.
 
 ## Axum delivery rules
 
 Before adding or moving a check, use the
-[boundary placement decision](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+[backend boundary rules](../../../AGENTS.md#backend-development-rules).
 Name the inputs it needs and its earliest safe execution point. Explain a later check's concrete
 state/lifecycle dependency; do not classify caller-only checks as service logic merely because
 they describe a domain field. Route-level tests must demonstrate early rejection before product
@@ -56,8 +56,9 @@ work and preserve necessary guards at the actual operation.
   state policy centralized.
 - Use typed Axum extractors. Body-consuming extractors such as `Json`/`Multipart` belong last.
 - Validate client-controlled path/query/header/JSON/multipart facts before product work. Reusable
-  request checks belong in private `handler/validate.rs` modules; multipart streaming bounds may
-  remain in handler-owned `upload.rs`. Keep HTTP errors and request policy out of models/services/
+  request checks belong in handler-owned `validate.rs`, normally `handler/validate.rs`. A flat
+  sibling is supported when `handler.rs` includes it as a private child through `#[path = "validate.rs"]`,
+  as in document viewing. Multipart streaming bounds may remain in handler-owned `upload.rs`. Keep HTTP errors and request policy out of models/services/
   adapters. Dedicated validation modules are named `validate.rs`.
 - Authenticate/authorize at the HTTP boundary using shared middleware for common session/path
   policy and handlers for body-selected resources. Resolve policy through service interfaces.
@@ -87,7 +88,8 @@ work and preserve necessary guards at the actual operation.
 
 - Never block a Tokio worker with filesystem traversal, Office subprocess work or heavy parsing.
   PostgreSQL I/O uses the asynchronous pool; do not wrap it in blocking tasks or block on futures. Use the existing blocking-pool and concurrency-control patterns.
-- Keep `AppState` lean and clone service `Arc`s, not large mutable objects.
+- Keep feature HTTP state narrow and clone service `Arc`s, not large mutable objects. Do not
+  introduce a global `AppState` or repository/configuration service locator.
 - Bound concurrency, response/upload sizes, pool acquisition, queries, retries and caches.
 - Never hold a blocking mutex across `.await`. The PostgreSQL transaction wrapper uses a Tokio
   mutex on one owned transaction connection. Helpers must share it rather than commit independently.
@@ -104,8 +106,11 @@ work and preserve necessary guards at the actual operation.
   for grouped predicates, ranking and bounded multi-row INSERTs. Never add feature SQL to adapters.
 - Preserve exact-content input claims, deterministic version/chunk IDs, one-current uniqueness,
   immutable accepted image text, profile compatibility and rollback. Changed bytes create a new
-  logical file; admission chooses one winning file identity before random parser IDs can diverge.
-- PostgreSQL schema 5 retains resource revisions and lifecycle guards and adds document profiles/chunks/jobs/input claims to the former layout. Initialize only an empty
+  logical file; admission derives file/version/document IDs from the deal ID and content hash, so exact-byte
+  retries converge and identical content in different deals remains independent.
+- PostgreSQL schema 7 includes resource revisions, lifecycle guards, document profiles/chunks/jobs/
+  input claims, content-address constraints, document classifications, notebook search sets and
+  owner-scoped template artifacts. Initialize only an empty
   selected schema; validate its source checksum/catalog fingerprint and ownership/readiness on
   restart. Unknown layouts fail without deletion. There is no import, fallback or automatic reset. The explicitly invoked guarded MVP reset requires user authorization; it is not verification.
 - Bootstrap retains a dedicated-session application writer lease through all client clones; database
@@ -120,7 +125,7 @@ work and preserve necessary guards at the actual operation.
   during the concurrency transition. Do not claim distributed application support from
   independent reads or test-only transactions that bypass the global guard.
 - Template lexical indexing retains exact Unicode 6.1 folding and FTS5-compatible weighted BM25,
-  owner/app scoping and stable ties. Its captured fixtures must continue to pass. Templates use typed subject/capability
+  owner scoping and stable ties. Its captured fixtures must continue to pass. Templates use typed subject/capability
   vector pairs in PostgreSQL. Documents use exact scoped cosine and indexed English/technical lexical search.
 - Document jobs retain immutable SQL input, database-clock attempts, image checkpoints and terminal replay. Preview caches remain process-local; query embeddings are not cached. Notebook atomic saves, template classification
   jobs, and deal deletion receipts persist in PostgreSQL and resume through their owned workers.
@@ -134,7 +139,7 @@ work and preserve necessary guards at the actual operation.
   optional group; partial WM AI configuration must fail precisely.
 - PostgreSQL and its separately provisioned pgvector extension are required at bootstrap.
 - Keep secrets in `SecretString` or an equivalent redacted wrapper.
-- Keep the configuration tables in `docs/ARCHITECTURE.md` aligned with parser changes. Quarry uses
+- Keep the configuration tables in `ARCHITECTURE.md` aligned with parser changes. Quarry uses
   only the ignored `backend/.env` at runtime and does not maintain a second env-shaped template.
 - The Rust SharePoint client is isolated and not assembled into routes/services. A stored
   SharePoint URL is metadata, not an active import.
@@ -183,7 +188,7 @@ ambiguously owned listener.
 
 ## Architecture completion gate
 
-After implementation, re-read `docs/ARCHITECTURE.md`. Update it in the same change if endpoints,
+After implementation, re-read `ARCHITECTURE.md`. Update it in the same change if endpoints,
 DTOs, layer responsibilities, dependencies, schemas, graph shape, data ownership, migrations,
 jobs, configuration, integrations, security/trust boundaries, error contracts, operational
 behavior, or verification commands changed. If no edit is needed, hand off with
@@ -196,15 +201,17 @@ uncertainty, and pre-existing failures separately.
 
 Server configuration requires redacted `QUARRY_DATABASE_URL`; the dedicated development database is
 `Quarry`. Pool/query/acquisition bounds are parsed only in `AppConfig`. Tests require an explicit URL
-ending in `_test`, use isolated random schemas and clean only namespaces they created. Keep development and test databases separate. No remote graph service is required. See
-`docs/postgresql-storage.md` for setup/recovery.
+ending in `_test`, use isolated random schemas and clean only namespaces they created. Keep
+development and test databases separate. No remote graph service is required. Inspect
+`backend/src/adapters/postgres/client.rs` and its test support for connection/recovery behavior.
 
 ## Document vector prerequisite
 
-Provision vector 0.8.6 once per database in `quarry_extensions` using the explicit procedure in
-`docs/postgresql-storage.md`. Startup validates it; tests never install/drop the shared extension.
+Provision vector 0.8.6 once per database in `quarry_extensions` using
+`backend/tools/provision-pgvector.sql`. Startup validates it; tests never install/drop the shared extension.
 Document repositories use the same SQLx pool, qualified official vector codec and retained
 transactions. Preserve per-deal read snapshots and bounded final authorization. Numeric checks
 and immutable provider/model/dimension/preparation profiles are separate requirements. Exact
 cosine is the default; no ANN index or measured relevance/scale claim is implied. Keep the global
-writer lease and mutation serialization. See `docs/document-storage.md` for current limits/recovery.
+writer lease and mutation serialization. Inspect document ingestion/store repositories and
+their tests for current limits and recovery behavior.

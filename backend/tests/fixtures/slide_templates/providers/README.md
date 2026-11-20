@@ -5,13 +5,14 @@ OpenAI SDK generated `reference.json`. No network calls are made: the classifier
 uses the SDK's Responses parser with canned HTTP response bodies, and the
 embedder uses a canned client response. The generator writes only here.
 
-Regenerate from the repository root, replacing `REFERENCE_CHECKOUT` with the
-absolute checkout path:
+Regenerate from the repository root, replacing `/absolute/reference-checkout` with the
+read-only TypeScript reference checkout path. Its historical `server/` layout is required only
+for optional fixture regeneration; Quarry itself builds from `backend/`:
 
 ```sh
-node --import REFERENCE_CHECKOUT/node_modules/tsx/dist/esm/index.mjs \
-  server/tests/fixtures/providers/generate-reference.mjs REFERENCE_CHECKOUT/server
-cargo test --manifest-path server/Cargo.toml --lib providers
+node --import /absolute/reference-checkout/node_modules/tsx/dist/esm/index.mjs \
+  backend/tests/fixtures/slide_templates/providers/generate-reference.mjs /absolute/reference-checkout/server
+cargo test --locked --manifest-path backend/Cargo.toml --lib slide_templates::providers::tests
 ```
 
 The fixtures cover exact schema/request bodies, eager validation of every output

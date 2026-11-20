@@ -26,7 +26,9 @@ export function createUploadWorkflow(
   api: Pick<QuarryApi, "startProcessFile" | "subscribeToProcessFileJob">,
   dealId: string,
 ) {
-  const concurrency = 3;
+  // Matches the server's default background document workers; the server still
+  // enforces its own bound across every client.
+  const concurrency = 5;
   let state: Snapshot = { entries: [], elapsedSeconds: 0, processedSeconds: null };
   let generation = 0;
   let pumping = false;

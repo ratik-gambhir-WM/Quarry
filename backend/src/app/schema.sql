@@ -162,7 +162,8 @@ CREATE TABLE "quarry_files" (
     created_at TEXT COLLATE "C" NOT NULL,
     updated_at TEXT COLLATE "C" NOT NULL,
     deleted_at TEXT COLLATE "C",
-    CHECK(length(trim(file_id)) > 0), CHECK(length(trim(deal_id)) > 0),
+    -- Content addressed: sha256(deal_id || 0x00 || content_sha256), see quarry_current_content.
+    CHECK(file_id ~ '^[0-9a-f]{64}$'), CHECK(length(trim(deal_id)) > 0),
     CHECK(length(trim(display_name)) > 0), CHECK(source_uri IS NULL OR length(trim(source_uri)) > 0)
 );
 
@@ -178,7 +179,9 @@ CREATE TABLE quarry_file_versions (
                 created_at        TEXT COLLATE "C" NOT NULL, uploaded_by_user_id BIGINT REFERENCES users(id) ON DELETE RESTRICT,
                 UNIQUE (file_id, version_number),
                 UNIQUE (file_id, content_sha256),
-                CHECK (length(trim(version_id)) > 0),
+                -- A content-addressed file has exactly one immutable version with its own ID.
+                CHECK (version_id = file_id),
+                CHECK (version_number = 1),
                 CHECK (length(trim(original_filename)) > 0),
                 CHECK (length(content_sha256) = 64)
             );
@@ -242,13 +245,15 @@ CREATE TABLE quarry_current_content (
     file_id TEXT COLLATE "C" NOT NULL REFERENCES quarry_files(file_id) ON DELETE CASCADE,
     version_id TEXT COLLATE "C" NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
     PRIMARY KEY(deal_id,content_sha256),
-    UNIQUE(file_id)
+    UNIQUE(file_id),
+    CHECK(version_id = file_id),
+    CHECK(file_id = encode(sha256(convert_to(deal_id,'UTF8') || '\x00'::bytea || convert_to(content_sha256,'UTF8')),'hex'))
 );
 
 CREATE TABLE document_identity_manifests (
     version_id TEXT COLLATE "C" PRIMARY KEY NOT NULL REFERENCES quarry_file_versions(version_id) ON DELETE CASCADE,
     derivation_version BIGINT NOT NULL CHECK(derivation_version IN (1,2)),
-    document_id TEXT COLLATE "C" NOT NULL,
+    document_id TEXT COLLATE "C" NOT NULL CHECK(document_id = version_id),
     active_generation TEXT COLLATE "C" NOT NULL CHECK(length(active_generation) > 0),
     chunk_count BIGINT NOT NULL CHECK(chunk_count >= 0),
     search_ready BIGINT NOT NULL DEFAULT 0 CHECK(search_ready IN (0,1))
@@ -658,8 +663,47 @@ CREATE TABLE document_input_identities (
     deal_id TEXT COLLATE "C" NOT NULL REFERENCES deals(deal_id) ON DELETE CASCADE,
     input_hash TEXT COLLATE "C" NOT NULL CHECK(length(input_hash)=64),
     file_id TEXT COLLATE "C" NOT NULL UNIQUE,
-    PRIMARY KEY(deal_id,input_hash)
+    PRIMARY KEY(deal_id,input_hash),
+    CHECK(file_id = encode(sha256(convert_to(deal_id,'UTF8') || '\x00'::bytea || convert_to(input_hash,'UTF8')),'hex'))
 );
+-- AI classification of one accepted content identity. Written only inside the canonical
+-- document transaction (or by reclassifying a committed document), so a row never exists
+-- without its document. Deleting the input identity (deal deletion) cascades.
+CREATE TABLE document_classifications (
+    deal_id TEXT COLLATE "C" NOT NULL,
+    input_hash TEXT COLLATE "C" NOT NULL CHECK(input_hash ~ '^[0-9a-f]{64}$'),
+    requested_by_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    generation BIGINT NOT NULL DEFAULT 1 CHECK(generation BETWEEN 1 AND 9007199254740991),
+    request_fingerprint TEXT COLLATE "C" NOT NULL CHECK(request_fingerprint ~ '^[0-9a-f]{64}$'),
+    sample_text TEXT COLLATE "C" NOT NULL CHECK(octet_length(sample_text) <= 32768),
+    sample_provenance TEXT COLLATE "C" NOT NULL
+        CHECK((sample_provenance IS JSON OBJECT) AND octet_length(sample_provenance) <= 16384),
+    sample_hash TEXT COLLATE "C" NOT NULL CHECK(sample_hash ~ '^[0-9a-f]{64}$'),
+    model TEXT COLLATE "C" NOT NULL CHECK(length(model) BETWEEN 1 AND 200),
+    taxonomy_version BIGINT NOT NULL CHECK(taxonomy_version > 0),
+    prompt_version TEXT COLLATE "C" NOT NULL CHECK(length(prompt_version) BETWEEN 1 AND 100),
+    sample_version TEXT COLLATE "C" NOT NULL CHECK(length(sample_version) BETWEEN 1 AND 100),
+    policy_version BIGINT NOT NULL CHECK(policy_version > 0),
+    run_status TEXT COLLATE "C" NOT NULL CHECK(run_status IN ('completed','failed','disabled')),
+    last_error_code TEXT COLLATE "C" CHECK(last_error_code IS NULL OR last_error_code ~ '^[a-z_]{1,64}$'),
+    result_json TEXT COLLATE "C"
+        CHECK(result_json IS NULL OR ((result_json IS JSON OBJECT) AND octet_length(result_json) <= 16384)),
+    created_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,
+    updated_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,
+    completed_at BIGINT,
+    PRIMARY KEY(deal_id,input_hash),
+    FOREIGN KEY(deal_id,input_hash)
+        REFERENCES document_input_identities(deal_id,input_hash) ON DELETE CASCADE,
+    CHECK((run_status='completed') = (result_json IS NOT NULL)),
+    CHECK(run_status='completed' OR completed_at IS NULL),
+    CHECK((run_status='failed') = (last_error_code IS NOT NULL))
+);
+CREATE INDEX idx_document_classifications_primary_workstream
+    ON document_classifications(deal_id,((result_json::jsonb)->>'primaryWorkstream'))
+    WHERE (result_json::jsonb)->>'status' = 'classified';
+CREATE INDEX idx_document_classifications_primary_category
+    ON document_classifications(deal_id,((result_json::jsonb)->>'primaryCategory'))
+    WHERE (result_json::jsonb)->>'status' = 'classified';
 
 -- Search readiness is published only with an exact, contiguous immutable set.
 CREATE VIEW document_search_integrity AS

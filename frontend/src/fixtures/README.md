@@ -8,9 +8,10 @@ Fixtures are grouped by the feature that presents them:
 
 - `workspace/`: portfolio deals, insights, navigation, and profile placeholders
 - `hub/`: suggested content, activity, and AI search prompts
-- `data-room/`: report/editor and local document-search results
+- `data-room/`: report/editor, file-review, and local document-search results
 - `deal-room/`: deal-room-only views such as site visits
 - `diligence/`: retained diligence-tree fixture data
+- `vault/`: sample vault items
 
 Keep domain types, selectors, and server-response mappers in `src/data`. Tests that need one-off
 values should define them in the test; shared test-only fixtures belong in `src/test/fixtures`.

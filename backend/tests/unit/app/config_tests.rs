@@ -269,3 +269,50 @@ fn postgres_configuration_is_required_bounded_and_redacted() {
     assert!(!format!("{config:?}").contains("private-password"));
     assert_eq!(config.postgres.max_connections, 16);
 }
+
+#[test]
+fn background_document_workers_default_to_five_and_reject_out_of_range_values() {
+    use crate::integration_support::config;
+    let defaults = config(Vec::<(&str, &str)>::new()).unwrap();
+    assert_eq!(defaults.documents.max_concurrent_background_documents, 5);
+    assert_eq!(defaults.documents.max_concurrent_documents, 8);
+    for valid in ["1", "5", "8"] {
+        let parsed = config([("QUARRY_DOCUMENT_WORKER_CONCURRENCY", valid)]).unwrap();
+        assert_eq!(
+            parsed.documents.max_concurrent_background_documents,
+            valid.parse::<usize>().unwrap()
+        );
+    }
+    for invalid in ["0", "9", "many"] {
+        assert!(config([("QUARRY_DOCUMENT_WORKER_CONCURRENCY", invalid)]).is_err());
+    }
+}
+
+#[test]
+fn document_classification_is_on_by_default_and_an_explicit_enable_requires_a_key() {
+    use crate::integration_support::config;
+    let defaults = config(Vec::<(&str, &str)>::new()).unwrap();
+    assert!(defaults.documents.classification.enabled);
+    assert!(!defaults.documents.classification.explicitly_enabled);
+    assert_eq!(defaults.documents.classification.concurrency, 5);
+    // The default never blocks startup without OpenAI; an explicit `true` does.
+    let error = config([("QUARRY_DOCUMENT_CLASSIFICATION_ENABLED", "true")]).unwrap_err();
+    assert!(error.contains("OPENAI_API_KEY"));
+    let disabled = config([("QUARRY_DOCUMENT_CLASSIFICATION_ENABLED", "false")]).unwrap();
+    assert!(!disabled.documents.classification.enabled);
+    let enabled = config([
+        ("QUARRY_DOCUMENT_CLASSIFICATION_ENABLED", "true"),
+        ("QUARRY_DOCUMENT_CLASSIFICATION_CONCURRENCY", "8"),
+        ("OPENAI_API_KEY", "sk-test"),
+    ])
+    .unwrap();
+    assert!(enabled.documents.classification.enabled);
+    assert_eq!(enabled.documents.classification.concurrency, 8);
+    for (name, value) in [
+        ("QUARRY_DOCUMENT_CLASSIFICATION_ENABLED", "yes"),
+        ("QUARRY_DOCUMENT_CLASSIFICATION_CONCURRENCY", "0"),
+        ("QUARRY_DOCUMENT_CLASSIFICATION_CONCURRENCY", "9"),
+    ] {
+        assert!(config([(name, value)]).is_err(), "{name}={value}");
+    }
+}

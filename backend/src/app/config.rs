@@ -20,6 +20,11 @@ const DEFAULT_DOCUMENT_SUMMARY_MODEL: &str = "gpt-5.5";
 const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 const DEFAULT_CHAT_MODEL: &str = "gpt-5.5";
 const DEFAULT_DOCUMENT_CONCURRENCY: usize = 8;
+const DEFAULT_DOCUMENT_WORKER_CONCURRENCY: usize = 5;
+const MAX_DOCUMENT_WORKER_CONCURRENCY: usize = 8;
+/// Matches the default document workers so classification does not queue behind them.
+const DEFAULT_CLASSIFICATION_CONCURRENCY: usize = 5;
+const MAX_CLASSIFICATION_CONCURRENCY: usize = 8;
 const DEFAULT_COMPLETED_JOB_RETENTION_SECONDS: u64 = 10 * 60;
 
 #[derive(Clone)]
@@ -98,8 +103,32 @@ impl DataRoomConfig {
 
 #[derive(Clone, Debug)]
 pub struct DocumentConfig {
+    /// Per-request bound for synchronous `/documents/process` batches.
     pub max_concurrent_documents: usize,
+    /// Owned background supervisor task slots (1–8, default 5).
+    pub max_concurrent_background_documents: usize,
     pub completed_job_retention: Duration,
+    pub classification: DocumentClassificationConfig,
+}
+
+/// In-worker AI classification. On by default whenever OpenAI is configured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DocumentClassificationConfig {
+    pub enabled: bool,
+    /// Explicitly set by the operator (as opposed to the default).
+    pub explicitly_enabled: bool,
+    /// Maximum concurrent Decisions requests across document tasks (1–8, default 5).
+    pub concurrency: usize,
+}
+
+impl Default for DocumentClassificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            explicitly_enabled: false,
+            concurrency: DEFAULT_CLASSIFICATION_CONCURRENCY,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +171,12 @@ impl AppConfig {
 
         let embeddings = parse_embedding_config(&values)?;
         let openai = parse_openai_config(&values, embeddings.vector_dimension)?;
+        let documents = parse_document_config(&values)?;
+        if documents.classification.explicitly_enabled && openai.is_none() {
+            return Err(
+                "QUARRY_DOCUMENT_CLASSIFICATION_ENABLED requires OPENAI_API_KEY".to_string(),
+            );
+        }
 
         Ok(Self {
             http: parse_http_config(&values)?,
@@ -150,7 +185,7 @@ impl AppConfig {
             openai,
             wm_ai: parse_wm_ai_config(&values)?,
             data_room: parse_data_room_config(&values),
-            documents: parse_document_config(&values)?,
+            documents,
             search: parse_search_config(&values)?,
             slide_templates: parse_slide_templates_config(&values)?,
             prompts: parse_prompt_config(&values)?,
@@ -187,9 +222,11 @@ impl Default for AppConfig {
             data_room: DataRoomConfig::default(),
             documents: DocumentConfig {
                 max_concurrent_documents: DEFAULT_DOCUMENT_CONCURRENCY,
+                max_concurrent_background_documents: DEFAULT_DOCUMENT_WORKER_CONCURRENCY,
                 completed_job_retention: Duration::from_secs(
                     DEFAULT_COMPLETED_JOB_RETENTION_SECONDS,
                 ),
+                classification: DocumentClassificationConfig::default(),
             },
             slide_templates: parse_slide_templates_config(&HashMap::new())
                 .expect("default slide configuration is valid"),
@@ -437,15 +474,55 @@ fn parse_document_config(values: &HashMap<String, String>) -> Result<DocumentCon
     if max_concurrent_documents == 0 {
         return Err("QUARRY_DOCUMENT_CONCURRENCY must be greater than zero".to_string());
     }
+    let max_concurrent_background_documents = parse_bounded(
+        values,
+        "QUARRY_DOCUMENT_WORKER_CONCURRENCY",
+        DEFAULT_DOCUMENT_WORKER_CONCURRENCY,
+        MAX_DOCUMENT_WORKER_CONCURRENCY,
+    )?;
     let retention_seconds = parse_value(
         values,
         "QUARRY_COMPLETED_JOB_RETENTION_SECONDS",
         DEFAULT_COMPLETED_JOB_RETENTION_SECONDS,
     )?;
+    let explicit = match value(values, "QUARRY_DOCUMENT_CLASSIFICATION_ENABLED") {
+        None => None,
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        Some(_) => {
+            return Err("QUARRY_DOCUMENT_CLASSIFICATION_ENABLED must be true or false".to_string())
+        }
+    };
+    let classification = DocumentClassificationConfig {
+        enabled: explicit.unwrap_or(true),
+        explicitly_enabled: explicit == Some(true),
+        concurrency: parse_bounded(
+            values,
+            "QUARRY_DOCUMENT_CLASSIFICATION_CONCURRENCY",
+            DEFAULT_CLASSIFICATION_CONCURRENCY,
+            MAX_CLASSIFICATION_CONCURRENCY,
+        )?,
+    };
     Ok(DocumentConfig {
         max_concurrent_documents,
+        max_concurrent_background_documents,
         completed_job_retention: Duration::from_secs(retention_seconds),
+        classification,
     })
+}
+
+/// Parse an integer in `1..=max`; out-of-range values are rejected, never clamped.
+fn parse_bounded(
+    values: &HashMap<String, String>,
+    name: &str,
+    default: usize,
+    max: usize,
+) -> Result<usize, String> {
+    let parsed = parse_value(values, name, default)?;
+    if !(1..=max).contains(&parsed) {
+        return Err(format!("{name} must be between 1 and {max}"));
+    }
+    Ok(parsed)
 }
 
 fn value<'a>(values: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {

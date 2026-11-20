@@ -157,13 +157,62 @@ export type SendQueryEventHandlers = {
   onEvent: (event: SendQueryEvent) => void;
 };
 
+export type DocumentWorkstream =
+  | "product_engineering"
+  | "corporate_technology_security"
+  | "data_ai"
+  | "business_commercial"
+  | "transaction_diligence_management";
+
+export type DocumentClassificationResult = {
+  status: "classified" | "needs_review" | "insufficient_information" | "refused";
+  primaryWorkstream: DocumentWorkstream | null;
+  /** Stable taxonomy category ID, e.g. `product_security`. */
+  primaryCategory: string | null;
+  secondaryCategories: {
+    workstream: DocumentWorkstream;
+    category: string;
+    probability: number;
+  }[];
+  /** Model-estimated signal, not a guarantee of correctness. */
+  confidence: number | null;
+  primaryProbability: number | null;
+  suggestedPrimaryCategory: string | null;
+  suggestedPrimaryWorkstream: DocumentWorkstream | null;
+  secondaryAssessmentIncomplete: boolean;
+  model: string | null;
+  taxonomyVersion: number;
+  promptVersion: string;
+  sampleVersion: string;
+  policyVersion: number;
+  inputFingerprint: string;
+  classifiedAt?: string;
+  sampled: boolean;
+};
+
+/**
+ * Saved in the same transaction as the document, so a completed ingestion job already has
+ * it. `not_requested` marks documents saved before classification existed.
+ */
+export type DocumentClassification = {
+  versionId: string;
+  runStatus: "not_requested" | "completed" | "failed" | "disabled";
+  generation: number | null;
+  lastErrorCode: string | null;
+  result: DocumentClassificationResult | null;
+};
+
 export type DealDocumentSummary = {
   addedAt?: string;
   sizeBytes?: number;
   uploadedByUserId?: number | null;
   uploadedByName?: string | null;
   attributionOrigin?: "authenticated" | "legacy_unknown";
+  /** SHA-256 of the stored bytes; compare with a local file's hash to detect change. */
+  contentSha256?: string;
+  classification?: DocumentClassification;
   displayName: string;
+  /** Deal-scoped content address: sha256(dealId, 0x00, contentSha256). */
   fileId: string;
 };
 
@@ -376,6 +425,15 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
     options?: AssistantThreadListOptions,
   ): Promise<AssistantThreadPage>;
   listDealDocuments(dealId: string): Promise<DealDocumentSummary[]>;
+  /**
+   * Synchronously reclassify the current version from its stored text; resolves with the new
+   * classification. `expectedGeneration` guards stale clients (409 when it changed).
+   */
+  requestDocumentClassification(
+    dealId: string,
+    fileId: string,
+    expectedGeneration: number,
+  ): Promise<DocumentClassification>;
   listDeals(): Promise<PersistedDeal[]>;
   listTemplatePreviews(page: number): Promise<TemplatePreviewPage>;
   previewDealDocument(

@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
             .router
             .into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal(application.templates))
+    .with_graceful_shutdown(shutdown_signal(application.templates, application.workers))
     .await
     .context("API server failed")?;
 
@@ -40,12 +40,13 @@ fn init_tracing() {
 
 async fn shutdown_signal(
     templates: std::sync::Arc<quarry_backend::domains::templates::slide_templates::SlideTemplates>,
+    workers: quarry_backend::app::bootstrap::BackgroundWorkers,
 ) {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to install shutdown signal handler");
         return;
     }
     templates.shutdown();
-    templates.stop_worker().await;
+    tokio::join!(templates.stop_worker(), workers.stop());
     tracing::info!("shutdown signal received");
 }

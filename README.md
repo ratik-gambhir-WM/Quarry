@@ -87,6 +87,5 @@ AI output still requires human review.
 For dependencies, local setup, configuration, development commands, builds, testing, and
 troubleshooting, read [Getting Started](Getting%20Started.md).
 
-For deeper technical context, see the [architecture](docs/ARCHITECTURE.md),
-[domain model](docs/DOMAIN_MODEL.md), [PostgreSQL storage and recovery](docs/postgresql-storage.md),
+For deeper technical context, see the [architecture](ARCHITECTURE.md)
 and [contributor guidance](AGENTS.md).

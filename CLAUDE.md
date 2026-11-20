@@ -2,7 +2,7 @@
 
 This file governs the entire repository. Read it before changing code, then read the
 project-local skill that matches the task and the relevant sections of
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 Quarry is a development-stage, multiplatform product with one shared React application,
 a thin Tauri desktop boundary, and an Axum product API. The repository has active
@@ -16,13 +16,24 @@ When instructions disagree, use this order:
 2. The nearest `AGENTS.md` for the file being changed, if a nested one is added later.
 3. This root `AGENTS.md`.
 4. Current code, manifests, lockfiles, and tests.
-5. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the maintained architecture narrative.
+5. [`ARCHITECTURE.md`](ARCHITECTURE.md) for the maintained architecture narrative.
 6. READMEs as historical context.
-7. Files under `plans/` and the retained architecture `.docx` reports as design inputs only.
+7. Files under `plans/` as design inputs only.
 
 Code is the final authority. The root README is a product overview; use
 [`Getting Started.md`](Getting%20Started.md) for developer onboarding. Preserve the implemented
 desktop API gateway; do not reintroduce the older “save command only” model.
+
+## Scope and simplicity
+
+- Follow the requested scope. A storage migration authorizes the storage migration, not an
+  accompanying redesign or unrelated performance work.
+- Do not overengineer. Use the smallest direct implementation that meets the current request.
+  Do not add speculative caches, request coalescing, frameworks, configuration knobs, or generic
+  abstractions for possible future needs. Add them only when explicitly requested or necessary
+  for the requested behavior's correctness; explain that necessity before implementing them.
+- Preserve existing authorization, integrity, and recovery guarantees without expanding them
+  into new infrastructure. Skills and plans guide execution; they do not expand the user's scope.
 
 ## Start every task this way
 
@@ -53,27 +64,30 @@ broadly reformat unrelated work.
 | `frontend/` | Shared React/Vite source for web and desktop UI | npm + `package-lock.json` |
 | `frontend/src-tauri/` | Tauri 2 shell, native capabilities, desktop API relay | Cargo |
 | `backend/` | Axum product API and Rust application core | Cargo |
-| `docs/` | Canonical Markdown architecture, domain model, retained reports | none |
+| `ARCHITECTURE.md` | Canonical current-state architecture reference | none |
 | `plans/` | Tracked implementation plans retained as design inputs; not an authoritative product contract | none |
 
 There is no root workspace manifest or root task runner. Run commands from the correct
-build root. There is currently no CI, deployment manifest, repository-owned container manifest, ESLint/Prettier
-configuration, or repository-pinned Node/Rust version. Do not invent scripts that do
-not exist.
+build root. Pull-request CI lives in `.github/workflows/ci.yml`; its shared setup action selects
+Node 24 and Rust 1.99.0. There is no deployment manifest, repository-owned container manifest, or ESLint/Prettier
+configuration. Do not invent scripts that do not exist.
 
 ### Embedded templates
 
+- Templates are scoped only to authenticated users; no app registry or app membership remains.
 - Templates run only inside Axum through `domains/templates/slide_templates`, with native
   conversion, Chromium/CDP previews and shared durable PostgreSQL/pgvector storage: claim-fenced
   classification/lexical publication and typed subject/capability vector pairs. The browser and Tauri webview call only Axum. Quarry's hidden Vite route supplies
   the shared read-only SVG render surface.
 - Bootstrap's main API assembly initializes one template engine for the facade, native routes
   and shutdown lifecycle; there is no alternate template backend or service selector.
-- `app/schema.sql` owns the fresh PostgreSQL schema, equivalent to former SQLite marker 18;
-  `app/migrations.rs` initializes/validates version 5, checksums and catalog fingerprints.
+- `app/schema.sql` owns the fresh PostgreSQL schema, extending the former SQLite marker-18 data model;
+  `app/migrations.rs` initializes/validates version 7, checksums and catalog fingerprints.
   Bootstrap passes one bounded asynchronous `PostgresClient` pool to product and template
   repositories. The database is `Quarry`; tests require a separate `_test` database and isolated
-  schemas. Old SQLite files and retired graph stores remain untouched; no import, fallback or reset exists.
+  schemas. Old SQLite files and retired graph stores remain outside schema initialization; no import/fallback exists.
+  The explicitly invoked `reset_postgres --confirm-reset` MVP utility recreates recognized SQL
+  product objects atomically, refuses unrelated objects/active writers, and never runs at startup.
 - Template provider keys belong in the ignored `backend/.env`; never place them in `VITE_*`,
   Tauri IPC payloads, or Axum request data.
 
@@ -109,8 +123,8 @@ not exist.
 The intended dependency flow is:
 
 ```text
-main -> AppConfig -> bootstrap -> clients/repositories/services -> AppState
-                                                     |
+main -> AppConfig -> bootstrap -> clients/repositories/services
+                              -> feature routers with private bound state
 request -> router -> handler -> service -> repository/client
 ```
 
@@ -118,15 +132,19 @@ request -> router -> handler -> service -> repository/client
 - `config.rs` parses and validates environment-derived configuration.
 - `bootstrap.rs` owns migrations, external-client construction, repository construction, and
   service assembly.
-- `AppState` contains cheap-to-clone service handles for handlers. It is not a service locator
-  for repositories or configuration.
+- Each feature router binds its own private HTTP state containing cheap-to-clone service
+  handles before composition. There is no global `AppState` or repository/configuration service locator.
 - Handlers extract and validate transport input, call one or more services, and map output.
 - Services own use-case orchestration and typed service errors.
 - Repositories own persistence/index operations and depend on narrow clients.
+- Name domain data access modules `repository.rs` or a specific `*_repository.rs` (for
+  example `search_repository.rs`). Keep feature table names, joins, scope policy and
+  query composition in those repositories. The shared PostgreSQL `query/` module owns
+  only reusable typed SQL building mechanisms; do not add feature-specific query layers there.
 - Services and repositories must not import `AppState`, read ambient environment variables, or
-  construct infrastructure clients. Current architecture tests cover lower-layer `AppState`
-  imports and ambient configuration reads; preserve the full boundary and extend the tests when
-  adding another enforceable forbidden-dependency pattern.
+  construct infrastructure clients. Current architecture tests reject global `AppState`,
+  enforce feature-bound router state, and reject lower-layer ambient configuration reads. Preserve
+  the full boundary and extend the tests when adding another enforceable forbidden-dependency pattern.
 
 ### API contract
 
@@ -143,18 +161,40 @@ request -> router -> handler -> service -> repository/client
 
 ### Persistence and indexing
 
+- **MVP PostgreSQL schema policy — effective 2026-11-15:** Quarry is currently at the MVP
+  stage. When implementing PostgreSQL schema changes, it is okay to drop and recreate affected
+  product tables and discard their existing MVP data. A request to implement a schema change
+  authorizes this approach; do not require preserving migrations/backfills or ask the user to
+  choose between migration and recreation unless they explicitly request data preservation.
+  Use the guarded reset utility when recreating the full product schema. Keep recreation an
+  explicit development operation, never automatic startup or failure-recovery behavior, and
+  leave unrelated databases, SQLite files and retired graph stores alone. Revisit and replace this
+  temporary policy with a data-preserving migration policy when the product matures.
 - PostgreSQL is canonical for users, deals, logical files, immutable versions, blobs, notebooks
   and embedded templates/assets/previews/classification/embeddings. The dedicated database is `Quarry`.
+- Documents own chunks, pgvector embeddings, GIN lexical metadata, original bytes, identities,
+  activity and durable job results in PostgreSQL schema 7. One retained transaction publishes the
+  complete document; accepted input/image checkpoints are separate from canonical commit.
+  Inspect the document ingestion/store repositories and their tests for profiles, readiness,
+  limits, attempts and recovery.
+- Document IDs are deal-scoped content addresses: file, version and manifest document IDs all equal
+  `sha256(deal_id || 0x00 || content_sha256)`, enforced in Rust and by PostgreSQL checks. Never mint
+  random document IDs or share one document row across deals.
+- Each background document task parses, embeds and classifies (OpenAI Decisions) its document,
+  then saves bytes, chunks and the `document_classifications` row in one transaction. A failed
+  classification is saved as `failed` and never fails the document.
+- Notebook native snapshots, active pgvector/GIN artifacts and terminal save jobs commit atomically;
+  accepted snapshots never establish a saved revision. Preserve private owner scoping and 256/32 slots.
 - Since schema 5, PostgreSQL with pgvector is the only canonical and search store for
-  documents, notebooks and templates; no route, worker or startup step opens a graph connection and
-  the launcher needs no Docker. Template stages use opaque claim tokens and database-clock leases; a
-  ready template has exactly its current subject and capability vectors (deferred pair check).
-  Never delete retained graph stores/volumes without separate authorization.
-- PostgreSQL schema version 5 adds bounded resource revisions and retained deal lifecycle guards
-  to the former marker-18 layout. Version 1 is intentionally unsupported; select an empty database. Startup
-  initializes an empty selected schema or validates its version, checksum, live catalog and owner/
-  document readiness invariants. Incompatible nonempty layouts fail without deletion. No old-data
-  migration, SQLite fallback or destructive relational reset is supported. Leave old stores alone.
+  documents, notebooks and templates; no route, worker or startup step opens a graph connection, and
+  the launcher needs no Docker. Template stages use opaque claim tokens and database-clock leases;
+  a ready template has exactly its current subject and capability vectors (deferred pair check).
+  The architecture suite rejects retired graph publication and projection paths. Never delete retained graph
+  stores/volumes without separate authorization.
+- Startup initializes an empty selected schema or validates schema 7, checksums, catalog/indexes,
+  vector extension readiness and document/notebook/template complete-set invariants. It never drops data. Unknown
+  nonempty layouts fail intact; there is no populated-schema upgrade, import or fallback. An MVP
+  reset follows the dated MVP policy above and uses the guarded reset utility, never an automatic retry.
 - One application writer lease is retained by the pool's dedicated session through router and
   detached-worker clones. Writes fail closed on ownership loss. Reads use ordinary pooled
   connections with no writer-session ping, ownership/generation check or explicit row lock,
@@ -166,25 +206,27 @@ request -> router -> handler -> service -> repository/client
   durable worker claims/recovery and remote-publication safeguards are implemented and verified. Do not infer
   multi-instance support from independent reads or test-only unguarded transaction fixtures.
 - Template lexical search uses indexed Unicode 6.1 field frequencies and FTS5-compatible weighted
-  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner/app filters and stable ties;
+  BM25 in PostgreSQL. Preserve captured lexical parity fixtures, owner filters and stable ties;
   template semantic ranking is exact SQL cosine with the existing fusion/tie policy in Rust.
 - `sqliteCommitted` and deletion phase `sqlite` are retained historical wire values meaning
   canonical PostgreSQL commit/cleanup. Do not rename them accidentally.
-- Keep `QUARRY_EMBEDDING_DIMENSION` aligned with both document and notebook vector columns. Template vectors use
+- Keep `QUARRY_EMBEDDING_DIMENSION` aligned with both document and notebook PostgreSQL vector columns. Template vectors use
   `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` as an independently rendered `vector(T)` family. A configuration change does not resize existing indexes;
   do not add automatic drop/recreation or pad/truncate vectors. A requested dimension change needs
-  a drained, explicitly scoped operation and a re-embedding plan for populated projections; see
-  `docs/postgresql-storage.md` for the verified-empty-index case.
-- Document jobs retain durable SQL inputs, attempts and results; preview caches remain in memory.
-- See `docs/postgresql-storage.md` for server-only URL/pool configuration, isolated PostgreSQL
-  tests, backups and recovery.
+  a drained, explicitly scoped operation and a re-embedding plan for populated projections.
+  Verify emptiness explicitly before changing dimensions on an empty index.
+- Document jobs are durable SQL
+  inputs/attempts/results; preview caches remain in memory. Query embeddings are not cached.
+- Use `backend/src/app/config.rs`, `backend/src/adapters/postgres/client.rs`, and isolated
+  PostgreSQL tests as the source for server-only URL/pool configuration and recovery behavior.
 
 ## Frontend development rules
 
 - Use npm; do not mix npm, pnpm, Yarn, or Bun in `frontend/`.
 - Preserve `package-lock.json` and avoid dependency or lockfile churn unless required.
-- React and React DOM are currently pinned to a React 19 canary in the live working tree. Check
-  `package.json` and the lockfile before using canary-only APIs. Preserve the uncommitted `.npmrc`
+- React and React DOM currently resolve to a React 19 canary in the lockfile; their manifest
+  ranges are not exact pins. Check `package.json` and the lockfile before using canary-only APIs.
+  Preserve the checked-in `.npmrc` peer-dependency policy
   unless the task explicitly changes dependency policy.
 - Keep TypeScript strict. Avoid `any`, `@ts-ignore`, unexplained non-null assertions, and broad
   suppression comments.
@@ -193,11 +235,19 @@ request -> router -> handler -> service -> repository/client
 - Model loading, empty, error, disabled, stale/cancelled, retry, and success states for async UI.
 - Reuse current primitives, CSS variables, Tailwind 4 conventions, and `components.json` aliases.
   Do not edit generated `dist` output or bypass semantic theme tokens with a parallel style system.
+- Use reusable local shadcn components under `frontend/src/components/ui/` for standard controls
+  and disclosures throughout feature/page code, including registry integrations. Add a missing
+  component to that shared layer instead of composing primitive-library parts in a feature.
+  Keep direct Radix, Base UI, and Ark UI imports inside `components/ui/`; the boundary check
+  enforces this. Specialized shared wrappers may retain their underlying library behavior.
+  Shared components own theme-aware styling, interaction states, accessibility, and motion;
+  callers own feature state and requests. Preserve Quarry's existing colors, typography,
+  spacing, radii, and motion tokens; do not import registry-wide theme defaults or resets.
 - Preserve semantic HTML, accessible names, keyboard/focus behavior, reduced-motion behavior,
   and visible async feedback.
-- Include purposeful motion when building or changing UI. Read
-  [`docs/interface-motion.md`](docs/interface-motion.md), reuse the existing timing/easing tokens
-  and shared controls, keep keyboard-triggered changes instant, and implement reduced-motion and
+- Include purposeful motion when building or changing UI. Reuse the existing timing/easing
+  tokens in `frontend/src/index.css` and shared controls under `frontend/src/components/ui/`,
+  keep keyboard-triggered changes instant, and implement reduced-motion and
   interruption behavior in the same change. Preserve state, focus, and scroll rather than remounting
   content to replay an animation. Verify the animated and immediate paths before handoff.
 - Put all runtime mock, demo, placeholder, and development-fixture product data under
@@ -256,6 +306,14 @@ being changed, keep abstractions proportional to its complexity, and preserve un
 
 ## Backend development rules
 
+- Before handoff, review added or touched `.clone()`, `.cloned()`, `.to_owned()` and `.to_vec()`
+  calls through their consumers. Move owned data when its current owner is finished with it;
+  borrow for read-only use. Check vectors, file bytes, JSON, chunk batches and sort comparisons
+  for repeated deep copies. Preserve cheap `Arc`/pool/client handle clones and copies required for
+  independent owned outputs or asynchronous task lifetimes. Do not add lifetime plumbing or new
+  wrappers merely to remove a clone; explain any material copy retained in a changed hot path.
+  Run the backend Clippy gate below with `clippy::redundant_clone`; passing it does not replace
+  this ownership review.
 - Confirm versions in `backend/Cargo.toml` and `Cargo.lock`; this project uses Axum 0.8 APIs.
 - Keep all backend Rust tests and test-only support code under `backend/tests/`, including
   mock constructors, fixture types, helper functions, and test-only inherent implementations.
@@ -265,14 +323,16 @@ being changed, keep abstractions proportional to its complexity, and preserve un
   `backend/src/`, widen production visibility for tests, or enable unused helpers in production.
   Because `autotests = false`, wire every test/support module into the crate's test-only module
   tree and verify it is compiled; the architecture suite enforces this separation.
-- Before adding, moving, or reviewing a backend check, apply the
-  [boundary placement decision](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+- Before adding, moving, or reviewing a backend check, identify its inputs and earliest safe
+  execution point. Reject caller-only invalid input at the HTTP boundary before product work.
   State the loaded-state or lifecycle reason for any check kept later; a business-logic label
   alone is not a reason to delay a caller-only check.
 - Keep handlers thin and body-consuming extractors last. Check every client-controlled path,
   query, header, JSON, and multipart value at the HTTP handler boundary before invoking product
-  work. Put reusable request-validation functions in handler-owned `handler/validate.rs` modules;
-  use `validate.rs`, not `validation.rs` or a generic `file.rs`, for dedicated validation modules.
+  work. Put reusable request-validation functions in handler-owned `validate.rs` modules, normally
+  `handler/validate.rs`. A flat sibling is supported when `handler.rs` declares it as a private
+  child using `#[path = "validate.rs"]` and `mod validate;` on the following line, as in document
+  viewing. Use `validate.rs`, not `validation.rs` or a generic `file.rs`, for dedicated validation modules.
   Multipart extraction and streaming size limits may live in a handler-owned `upload.rs`.
   Models hold data; services and adapters must not own request-shape validation or HTTP errors.
 - Authenticate and authorize requests at the HTTP boundary before protected product work.
@@ -305,6 +365,10 @@ being changed, keep abstractions proportional to its complexity, and preserve un
 
 Start with the narrowest relevant check, then run the applicable broader gate. The detailed
 decision tree is in the code-verification skill.
+
+Before handing off Rust changes, run `cargo fmt --all` from each affected Rust build root
+(`backend/` or `frontend/src-tauri/`), then verify with `cargo fmt --all -- --check`. Inspect
+the formatting diff and keep unrelated user work untouched.
 
 ### Shared React/Vite (`frontend/`)
 
@@ -340,13 +404,19 @@ relevant viewport sizes.
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
 `autotests = false`; unit tests mirror `backend/src/` under `backend/tests/unit/`, and cross-module
 suites live under `backend/tests/integration/`. Both are included manually with `#[path]`. Use
 `cargo test <name-filter>` for focused tests. Do not invent `cargo test --test <file>` commands.
+
+Real vector codec tests additionally require pgvector 0.8.6 provisioned once in the separate
+`quarry_extensions` schema of the selected `_test` database. Use the explicit
+`backend/tools/provision-pgvector.sql` procedure against each selected database; tests and
+application startup never install or drop the extension. Document storage/search and durable
+jobs now use schema 7.
 
 Do not use `cargo run` as a routine check. Startup initializes/validates PostgreSQL and resumes durable template stages. Tests never reset the development database.
 
@@ -365,9 +435,9 @@ normal code check.
 ## Change checklists
 
 The root `./quarry web` and `./quarry desktop` launchers supervise Axum and the selected UI with
-embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped, check
-the configured database connection. Docker is not required. PostgreSQL remains running after the
-launcher exits.
+embedded templates. On macOS they start an existing Postgres.app 18 cluster if stopped. Docker is
+not required. Axum opens its PostgreSQL pool during bootstrap; there is no separate database
+connection preflight. PostgreSQL remains running after the launcher exits.
 
 ### When changing a frontend route or feature
 
@@ -387,15 +457,17 @@ launcher exits.
   before protected work, plus the retained state-dependent guards. Run the architecture suite
   (directly or through the full backend gate); static dependency checks alone do not prove order.
 - When a template operation changes, update and test the facade and native template routes,
-  headers, request bounds, owner/app scoping, and error contract.
+  headers, request bounds, owner scoping, and error contract.
 - Add contract/adapter and route tests; run both frontend typechecks and backend tests.
 - Document compatibility or rollout implications.
 
 ### When changing PostgreSQL data shape
 
 - Define canonical ownership and stable IDs before coding.
-- Make forward migration and rollback/recovery behavior explicit.
-- Protect existing local data; use temporary databases in tests.
+- For PostgreSQL, follow the dated MVP schema policy above: table recreation is acceptable;
+  preserving migrations/backfills are required only when explicitly requested. State the reset
+  scope and recovery behavior.
+- Preserve data outside the intended PostgreSQL reset scope; use temporary databases in tests.
 - Verify transactionality, idempotency, foreign keys, current-version uniqueness, and failure paths.
 - Update the canonical architecture and recovery procedure when the operational rollout changes.
 
@@ -412,15 +484,16 @@ launcher exits.
 - Treat `.env*`, local databases, API keys, tokens, absolute paths, user email, and document
   contents as sensitive. Do not print them in command output, fixtures, screenshots, or logs.
 - Do not read or modify a real `.env` unless the user explicitly requests configuration work. Use
-  the configuration sections of `docs/ARCHITECTURE.md` as the documented environment schema.
+  the configuration sections of `ARCHITECTURE.md` as the documented environment schema.
 - Do not put provider keys or passwords in `VITE_*`, browser storage, client bundles, or Tauri
   command arguments. The user-authorized bearer-session cache in `localStorage` is a deliberate
-  exception, documented in `docs/authentication.md`; never expand it to other secrets.
+  exception; never expand it to other secrets.
 - Users have salted Argon2id password hashes; only public profile fields are serialized. Sessions
   store token digests in PostgreSQL. The app restores unexpired bearer sessions from origin-scoped
   `localStorage` and sends a matching `X-User-Id` consistency header; the token is the identity authority.
 - User-provided API-key collection was removed. AI services use server-side `OPENAI_API_KEY`.
-  Job titles grant no privileges. See `docs/authentication.md` for current limits and reset policy.
+  Job titles grant no privileges. Inspect identity services and authentication tests for current
+  limits and reset behavior.
 - Preserve request limits, filename/path validation, safe URL policy, CORS allowlists, sanitized
   error responses, and activity-log redaction.
 - New server endpoints need real authorization before public production use; client-side route
@@ -435,8 +508,8 @@ Do not hand-edit or commit generated/local outputs unless the task explicitly re
 - `backend/target/`, `backend/data/`
 - local `.env*` files and `*.log`
 
-`frontend/tsconfig.node.tsbuildinfo` is tracked even though it is generated. Never edit it by
-hand; review any regeneration carefully.
+TypeScript `*.tsbuildinfo` files are generated compiler state. Do not hand-edit them or add them
+to source control as part of an unrelated change.
 
 The duplicate icons under `backend/icons/`, empty/stale backend capability artifacts, and
 any ignored retired storage remnants are not proven product contracts. Resolve ownership before expanding
@@ -446,18 +519,17 @@ or deleting them.
 
 - Every feature, refactor, fix, API change, data change, configuration change, and infrastructure
   change ends with an architecture-impact check. Re-read the relevant sections of
-  `docs/ARCHITECTURE.md` after implementation, not only before it.
-- Update `docs/ARCHITECTURE.md` in the same change when the work alters any documented route,
+  `ARCHITECTURE.md` after implementation, not only before it.
+- Update `ARCHITECTURE.md` in the same change when the work alters any documented route,
   runtime boundary, module responsibility, data flow or schema, API contract, configuration,
   external integration, security/trust boundary, verification command, feature maturity, known
   limitation, or operational behavior.
 - If no update is needed, say `Architecture impact: none — <reason>` in the handoff. Do not omit
   the check merely because the code change is small.
-- Keep `docs/ARCHITECTURE.md` descriptive: distinguish current implementation, uncommitted work,
+- Keep `ARCHITECTURE.md` descriptive: distinguish current implementation, uncommitted work,
   known gaps, and intended evolution.
 - Record durable decisions that change a trust boundary, runtime split, data owner, public API
-  version, or destructive rollout in the canonical architecture and an appropriately scoped
-  standalone document when more detail is required.
+  version, or destructive rollout in `ARCHITECTURE.md`, keeping it aligned with the implementation.
 - Update commands from manifests, not memory. Never document a check that does not exist.
 - Do not treat or link `plans/` files as canonical documentation.
 - If code and documentation drift, update both in the same change or call out the drift explicitly.
@@ -467,7 +539,7 @@ or deleting them.
 A change is ready only when:
 
 - The requested behavior is complete across every affected runtime.
-- `docs/ARCHITECTURE.md` was re-checked and either updated or an explicit no-impact reason is ready
+- `ARCHITECTURE.md` was re-checked and either updated or an explicit no-impact reason is ready
   for the handoff.
 - Architecture and security boundaries still hold.
 - Relevant focused tests and broad gates pass.
@@ -505,5 +577,4 @@ Evaluate conflicting skill recommendations against Quarry's actual stack and con
 recommendation improves correctness, accessibility, maintainability, performance, or verification,
 explain the evidence, tradeoffs, and checks, then update the affected Quarry guidance explicitly
 in the same change before treating it as the new rule. A difference from Ring's preferred
-framework or library is not itself a defect. See
-[the skill evaluation](docs/frontend-refactor-skill-evaluation.md) for the adopted decisions.
+framework or library is not itself a defect.

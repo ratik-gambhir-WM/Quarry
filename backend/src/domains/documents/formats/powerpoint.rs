@@ -10,7 +10,6 @@ use std::{
 use pptx_to_md::{parse_xml::parse_slide_xml, SlideElement};
 use roxmltree::Document as XmlDocument;
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::{
@@ -82,7 +81,7 @@ pub fn parse_powerpoint_chunks_from_bytes(
 
     Ok(PowerpointAssembly {
         document: Document {
-            file_id: Uuid::new_v4().to_string(),
+            file_id: document_id.clone(),
             document_id,
             deal_id,
             file_name: source_path

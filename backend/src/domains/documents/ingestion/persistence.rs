@@ -1,6 +1,7 @@
 use super::repository::Attempt;
 use crate::{
     domains::documents::{
+        classification::repository::ClassificationRecord,
         model::{Document, DocumentChunk},
         store::{
             chunk::FileChunkResult,
@@ -13,12 +14,20 @@ use crate::{
     shared::{
         error::RepositoryError,
         file_policy::{infer_supported_image_mime_type, infer_supported_mime_type},
-        ids::{document_id_from_content, file_version_id, sha256_hex},
+        ids::{document_id_from_content, sha256_hex},
     },
 };
 use chrono::{SecondsFormat, Utc};
 use serde_json::json;
 use std::{collections::HashSet, path::Path};
+
+/// Accepted work committed with the document: the fenced ingestion attempt and the
+/// classification produced by the same document task.
+#[derive(Default)]
+pub(crate) struct CommitContext {
+    pub attempt: Option<Attempt>,
+    pub classification: Option<ClassificationRecord>,
+}
 
 pub(crate) async fn persist_document_and_chunks(
     files: &DocumentStore,
@@ -27,7 +36,7 @@ pub(crate) async fn persist_document_and_chunks(
     document: Document,
     chunks: Vec<DocumentChunk>,
     file_bytes: Vec<u8>,
-    attempt: Option<Attempt>,
+    context: CommitContext,
 ) -> Result<PersistedFileIdentity, RepositoryError> {
     let profile = files.profile().clone();
     let deal = deal_id.to_owned();
@@ -37,7 +46,9 @@ pub(crate) async fn persist_document_and_chunks(
     .await
     .map_err(|_| RepositoryError::BlockingWorker("document preparation interrupted".into()))?
     .map_err(RepositoryError::invalid)?;
-    files.persist_complete(input, batch, attempt).await
+    files
+        .persist_complete(input, batch, context.attempt, context.classification)
+        .await
 }
 fn prepare_document(
     deal_id: &str,
@@ -156,11 +167,17 @@ pub(crate) fn build_file_persistence_input(
             document.document_id
         ));
     }
-    let expected_document_id = document_id_from_content(&deal_id, &content_sha256);
-    if expected_document_id != document.document_id {
+    // Content addressing: file, version and document IDs are all the deal-scoped hash.
+    let content_address = document_id_from_content(&deal_id, &content_sha256);
+    if content_address != document.document_id {
         return Err(format!(
             "file bytes do not match document id `{}`",
             document.document_id
+        ));
+    }
+    if content_address != file_id {
+        return Err(format!(
+            "file id `{file_id}` is not the content address of its bytes"
         ));
     }
 
@@ -185,7 +202,7 @@ pub(crate) fn build_file_persistence_input(
     }))
     .map_err(|error| format!("failed to serialize file metadata: {error}"))?;
     let timestamp = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    let version_id = file_version_id(&file_id, &content_sha256);
+    let version_id = content_address;
 
     Ok(FilePersistenceInput {
         deal_id,

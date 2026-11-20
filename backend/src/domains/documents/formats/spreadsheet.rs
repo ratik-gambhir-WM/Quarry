@@ -7,7 +7,6 @@ use std::{
 use calamine::{open_workbook_auto_from_rs, Data, Reader};
 use roxmltree::Document as XmlDocument;
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::{
@@ -128,7 +127,7 @@ pub fn parse_spreadsheet_chunks_from_bytes(
 
     Ok(SpreadsheetAssembly {
         document: Document {
-            file_id: Uuid::new_v4().to_string(),
+            file_id: document_id.clone(),
             document_id,
             deal_id,
             file_name: source_path

@@ -1,3 +1,4 @@
+mod classification;
 mod client;
 mod commands;
 mod models;

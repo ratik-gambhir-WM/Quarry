@@ -275,7 +275,7 @@ Quarry's shell/theme/thread-list/compact chat continue to work on web and deskto
 
 ## 9. Architecture and rollout
 
-During implementation, update `docs/ARCHITECTURE.md` sections on Assistant state ownership,
+During implementation, update `ARCHITECTURE.md` sections on Assistant state ownership,
 feature maturity, UI composition, persistent runs/context selection, and verification. Remove the
 current statement that branching controls are unsupported only when they actually ship. Document
 session-only layout state and the unchanged stale-stream/authentication limitations. SQLite stays

@@ -131,7 +131,7 @@ spacing instead of reproducing a separate page shell.
    web/desktop routing; inspect console/network for unexpected failures. Use the existing listener
    only when appropriate or record/clean up any new dev-server process. Do not claim exact pixel
    matching of the example's overall viewport since Quarry's persistent shell changes available space.
-6. Update `docs/ARCHITECTURE.md` to record the now-enabled Findings tab, clearly marked illustrative
+6. Update `ARCHITECTURE.md` to record the now-enabled Findings tab, clearly marked illustrative
    data, available local interactions, disabled write/evidence links, and absence of persistence.
    Re-read the relevant architecture section after implementation; this plan remains design input.
 

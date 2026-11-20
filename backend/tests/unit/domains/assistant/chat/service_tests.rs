@@ -347,7 +347,7 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
                 viewing::service::StoredDocumentService,
             },
         },
-        shared::ids::{document_id_from_content, file_version_id, sha256_hex},
+        shared::ids::{document_id_from_content, sha256_hex},
     };
     let directory = tempfile::tempdir().unwrap();
     let postgres = PostgresClient::test_database_at(directory.path().join("references.sqlite"))
@@ -366,14 +366,17 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
         Ok(())
      }).await.unwrap();
     let store = DocumentStore::new(postgres.clone());
-    for (deal, file) in [("DEAL-A", "file-a"), ("DEAL-B", "file-b")] {
+    let mut files = Vec::new();
+    for deal in ["DEAL-A", "DEAL-B"] {
         let bytes = b"%PDF-1.7\nCanonical stored contents".to_vec();
         let hash = sha256_hex(&bytes);
-        let version = file_version_id(file, &hash);
+        let file = document_id_from_content(deal, &hash);
+        let version = file.clone();
+        files.push(file.clone());
         store
             .persist(FilePersistenceInput {
                 deal_id: deal.into(),
-                file_id: file.into(),
+                file_id: file,
                 actor_id: 1,
                 display_name: "Canonical.pdf".into(),
                 source_uri: None,
@@ -422,7 +425,10 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
     let resolved = service
         .resolve_file_references(
             1,
-            vec![reference("DEAL-A", "file-a"), reference("DEAL-B", "file-b")],
+            vec![
+                reference("DEAL-A", &files[0]),
+                reference("DEAL-B", &files[1]),
+            ],
             vec![manual],
         )
         .await
@@ -433,13 +439,13 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
     assert_eq!(resolved[1].bytes, b"%PDF-1.7\nCanonical stored contents");
     assert!(matches!(
         service
-            .resolve_file_references(2, vec![reference("DEAL-A", "file-a")], vec![])
+            .resolve_file_references(2, vec![reference("DEAL-A", &files[0])], vec![])
             .await,
         Err(ServiceError::NotFound(_))
     ));
     assert!(matches!(
         service
-            .resolve_file_references(1, vec![reference("DEAL-A", "file-b")], vec![])
+            .resolve_file_references(1, vec![reference("DEAL-A", &files[1])], vec![])
             .await,
         Err(ServiceError::NotFound(_))
     ));
@@ -461,7 +467,7 @@ async fn file_references_resolve_canonical_bytes_and_enforce_current_membership(
         .unwrap();
     assert!(matches!(
         service
-            .resolve_file_references(1, vec![reference("DEAL-A", "file-a")], vec![])
+            .resolve_file_references(1, vec![reference("DEAL-A", &files[0])], vec![])
             .await,
         Err(ServiceError::NotFound(_))
     ));

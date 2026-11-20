@@ -2,14 +2,14 @@
 
 PostgreSQL setup: use the existing server with a dedicated database named `Quarry`; export
 `QUARRY_DATABASE_URL=postgresql://localhost/Quarry` before launching. Tests use the separate
-`Quarry_test` database. Both need the pgvector extension provisioned once. Docker is not required: PostgreSQL is the only store. See [storage setup and recovery](docs/postgresql-storage.md).
+`Quarry_test` database. Both need the pgvector extension provisioned once. Docker is not required: PostgreSQL is the only store. See [storage setup and recovery](ARCHITECTURE.md#91-shared-postgresql-schema-version-7).
 
 This guide covers local development for Quarry's browser and desktop applications.
 For a product overview and upcoming features, see the [README](README.md).
-The [architecture guide](docs/ARCHITECTURE.md) is the detailed reference for configuration,
+The [architecture guide](ARCHITECTURE.md) is the detailed reference for configuration,
 runtime boundaries, data recovery, and verification.
-For the main backend/frontend libraries, upstream documentation and their source locations in
-Quarry, see the [key dependency map](docs/dependencies.md).
+For backend/frontend dependencies, inspect `backend/Cargo.toml`, `frontend/package.json`,
+their lockfiles, and the owning source modules.
 
 Run commands from the repository root unless a section names a different directory.
 
@@ -18,7 +18,7 @@ Run commands from the repository root unless a section names a different directo
 | Tool | Requirement |
 | --- | --- |
 | Git | Required to clone and work with the repository |
-| Node.js and npm | Use Node.js 22.12 or newer in the Node 22 line, or a newer supported LTS; the current Vite dependency requires `^20.19.0` or `>=22.12.0` |
+| Node.js and npm | Use Node 24 to match CI; the locked Vite package declares `^20.19.0` or `>=22.12.0` |
 | Rust and Cargo | Rust 1.97.1 or newer, with `rustfmt` and Clippy; the backend declares this minimum for Rig 0.46 |
 | PostgreSQL | Existing local service with a fresh `Quarry` database; PostgreSQL 18 was validated |
 | Bash and curl | Required by the root launcher |
@@ -28,7 +28,8 @@ Run commands from the repository root unless a section names a different directo
 
 Install Node.js from [nodejs.org](https://nodejs.org/en/download) and Rust through
 [rustup](https://www.rust-lang.org/tools/install).
-The repository does not pin an exact Node or Rust toolchain version.
+Local builds have no `.nvmrc` or `rust-toolchain.toml` pin. The shared CI setup selects
+Node 24 and Rust 1.99.0; the backend manifest declares Rust 1.97.1 as its minimum.
 
 On macOS, install Xcode or its command-line tools for native builds:
 
@@ -63,7 +64,12 @@ cd ..
 ```
 
 Use npm and the checked-in lockfile. There is no root npm workspace or root task runner.
-Cargo downloads Rust dependencies during the first build or launcher run.
+Cargo downloads Rust dependencies during the first build or launcher run. The backend uses an
+exact Git/SSH revision of the private `ratik-gambhir-WM/docx-rust-quarry` repository. Your GitHub
+SSH identity must have read access, and GitHub host-key verification must succeed; cloning Quarry
+over HTTPS alone does not grant that dependency access. `backend/.cargo/config.toml` selects Git
+CLI fetching. CI uses a separate read-only dependency deploy key through
+[its setup action](.github/actions/setup-docx-dependency/action.yml).
 
 ## Configure local capabilities
 
@@ -73,7 +79,8 @@ The default stack requires the exported `QUARRY_DATABASE_URL` shown above. An en
 - `backend/.env`: backend configuration and server-side secrets.
 
 These are ignored local files. Never place provider secrets in `VITE_*` variables or the
-browser bundle. The backend does not read the external service's environment file.
+browser bundle. Backend configuration is parsed in `backend/src/app/config.rs`; templates
+run inside that backend and use its configuration.
 
 | Setting | Where it belongs | Purpose |
 | --- | --- | --- |
@@ -94,7 +101,7 @@ Install [LibreOffice](https://www.libreoffice.org/download/) for supported Offic
 Missing optional providers fail explicitly when invoked; partially configured WM AI settings
 fail startup validation.
 
-See [Configuration](docs/ARCHITECTURE.md#11-configuration) for the complete environment contract,
+See [Configuration](ARCHITECTURE.md#11-configuration) for the complete environment contract,
 including provider groups, template settings, timeouts, storage, and model dimensions. Changing
 an embedding model or dimension requires coordinated reindex planning; configuration alone
 does not convert existing data.
@@ -125,10 +132,24 @@ and runs template processing inside Axum.
 
 PostgreSQL (with pgvector) is the only product store: documents, notebooks and templates,
 including template classification, lexical postings and vectors. Startup initializes an empty
-PostgreSQL schema or validates version 5 and its catalog. A database from an earlier schema is
+PostgreSQL schema or validates version 7 and its catalog. A database from an earlier schema is
 refused intact; use a fresh database or the explicit guarded reset in
-[storage setup and recovery](docs/postgresql-storage.md). Do not delete stores as a setup shortcut.
+[storage setup and recovery](ARCHITECTURE.md#91-shared-postgresql-schema-version-7). Do not delete stores as a setup shortcut.
 Retired storage containers and volumes are left untouched.
+
+Provision pgvector 0.8.6 once in `quarry_extensions` for each selected database, using the
+migration role. The PostgreSQL server must already have that extension version available.
+From the repository root, after creating the dedicated databases:
+
+```sh
+psql --dbname=Quarry --file=backend/tools/provision-pgvector.sql
+psql --dbname=Quarry_test --file=backend/tools/provision-pgvector.sql
+```
+
+Use the appropriate connection/role options for your server. The script refuses an incompatible
+existing extension; inspect it rather than dropping it. Application startup and tests validate
+the extension and never install or remove it. Tests create and clean their own isolated schemas
+inside `Quarry_test`.
 
 ### Local addresses
 
@@ -172,7 +193,9 @@ For standalone runtime work, run from `backend/`:
 cargo run --locked
 ```
 
-This loads `backend/.env`, connects to PostgreSQL, initializes/validates the selected schema and resumes durable template stages.
+This loads `backend/.env`, connects to PostgreSQL, initializes/validates the selected schema,
+starts the document supervisor and notebook workers, and requests recovery scans for template
+stages and deal deletion receipts.
 It is a runtime operation, not a compilation check. Do not run it alongside the root launcher
 on the same port. Client code targets `/api/v1`; `/api` is a temporary compatibility mount.
 
@@ -212,7 +235,7 @@ Run from `backend/`:
 ```sh
 cargo fmt --all -- --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings -D clippy::redundant_clone
 QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked --all-targets
 ```
 
@@ -228,12 +251,12 @@ PostgreSQL database and create isolated schemas; other capabilities use test cli
 Some opt-in tests require explicitly selected disposable services and remain ignored in the normal
 suite. Do not enable them against a live store. Do not use startup or destructive database maintenance as verification commands.
 
-Before adding or moving backend validation or authorization, use the
-[boundary placement decision and review checklist](docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+Before adding or moving backend validation or authorization, follow the
+[backend boundary rules](AGENTS.md#backend-development-rules).
 Caller-only checks and initial request authorization belong at the HTTP boundary; checks needing
 loaded state, atomic permissions, or ongoing revocation remain at the operation they protect.
-Use `handler/validate.rs` for reusable request validation and verify rejection order through the
-handler. `cargo test --locked --lib architecture_tests` provides a focused dependency check;
+Use handler-owned `validate.rs` for reusable request validation (normally `handler/validate.rs`;
+document viewing uses a private flat sibling) and verify rejection order through the handler. `cargo test --locked --lib architecture_tests` provides a focused dependency check;
 the full backend suite above includes it.
 
 ### Desktop shell
@@ -259,10 +282,9 @@ contract changes. Reserve `npm run build:desktop` for packaging/release validati
   different dimension setting. Use a fresh database or the guarded reset; startup never drops data.
 - **Embedded template preview failure:** check Chromium discovery or set its absolute executable
   path. Ensure the UI's `/_internal/template-preview` route is available.
-- **Legacy preview failure:** run `npx playwright install chromium` in the external service checkout.
 - **Office conversion failure:** install LibreOffice and check `QUARRY_SOFFICE` if using an override.
 - **AI unavailable:** check the backend provider configuration. Hybrid search is disabled by default
-  and offers explicit keyword fallback; see [hybrid search guidance](docs/hybrid-document-search.md).
+  and offers explicit keyword fallback; see [hybrid search guidance](ARCHITECTURE.md#104-search).
 - **Desktop build failure:** revisit Tauri system dependencies; on macOS, check `xcode-select -p`.
 
 ## Repository and runtime map
@@ -272,15 +294,16 @@ contract changes. Reserve `npm run build:desktop` for packaging/release validati
 | `frontend/` | Shared React/Vite UI, routes, contracts, and platform adapters |
 | `frontend/src-tauri/` | Validated IPC, native dialogs/files, and desktop API relay |
 | `backend/` | Axum routes, product services, persistence, document processing, search, and AI orchestration |
-| `docs/` | Canonical architecture, domain model, and focused operational guidance |
+| `ARCHITECTURE.md` | Canonical current-state architecture reference |
 | `.agents/skills/` | Repository-specific development and verification guidance |
 | `quarry` | Repository-root development launcher |
 
 Web and desktop share the same product behavior. Web uses `BrowserRouter` and browser HTTP;
 desktop uses `HashRouter` and Tauri IPC to the same backend. PostgreSQL owns durable product and
-embedded template data, including all search artifacts. Document jobs and several caches
-remain in memory. Authentication and membership checks are implemented, but production tenancy,
-identity lifecycle, CI, and deployment automation remain incomplete.
+embedded template data, including all search artifacts. Document inputs, attempts and terminal
+job results are durable SQL records; preview caches and live subscriptions remain process-local.
+Authentication, membership checks and pull-request CI are implemented. Production tenancy,
+identity lifecycle and deployment automation remain incomplete.
 
 Read [AGENTS.md](AGENTS.md) before contributing and consult the
-[architecture](docs/ARCHITECTURE.md) and [domain model](docs/DOMAIN_MODEL.md) for detailed contracts.
+[architecture](ARCHITECTURE.md) for detailed contracts.

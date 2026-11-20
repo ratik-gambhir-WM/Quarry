@@ -13,14 +13,18 @@ fn document_id_changes_with_content_or_user() {
 }
 
 #[test]
-fn file_version_identity_changes_with_logical_file_or_content() {
+fn content_address_matches_the_documented_derivation_and_shape() {
     let content_hash = sha256_hex(b"version bytes");
-    let original = file_version_id("file-1", &content_hash);
+    let address = document_id_from_content("DEAL-1", &content_hash);
 
-    assert_eq!(original, file_version_id("file-1", &content_hash));
-    assert_ne!(original, file_version_id("file-2", &content_hash));
-    assert_ne!(original, file_version_id("file-1", &sha256_hex(b"changed")));
-    assert_eq!(original.len(), 64);
+    assert_eq!(
+        address,
+        sha256_hex(format!("DEAL-1\0{content_hash}").as_bytes())
+    );
+    assert!(is_content_address(&address));
+    assert!(!is_content_address(&address.to_uppercase()));
+    assert!(!is_content_address("5346b615-818b-4b25-85da-045507df2db4"));
+    assert!(!is_content_address(&address[..63]));
 }
 
 #[test]

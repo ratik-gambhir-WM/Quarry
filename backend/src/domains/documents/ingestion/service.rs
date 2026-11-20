@@ -10,11 +10,12 @@ pub use crate::domains::documents::model::{Document, DocumentChunk};
 use crate::{
     adapters::openai::client::{OpenAiClient, ResponsesFileInput},
     domains::documents::{
+        classification::service::ClassificationService,
         formats::{
             image::{build_image_assembly, validate_image_by_bytes, ImageAssembly},
             ParsedQuarryFile, QuarryFile,
         },
-        ingestion::persistence::persist_document_and_chunks,
+        ingestion::persistence::{persist_document_and_chunks, CommitContext},
         store::repository::DocumentStore,
     },
     shared::{
@@ -89,6 +90,7 @@ pub struct DocumentIngestionService {
     office_parse_semaphore: Arc<Semaphore>,
     embedding_request_semaphore: Arc<Semaphore>,
     max_concurrent_documents: usize,
+    classification: Option<Arc<ClassificationService>>,
 }
 
 impl DocumentIngestionService {
@@ -112,7 +114,17 @@ impl DocumentIngestionService {
                 MAX_CONCURRENT_EMBEDDING_REQUESTS,
             )),
             max_concurrent_documents,
+            classification: None,
         }
+    }
+
+    /// Optional enrichment. Its failures never change an ingestion outcome.
+    pub(crate) fn with_classification(
+        mut self,
+        classification: Arc<ClassificationService>,
+    ) -> Self {
+        self.classification = Some(classification);
+        self
     }
 
     pub(crate) async fn admit_deal(
@@ -261,14 +273,29 @@ impl DocumentIngestionService {
                 )
                 .await?;
         }
-        self.embed_chunks(
+        // Sample the parsed chunks before embedding borrows them mutably, then embed and
+        // classify concurrently. Classification always yields a record to save (completed,
+        // failed or disabled); only an embedding failure fails this attempt.
+        let prepared = self.classification.as_ref().map(|classification| {
+            (
+                classification,
+                classification.prepare(&attempt.filename, &parsed.document, &parsed.chunks),
+            )
+        });
+        let classify = async {
+            match prepared {
+                Some((classification, prepared)) => Some(classification.classify(prepared).await),
+                None => None,
+            }
+        };
+        let embedding = self.embed_chunks(
             &attempt.filename,
             parsed.document.file_size_bytes,
             &mut parsed.chunks,
             openai,
-        )
-        .await
-        .map_err(ServiceError::internal)?;
+        );
+        let (embedding, classification) = tokio::join!(embedding, classify);
+        embedding.map_err(ServiceError::internal)?;
         persist_document_and_chunks(
             &self.files,
             &attempt.deal,
@@ -276,7 +303,10 @@ impl DocumentIngestionService {
             parsed.document,
             parsed.chunks,
             parsed.file_bytes,
-            Some(attempt.clone()),
+            CommitContext {
+                attempt: Some(attempt.clone()),
+                classification,
+            },
         )
         .await
         .map_err(|_| ServiceError::internal("document commit failed"))?;

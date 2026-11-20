@@ -1,15 +1,15 @@
 # Replace SQLite with PostgreSQL; retain legacy storage
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Updated: November 11, 2026
 
 Historical status: implemented November 11, 2026 with PostgreSQL canonical storage and a separate
 search projection. Schema 5 supersedes that topology; see the current architecture linked above.
-See [current storage and recovery](../docs/postgresql-storage.md) and
-[implementation verification](../docs/postgresql-storage-verification.md). The sections below
+See [current storage and recovery](../ARCHITECTURE.md#91-shared-postgresql-schema-version-7) and
+[verification guidance](../.agents/skills/code-verification/SKILL.md). The sections below
 retain the original design input and planning-time observations.
 
 ## 1. Objective and scope
@@ -390,8 +390,7 @@ verification, leaving shared services alone. Finish with `git diff --check` and 
 
 ## 10. Documentation and definition of done
 
-When implementation lands, update `docs/ARCHITECTURE.md`, related authentication/notebook/
-shared-deal/template/recovery documents, onboarding/configuration instructions, `AGENTS.md`
+When implementation lands, update `ARCHITECTURE.md`, onboarding/configuration instructions, `AGENTS.md`
 and affected project skills to describe **PostgreSQL canonical storage plus legacy graph/search**.
 Replace obsolete SQLite setup/reset guidance while retaining and adapting legacy storage procedures.
 State the retained commit-before-indexing failure/retry behavior; do not claim cross-store
@@ -405,28 +404,29 @@ behavioral/query parity gap explicitly rather than weakening tests to make the p
 
 ## 11. Source map and planning verification
 
-Use these current repository sources during implementation:
+These anchors retain the proposal-time baseline; removed sources are historical paths.
+Use the current architecture and live source before starting any new implementation:
 
-- [Canonical architecture](../docs/ARCHITECTURE.md), especially backend composition, schema,
+- [Canonical architecture](../ARCHITECTURE.md), especially backend composition, schema,
   legacy storage, cross-store consistency, request flows, configuration and verification.
 - [Final schema/upgrades](../backend/src/app/migrations.rs),
   [bootstrap](../backend/src/app/bootstrap.rs), [configuration](../backend/src/app/config.rs),
   [backend manifest](../backend/Cargo.toml), [lockfile](../backend/Cargo.lock), [launcher](../quarry).
 - [PostgreSQL client](../backend/src/adapters/postgres/client.rs),
   [query builder](../backend/src/adapters/postgres/query/builder.rs),
-  [document store](../backend/src/domains/documents/store/postgres.rs),
+  document store (`backend/src/domains/documents/store/postgres.rs`, removed),
   [identity checkpoints](../backend/src/domains/documents/store/identity.rs).
-- [Document graph queries](../backend/src/domains/documents/graph/query.rs),
-  [writer](../backend/src/domains/documents/graph/writer.rs),
-  [repository](../backend/src/domains/documents/graph/repository.rs),
+- Document graph queries (`backend/src/domains/documents/graph/query.rs`, removed),
+  writer (`backend/src/domains/documents/graph/writer.rs`, removed),
+  repository (`backend/src/domains/documents/graph/repository.rs`, removed),
   [ingestion](../backend/src/domains/documents/ingestion/service.rs),
   [search](../backend/src/domains/documents/search/service.rs).
 - [Notebook repository](../backend/src/domains/notebooks/repository.rs),
   [jobs](../backend/src/domains/notebooks/job_repository.rs),
-  [legacy storage pipeline](../backend/src/domains/notebooks/graph.rs).
-- [Template repository](../backend/src/domains/templates/slide_templates/repository.rs),
-  [classification/lexical storage](../backend/src/domains/templates/slide_templates/repository/classification.rs),
-  [legacy storage projection](../backend/src/domains/templates/slide_templates/graph.rs).
+  legacy storage pipeline (`backend/src/domains/notebooks/graph.rs`, removed).
+- Template repository (`backend/src/domains/templates/slide_templates/repository.rs`, removed),
+  classification/lexical storage (`backend/src/domains/templates/slide_templates/repository/classification.rs`, removed),
+  legacy storage projection (`backend/src/domains/templates/slide_templates/graph.rs`, removed).
 - [Deletion repository](../backend/src/domains/deals/deletion/repository.rs),
   [integration suites](../backend/tests/integration/), [frontend scripts](../frontend/package.json).
 

@@ -1,7 +1,7 @@
 # Concurrent writers continuation: durable claims, remote fencing and recovery
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Date: 2026-11-12. Status: proposed implementation for a separate follow-up PR.
@@ -25,10 +25,10 @@ schema/revision/resource-coordination work currently in the working tree; it doe
 claim that work is committed or merged. Start the follow-up branch from that PR's merged
 result, inspect the actual code and rerun the inventory before implementation.
 
-This file is a design input. [Architecture](../docs/ARCHITECTURE.md) describes the current
-product; [storage verification](../docs/postgresql-storage-verification.md) records the
-completed checks and their limits. Neither multiple application writers nor distributed
-worker safety is enabled today.
+This file is a design input. [Architecture](../ARCHITECTURE.md) describes the current
+product; [PostgreSQL integration tests](../backend/tests/integration/adapters/postgres/) provide
+current regression coverage. Neither multiple application writers nor distributed worker
+safety is enabled today.
 
 ## 1. Completed foundation to preserve
 
@@ -387,10 +387,8 @@ Preserve adapter/route tests for revisions, retained drafts, retries, destructiv
 late responses, duplicate prevention and focus/announcements. Inspect changed UI paths, both
 applicable runtimes, themes, viewports and reduced motion. Follow project review/refactoring gates.
 
-Update current architecture and recovery guidance in the implementation PR: `docs/ARCHITECTURE.md`,
-`docs/postgresql-storage.md`, its verification record, `docs/notebook-api.md`,
-`docs/deal-permanent-deletion.md`, `docs/template-ownership.md`, `docs/authentication.md`,
-`docs/backend-boundary-checks.md`, `AGENTS.md` and affected project skills. Describe actual claim/
+Update current architecture and recovery guidance in the implementation PR: `ARCHITECTURE.md`,
+`AGENTS.md` and affected project skills. Describe actual claim/
 retention/schema/remote semantics, replica budgets, revocation timing, deployment limits and rollout.
 Remove single-writer guidance only with the code removal; do not describe planned support as current.
 

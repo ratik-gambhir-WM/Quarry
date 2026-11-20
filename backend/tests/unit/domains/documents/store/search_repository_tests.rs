@@ -18,7 +18,7 @@ async fn measure_native_document_search_at_ten_thousand_chunks() {
         doc,
         chunks,
         bytes,
-        None,
+        Default::default(),
     )
     .await
     .unwrap();

@@ -9,6 +9,7 @@ use thiserror::Error;
 const SCHEMA_VERSION: &str = "1";
 const CATALOG_ASSETS: &[&str] = &[
     "document_summary.md",
+    "document_classification.md",
     "diligence_review.md",
     "system/research_agent.md",
     "system/assistant_chat.md",
@@ -26,10 +27,11 @@ pub enum PromptId {
     ProductApplicationDeepDive,
     ImageDescription,
     AssistantChatDefault,
+    DocumentClassification,
 }
 
 impl PromptId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::DefaultResponse,
         Self::DefaultInstructions,
         Self::DealExtractionSystem,
@@ -41,6 +43,7 @@ impl PromptId {
         Self::ProductApplicationDeepDive,
         Self::ImageDescription,
         Self::AssistantChatDefault,
+        Self::DocumentClassification,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -56,6 +59,7 @@ impl PromptId {
             Self::ProductApplicationDeepDive => "product-application-deep-dive",
             Self::ImageDescription => "image-description",
             Self::AssistantChatDefault => "assistant-chat-default",
+            Self::DocumentClassification => "document-classification",
         }
     }
 
@@ -69,6 +73,7 @@ impl PromptId {
                 "system/research_agent.md"
             }
             Self::AssistantChatDefault => "system/assistant_chat.md",
+            Self::DocumentClassification => "document_classification.md",
             Self::DealExtractionSystem | Self::DealExtractionRequest => "diligence_review.md",
             Self::SummarySystem
             | Self::CliSummarySystem

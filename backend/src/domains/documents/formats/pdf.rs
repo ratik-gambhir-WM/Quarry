@@ -14,7 +14,6 @@ use image::{codecs::png::PngEncoder, ColorType, ImageEncoder};
 use pdf_extract::{xobject::PdfImage, Document, Error as PdfError, Stream};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 const PDF_IMAGE_DESCRIPTION_MIME_TYPE: &str = "image/png";
 const JPEG_IMAGE_DESCRIPTION_MIME_TYPE: &str = "image/jpeg";
@@ -195,7 +194,7 @@ fn parse_pdf_file_with_metadata(
         .map(|chunk| u64::from(chunk.token_count))
         .sum();
     let document = IngestionDocument {
-        file_id: Uuid::new_v4().to_string(),
+        file_id: document_id.clone(),
         document_id,
         deal_id: deal_id.to_string(),
         file_name,

@@ -1071,8 +1071,6 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
             insert_stored_document(
                 &connection,
                 "DEAL-DOCUMENTS",
-                "file-zulu",
-                "version-zulu",
                 "Zulu.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nzulu",
@@ -1080,8 +1078,6 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
             insert_stored_document(
                 &connection,
                 "DEAL-DOCUMENTS",
-                "file-alpha",
-                "version-alpha",
                 "Alpha.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nalpha",
@@ -1089,8 +1085,6 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
             insert_stored_document(
                 &connection,
                 "DEAL-DOCUMENTS",
-                "file-raw",
-                "version-raw",
                 "Raw.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 &docx_bytes,
@@ -1098,8 +1092,6 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
             insert_stored_document(
                 &connection,
                 "DEAL-OTHER",
-                "file-other",
-                "version-other",
                 "Other.pdf",
                 "application/pdf",
                 b"%PDF-1.4\nother",
@@ -1109,6 +1101,29 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
         .unwrap();
     let app = application.router;
 
+    let listed_document = |name: &str, bytes: &[u8]| {
+        let file_id = stored_document_id("DEAL-DOCUMENTS", bytes);
+        serde_json::json!({
+            "fileId": file_id,
+            "contentSha256": crate::shared::ids::sha256_hex(bytes),
+            "addedAt": "2026-01-01T00:00:00Z",
+            "sizeBytes": bytes.len(),
+            "displayName": name,
+            "uploadedByUserId": null,
+            "uploadedByName": null,
+            "attributionOrigin": "legacy_unknown",
+            "classification": {
+                "versionId": file_id,
+                "runStatus": "not_requested",
+                "generation": null,
+                "lastErrorCode": null,
+                "result": null
+            }
+        })
+    };
+    let alpha = stored_document_id("DEAL-DOCUMENTS", b"%PDF-1.4\nalpha");
+    let raw = stored_document_id("DEAL-DOCUMENTS", &docx_bytes);
+    let other = stored_document_id("DEAL-OTHER", b"%PDF-1.4\nother");
     let list_response = app
         .clone()
         .oneshot(
@@ -1128,18 +1143,20 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     assert_eq!(
         listed,
         serde_json::json!([
-            {"fileId": "file-alpha", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": b"%PDF-1.4\nalpha".len(), "displayName": "Alpha.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
-            {"fileId": "file-raw", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": docx_bytes.len(), "displayName": "Raw.docx", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"},
-            {"fileId": "file-zulu", "addedAt": "2026-01-01T00:00:00Z", "sizeBytes": b"%PDF-1.4\nzulu".len(), "displayName": "Zulu.pdf", "uploadedByUserId": null, "uploadedByName": null, "attributionOrigin": "legacy_unknown"}
+            listed_document("Alpha.pdf", b"%PDF-1.4\nalpha"),
+            listed_document("Raw.docx", &docx_bytes),
+            listed_document("Zulu.pdf", b"%PDF-1.4\nzulu"),
         ])
     );
 
     let pdf_response = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-alpha/pdf")
-                .body(Body::empty())
-                .unwrap(),
+            Request::get(format!(
+                "/api/v1/deals/DEAL-DOCUMENTS/documents/{alpha}/pdf"
+            ))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -1163,7 +1180,7 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
     let text_response = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-raw/text")
+            Request::get(format!("/api/v1/deals/DEAL-DOCUMENTS/documents/{raw}/text"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1182,24 +1199,32 @@ async fn stored_document_routes_list_files_and_return_pdf_and_raw_text() {
 
     let cross_deal_response = app
         .oneshot(
-            Request::get("/api/v1/deals/DEAL-DOCUMENTS/documents/file-other/pdf")
-                .body(Body::empty())
-                .unwrap(),
+            Request::get(format!(
+                "/api/v1/deals/DEAL-DOCUMENTS/documents/{other}/pdf"
+            ))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(cross_deal_response.status(), StatusCode::NOT_FOUND);
 }
 
+fn stored_document_id(deal_id: &str, bytes: &[u8]) -> String {
+    crate::shared::ids::document_id_from_content(deal_id, &crate::shared::ids::sha256_hex(bytes))
+}
+
 async fn insert_stored_document(
     connection: &crate::adapters::postgres::client::test_support::TestConnection,
     deal_id: &str,
-    file_id: &str,
-    version_id: &str,
     display_name: &str,
     mime_type: &str,
     bytes: &[u8],
 ) -> crate::adapters::postgres::client::test_support::TestResult<()> {
+    let content_sha256 = crate::shared::ids::sha256_hex(bytes);
+    let file_id = stored_document_id(deal_id, bytes);
+    let version_id = file_id.as_str();
+    let file_id = file_id.as_str();
     connection
         .execute(
             r#"
@@ -1223,7 +1248,7 @@ async fn insert_stored_document(
                 file_id,
                 display_name,
                 mime_type,
-                "a".repeat(64),
+                &content_sha256,
                 bytes.len() as i64
             ],
         )

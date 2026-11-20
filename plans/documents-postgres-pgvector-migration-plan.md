@@ -1,7 +1,7 @@
 # Plan 1: document chunks, embeddings and search in PostgreSQL
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Date: 2026-11-12. Reviewed against `main` at `83071dd` on 2026-11-15.
@@ -10,8 +10,8 @@ Execution order: **1. Documents (this plan) → 2. Notebooks → 3. Templates an
 This document migration runs first, followed by [notebooks](notebooks-postgres-pgvector-migration-plan.md), then
 [templates and final legacy storage retirement](templates-postgres-pgvector-migration-plan.md).
 Reinspect code/manifests before implementation. Current code, not these proposed names, remains
-authoritative. Relevant baseline: [architecture](../docs/ARCHITECTURE.md),
-[storage](../docs/postgresql-storage.md), [hybrid search](../docs/hybrid-document-search.md).
+authoritative. Relevant baseline: [architecture](../ARCHITECTURE.md),
+[storage](../ARCHITECTURE.md#91-shared-postgresql-schema-version-7), [hybrid search](../ARCHITECTURE.md#104-search).
 The inspected baseline has no pgvector dependency. Documents move to SQL in this migration;
 notebooks/templates and their shared legacy storage infrastructure remain operational until their turns.
 
@@ -424,7 +424,7 @@ Use disposable schemas with the real vector extension and fake providers; never 
 Run frontend typecheck/boundaries/tests/build and matching bundle gates if adapter/behavior contracts
 change; native fmt/Clippy/tests if the relay changes. Commands must match manifests at implementation.
 
-Update `docs/ARCHITECTURE.md`, storage/recovery, hybrid search, document identity/deletion guidance,
-`AGENTS.md` and applicable skills with actual semantics. Review architecture, check placement,
+Update `ARCHITECTURE.md`, `AGENTS.md`, and applicable skills with actual storage/recovery,
+hybrid search, and document identity/deletion semantics. Review architecture, check placement,
 security, cancellation, performance and scoped refactoring before handoff. Record skipped evidence.
 Architecture impact of this plan: none — it describes future changes; no current runtime changed.

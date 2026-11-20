@@ -32,8 +32,9 @@ async fn seed_database(db: PostgresClient) -> PostgresClient {
     }
     db
 }
+/// `_label` names the fixture only; IDs are always the deal-scoped content address.
 pub(crate) fn sample(
-    file: &str,
+    _label: &str,
     deal: &str,
     content: &str,
     count: u32,
@@ -42,7 +43,7 @@ pub(crate) fn sample(
     let hash = sha256_hex(&bytes);
     let document_id = document_id_from_content(deal, &hash);
     let document = Document {
-        file_id: file.into(),
+        file_id: document_id.clone(),
         document_id: document_id.clone(),
         deal_id: deal.into(),
         file_name: "evidence.docx".into(),
@@ -90,7 +91,7 @@ pub(crate) async fn save(db: &PostgresClient, file: &str, deal: &str, content: &
         doc,
         chunks,
         bytes,
-        None,
+        Default::default(),
     )
     .await
     .unwrap();

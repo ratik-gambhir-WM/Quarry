@@ -1,12 +1,21 @@
 //! Durable document workers and database-polled SSE snapshots.
 use super::{
     jobs::DocumentJobEvent,
-    repository::{DocumentJobRepository, Job},
+    repository::{Claimed, DocumentJobRepository, Job},
     service::{DocumentIngestionService, UploadedDocument},
 };
-use crate::shared::error::ServiceResult;
-use std::{sync::Arc, time::Duration};
-use tokio::sync::watch;
+use crate::shared::{
+    error::ServiceResult,
+    worker::{drain_owned, StopSignal, WorkerHandle, DRAIN_GRACE},
+};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+use tokio::{sync::watch, task::JoinSet};
+
+/// Hard ceiling for concurrently prepared background documents.
+pub const MAX_BACKGROUND_DOCUMENTS: usize = 8;
+const IDLE_POLL: Duration = Duration::from_millis(200);
+const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60);
+
 #[derive(Debug)]
 pub struct StartedDocumentJob {
     pub job_id: String,
@@ -18,35 +27,22 @@ pub struct DocumentJobService {
     queue: DocumentJobRepository,
 }
 impl DocumentJobService {
-    pub fn new(ingestion: Arc<DocumentIngestionService>, retention: Duration) -> Self {
+    pub fn new(ingestion: Arc<DocumentIngestionService>) -> Self {
         let queue = ingestion.queue();
-        let weak = Arc::downgrade(&ingestion);
-        let worker = queue.clone();
-        tokio::spawn(async move {
-            let mut maintenance = tokio::time::Instant::now();
-            loop {
-                let Some(ingestion) = weak.upgrade() else {
-                    break;
-                };
-                if tokio::time::Instant::now() >= maintenance {
-                    let seconds = u32::try_from(retention.as_secs()).unwrap_or(u32::MAX);
-                    if worker.prune(seconds).await.is_err() {
-                        tracing::warn!(category = "storage", "document retention unavailable");
-                    }
-                    maintenance = tokio::time::Instant::now() + Duration::from_secs(60);
-                }
-                match worker.claim(None).await {
-                    Ok(Some(claim)) => {
-                        let _ = ingestion.process_claim(claim).await;
-                    }
-                    Ok(None) => {}
-                    Err(_) => tracing::warn!(category = "storage", "document claim unavailable"),
-                }
-                drop(ingestion);
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-        });
         Self { ingestion, queue }
+    }
+
+    /// Start the single background supervisor. Bootstrap calls this once and owns the
+    /// handle; service clones never start or stop another pool.
+    pub fn start_worker(&self, concurrency: usize, retention: Duration) -> WorkerHandle {
+        // One shared ingestion service: its Office and embedding semaphores bound every
+        // concurrently prepared document.
+        let ingestion = Arc::clone(&self.ingestion);
+        let process: ProcessDocument = Arc::new(move |claim| {
+            let ingestion = Arc::clone(&ingestion);
+            Box::pin(async move { ingestion.process_claim(claim).await })
+        });
+        start_supervisor(self.queue.clone(), concurrency, retention, process)
     }
     pub async fn start(
         &self,
@@ -96,6 +92,97 @@ impl DocumentJobService {
         Ok(receiver)
     }
 }
+/// Prepares and commits exactly one claimed document.
+pub(crate) type ProcessDocument =
+    Arc<dyn Fn(Claimed) -> Pin<Box<dyn Future<Output = ServiceResult<()>> + Send>> + Send + Sync>;
+
+pub(crate) fn start_supervisor(
+    queue: DocumentJobRepository,
+    concurrency: usize,
+    retention: Duration,
+    process: ProcessDocument,
+) -> WorkerHandle {
+    let supervisor = DocumentSupervisor {
+        queue,
+        limit: concurrency.clamp(1, MAX_BACKGROUND_DOCUMENTS),
+        retention_seconds: u32::try_from(retention.as_secs()).unwrap_or(u32::MAX),
+        process,
+    };
+    WorkerHandle::spawn(move |stop| supervisor.run(stop))
+}
+
+/// Claims background jobs only while a task slot is free; each owned task prepares and
+/// commits exactly one document independently of its siblings.
+struct DocumentSupervisor {
+    queue: DocumentJobRepository,
+    limit: usize,
+    retention_seconds: u32,
+    process: ProcessDocument,
+}
+
+impl DocumentSupervisor {
+    async fn run(self, mut stop: StopSignal) {
+        let mut active = JoinSet::new();
+        let mut maintenance_due = tokio::time::Instant::now();
+        loop {
+            while let Some(outcome) = active.try_join_next() {
+                observe_document_task(outcome);
+            }
+            if stop.is_requested() {
+                break;
+            }
+            // Maintenance runs on its own cadence even while every slot is busy.
+            if tokio::time::Instant::now() >= maintenance_due {
+                if self.queue.prune(self.retention_seconds).await.is_err() {
+                    tracing::warn!(category = "storage", "document retention unavailable");
+                }
+                maintenance_due = tokio::time::Instant::now() + MAINTENANCE_INTERVAL;
+            }
+            self.fill(&mut active, &stop).await;
+            tokio::select! {
+                outcome = active.join_next(), if !active.is_empty() => {
+                    if let Some(outcome) = outcome {
+                        observe_document_task(outcome);
+                    }
+                }
+                _ = tokio::time::sleep(IDLE_POLL) => {}
+                _ = stop.requested() => break,
+            }
+        }
+        drain_owned(&mut active, DRAIN_GRACE).await;
+    }
+
+    /// Capacity is checked before every claim, so no backlog is preclaimed and no lease
+    /// ages while waiting for a slot.
+    async fn fill(&self, active: &mut JoinSet<ServiceResult<()>>, stop: &StopSignal) {
+        while !stop.is_requested() && active.len() < self.limit {
+            match self.queue.claim(None).await {
+                Ok(Some(claim)) => {
+                    active.spawn((self.process)(claim));
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    tracing::warn!(category = "storage", "document claim unavailable");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// One task's failure or panic never ends the supervisor or cancels siblings. A panicked
+/// task cannot prove ownership, so its attempt is left for lease-expiry recovery.
+fn observe_document_task(outcome: Result<ServiceResult<()>, tokio::task::JoinError>) {
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => tracing::debug!(category = "attempt_failed", "document task failed"),
+        Err(error) if error.is_panic() => {
+            tracing::error!(category = "worker", "document task panicked")
+        }
+        Err(_) => tracing::debug!(category = "worker", "document task aborted"),
+    }
+}
+
 fn event(id: &str, job: &Job) -> DocumentJobEvent {
     if let Some(result) = &job.result {
         if result.skipped {

@@ -84,7 +84,7 @@ while methods repeatedly check their availability at runtime.
   idempotency, branch history, context limits, and failure persistence.
 - Preserve authorization before canonical file loading, loaded-thread scope checks, bounded file
   resolution, upload limits, and final transaction guards. Apply the boundary-placement decision
-  in `docs/backend-boundary-checks.md` to any check whose location changes.
+  in `AGENTS.md` to any check whose location changes.
 - Retain admission ownership across the detached run and blocking file work as currently
   implemented. Preserve revocation independent of provider/SSE backpressure, disconnect handling,
   partial-text persistence, and deletion barriers.
@@ -112,6 +112,6 @@ the existing pgvector prerequisite and opt-in integration boundaries. Do not use
 startup, development data resets, or legacy storage clearing as verification.
 
 Review the final diff for behavior, dependency direction, error handling, ownership/copies, and
-unrelated changes. Run `git diff --check` and recheck status. Update `docs/ARCHITECTURE.md` for the
+unrelated changes. Run `git diff --check` and recheck status. Update `ARCHITECTURE.md` for the
 implemented type/construction responsibilities, and any operational or contract change actually
 required by the final design. Report checks, ignored tests, and remaining uncertainty separately.

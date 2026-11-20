@@ -13,7 +13,7 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     .fetch_all(client.pool())
     .await
     .unwrap();
-    assert_eq!(tables.len(), 50); // schema 6 removes app registry and template memberships
+    assert_eq!(tables.len(), 51); // schema 7 adds document classification enrichment
     assert!(!tables
         .iter()
         .any(|table| matches!(table.as_str(), "apps" | "app_templates")));
@@ -25,6 +25,7 @@ async fn fresh_schema_reuses_and_detects_constraint_drift_without_discarding_dat
     .is_err());
     for table in [
         "quarry_files",
+        "document_classifications",
         "document_identity_manifests",
         "document_image_recovery",
         "template_classification_status",
@@ -129,11 +130,11 @@ async fn query_plans_use_indexes_for_scoped_access_claims_jobs_and_activity() {
          INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at)
          VALUES('plan-5000',2,'viewer','now','now');
          INSERT INTO quarry_files(file_id,deal_id,display_name,created_at,updated_at)
-         SELECT 'file-'||n,'plan-'||n,'File','now','now' FROM generate_series(1,10000) n;
+         SELECT encode(sha256(convert_to('plan-'||n,'UTF8') || '\\x00'::bytea || convert_to(repeat('a',64),'UTF8')),'hex'),'plan-'||n,'File','now','now' FROM generate_series(1,10000) n;
          INSERT INTO quarry_file_versions(version_id,file_id,version_number,original_filename,mime_type,content_sha256,byte_size,is_current,created_at)
-         SELECT 'version-'||n,'file-'||n,1,'file.pdf','application/pdf',repeat('a',64),0,1,'now' FROM generate_series(1,10000) n;
+         SELECT encode(sha256(convert_to('plan-'||n,'UTF8') || '\\x00'::bytea || convert_to(repeat('a',64),'UTF8')),'hex'),encode(sha256(convert_to('plan-'||n,'UTF8') || '\\x00'::bytea || convert_to(repeat('a',64),'UTF8')),'hex'),1,'file.pdf','application/pdf',repeat('a',64),0,1,'now' FROM generate_series(1,10000) n;
          INSERT INTO quarry_current_content(deal_id,content_sha256,file_id,version_id)
-         SELECT 'plan-'||n,repeat('a',64),'file-'||n,'version-'||n FROM generate_series(1,10000) n;
+         SELECT 'plan-'||n,repeat('a',64),encode(sha256(convert_to('plan-'||n,'UTF8') || '\\x00'::bytea || convert_to(repeat('a',64),'UTF8')),'hex'),encode(sha256(convert_to('plan-'||n,'UTF8') || '\\x00'::bytea || convert_to(repeat('a',64),'UTF8')),'hex') FROM generate_series(1,10000) n;
          INSERT INTO deal_activity_events(event_id,deal_id,actor_user_id,kind,created_at)
          SELECT 'event-'||n,'plan-5000',1,'deal_updated',lpad(n::text,8,'0') FROM generate_series(1,10000) n;
          INSERT INTO notebooks(notebook_id,user_id,title,created_at,updated_at) VALUES('book',1,'Book','now','now');

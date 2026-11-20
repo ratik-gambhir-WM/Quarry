@@ -3,24 +3,36 @@ use serde::Serialize;
 use crate::{
     adapters::postgres::{
         client::{PostgresClient, PostgresError, PostgresTransaction, SqlRow},
-        query::{Condition, ConflictUpdate, SortDirection, SqlBuilder, SqlValue},
+        query::{
+            Condition, ConflictUpdate, JoinClause, JoinCondition, SortDirection, SqlBuilder,
+            SqlValue,
+        },
     },
-    domains::documents::store::model::{
-        ExistingFileVersion, FilePersistenceInput, PersistedFileIdentity,
+    domains::documents::{
+        classification::{
+            model::{ClassificationResult, DocumentClassification},
+            repository::{insert_with_document, ClassificationRecord},
+        },
+        store::model::{ExistingFileVersion, FilePersistenceInput, PersistedFileIdentity},
     },
     shared::error::RepositoryError,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DealDocumentSummary {
     pub added_at: String,
+    /// Deal-scoped content address: `sha256(deal_id || 0x00 || content_sha256)`.
     pub file_id: String,
+    /// SHA-256 of the stored bytes; compare with a local file's hash to detect change.
+    pub content_sha256: String,
     pub display_name: String,
     pub size_bytes: i64,
     pub uploaded_by_user_id: Option<i64>,
     pub uploaded_by_name: Option<String>,
     pub attribution_origin: String,
+    /// Optional enrichment for exactly this current version; `not_requested` when absent.
+    pub classification: DocumentClassification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,8 +238,9 @@ impl DocumentStore {
         input: FilePersistenceInput,
         chunks: super::search_repository::PreparedChunks,
         attempt: Option<crate::domains::documents::ingestion::repository::Attempt>,
+        classification: Option<ClassificationRecord>,
     ) -> Result<PersistedFileIdentity, RepositoryError> {
-        persist_file_blob(&self.postgres, input, chunks, attempt).await
+        persist_file_blob(&self.postgres, input, chunks, attempt, classification).await
     }
 }
 
@@ -240,15 +253,39 @@ async fn list_current_deal_documents(
             "quarry_files.file_id",
             "quarry_files.display_name",
             "quarry_files.created_at",
+            "quarry_file_versions.content_sha256",
+            "quarry_file_versions.version_id",
             "quarry_file_versions.byte_size",
             "quarry_file_versions.uploaded_by_user_id",
             "users.first_name",
             "users.last_name",
+            "document_classifications.run_status",
+            "document_classifications.generation",
+            "document_classifications.last_error_code",
+            "document_classifications.result_json",
+            "document_classifications.completed_at",
         ])
         .inner_join(
             "quarry_file_versions",
             "quarry_files.file_id",
             "quarry_file_versions.file_id",
+        )
+        // One snapshot read: enrichment joins the exact current content identity only.
+        .left_join(
+            "document_input_identities",
+            "quarry_files.file_id",
+            "document_input_identities.file_id",
+        )
+        .join(
+            JoinClause::left("document_classifications")
+                .on(JoinCondition::equal(
+                    "document_classifications.deal_id",
+                    "document_input_identities.deal_id",
+                ))
+                .and_on(JoinCondition::equal(
+                    "document_classifications.input_hash",
+                    "quarry_file_versions.content_sha256",
+                )),
         )
         .left_join(
             "users",
@@ -271,6 +308,7 @@ async fn list_current_deal_documents(
             Ok(DealDocumentSummary {
                 added_at: required_text(&row, "created_at")?,
                 file_id: required_text(&row, "file_id")?,
+                content_sha256: required_text(&row, "content_sha256")?,
                 display_name: required_text(&row, "display_name")?,
                 size_bytes: required_integer(&row, "byte_size")?,
                 uploaded_by_user_id: match row.get("uploaded_by_user_id") {
@@ -290,6 +328,7 @@ async fn list_current_deal_documents(
                     "legacy_unknown"
                 }
                 .into(),
+                classification: classification_view(&row)?,
             })
         })
         .collect::<Result<Vec<_>, PostgresError>>()
@@ -395,6 +434,7 @@ async fn persist_file_blob(
     mut file_persistence: FilePersistenceInput,
     chunks: super::search_repository::PreparedChunks,
     attempt: Option<crate::domains::documents::ingestion::repository::Attempt>,
+    classification: Option<ClassificationRecord>,
 ) -> Result<PersistedFileIdentity, RepositoryError> {
     if let Some(attempt) = &attempt {
         if attempt.deal != file_persistence.deal_id
@@ -504,6 +544,17 @@ async fn persist_file_blob(
             )
             .await
             .map_err(|e| PostgresError::transaction_aborted(e.to_string()))?;
+            // The classification commits with the document or not at all.
+            if let Some(record) = &classification {
+                insert_with_document(
+                    transaction,
+                    &file_persistence.deal_id,
+                    &file_persistence.content_sha256,
+                    file_persistence.actor_id,
+                    record,
+                )
+                .await?;
+            }
             let existing_chunks = transaction
                 .read_with(
                     SqlBuilder::select("document_chunks")
@@ -895,6 +946,50 @@ async fn read_back_persisted_file_identity(
         ));
     }
     Ok(identity)
+}
+
+fn optional_text(row: &SqlRow, column: &str) -> Option<String> {
+    match row.get(column) {
+        Some(SqlValue::Text(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn optional_integer(row: &SqlRow, column: &str) -> Option<i64> {
+    match row.get(column) {
+        Some(SqlValue::Integer(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Public classification metadata; raw samples and claim tokens are never projected.
+fn classification_view(row: &SqlRow) -> Result<DocumentClassification, PostgresError> {
+    let version_id = required_text(row, "version_id")?;
+    let Some(run_status) = optional_text(row, "run_status") else {
+        return Ok(DocumentClassification::not_requested(version_id));
+    };
+    let generation = optional_integer(row, "generation");
+    let result = optional_text(row, "result_json").and_then(|json| {
+        let parsed = serde_json::from_str::<ClassificationResult>(&json)
+            .ok()
+            .filter(ClassificationResult::is_consistent);
+        if parsed.is_none() {
+            tracing::warn!(category = "invalid_data", "stored classification ignored");
+        }
+        parsed.map(|mut result| {
+            result.classified_at = optional_integer(row, "completed_at")
+                .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+                .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            result
+        })
+    });
+    Ok(DocumentClassification {
+        version_id,
+        run_status,
+        generation,
+        last_error_code: optional_text(row, "last_error_code"),
+        result,
+    })
 }
 
 fn require_one_row(rows_affected: usize, operation: &str) -> Result<(), PostgresError> {

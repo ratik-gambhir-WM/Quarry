@@ -22,7 +22,6 @@ use std::{
     io::{Cursor, Read},
     path::{Path, PathBuf},
 };
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocxAssembly {
@@ -125,7 +124,7 @@ fn parse_docx_file_with_metadata(
         .map(|chunk| u64::from(chunk.token_count))
         .sum();
     let document = Document {
-        file_id: Uuid::new_v4().to_string(),
+        file_id: document_id.clone(),
         document_id,
         deal_id: deal_id.to_string(),
         file_name: path

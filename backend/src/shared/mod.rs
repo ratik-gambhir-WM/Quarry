@@ -7,3 +7,4 @@ pub mod prompts;
 pub(crate) mod revision;
 
 pub(crate) mod search_text;
+pub mod worker;

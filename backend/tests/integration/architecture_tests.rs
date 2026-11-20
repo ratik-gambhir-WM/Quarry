@@ -181,6 +181,8 @@ fn product_infrastructure_is_constructed_only_in_bootstrap() {
     let constructors = [
         "PostgresClient::connect(",
         "OpenAiClient::from_config(",
+        "DecisionsClient::new(",
+        "ClassificationRepository::new(",
         "OfficeConverter::new(",
         "FileUploadServiceClient::new(",
         "IndexServiceClient::new(",
@@ -329,7 +331,14 @@ fn template_domain_keeps_sql_and_http_ownership_explicit() {
 }
 
 fn is_handler_source(path: &str) -> bool {
-    path.ends_with("/handler.rs") || path.ends_with("_handler.rs") || path.contains("/handler/")
+    if path.ends_with("/handler.rs") || path.ends_with("_handler.rs") || path.contains("/handler/")
+    {
+        return true;
+    }
+    // A flat validator remains handler-owned only when declared as its private child.
+    path.ends_with("/validate.rs")
+        && fs::read_to_string(Path::new(path).with_file_name("handler.rs"))
+            .is_ok_and(|source| source.contains("#[path = \"validate.rs\"]\nmod validate;"))
 }
 
 #[test]
@@ -391,6 +400,23 @@ fn openai_provider_calls_use_rig_without_a_product_http_client() {
                 "{file} bypasses Rig with {forbidden}"
             );
         }
+    }
+    // Documented exception: Rig has no Decisions endpoint. Exactly one adapter owns that
+    // transport, on one fixed endpoint, and no other source reaches OpenAI directly.
+    let decisions = fs::read_to_string(root.join("src/adapters/openai/decisions.rs")).unwrap();
+    assert_eq!(decisions.matches("api.openai.com").count(), 1);
+    assert!(decisions.contains("\"https://api.openai.com/v1/decisions\""));
+    for (path, source) in rust_sources("src") {
+        if path.ends_with("/adapters/openai/decisions.rs")
+            || path.contains("/slide_templates/")
+            || path.ends_with("_tests.rs")
+        {
+            continue;
+        }
+        assert!(
+            !source.contains("api.openai.com/v1/decisions"),
+            "{path} calls Decisions outside its adapter"
+        );
     }
 }
 

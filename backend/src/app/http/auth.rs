@@ -80,6 +80,12 @@ pub(crate) async fn authenticate(
                     || path.ends_with("/documents/process_file")
                 {
                     Capability::Upload
+                } else if method == axum::http::Method::POST
+                    && path.contains("/documents/")
+                    && path.ends_with("/classification")
+                {
+                    // Explicit (re)classification spends provider budget on stored evidence.
+                    Capability::Upload
                 } else if path.ends_with("/archive") {
                     Capability::Transfer
                 } else if path.ends_with("/metadata")

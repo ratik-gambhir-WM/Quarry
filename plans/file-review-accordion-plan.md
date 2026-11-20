@@ -212,7 +212,7 @@ navigation insets; remove unexplained padding that would strand content below th
 3. Implement full detail content and independent Open document behavior, then connect the existing
    toolbar, shared sorting state, pagination, and deal-scoped preview-return state.
 4. Remove obsolete review-column/pinning rendering from this feature. Update canonical
-   `docs/ARCHITECTURE.md` for the table layout, added size DTO, state lifetime, and fixture limitation;
+   `ARCHITECTURE.md` for the table layout, added size DTO, state lifetime, and fixture limitation;
    this plan remains a design input, not canonical product documentation.
 5. Inspect the Data Room using disposable/synthetic data on web and desktop where native metadata
    participates. Stop task-owned preview servers and verify their ports are free.
