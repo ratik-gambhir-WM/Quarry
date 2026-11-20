@@ -99,7 +99,10 @@ async fn cancelled_sync_requests_expire_release_capacity_and_retry_with_fenced_a
         doc,
         chunks,
         bytes,
-        Some(recovered.attempt),
+        crate::domains::documents::ingestion::persistence::CommitContext {
+            attempt: Some(recovered.attempt),
+            classification: None,
+        },
     )
     .await
     .unwrap();
@@ -225,7 +228,10 @@ async fn expired_attempt_cannot_publish_or_overwrite_a_recovered_committed_resul
             doc,
             chunks,
             bytes,
-            Some(attempt),
+            crate::domains::documents::ingestion::persistence::CommitContext {
+                attempt: Some(attempt),
+                classification: None,
+            },
         )
         .await;
         assert_eq!(result.is_ok(), success);
@@ -277,7 +283,10 @@ async fn archive_or_delete_after_preparation_prevents_publication_and_resurrecti
             doc,
             chunks,
             bytes,
-            Some(claim.attempt)
+            crate::domains::documents::ingestion::persistence::CommitContext {
+                attempt: Some(claim.attempt),
+                classification: None
+            },
         )
         .await
         .is_err());
@@ -367,7 +376,10 @@ async fn a_batch_that_outlives_its_attempt_fails_the_final_database_clock_fence(
         doc,
         chunks,
         bytes,
-        Some(claim.attempt)
+        crate::domains::documents::ingestion::persistence::CommitContext {
+            attempt: Some(claim.attempt),
+            classification: None
+        },
     )
     .await
     .is_err());
@@ -420,7 +432,10 @@ async fn independent_pools_recover_input_and_replay_committed_result_after_resta
         doc,
         chunks,
         bytes,
-        Some(claim.attempt),
+        crate::domains::documents::ingestion::persistence::CommitContext {
+            attempt: Some(claim.attempt),
+            classification: None,
+        },
     )
     .await
     .unwrap();

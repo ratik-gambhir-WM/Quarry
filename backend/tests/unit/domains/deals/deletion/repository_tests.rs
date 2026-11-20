@@ -14,7 +14,7 @@ async fn fixture() -> DeletionRepository {
     postgres.with_connection(async |c| { c.execute_batch("INSERT INTO deals(deal_id,user_id,deal_name,engagement_type,transaction_type,status,created_at,updated_at) VALUES('DELETE-A',1,'Synthetic','buy_side','unknown','pipeline','now','now'),('KEEP-B',2,'Synthetic','buy_side','unknown','pipeline','now','now');
     INSERT INTO deal_memberships(deal_id,user_id,role,joined_at,updated_at) VALUES('DELETE-A',1,'owner','now','now'),('DELETE-A',2,'manager','now','now'),('KEEP-B',2,'owner','now','now');
     INSERT INTO deal_access_revisions(deal_id) VALUES('DELETE-A'),('KEEP-B');
-    INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at) VALUES('owned-file','DELETE-A','synthetic','{}','now','now'),('other-file','KEEP-B','synthetic','{}','now','now');
+    INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at) VALUES(repeat('1',64),'DELETE-A','synthetic','{}','now','now'),(repeat('2',64),'KEEP-B','synthetic','{}','now','now');
     INSERT INTO assistant_threads(thread_id,user_id,deal_id,title) VALUES('owned-thread',1,'DELETE-A','synthetic'),('private-thread',2,'DELETE-A','synthetic'),('free-thread',2,NULL,'synthetic'),('other-thread',2,'KEEP-B','synthetic');
     INSERT INTO notebooks(notebook_id,user_id,deal_id,title,created_at,updated_at) VALUES('private-book',2,'DELETE-A','synthetic','now','now');
     BEGIN;
@@ -160,7 +160,7 @@ async fn purge_rollback_keeps_notebook_links_threads_targets_and_phase_consisten
 async fn manifest_covers_more_than_one_batch_including_soft_deleted_files() {
     let repo = fixture().await;
     repo.postgres.with_connection(async |c| {
-        for n in 0..520 { c.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,deleted_at,created_at,updated_at) VALUES(?1,'DELETE-A','synthetic','{}','now','now','now')",[format!("batch-{n:04}")]).await?; } Ok(())
+        for n in 0..520 { c.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,deleted_at,created_at,updated_at) VALUES(?1,'DELETE-A','synthetic','{}','now','now','now')",[crate::shared::ids::sha256_hex(format!("batch-{n:04}").as_bytes())]).await?; } Ok(())
      }).await.unwrap();
     let op = repo.accept("DELETE-A".into(), 1, 1).await.unwrap();
     repo.snapshot_and_purge(op).await.unwrap();

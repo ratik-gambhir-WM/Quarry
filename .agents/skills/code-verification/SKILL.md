@@ -10,7 +10,7 @@ external systems.
 
 ## Preflight
 
-1. Read the root `AGENTS.md` and relevant sections of `docs/ARCHITECTURE.md`.
+1. Read the root `AGENTS.md` and relevant sections of `ARCHITECTURE.md`.
 2. Run `git status --short` and record the pre-existing dirty state.
 3. Read the real scripts/manifests in every affected build root. Do not invent commands.
 4. Identify changed contracts and consumers, including generated/ignored outputs that checks may
@@ -43,7 +43,7 @@ local port:
 | `frontend/src-tauri/**` | Tauri Rust checks plus frontend desktop typecheck/boundary checks |
 | `backend/**` | backend Rust checks; runtime smoke only with explicit disposable dependencies |
 | schema/vector/migration | focused invariant tests plus full backend gates; no real data or destructive utility |
-| docs/agent skills only | structural/content checks, links/paths, skill validation, `git diff --check` |
+| Documentation/agent skills only | structural/content checks, links/paths, skill validation, `git diff --check` |
 
 There is no root test command and no CI-equivalent wrapper. Verify each touched build root.
 
@@ -64,13 +64,19 @@ npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 Rules:
 
 - Use `npm run typecheck` when shared code is affected.
-- Run `check:web-bundle` only after `build:web`; it inspects `frontend/dist`.
+- Run web runtime, bundle-size and notebook-bundle checks after `build:web`, then desktop
+  bundle-size and notebook-bundle checks after `build:desktop-ui`, before another build overwrites
+  `dist`. These verify complete static startup costs and production notebook module initialization.
 - There is no lint/format script. Do not report one as skipped or invent one.
 - Test mode selects the web runtime. Direct Tauri adapter tests and desktop typechecking are needed
   for desktop contract confidence.
@@ -106,7 +112,7 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 Add `cargo build --locked --release` when release compilation, feature flags, or packaging changed.
 
 For backend code changes affecting validation or authorization, follow the
-[boundary verification checklist](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+[backend boundary rules](../../../AGENTS.md#backend-development-rules).
 Use `cargo test --locked --lib architecture_tests` as the focused dependency gate; the full backend
 suite includes it. Also verify early rejection through the real handler path and retain tests for
 state-dependent permission/freshness guards. Passing source-dependency checks alone does not prove
@@ -184,10 +190,10 @@ working should be supported by recent evidence or explicitly described as not ru
 ## Mandatory architecture-impact check
 
 Every feature, refactor, fix, contract change, configuration change, and infrastructure change
-must finish by re-reading the relevant sections of `docs/ARCHITECTURE.md` and comparing them with
+must finish by re-reading the relevant sections of `ARCHITECTURE.md` and comparing them with
 the final diff.
 
-Update `docs/ARCHITECTURE.md` in the same change when the diff alters:
+Update `ARCHITECTURE.md` in the same change when the diff alters:
 
 - routes, pages, feature maturity, or visible product behavior;
 - runtime/platform selection, module ownership, or dependency direction;
@@ -221,13 +227,14 @@ lock/CAS primitives and captured template lexical parity. The global production 
 test-only unguarded transactions prove primitives, not completed multi-instance domain safety.
 Domain claims/recovery and remote fencing still need their own integration evidence. Preserve
 and report ownership of validation processes/ports, containers, volumes and schemas; clean only
-those created by the current task. See `docs/postgresql-storage.md`.
+those created by the current task. Inspect the PostgreSQL client and isolated test support
+for the implemented ownership, configuration and recovery contracts.
 
 ## Document SQL cutover verification
 
 Real document/vector tests require the explicitly provisioned vector 0.8.6 extension in the
-separate `quarry_extensions` schema of the selected `_test` database. Follow
-`docs/postgresql-storage.md`; never install/drop it per test or use the explicit destructive
+separate `quarry_extensions` schema of the selected `_test` database. Provision it explicitly
+with `backend/tools/provision-pgvector.sql`; never install/drop it per test or use the explicit destructive
 `reset_postgres --confirm-reset` utility as verification. Cover complete multi-batch rollback,
 deferred failure, old/new snapshots, cancellation, immutable image input, token/DB-clock fencing,
 identity convergence, profile/current authorization and legacy DTO/fusion behavior. Document

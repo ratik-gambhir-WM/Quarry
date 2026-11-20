@@ -1,7 +1,7 @@
 # Plan 3: template retrieval in PostgreSQL and complete legacy storage removal
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Date: 2026-11-12. Updated against repository HEAD `708d73a` on 2026-11-16.
@@ -9,7 +9,7 @@ Status: proposed implementation PR, not a runtime change.
 Retains design context from [Plan 1's shared storage/search contract](documents-postgres-pgvector-migration-plan.md#2-common-storage-and-search-decisions-for-all-three-plans)
 and follows [the notebook migration](notebooks-postgres-pgvector-migration-plan.md).
 This PR owns final removal of legacy storage only after all three domains have stopped using it.
-Baseline: [template ownership](../docs/template-ownership.md) and [architecture](../docs/ARCHITECTURE.md).
+Baseline: [template ownership](../ARCHITECTURE.md#75-template-catalog) and [architecture](../ARCHITECTURE.md).
 Documents and notebooks now use PostgreSQL search and durable jobs; their implementation, not the
 older migration proposals, is the execution reference. The current product schema is 4, with SQLx
 0.8.6, pgvector Rust 0.4.2 and the separately provisioned pgvector extension 0.8.6 in
@@ -433,7 +433,7 @@ QUARRY_TEST_DATABASE_URL=postgresql://localhost/Quarry_test cargo test --locked 
 ```
 
 Inspect formatting changes without overwriting unrelated work. Provision extension 0.8.6 once using
-`backend/tools/provision-pgvector.sql` as documented in `docs/postgresql-storage.md`; tests never
+`backend/tools/provision-pgvector.sql` against each selected database; tests never
 install/drop it. Reuse notebook rollback/fence/snapshot/independent-pool fixtures and document
 codec/read-independence tests, keeping all added test helpers manually wired under `backend/tests/`.
 Run launcher syntax (`bash -n quarry`) and its suite (`python3 tests/test_quarry_launcher.py`) from
@@ -449,7 +449,7 @@ operational removal. Perform the architecture-impact/review/refactoring gates an
 architecture with implementation.
 
 Architecture impact of this plan: none — proposal only; the schema-4 runtime and existing contracts
-remain unchanged. Implementation must update `docs/ARCHITECTURE.md`, storage/recovery,
+remain unchanged. Implementation must update `ARCHITECTURE.md`, storage/recovery,
 configuration, launcher instructions and `AGENTS.md` when legacy storage is actually retired.
 
 Plan-update verification (2026-11-16): inspected current manifests/lockfile versions, schema and

@@ -18,7 +18,12 @@ manual scope editing, search/indexing, automated SharePoint/SOW-link retrieval, 
 background jobs, or automatic historical backfill. The user-provided sample is reference material;
 use synthetic equivalent examples in committed tests and do not copy its deal-specific content.
 
-## Current state and boundaries
+## State and boundaries at proposal time
+
+This section retains the 2026-11-01 baseline. Metadata now uses PostgreSQL, and multipart
+extraction lives in `backend/src/domains/deals/handler/upload.rs`. Re-check the current
+[architecture](../ARCHITECTURE.md#101-deal-creation-and-metadata-extraction) and source before
+implementing this proposal; the older storage and path descriptions below are historical.
 
 - `backend/src/domains/deals/upload.rs` accepts link fields and repeated `files` parts. Both the
   SOW and project-timeline selections are flattened into that same field in
@@ -168,7 +173,7 @@ Questions prompt or limit its historical file handling as an incidental change.
    existing resource-save error/retry affordance; never present stale data as newly extracted.
    Verify immediate save, link-only save, core-deal edit, navigation, reload, and direct-entry paths
    all use persisted metadata consistently. Do not silently fall back to demo fixture data.
-6. **Documentation.** Update `docs/ARCHITECTURE.md` and relevant schema/recovery and API
+6. **Documentation.** Update `ARCHITECTURE.md` and relevant schema/recovery and API
    documentation to describe the actual migration, storage, extraction sources, limits, failure
    behavior, legacy-client compatibility, and no-backfill limitation. Plans are design inputs, not
    canonical implementation documentation.

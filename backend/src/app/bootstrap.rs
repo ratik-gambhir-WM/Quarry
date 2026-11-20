@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     adapters::{
         office::converter::OfficeConverter,
-        openai::client::OpenAiClient,
+        openai::{client::OpenAiClient, decisions::DecisionsClient},
         postgres::client::{PostgresClient, PostgresError},
         wm_ai::client::{FileUploadServiceClient, GraphRagClient, IndexServiceClient},
     },
@@ -27,6 +27,9 @@ use crate::{
             DealContextReader,
         },
         documents::{
+            classification::{
+                self, repository::ClassificationRepository, service::ClassificationService,
+            },
             ingestion::{self, job_service::DocumentJobService, service::DocumentIngestionService},
             search::{self, embedding::QueryEmbeddings, service::DocumentSearchService},
             store::repository::DocumentStore,
@@ -45,7 +48,10 @@ use crate::{
         templates::{self, service::TemplateService},
         users::{repository::UserRepository, UserDirectory},
     },
-    shared::prompts::{PromptCatalog, PromptCatalogError},
+    shared::{
+        prompts::{PromptCatalog, PromptCatalogError},
+        worker::WorkerHandle,
+    },
 };
 
 const DEFAULT_DEAL_EXTRACTION_MODEL: &str = "gpt-5.6-luna";
@@ -56,6 +62,21 @@ pub struct Application {
     pub router: Router,
     pub bind_address: std::net::SocketAddr,
     pub templates: Arc<templates::slide_templates::SlideTemplates>,
+    pub workers: BackgroundWorkers,
+}
+
+/// Background supervisors created once by bootstrap and owned by the application.
+#[derive(Clone)]
+pub struct BackgroundWorkers {
+    documents: WorkerHandle,
+}
+
+impl BackgroundWorkers {
+    /// Stop document claims, then drain owned tasks within the bounded grace period.
+    /// Leases make aborted work recoverable.
+    pub async fn stop(&self) {
+        self.documents.stop().await;
+    }
 }
 
 #[derive(Debug, Error)]
@@ -104,13 +125,14 @@ pub async fn bootstrap(config: AppConfig) -> Result<Application, BootstrapError>
     let http = reqwest::Client::builder()
         .build()
         .map_err(BootstrapError::HttpClient)?;
-    let (api, templates) = assemble_api(&config, postgres, http, prompts).await?;
+    let (api, templates, workers) = assemble_api(&config, postgres, http, prompts).await?;
     let bind_address = config.http.bind_address;
     let router = create_router(api, &config.http);
     Ok(Application {
         router,
         bind_address,
         templates,
+        workers,
     })
 }
 
@@ -119,7 +141,14 @@ async fn assemble_api(
     postgres: PostgresClient,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
-) -> Result<(Router, Arc<templates::slide_templates::SlideTemplates>), BootstrapError> {
+) -> Result<
+    (
+        Router,
+        Arc<templates::slide_templates::SlideTemplates>,
+        BackgroundWorkers,
+    ),
+    BootstrapError,
+> {
     use crate::adapters::slide_templates::preview as native;
     use templates::slide_templates::*;
     let settings = &config.slide_templates;
@@ -172,17 +201,18 @@ async fn assemble_api(
         settings.allow_embedding_inspection,
     ));
     embedded.resume_pending_jobs();
-    let api = assemble_api_routes(config, postgres, http, prompts, Some(embedded.clone()));
-    Ok((api, embedded))
+    let (api, workers) =
+        assemble_api_components(config, postgres, http, prompts, Some(embedded.clone()));
+    Ok((api, embedded, workers))
 }
 
-pub(crate) fn assemble_api_routes(
+fn assemble_api_components(
     config: &AppConfig,
     postgres: PostgresClient,
     http: reqwest::Client,
     prompts: Arc<PromptCatalog>,
     embedded: Option<Arc<templates::slide_templates::SlideTemplates>>,
-) -> Router {
+) -> (Router, BackgroundWorkers) {
     let templates = Arc::new(TemplateService::new(embedded));
     let identity = Arc::new(IdentityService::new(IdentityRepository::new(
         postgres.clone(),
@@ -266,6 +296,17 @@ pub(crate) fn assemble_api_routes(
         config.data_room.clone(),
         office.clone(),
     ));
+    // Decisions shares the bootstrap HTTP client and the server-side OpenAI key.
+    let classification = Arc::new(ClassificationService::new(
+        ClassificationRepository::new(postgres.clone()),
+        config
+            .openai
+            .as_ref()
+            .map(|openai| DecisionsClient::new(http.clone(), openai.api_key.expose())),
+        prompts.clone(),
+        config.documents.classification.enabled,
+        config.documents.classification.concurrency,
+    ));
     let summaries = Arc::new(SummaryService::new(
         openai.clone(),
         config
@@ -295,12 +336,16 @@ pub(crate) fn assemble_api_routes(
                 .unwrap_or_else(|| DEFAULT_IMAGE_DESCRIPTION_MODEL.to_string()),
             config.documents.max_concurrent_documents,
         )
-        .with_lifecycle(memberships.lifecycle().clone()),
+        .with_lifecycle(memberships.lifecycle().clone())
+        .with_classification(classification.clone()),
     );
-    let document_jobs = Arc::new(DocumentJobService::new(
-        document_ingestion.clone(),
-        config.documents.completed_job_retention,
-    ));
+    let document_jobs = Arc::new(DocumentJobService::new(document_ingestion.clone()));
+    let workers = BackgroundWorkers {
+        documents: document_jobs.start_worker(
+            config.documents.max_concurrent_background_documents,
+            config.documents.completed_job_retention,
+        ),
+    };
     let search_embeddings =
         config
             .openai
@@ -355,6 +400,7 @@ pub(crate) fn assemble_api_routes(
         .merge(data_rooms::route::routes(data_rooms))
         .merge(ingestion::route::routes(document_ingestion, document_jobs))
         .merge(viewing::route::routes(stored_documents))
+        .merge(classification::route::routes(classification))
         .merge(search::route::routes(document_search))
         .merge(summaries::route::routes(summaries))
         .merge(research::route::routes(research))
@@ -367,10 +413,11 @@ pub(crate) fn assemble_api_routes(
             },
             crate::app::http::auth::authenticate,
         ));
-    Router::new()
+    let router = Router::new()
         .merge(protected)
         .merge(system::route::routes())
-        .merge(identity::route::public(identity))
+        .merge(identity::route::public(identity));
+    (router, workers)
 }
 
 #[cfg(test)]

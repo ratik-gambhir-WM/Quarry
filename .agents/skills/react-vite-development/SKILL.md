@@ -11,12 +11,12 @@ preserves the repository's active working-tree changes.
 ## Read before editing
 
 1. Read the root `AGENTS.md` and the relevant frontend/runtime sections of
-   `docs/ARCHITECTURE.md`.
+   `ARCHITECTURE.md`.
 2. Run `git status --short`; the frontend commonly contains user-owned tracked and untracked work.
 3. Read `frontend/package.json`, `package-lock.json`, `vite.config.ts`, the applicable TypeScript
    configs, the route/feature entrypoint, analogous components, and nearby tests.
-4. Confirm the live React/Vite versions. The current working tree uses React 19 canary APIs and an
-   uncommitted `.npmrc`; do not normalize, remove, or upgrade them incidentally.
+4. Confirm the live React/Vite versions. The current working tree uses React 19 canary APIs and a
+   `.npmrc` peer-dependency policy; do not normalize, remove, or upgrade them incidentally.
 
 ## Preserve Quarry's composition boundary
 
@@ -111,8 +111,8 @@ uninspected area is a limitation, not a passing result.
 Evaluate a proposed improvement to Quarry's guidance on its merits. Explain the concrete benefit,
 tradeoffs, and verification, then update the relevant guidance explicitly when adopting it. Apply
 framework-specific recommendations only to capabilities Quarry actually uses; Vite client code
-has no Next.js server-component or App Router requirement. The evaluation is documented in
-[frontend-refactor-skill-evaluation.md](../../../docs/frontend-refactor-skill-evaluation.md).
+has no Next.js server-component or App Router requirement. Follow the adopted
+[frontend review guidance](../../../AGENTS.md#frontend-review-and-guidance-improvements).
 
 ## Verification ladder
 
@@ -127,11 +127,17 @@ npm run check:boundaries
 npm test
 npm run build:web
 npm run check:web-bundle
+npm run check:bundle-size:web
+npm run check:notebook-bundle:web
 npm run build:desktop-ui
+npm run check:bundle-size:desktop
+npm run check:notebook-bundle:desktop
 ```
 
 - Use `npm run typecheck` when shared code is affected.
-- `npm run check:web-bundle` must follow `npm run build:web` because it inspects `dist`.
+- Run web runtime, bundle-size and notebook-bundle checks after `build:web`, then desktop
+  bundle-size and notebook-bundle checks after `build:desktop-ui`, before another build overwrites
+  `dist`. These verify complete static startup costs and production notebook module initialization.
 - Run the desktop UI build when shared runtime aliases, desktop contracts, or bundle behavior
   changed.
 - For native Rust changes, also run the Tauri crate checks from the code-verification skill.
@@ -147,7 +153,7 @@ listener that existed before the task or whose ownership is uncertain.
 
 ## Architecture completion gate
 
-After implementation, re-read the relevant sections of `docs/ARCHITECTURE.md`. Update it in the
+After implementation, re-read the relevant sections of `ARCHITECTURE.md`. Update it in the
 same change if routes, feature maturity, state ownership, UI/runtime boundaries, contracts,
 transport, platform capabilities, configuration, security posture, verification commands, or
 known limitations changed. If no edit is required, hand off with

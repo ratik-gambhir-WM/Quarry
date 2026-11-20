@@ -5,7 +5,7 @@ import type { ProcessFileJobEventHandlers } from "@/contracts/quarryApi";
 
 afterEach(() => vi.useRealTimers());
 
-function setup(fileCount = 5) {
+function setup(fileCount = 7) {
   const handlers: ProcessFileJobEventHandlers[] = [];
   const stops: ReturnType<typeof vi.fn>[] = [];
   const api = {
@@ -31,21 +31,22 @@ describe("upload lifecycle", () => {
     await Promise.resolve();
     handlers.slice().forEach((handler) => handler.onConnectionError?.());
     expect(stops.every((stop) => stop.mock.calls.length === 1)).toBe(true);
-    expect(api.startProcessFile).toHaveBeenCalledTimes(3);
+    expect(api.startProcessFile).toHaveBeenCalledTimes(5);
     await vi.advanceTimersByTimeAsync(1000);
     expect(api.subscribeToProcessFileJob.mock.calls.map(([id]) => id)).toEqual([
-      "0.pdf", "1.pdf", "2.pdf", "0.pdf", "1.pdf", "2.pdf",
+      "0.pdf", "1.pdf", "2.pdf", "3.pdf", "4.pdf",
+      "0.pdf", "1.pdf", "2.pdf", "3.pdf", "4.pdf",
     ]);
     // A callback from a disconnected stream cannot complete a current attempt.
     handlers[0].onEvent({ filename: "0.pdf", jobId: "0.pdf", status: "completed" });
     expect(store.getSnapshot().entries[0].status).toBe("processing");
-    handlers.slice(3).forEach((handler, index) => handler.onEvent({
+    handlers.slice(5).forEach((handler, index) => handler.onEvent({
       filename: `${index}.pdf`, jobId: `${index}.pdf`, status: "completed",
     }));
     await Promise.resolve();
-    expect(api.startProcessFile).toHaveBeenCalledTimes(5);
-    handlers.slice(6).forEach((handler, index) => handler.onEvent({
-      filename: `${index + 3}.pdf`, jobId: `${index + 3}.pdf`, status: "skipped",
+    expect(api.startProcessFile).toHaveBeenCalledTimes(7);
+    handlers.slice(10).forEach((handler, index) => handler.onEvent({
+      filename: `${index + 5}.pdf`, jobId: `${index + 5}.pdf`, status: "skipped",
     }));
     expect(store.getSnapshot().entries.every((entry) => ["completed", "skipped"].includes(entry.status))).toBe(true);
     expect(store.getSnapshot().processedSeconds).not.toBeNull();
@@ -107,19 +108,22 @@ describe("upload lifecycle", () => {
     const { api, store, stop, handlers, stops } = setup();
     store.upload();
     store.upload();
-    await vi.waitFor(() => expect(handlers).toHaveLength(3));
-    expect(api.startProcessFile).toHaveBeenCalledTimes(3);
+    // Five active jobs; the sixth and seventh files stay locally queued.
+    await vi.waitFor(() => expect(handlers).toHaveLength(5));
+    expect(api.startProcessFile).toHaveBeenCalledTimes(5);
     expect(store.getSnapshot().entries.filter((entry) => entry.status === "queued")).toHaveLength(2);
     handlers[0].onEvent({ filename: "test.pdf", jobId: "0.pdf", status: "failed", error: "Try again" });
-    await vi.waitFor(() => expect(handlers).toHaveLength(4));
+    // One terminal event frees exactly one slot for the next queued file.
+    await vi.waitFor(() => expect(handlers).toHaveLength(6));
+    expect(api.startProcessFile).toHaveBeenCalledTimes(6);
     expect(stops[0]).toHaveBeenCalledOnce();
     handlers[0].onEvent({ filename: "test.pdf", jobId: "0.pdf", status: "completed" });
     expect(store.getSnapshot().entries[0].status).toBe("failed");
     store.upload();
-    expect(api.startProcessFile).toHaveBeenCalledTimes(4);
+    expect(api.startProcessFile).toHaveBeenCalledTimes(6);
     handlers[1].onEvent({ filename: "test.pdf", jobId: "1.pdf", status: "completed" });
-    await vi.waitFor(() => expect(handlers).toHaveLength(5));
-    expect(api.startProcessFile.mock.calls[4][1].name).toBe("0.pdf");
+    await vi.waitFor(() => expect(handlers).toHaveLength(7));
+    expect(api.startProcessFile.mock.calls[6][1].name).toBe("0.pdf");
     handlers[0].onEvent({ filename: "test.pdf", jobId: "old-attempt", status: "completed" });
     expect(store.getSnapshot().entries[0].status).toBe("processing");
     stop();
@@ -136,7 +140,7 @@ describe("upload lifecycle", () => {
     resolve({ jobId: "late" });
     await Promise.resolve();
     expect(api.subscribeToProcessFileJob).not.toHaveBeenCalled();
-    expect(api.startProcessFile).toHaveBeenCalledTimes(3);
+    expect(api.startProcessFile).toHaveBeenCalledTimes(5);
     stopAgain();
   });
 
@@ -164,11 +168,11 @@ describe("upload lifecycle", () => {
       return unsubscribe;
     });
     store.upload();
-    await vi.waitFor(() => expect(api.startProcessFile).toHaveBeenCalledTimes(5));
+    await vi.waitFor(() => expect(api.startProcessFile).toHaveBeenCalledTimes(7));
     expect(store.getSnapshot().entries.every((entry) => entry.status === "skipped")).toBe(true);
     expect(store.getSnapshot().processedSeconds).toBe(1);
-    expect(unsubscribe).toHaveBeenCalledTimes(5);
+    expect(unsubscribe).toHaveBeenCalledTimes(7);
     stop();
-    expect(unsubscribe).toHaveBeenCalledTimes(5);
+    expect(unsubscribe).toHaveBeenCalledTimes(7);
   });
 });

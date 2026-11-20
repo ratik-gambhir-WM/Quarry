@@ -21,7 +21,6 @@ use image::{
     AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat,
 };
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 const DEFAULT_IMAGE_DESCRIPTION_MODEL: &str = "gpt-5.5";
 const MAX_IMAGE_DIMENSION: u32 = 20_000;
@@ -128,7 +127,7 @@ pub(crate) fn build_image_assembly(
         .map(|path| path.canonicalize().unwrap_or_else(|_| PathBuf::from(path)))
         .map(|path| path.to_string_lossy().into_owned());
     let document = Document {
-        file_id: Uuid::new_v4().to_string(),
+        file_id: document_id.clone(),
         document_id,
         deal_id: deal_id.to_string(),
         file_name,

@@ -1,13 +1,13 @@
 # File permanent deletion plan
 
 Historical design input. PostgreSQL with pgvector now owns all product persistence and search.
-Use [the current architecture](../docs/ARCHITECTURE.md) for implemented behavior; removed graph
+Use [the current architecture](../ARCHITECTURE.md) for implemented behavior; removed graph
 operations and maintenance instructions below are historical, not executable rollout guidance.
 
 Date: 2026-11-06. Status: proposed; not implemented.
 
 This document records the agreed planning direction. Saving it changes no runtime behavior,
-schema, API, or stored data. [Architecture](../docs/ARCHITECTURE.md) describes the implemented
+schema, API, or stored data. [Architecture](../ARCHITECTURE.md) describes the implemented
 product; this plan is a design input. Preserve the existing uncommitted work.
 
 ## 1. Outcome and scope
@@ -33,9 +33,12 @@ or remove independent backups. Logical record deletion does not promise immediat
 erasure of database pages, write-ahead logs, or underlying storage remnants; backup retention
 and any stronger erasure requirement need a separate operational policy.
 
-## 2. Current implementation anchors
+## 2. Implementation anchors at proposal time
 
-- [SQLite document store](../backend/src/domains/documents/store/sqlite.rs) owns canonical
+These paths and behaviors describe the historical proposal baseline. Removed source paths are
+shown as text; current SQL repositories and durable jobs supersede that storage design.
+
+- Former SQLite document store (`backend/src/domains/documents/store/sqlite.rs`, removed) owns canonical
   files, versions, blobs, and current-content claims.
 - [Identity manifests](../backend/src/domains/documents/store/identity.rs) retain immutable
   version/chunk identities independently of legacy storage.
@@ -44,8 +47,8 @@ and any stronger erasure requirement need a separate operational policy.
 - [Ingestion](../backend/src/domains/documents/ingestion/service.rs) uses process-local
   per-attachment locks. [Document jobs](../backend/src/domains/documents/ingestion/job_service.rs)
   are in memory and cannot serve as the durable deletion queue.
-- [Graph repository](../backend/src/domains/documents/graph/repository.rs) and
-  [writer](../backend/src/domains/documents/graph/writer.rs) own document projection operations.
+- Former graph repository (`backend/src/domains/documents/graph/repository.rs`, removed) and
+  writer (`backend/src/domains/documents/graph/writer.rs`, removed) own document projection operations.
 - [Stored-document viewing](../backend/src/domains/documents/viewing/service.rs) owns the
   bounded in-memory preview cache. Its current cache key does not contain the file identity.
 - [Membership policy](../backend/src/domains/memberships/model.rs) defines server-verified

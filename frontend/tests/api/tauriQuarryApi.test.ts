@@ -8,6 +8,16 @@ import {
 } from "@/api/tauriQuarryApi";
 
 describe("createTauriQuarryApi", () => {
+  it("relays document classification through the desktop POST with the generation guard", async () => {
+    const payload = { versionId: "b".repeat(64), runStatus: "completed", generation: 1, lastErrorCode: null, result: null };
+    const post = vi.fn().mockResolvedValue(payload);
+    const api = createTauriQuarryApi({ delete: vi.fn(), get: vi.fn(), getPdf: vi.fn(), post, postPowerPoint: vi.fn(), postMultipart: vi.fn(), subscribeJob: vi.fn() });
+    await expect(api.requestDocumentClassification("DEAL / 1", "b".repeat(64), 0)).resolves.toEqual(payload);
+    expect(post).toHaveBeenCalledWith(
+      `/api/v1/deals/DEAL%20%2F%201/documents/${"b".repeat(64)}/classification`,
+      { expectedGeneration: 0 },
+    );
+  });
   it("retries failed slide processing through the existing desktop POST relay", async () => {
     const payload = { templateId: "template-one", stage: "classification" };
     const post = vi.fn().mockResolvedValue(payload);

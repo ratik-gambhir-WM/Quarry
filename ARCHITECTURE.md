@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Status | Canonical current-state architecture reference |
-| Last verified | 2026-09-25 |
+| Last documentation audit | 2026-11-19; checked against working-tree source, manifests and tests; external integrations and repository settings were not re-run |
 | Repository snapshot | Live working tree; templates run inside Axum |
 | Audience | Quarry developers, reviewers, operators, and coding agents |
 | Scope | Shared React/Vite UI, web transport, Tauri desktop shell, Axum API, embedded templates, persistence, integrations, and verification |
@@ -12,19 +12,17 @@ This document describes the implementation in the live repository, not an ideali
 When it disagrees with code, manifests, lockfiles, or tests, the executable repository is the
 authority and this document should be corrected in the same change.
 
-For a focused map of product-domain ownership, implemented versus reserved domains, canonical
-entities, projections, ephemeral state, identifiers, and model gaps, see the companion
-[`DOMAIN_MODEL.md`](DOMAIN_MODEL.md). This architecture guide remains the source for runtime and
-deployment boundaries; the domain-model guide expands the product/data semantics without turning
-planned domain scaffolds into implemented capabilities.
+For product-domain ownership and implemented versus reserved capabilities, use the
+[product domain registry](#821-product-domain-registry) and the domain models under
+`backend/src/domains/`. Confirm data shapes and invariants against the schema and tests.
 
 The backend topology described here includes the live domain-modularization change. Confirm
 `git status --short` before relying on working-tree code as a committed baseline.
 
-The root [README](../README.md) provides the product overview, feature status, and roadmap direction;
-[Getting Started](../Getting%20Started.md) covers dependencies, setup, commands, and verification.
-The [key dependency map](dependencies.md) links backend/frontend libraries to their upstream
-documentation and the directories where Quarry integrates them.
+The root [README](README.md) provides the product overview, feature status, and roadmap direction;
+[Getting Started](Getting%20Started.md) covers dependencies, setup, commands, and verification.
+Use `backend/Cargo.toml`, `frontend/package.json`, and their lockfiles for dependencies;
+inspect the owning source modules for integration details.
 The current code has a broader Tauri
 boundary: desktop product API traffic, PDF bytes, multipart uploads, and document-job events cross
 Tauri IPC before reaching the same Axum API used by the browser. This document records that
@@ -43,9 +41,8 @@ Agent-led frontend changes use the project frontend and verification skills toge
 globally installed `refactor` and `dev-refactor-frontend` skills; the refactoring skills are not
 vendored under `.agents/skills/`. Review records applicable coverage, evidence, and finding
 dispositions. External recommendations can improve Quarry's guidance after an explicit
-evaluation and update; they do not silently redefine the runtime or framework contract. See
-[the frontend refactor skill evaluation](frontend-refactor-skill-evaluation.md) for the source,
-adopted improvements, and adaptations for Quarry's React/Vite architecture.
+evaluation and update; they do not silently redefine the runtime or framework contract. Follow
+the adopted [frontend review guidance](AGENTS.md#frontend-review-and-guidance-improvements).
 
 ## 1. Executive summary
 
@@ -79,12 +76,12 @@ processing results atomically in PostgreSQL. Notebook search sets and template c
 lexical postings and typed subject/capability vector pairs are also PostgreSQL-owned; schema 5
 retired the remote graph store entirely, so no graph service, Docker container or remote projection
 is required at startup. This MVP cutover uses a fresh schema, with an explicitly invoked guarded
-reset; there is no populated-data migration or automatic reset. See [document storage](document-storage.md).
+reset; there is no populated-data migration or automatic reset. See [document storage](#93-atomic-document-publication-and-durable-recovery).
 
 Quarry is a tested development foundation, not a production-secure deployment. Username/password
 authentication, revocable sessions, private-resource ownership, deal membership capabilities and bounded local auth throttling are
 implemented. Organization tenancy, distributed abuse protection, general multi-instance worker coordination, production
-storage and deployment manifests remain absent. Pull-request CI is described in section 14.4. See [authentication](authentication.md).
+storage and deployment manifests remain absent. Pull-request CI is described in section 14.4. See [authentication](#12-security-and-trust-boundaries).
 
 ## 2. System context
 
@@ -146,10 +143,7 @@ remains the final product router and trust boundary for server-owned data.
 Quarry/
 ├── AGENTS.md                         repository-wide agent rules
 ├── quarry                            root-only local process launcher
-├── docs/
-│   ├── ARCHITECTURE.md               this canonical Markdown reference
-│   ├── DOMAIN_MODEL.md                domain ownership and product/data model companion
-│   └── architecture/                 retained point-in-time DOCX reports
+├── ARCHITECTURE.md                    this canonical Markdown reference
 ├── .agents/skills/                   project-local development skills
 ├── frontend/
 │   ├── src/                          shared React application
@@ -212,7 +206,7 @@ explicitly decided.
 
 ### 4.1 Shared application entry
 
-[`frontend/src/main.tsx`](../frontend/src/main.tsx) mounts one application:
+[`frontend/src/main.tsx`](frontend/src/main.tsx) mounts one application:
 
 ```text
 React.StrictMode
@@ -227,7 +221,7 @@ React.StrictMode
 The app does not perform runtime sniffing to choose its host. Vite mode and the corresponding
 TypeScript project select the implementation before the bundle runs.
 
-[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) keeps the headless template
+[`frontend/src/app/RootRoutes.tsx`](frontend/src/app/RootRoutes.tsx) keeps the headless template
 renderer outside the product application shell. The renderer is lazy-loaded and requires a server
 runner to inject template JSON into `window.__TTS_MERMAID_TEMPLATE_PREVIEW_INPUT__` before React
 renders it. A direct visit without that input produces an explicit render error and never mounts
@@ -237,7 +231,7 @@ at their network/server boundary.
 
 ### 4.2 Build-time aliases
 
-[`frontend/vite.config.ts`](../frontend/vite.config.ts) maps:
+[`frontend/vite.config.ts`](frontend/vite.config.ts) maps:
 
 | Stable import | Web mode | Desktop mode |
 | --- | --- | --- |
@@ -280,16 +274,17 @@ The live frontend is an npm package using:
   the Diligence Canvas text editor
 - Vitest, Testing Library, user-event, and per-file happy-dom tests
 
-The repository does not pin Node, set `packageManager`/`engines`, or define ESLint/Prettier.
-The current uncommitted `.npmrc` enables `legacy-peer-deps`, supporting the canary dependency
-combination. Manifest and lockfile state must be inspected before dependency work.
+The frontend has no local Node version file, `packageManager`/`engines` declaration, or
+ESLint/Prettier configuration. CI selects Node 24 and Rust 1.99.0. The frontend `.npmrc` enables
+`legacy-peer-deps`, supporting the canary dependency combination. Manifest and lockfile state
+must be inspected before dependency work.
 
 ### 5.2 Route map
 
-[`frontend/src/app/RootRoutes.tsx`](../frontend/src/app/RootRoutes.tsx) declares the isolated
-headless-render route and product fallback. [`frontend/src/App.tsx`](../frontend/src/App.tsx)
+[`frontend/src/app/RootRoutes.tsx`](frontend/src/app/RootRoutes.tsx) declares the isolated
+headless-render route and product fallback. [`frontend/src/App.tsx`](frontend/src/App.tsx)
 declares the authentication and workspace loading boundaries;
-[`frontend/src/app/WorkspaceRoutes.tsx`](../frontend/src/app/WorkspaceRoutes.tsx) declares the
+[`frontend/src/app/WorkspaceRoutes.tsx`](frontend/src/app/WorkspaceRoutes.tsx) declares the
 shared `/hub/*` route tree:
 
 | Route | Page | Loading |
@@ -305,7 +300,7 @@ shared `/hub/*` route tree:
 | `/hub/assistant` | `Assistant` | lazy |
 | `/hub/notebook` and `/hub/notebook/:noteId` | `NotebookPage` | lazy page; BlockNote loads only for a selected draft |
 | `/hub/logs` | `LogsPage` | lazy |
-| `/hub/deals` | `Deals` | lazy; currently uncommitted |
+| `/hub/deals` | `Deals` | lazy |
 | `/hub/deals/:dealId` | `DealRoomPage` + `DealRoomOverviewPage` | lazy parent and nested leaf |
 | `/hub/deals/:dealId/activity` | `DealActivityPage` compatibility redirect to `?section=activity` | lazy nested leaf |
 | `/hub/deals/:dealId/data-room` | `DataRoomPage` | lazy nested leaf |
@@ -376,7 +371,7 @@ autofill does not depend on React change events. Native required-field validatio
 submissions; submit buttons disable only while a request is pending. Password fields expose an
 inline eye control, report Caps Lock, and preserve entered values across visibility and error
 rerenders; passwords are never trimmed. Reload restores a structurally valid, unexpired cached
-session without extending its server expiry. Router state and the removed `quarry.workspace.email` storage key cannot authenticate a user. See [authentication](authentication.md).
+session without extending its server expiry. Router state and the removed `quarry.workspace.email` storage key cannot authenticate a user. See [authentication](#12-security-and-trust-boundaries).
 
 ### 5.3 Layer responsibilities
 
@@ -408,7 +403,7 @@ global state or query-cache library.
   usable in memory. Logout, expiry, and protected-request 401s clear the cache. Storage events
   synchronize tabs and cancel prior-session requests. Cached fields never establish server
   authorization; the bearer token and ownership checks remain authoritative. The token is readable
-  by origin JavaScript, as detailed in [authentication](authentication.md).
+  by origin JavaScript, as detailed in [authentication](#12-security-and-trust-boundaries).
 - `UserProvider` owns verified identity/session state for the product tree; `WorkspaceProvider`
   owns deal-resource state for `/hub/*` and reads the verified profile through its session hook.
   Its `loadDeal` operation captures the deal’s local revocation revision before each API request;
@@ -546,7 +541,8 @@ global state or query-cache library.
   Missing values and unavailable links display `N/A`; external links open in a separate tab.
   A search with no matching deals shows centered guidance directly on the page and a Reset filters action.
 - `UploadFilesModal` delegates its queue, retry/completion transitions, timing and SSE cleanup to
-  `uploadWorkflow`. At most three jobs upload or process concurrently; additional selected files
+  `uploadWorkflow`. At most five jobs upload or process concurrently (matching the server's default
+  background document workers, which the server enforces independently); additional selected files
   wait in a queued state. Active and queued work protects dismissal. Unmount invalidates pending
   admission callbacks, clears queued starts and closes subscriptions; it does not cancel jobs
   already admitted by Axum. Attempt identity rejects stale events after retry, including synchronous
@@ -766,7 +762,7 @@ operational failures.
 | --- | --- | --- |
 | Login/profile | Username/password registration and username-or-email login on both targets; revocable eight-hour sessions | Local-storage session cache is JavaScript-readable; no account recovery or email verification |
 | Hub | A multiline question draft and suggestions open Assistant with an unsent prompt; keyboard-operable saved-work tabs show clearly labeled, read-only sample content | No unified document search or live saved-work catalog; sending remains an explicit action in Assistant |
-| Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board; current table/Kanban implementation is uncommitted |
+| Deals | Search, compact List/Kanban view picker, sortable/content-sized ReUI table, lazy read-only Kanban with softly tinted lanes, status-ring headers/counts, and compact bordered deal cards with detail chips and close-date/question footers, add-deal flow | Additional view configuration and portfolio-filter controls are deferred; Kanban collapse controls do not yet retain state in the controlled Deals board |
 | Deal room | Deal lookup, responsive overview dashboard with labeled sample assessment metrics/planning, deal-derived details/resources, and a Scope key-question list, persisted SOW/fact-sheet/SharePoint/request-list resource links, nested Overview, Deal Activity, Site Visits, File Summary, Scope, Team, and Search documents tabs, ReUI review grids, timeline, activity and selected views; Deliverables keeps only completed and in-progress sections, with a View Templates action opening a dedicated route and large, single-slide API-backed preview carousel; generated previews open a lazy controlled Diligence Canvas editor backed by validated hydrated template JSON; the editor header includes a route-local deliverable name initialized to `Unnamed` that displays as text and becomes an input on double-click or keyboard activation, and the editor exports its current in-memory presentation as a PowerPoint through Quarry’s embedded template engine; each user can delete templates from their private catalog; populated and empty catalogs expose explicit PPTX single-slide and deck imports, with the empty state also accepting a single-slide drop | Editor changes and its deliverable name are route-local and discarded on exit; the name is not connected to the document or exported filename; save and deliverable creation are not implemented; PowerPoint export creates a new file and does not persist editor changes; imported templates without a generated preview remain absent from the preview-only gallery; Findings, Open Items, and History tabs are disabled pending backing contracts; Site Visits calendar edits are session-only; uploaded SOW filename display is not reload-safe; completed/in-progress deliverables have no backing API; several sidebar diligence/synthesis views remain `UnderConstructionView` placeholders |
 | Data room | Shared membership/capabilities, uploaded-file attribution, persisted activity, explicit API search scopes, stored/local tree, empty/error/loading states, PDF/DOCX/XLSX/PPTX/image upload jobs, populated file-review grid, PDF/text preview (including on-demand PDF-rendered Office and image previews), explorer quick-action submitted deal-scoped hybrid search (server opt-in, explicit keyword fallback) with current-document page jumps, and a floating Synthesis Canvas Assistant chat with a previous-chat picker | Review content is partly fixture-derived; Synthesis Canvas shares authenticated deal-linked threads and explicit current-room file references; there is no automatic document retrieval; search has no activatable page target until a preview reports its page count; cross-document navigation and exact in-PDF term highlighting are not implemented; SharePoint connect submission is not implemented |
 | Assistant | PostgreSQL-backed multi-thread chat with current-turn uploads and scoped `@` file references, server-default/GPT-5.5/custom model selection, previous-chat selection, incremental Markdown, stop/retry/copy actions, server-owned bounded context, and shared web/desktop streaming transport | Authenticated per-user thread ownership; no restart stream recovery, durable attachment reuse, voice, tools, automatic retrieval, citations, organization tenancy, provider quotas or moderation |
@@ -779,7 +775,7 @@ operational failures.
 
 ### 5.6 UI and styling system
 
-[`frontend/src/index.css`](../frontend/src/index.css) is the styling source of truth. It imports
+[`frontend/src/index.css`](frontend/src/index.css) is the styling source of truth. It imports
 Tailwind 4, animation utilities, and shadcn CSS, then defines semantic tokens for canvas, surfaces,
 content, borders, interaction, sidebar, status, typography, spacing, radii, and shared panels.
 The shared heading, body, sidebar, sans, and mono compatibility tokens all use locally bundled
@@ -854,7 +850,7 @@ filename or truncated excerpt. Closing either panel restores focus to the origin
 selecting an available search result returns focus to the document viewer. The logo remains static
 outside the Data Room.
 
-[`frontend/components.json`](../frontend/components.json) configures shadcn's `radix-nova` style,
+[`frontend/components.json`](frontend/components.json) configures shadcn's `radix-nova` style,
 CSS variables, Lucide icons, and the `@` aliases. Shared components should use the existing tokens
 and primitives instead of adding hard-coded parallel color/spacing systems. Feature/page code
 and registry integrations consume reusable local shadcn components from `components/ui/`.
@@ -920,7 +916,7 @@ limit inside the mutation transaction and returns HTTP 409 for a second team, in
 name. Existing records are preserved; legacy deals with multiple teams remain visible and manageable
 but cannot add more. The paginated team API and schema are unchanged.
 
-Interface motion follows [the maintained motion guide](interface-motion.md). Shared Radix menus,
+Interface motion uses the existing timing tokens and shared controls. Shared Radix menus,
 popovers, select popups, and tooltips use 180 ms entrances and 120 ms exits; shared dialog surfaces
 use 260/160 ms. Existing primitives retain presence/unmounting and focus ownership. Pointer-driven
 Deal Room section and Assistant sidebar-view changes use a cancellable 180 ms native content
@@ -988,7 +984,7 @@ typing component has been removed.
 
 ### 6.1 Shared contract
 
-[`frontend/src/contracts/quarryApi.ts`](../frontend/src/contracts/quarryApi.ts) defines the
+[`frontend/src/contracts/quarryApi.ts`](frontend/src/contracts/quarryApi.ts) defines the
 transport-neutral `QuarryApi`, `PlatformCapabilities`, `QuarryRuntime`, and shared DTOs. Product
 components should express intent through this contract rather than through fetch paths or Tauri
 command names.
@@ -1070,7 +1066,7 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `quarry_api_get_pdf` | Relay stored document PDF bytes | exact route shape; PDF MIME/signature; 64 MB cap |
 | `quarry_api_delete` | Relay versioned DELETE with a required 204 response | Main window/origin; path policy; safe base URL |
 | `quarry_api_delete_json` | Relay permanent-deal DELETE (202 receipt or completed 204) | Main window/origin; exact deal-ID path; bearer credentials; safe base URL |
-| `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy |
+| `quarry_api_post` | Relay versioned JSON POST | main window/origin; path policy; the classification route accepts only `/deals/{id}/documents/{64-hex}/classification` with a single safe-integer `expectedGeneration` body |
 | `quarry_api_patch` | Relay notebook resource PATCH | main window/origin; canonical resource paths; 2 MiB JSON; authenticated status errors |
 | `subscribe_notebook_job` | Relay authenticated notebook save-job SSE | canonical notebook/job/subscription IDs; 64 KiB events; cancellation; ten-minute maximum |
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
@@ -1142,8 +1138,8 @@ method allowlist.
 
 Deal aggregates include actor role/capabilities, `createdByUserId` and `accessRevision`. Local
 paths are redacted for everyone except the current owner who is also the creator. The membership,
-team, transfer, activity and per-deal search endpoints are listed in
-[shared deal projects](shared-deal-projects.md#api-and-clients); both API mounts enforce the same
+team, transfer, activity and per-deal search endpoints are composed in the membership, deal,
+and document-search route modules; both API mounts enforce the same
 role/archive policy and repeat write checks transactionally. Personal notebooks/chats/company
 directories remain private. Member creation requires an existing registered email in the `email`
 request field, trims and ASCII-lowercases it, and resolves the matching user in PostgreSQL.
@@ -1155,7 +1151,8 @@ The shared Settings form accepts email only.
 
 | Method | Path | Purpose | Notes |
 | --- | --- | --- | --- |
-| GET | `/deals/{deal_id}/documents` | List current logical documents | PostgreSQL source; includes original file `addedAt` and current-version `sizeBytes` |
+| GET | `/deals/{deal_id}/documents` | List current logical documents | PostgreSQL source; includes original file `addedAt`, current-version `sizeBytes`, `contentSha256` and nested optional `classification` metadata for that exact version |
+| POST | `/deals/{deal_id}/documents/{file_id}/classification` | Synchronously reclassify the current version from stored text | Upload capability; `{expectedGeneration}` CAS; 200 with the new classification metadata; 409 on stale generation; 503 when disabled or the provider fails (stored classification unchanged). See [document classification](#102-document-ingestion) |
 | GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
 | POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
@@ -1170,7 +1167,7 @@ The two document-processing routes raise Axum's body limit to 50 MB plus 1 MB mu
 Synchronous document jobs remain request-owned. Maintenance marks expired attempts and unclaimed
 synchronous jobs older than ten minutes failed, fences their tokens and releases active queue
 capacity. Accepted inputs/checkpoints remain retryable for 24 hours; live leases and background
-recovery jobs are preserved. See [document storage](document-storage.md) for the recovery policy.
+recovery jobs are preserved. See [document storage](#93-atomic-document-publication-and-durable-recovery) for the recovery policy.
 The PPTX template-import route separately raises its scoped body limit to 26 MB for one file capped
 at 25 MB. The presentation-export route raises its scoped JSON body limit to 50 MB. Other multipart routes contain service-level 50 MB checks but currently encounter
 Axum's default 2 MB body limit first; this mismatch remains a known contract gap.
@@ -1370,9 +1367,9 @@ asset responses retain image rendering but apply a CSP sandbox without permissio
 and network resources, and allow only inline
 styles and embedded data images; direct navigation cannot grant an SVG the API's origin.
 
-PostgreSQL is canonical and the only template store; see [PostgreSQL storage](postgresql-storage.md).
+PostgreSQL is canonical and the only template store; see [PostgreSQL storage](#91-shared-postgresql-schema-version-7).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
-fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 6 with
+fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 7 with
 checksums and catalog fingerprints. There is no data migration or startup reset. Unknown or damaged
 layouts fail without deletion. Templates, image bytes, previews, metadata,
 classification, lexical postings and typed vector pairs are transactional. Indexed lexical term
@@ -1390,7 +1387,7 @@ queries apply owner/profile predicates before any result leaves the database.
 Schema 6 requires `templates.owner_user_id` and removes the `apps` registry and
 `app_templates` memberships. Existing schema-5 databases fail intact at startup; use a fresh
 database or the explicit guarded MVP reset after draining the writer. No ownership is inferred
-and no catalog is imported. See [template ownership and rollout](template-ownership.md).
+and no catalog is imported. The template repositories and lifecycle tests enforce this ownership.
 Deleting an owned template physically removes its canonical row and cascades its artifacts
 in the same transaction. Previously created standalone template files remain untouched.
 
@@ -1448,8 +1445,9 @@ classification previews fail explicitly instead of using a text-only fallback. P
 restart resumes pending/due jobs and recovers expired leases. These are single-host workers, not a
 distributed queue; live pipeline changes require draining old writers. HTTP disconnects after commit
 do not cancel saved jobs. Shutdown stops claims, drains for five seconds, then cancels provider
-futures and records retryable work. Job claims and pending-work probes enforce the fixed app
-membership. Notifications run inside the spawned publication task after commit, so cancelling
+futures and records retryable work. Trusted background workers use the unscoped repository;
+request reads and mutations enforce authenticated user ownership. No template app registry or app
+membership remains. Notifications run inside the spawned publication task after commit, so cancelling
 the HTTP future cannot strand a committed job before its wake-up. Publication still observes
 request/shutdown cancellation before committing.
 
@@ -1497,8 +1495,8 @@ The dialog preserves keyboard focus, internal scrolling, reduced motion and them
 the [Stealth UI menu and dialog patterns](https://www.stealth.pm/ui).
 
 SQL commit is semantic availability: there is no projection refresh, reconciliation worker,
-graph cleanup or process-local mutation mutex. Revisioned deletion removes membership or the
-canonical template and, through foreign-key cascades, its stage row, lexical postings and vectors in
+graph cleanup or process-local mutation mutex. Revisioned deletion removes the owned canonical
+template and, through foreign-key cascades, its stage row, lexical postings and vectors in
 one transaction; a late stage then fails its parent/token fence. Changing classification input
 (`refresh_pending_slide_classification`) atomically clears metadata, lexical postings, embedding input
 and vectors. There is no general reindex CLI or public search UI.
@@ -1558,13 +1556,13 @@ and deterministic RRF; bounded final revision/set/owner and HTTP session recheck
 Quoted phrases use separate GIN-indexed title/content vectors that preserve the positions of
 hashed technical tokens alongside English words, including stemming and stop-word gaps. Synthetic
 chunk heading context is excluded from phrase positions. Unicode prefixes accept combining marks.
-The `phrases-v1` notebook pipeline and updated schema-4 checksum require a fresh schema or explicit
-guarded MVP reset for older schema-4 installations; startup refuses them intact and never resets them.
+The `phrases-v1` notebook pipeline is part of current schema 7. Earlier schema/checksum layouts
+require a fresh schema or explicit guarded MVP reset; startup refuses them intact and never resets them.
 There is no ANN index, semantic sidebar integration or editor-offset mapping. The existing sidebar
 metadata filter and explicit-save edit buffers remain unchanged. Pending jobs no longer assign a
 canonical ID to unsaved drafts. SSE names/stages remain compatible; `sqliteCommitted` becomes true
-only after the complete save transaction commits. See [notebook API and recovery](notebook-api.md)
-for payloads, bounds, attempts, failure semantics and schema-4 rollout.
+only after the complete save transaction commits. The notebook handlers, job repository,
+and save tests define payloads, bounds, attempts and failure semantics.
 
 ### 7.8 Permanent deal deletion
 
@@ -1575,7 +1573,7 @@ and cascades canonical files, versions, chunks, inputs and jobs in SQL. It verif
 completion and retains lifecycle reservations so deleted IDs cannot be reused. Historical phase
 strings remain compatible; current cleanup uses `sqlite`, `verifying`, `completed` without remote
 document fencing/purge. Data in retired, untouched graph stores is outside the SQL receipt's erasure claim.
-See [permanent deletion](deal-permanent-deletion.md).
+See [permanent deletion](#78-permanent-deal-deletion).
 
 PostgreSQL mutations take a transaction-scoped advisory lock for the selected schema on one
 pooled connection. This preserves aggregate ordering across cooperating processes while row
@@ -1589,8 +1587,8 @@ The page owns the dialog so acceptance can remove the row without losing cleanup
 The dialog distinguishes acceptance from completion, supports status-check retries without another
 DELETE, and reports blocked cleanup with an operation reference. Closing after acceptance stops
 local polling while durable work continues; cancelling before submission sends no request.
-See [deletion contracts, rollout and recovery](deal-permanent-deletion.md)
-for ownership, batching, retention limits and backup/rollback constraints.
+Deletion services, repositories, and tests define ownership, batching, and recovery.
+A successful SQL deletion does not erase backups or externally retained copies.
 
 ## 8. Backend architecture
 
@@ -1601,26 +1599,33 @@ flowchart TD
     Main[main.rs] --> Config[AppConfig::from_env]
     Config --> Bootstrap[app::bootstrap]
     Bootstrap --> Prompts[Load and validate Markdown prompt catalog]
-    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v5]
+    Prompts --> Postgres[Connect bounded PostgreSQL pool and initialize or validate schema v7]
     Bootstrap --> Http[Construct shared reqwest client]
     Bootstrap --> Rig[Construct optional Rig OpenAI client]
+    Http --> Decisions[Construct optional Decisions client on the shared HTTP client]
     Postgres --> Adapters[Construct concrete adapters]
     Http --> Adapters
     Rig --> Adapters
+    Decisions --> Adapters
     Adapters --> Domains[Construct domain services]
+    Domains --> Workers[Start owned document supervisor]
     Domains --> FeatureRouters[Bind private feature router state]
     FeatureRouters --> Router[Merge API and apply global middleware]
     Router --> Serve[Bind and serve with Ctrl-C shutdown]
+    Serve --> Stop[Stop template and document workers; bounded drain]
 ```
 
-[`backend/src/main.rs`](../backend/src/main.rs) is intentionally thin: dotenv, tracing,
+[`backend/src/main.rs`](backend/src/main.rs) is intentionally thin: dotenv, tracing,
 configuration, bootstrap, bind, serve, and graceful shutdown.
-[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) owns application construction
-and selects concrete production adapters. [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs)
+[`backend/src/app/bootstrap.rs`](backend/src/app/bootstrap.rs) owns application construction
+and selects concrete production adapters. [`backend/src/app/migrations.rs`](backend/src/app/migrations.rs)
 owns all product/auth/template PostgreSQL initialization and validation, without an old-data
 upgrade/reset path. Bootstrap connects one bounded asynchronous pool, validates the selected schema,
 passes clones of the same client to product and template repositories, initializes the template
-catalog and requests one durable-stage recovery scan before binding routes. Bootstrap passes each
+catalog and requests one durable-stage recovery scan before binding routes. It starts the document
+supervisor once and returns its handle in `Application::workers`; `main.rs` stops document claims
+on Ctrl-C and drains owned tasks for five seconds before aborting them. Service clones never start or stop
+workers. Bootstrap passes each
 domain only its required capabilities and
 merges the returned, already-state-bound routers; adding a feature does not widen shared request
 state.
@@ -1660,7 +1665,7 @@ entry points and parity contracts are unchanged. Document preview rendering uses
 lifecycle for image and Office formats, retaining cache validation before and after semaphore
 acquisition, blocking-worker admission ownership, and PDF validation before caching.
 
-[`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs)
+[`backend/tests/integration/architecture_tests.rs`](backend/tests/integration/architecture_tests.rs)
 enforces that
 the removed horizontal roots and global `AppState` do not return, adapters do not import domains,
 request layers do not reach repositories or concrete adapters, domain routers bind their own
@@ -1668,10 +1673,12 @@ state before composition, domain code does not read ambient configuration, and c
 imports use public facades instead of another domain's private layers.
 
 Request validation runs in handlers before product work. Reusable request checks live in
-handler-owned `handler/validate.rs` modules; multipart extraction and streaming bounds live in
-handler-owned `upload.rs` modules. Assistant models contain data rather than HTTP validators,
-membership routes only compose handlers, and the WM AI adapter serializes validated requests
-rather than deciding whether incoming fields are valid. Shared pure attachment/path parsers use
+handler-owned `handler/validate.rs` modules. Document viewing keeps its small `validate.rs` beside
+`handler.rs`, declared as the handler's private child with `#[path = "validate.rs"]`; the architecture
+gate recognizes this ownership without exposing the validator to services. Multipart extraction and
+streaming bounds live in handler-owned `upload.rs` modules. Assistant models contain data rather
+than HTTP validators, membership routes only compose handlers, and the WM AI adapter serializes
+validated requests rather than deciding whether incoming fields are valid. Shared pure attachment/path parsers use
 `validate.rs` and carry no HTTP error types. Architecture tests reject HTTP extraction/error
 dependencies in domain models, services, and repositories and handler dependencies in services.
 
@@ -1680,8 +1687,7 @@ checks bearer/header/session/path policy, while handler-owned checks cover body-
 Checks needing loaded or changing state remain at their point of use, including canonical file
 membership, atomic write permissions, stored-thread scope, current-result filtering, filesystem
 containment, and background-job/stream revocation. An early check does not replace those guards.
-See [backend boundary checks](backend-boundary-checks.md) for the audit and verification scope.
-Its placement decision and review checklist apply to every new or changed backend check.
+Follow the [backend boundary rules](AGENTS.md#backend-development-rules) for every new or changed check.
 Changes explain the state/lifecycle reason for a later guard and use behavioral tests to prove
 early rejection; the architecture gate alone does not establish execution order.
 
@@ -1698,6 +1704,7 @@ service, model, table, or product capability.
 | `companies` | Implemented authenticated-owner company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
 | `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and PostgreSQL search capabilities |
+| `documents::classification` | AI classification inside each document task (sampling, bounded Decisions calls, atomic save with the document), read projection and synchronous reclassification; on by default with OpenAI |
 | `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
 | `research` | Implemented WM AI transport workflows when configured; broader product research remains conceptual |
 | `system` | Public shallow health and static capabilities; development diagnostics/demo routes removed |
@@ -1723,9 +1730,9 @@ changes do not create activity or advance revisions.
 ### 8.3 Router and middleware
 
 Each active domain exposes a route builder that binds only its required service state.
-[`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) merges the system, identity, company, deal, data-room, document-ingestion, document-viewing,
+[`backend/src/app/bootstrap.rs`](backend/src/app/bootstrap.rs) merges the system, identity, company, deal, data-room, document-ingestion, document-viewing,
 document-search, uploaded-summary,
-research, template, and assistant-chat routers. [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs) mounts the
+research, template, and assistant-chat routers. [`backend/src/app/http/mod.rs`](backend/src/app/http/mod.rs) mounts the
 same assembled API under `/api/v1` and the temporary `/api` compatibility prefix. Global Tower
 layers provide:
 
@@ -1835,14 +1842,14 @@ This is a coordinated API compatibility change across Axum, web and desktop, ret
 deal codes are rejected with a sanitized HTTP 400; independent chat/job statuses are unchanged.
 Use a fresh PostgreSQL database; leave old SQLite data and retired graph stores alone.
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
-[fresh storage and recovery](postgresql-storage.md).
+[fresh storage and recovery](#91-shared-postgresql-schema-version-7).
 
-### 9.1 Shared PostgreSQL schema version 6
+### 9.1 Shared PostgreSQL schema version 7
 
 The pinned pgvector 0.4.2 Rust adapter uses SQLx 0.8.6 and an explicitly provisioned
 `quarry_extensions.vector` 0.8.6 server extension. Types/operators are qualified and vectors are
 validated before/after conversion. Document-owned repositories use the shared typed SQL builder,
-including bounded multi-row INSERTs on a retained transaction. See [document storage](document-storage.md)
+including bounded multi-row INSERTs on a retained transaction. See [document storage](#93-atomic-document-publication-and-durable-recovery)
 for profile, readiness, queue, rollback, search and deletion contracts.
 
 PostgreSQL enforces foreign keys and parameterized queries through the shared asynchronous pool. The
@@ -1909,12 +1916,18 @@ Key invariants include:
 - deal creation, owner membership and creation activity are atomic; ownership transfer never changes
   document scope or identities; team membership does not independently grant access
 - team creation permits at most one team per deal, checked transactionally without deleting legacy teams
+- document identity is content addressed per deal: `file_id`, its single `version_id` and the
+  manifest `document_id` all equal `sha256(deal_id || 0x00 || content_sha256)`; SQL checks enforce
+  the derivation on input identities and current content, `version_id = file_id`,
+  `version_number = 1` and a 64-hex `file_id`
 - versions are unique by `(file_id, version_number)` and `(file_id, content_sha256)`
 - at most one current version exists per logical file
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 6 includes the former marker-18 layout, bounded content revisions,
+PostgreSQL schema version 7 adds the content-address checks and the optional
+`document_classifications` table (keyed by the admitted `(deal_id, input_hash)` identity, cascading
+from `document_input_identities`, written only with its document) to schema 6, which includes the former marker-18 layout, bounded content revisions,
 durable deal lifecycle guards, complete document/notebook search artifacts and template
 embedding profiles/typed vector pairs (replacing schema 4's template BYTEA vectors and
 caller-clock lease text), removes template app registration/memberships and requires a user owner, with
@@ -1925,17 +1938,17 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates an empty selected schema or validates schema 6, checksum/catalog, owned indexes,
+Startup creates an empty selected schema or validates schema 7, checksum/catalog, owned indexes,
 extension readiness, ownership, complete document/notebook search sets and template pair integrity.
 The schema renders two vector dimension families: the shared document/notebook dimension and the
-independent template dimension. Schema 4 and 5 databases are refused; select a fresh database or run the
+independent template dimension. Schema 4, 5 and 6 databases are refused; select a fresh database or run the
 explicit reset. Unknown layouts fail without
 deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
 rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
 objects atomically. It has no old-data backfill and never runs at ordinary startup. Old stores
-remain outside its scope. See [reset and recovery](postgresql-storage.md).
+remain outside its scope.
 
-As of 2026-11-15, the MVP schema policy in [the agent guide](../AGENTS.md#persistence-and-indexing)
+As of 2026-11-15, the MVP schema policy in [the agent guide](AGENTS.md#persistence-and-indexing)
 allows requested PostgreSQL schema changes to drop/recreate product tables and discard their MVP
 data without preserving migrations or backfills, unless data preservation is explicitly requested.
 This is a temporary development policy to replace when the product matures. Recreation remains an
@@ -1943,7 +1956,7 @@ explicit operation; normal startup never resets data, and unrelated stores remai
 
 Aggregate reads retain one consistent snapshot; related batches run sequentially on its connection
 without N+1 child reads or multiplying parties by scopes. Mutation authorization, activity and
-all child rows remain atomic. See [PostgreSQL setup, concurrency and recovery](postgresql-storage.md).
+all child rows remain atomic. See [PostgreSQL setup, concurrency and recovery](#91-shared-postgresql-schema-version-7).
 
 ### Resource revisions and canonical coordination
 
@@ -1989,14 +2002,15 @@ remote graph module, publication request, index initialization, candidate scan o
 `store/repository.rs`, `store/search_repository.rs`, `store/identity_repository.rs`,
 `store/access_repository.rs` and `ingestion/repository.rs` own data access. The shared adapter
 contains reusable mechanisms only.
-Changed-content uploads still create a new logical file; explicit repository version operations
-retain uniqueness and one-current rules. Stable IDs, spans, attribution and original bytes remain.
+Changed-content uploads always create a new logical file because IDs are deal-scoped content
+addresses; identical bytes in one deal always converge on one ID, and identical bytes in two deals
+are independent documents. Stable IDs, spans, attribution and original bytes remain.
 
 Search uses profile-scoped exact cosine and GIN-indexed English/technical lexical channels.
 Both hybrid branches share a read-only snapshot per deal, followed by bounded final authorization.
 No ANN index is enabled. Notebooks use SQL search sets and templates use typed SQL vector pairs.
 Their dimension conflicts still require an explicitly scoped operational procedure; ordinary
-startup never clears stores or recreates indexes. See [document storage](document-storage.md).
+startup never clears stores or recreates indexes. See [document storage](#93-atomic-document-publication-and-durable-recovery).
 
 ### 9.3 Atomic document publication and durable recovery
 
@@ -2012,10 +2026,10 @@ reconciles uncertain acknowledgments and survives restarts without repeating com
 work. Explicit async retries promote queued or processing synchronous jobs to background recovery
 without replacing a live attempt's token or lease; processing work is reclaimed only after expiry.
 Status polling reads metadata/results without loading accepted input bytes or image checkpoints.
-The historical `sqliteCommitted` field means this complete PostgreSQL commit. See the
-[document storage and recovery contract](document-storage.md) for limits and retry policy.
+The historical `sqliteCommitted` field means this complete PostgreSQL commit. Inspect the
+document ingestion repository and its tests for current limits and retry policy.
 
-### 9.4 Ephemeral state
+### 9.4 Durable jobs and ephemeral state
 
 | State | Implementation | Lifetime |
 | --- | --- | --- |
@@ -2098,11 +2112,16 @@ submitting links or files entered in the optional metadata step.
 Authenticated multipart handlers validate names, types and body bounds before admission. The
 job repository retains immutable input/hash and a unique winning file claim. The synchronous
 route owns its active futures; the 202 route leaves admitted background work recoverable.
-The worker parses/describes/embeds outside SQL locks and checkpoints accepted image text before
-embedding. CPU-heavy persistence preparation runs on the blocking pool. One short retained SQL
-transaction authorizes current deal/file/attempt state and publishes the entire aggregate plus
-activity/result. SSE sends durable processing/completed/skipped/failed snapshots and checks access.
-See [document storage](document-storage.md) for database-clock leases, retention and partial failure.
+One bootstrap-owned supervisor runs up to `QUARRY_DOCUMENT_WORKER_CONCURRENCY` (default 5, max 8)
+independent background document tasks, claiming only when a slot is free; the synchronous batch
+route keeps its separate `QUARRY_DOCUMENT_CONCURRENCY` bound. Each task parses/describes/embeds
+outside SQL locks and checkpoints accepted image text before embedding. After parsing, the task
+samples bounded evidence and runs embedding and OpenAI Decisions classification concurrently;
+classification always yields a completed, failed or disabled record and never fails the document.
+CPU-heavy persistence preparation runs on the blocking pool. One short retained SQL
+transaction authorizes current deal/file/attempt state and publishes the entire aggregate plus the
+classification and activity/result, so a `completed` SSE event means both are saved. SSE sends durable processing/completed/skipped/failed snapshots and checks access.
+See [document storage](#93-atomic-document-publication-and-durable-recovery) for database-clock leases, retention and partial failure.
 
 ### 10.3 Stored preview
 
@@ -2132,8 +2151,8 @@ readiness and immutable profile predicates before lexical/vector LIMIT. Hybrid b
 repeatable-read read-only transaction per deal, then deterministic per-deal RRF and global ordering.
 A final bounded canonical membership/current-result check can shorten responses without refill.
 Both branches must succeed. Explicit client keyword fallback, source badges and page targets remain.
-Legacy vector distance is pgvector cosine distance divided by two. See
-[hybrid search](hybrid-document-search.md) and [document storage](document-storage.md).
+Legacy vector distance is pgvector cosine distance divided by two. Inspect
+`backend/src/domains/documents/search/` and `backend/src/domains/documents/store/` for the implementation.
 
 ### 10.5 Assistant chat
 
@@ -2203,7 +2222,10 @@ pins it to the loopback API.
 | `QUARRY_SEARCH_EMBEDDING_SECONDS` | 15; 1–60 per-request embedding deadline, including provider queue |
 | `QUARRY_DATA_ROOM_<NORMALIZED_DEAL_ID>` | optional server-side local data-room root |
 | `QUARRY_SOFFICE` | optional LibreOffice executable override |
-| `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive |
+| `QUARRY_DOCUMENT_CONCURRENCY` | `8`; must be positive; per-request synchronous batch bound |
+| `QUARRY_DOCUMENT_WORKER_CONCURRENCY` | `5`; 1–8 owned background document tasks; out-of-range values are rejected |
+| `QUARRY_DOCUMENT_CLASSIFICATION_ENABLED` | `true` by default whenever OpenAI is configured; an explicit `true` requires `OPENAI_API_KEY`; `false` saves `disabled` classifications |
+| `QUARRY_DOCUMENT_CLASSIFICATION_CONCURRENCY` | `5`; 1–8 concurrent OpenAI Decisions requests shared by all document tasks |
 | `QUARRY_COMPLETED_JOB_RETENTION_SECONDS` | `600` |
 | `RUST_LOG` | tracing filter; defaults to Quarry/tower HTTP info |
 
@@ -2223,7 +2245,7 @@ These are backend settings parsed through injected-map-testable `AppConfig`.
 | `OPENAI_API_KEY` | Server-held secret reused by the optional slide provider; never a per-user key |
 | `OPENAI_SLIDE_CLASSIFICATION_MODEL` | Required when slide classification is enabled |
 | `OPENAI_SLIDE_EMBEDDING_MODEL` | Required when slide classification is enabled |
-| `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` | `1536`, range 1–16384; both roles must match; template vector indexes use this dimension even when classification is disabled, independently of the document index |
+| `OPENAI_SLIDE_EMBEDDING_DIMENSIONS` | `1536`, range 1–16000; both roles must match; template vector indexes use this dimension even when classification is disabled, independently of the document index |
 | `OPENAI_SLIDE_TIMEOUT_MS` | `30000`, range 1–120000 per provider request |
 | `OPENAI_SLIDE_MAX_OUTPUT_TOKENS` | `4096`, range 1–32768 |
 | `OPENAI_SLIDE_EMBEDDING_MAX_TEXT_BYTES` | `32000`, range 1–128000 |
@@ -2236,8 +2258,7 @@ metadata, rejecting collisions. When classification is enabled, API assembly res
 classification and embedding jobs through the shared bounded worker.
 
 Both `./quarry web` and `./quarry desktop` use embedded Rust templates and the existing
-`QUARRY_DATABASE_URL` selection. Old standalone database files remain untouched. See the
-[storage/cutover decision](slide-templates-migration.md) for storage history.
+`QUARRY_DATABASE_URL` selection. Old standalone database files remain untouched.
 
 ### 11.4 Optional OpenAI capability group
 
@@ -2265,8 +2286,13 @@ configuration. Registering an account does not configure or select an AI credent
 `adapters/openai/client.rs` uses Rig 0.46 (`rig-core`, imported as `rig`, with default features
 disabled and `reqwest`/`rustls` enabled) for request builders and native Responses and embedding
 execution. Rig owns its shared bundled HTTP client, authentication, provider encoding/decoding,
-and SSE framing. All OpenAI calls, including embedded slide classification and embeddings, use
-unmodified Rig models and its bundled transport. Quarry constructs no OpenAI HTTP client and
+and SSE framing. All OpenAI calls except document classification, including embedded slide
+classification and embeddings, use unmodified Rig models and its bundled transport. The documented
+exception is `adapters/openai/decisions.rs`: Rig 0.46 has no Decisions endpoint, so this adapter
+posts to the fixed `https://api.openai.com/v1/decisions` endpoint through bootstrap's shared
+`reqwest::Client` with the server-side key, 128 KiB request and 64 KiB response caps, no hidden
+retries and sanitized error categories; the architecture suite pins it as the only such transport.
+Apart from that adapter, Quarry constructs no OpenAI HTTP client and
 carries no SDK patch. The incoming SSE event byte limit is intentionally absent; the 8 MiB
 accumulated/final chat text bound and connection, idle, and total-duration deadlines remain.
 This dependency requires Rust 1.97.1 or newer. Credentials are supplied explicitly from
@@ -2368,7 +2394,7 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- No graph store is contacted. Startup validates PostgreSQL schema 6, pgvector, document vector
+- No graph store is contacted. Startup validates PostgreSQL schema 7, pgvector, document vector
   profiles, notebook and template pair integrity, and indexes.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
@@ -2377,8 +2403,7 @@ All fields are required if any one is present:
   parsing: 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
   A model/dimension change requires compatible document/notebook SQL schemas and exact profiles;
   changing configuration cannot convert existing vectors.
-  The historical local 3072-dimensional trial and its authorized historical document reset are recorded in
-  [Hybrid document search](hybrid-document-search.md). Repository defaults remain small/1536.
+  Repository defaults remain small/1536.
 - The isolated SharePoint client accepts `AZUREAD_*` values directly, but `AppConfig` does not
   parse or wire them into the product application.
 - Data-room environment roots are not always a fallback: if a deal metadata row exists with a
@@ -2468,7 +2493,7 @@ Coverage currently includes:
 - runtime selection and boundary behavior
 - activity-log redaction and bounds
 - workspace/deal/data-room selectors and mapping
-- Deals ReUI table/filter/modal/Kanban interactions in the uncommitted work
+- Deals ReUI table/filter/modal/Kanban interactions
 - sidebar/layout interactions
 - PDF source normalization and page tracking
 - Data Room PDF editor loading-shell behavior, in-memory annotation restoration, focus, page count,
@@ -2633,10 +2658,10 @@ configuration. Never delete retired graph volumes as verification.
 
 ### 14.4 Pull-request CI
 
-[CI](../.github/workflows/ci.yml) runs on pull requests targeting `main` (opened, updated, edited,
+[CI](.github/workflows/ci.yml) runs on pull requests targeting `main` (opened, updated, edited,
 reopened, and marked ready), pushes to `main`, and manual dispatch. It always emits four jobs
 named `CodeQL`, `test`, `build`, and `lint`; there are no path filters or matrix suffixes.
-New commits cancel superseded runs. The shared [setup action](../.github/actions/setup/action.yml)
+New commits cancel superseded runs. The shared [setup action](.github/actions/setup/action.yml)
 uses Node 24, Rust 1.99.0, npm's lockfile, both Cargo lockfiles, and Ubuntu 24.04 Tauri prerequisites.
 
 - `CodeQL` analyzes JavaScript/TypeScript and Rust with CodeQL v4 in buildless mode. Only this
@@ -2662,9 +2687,9 @@ Ignored external Chromium/visual fixture suites remain explicit opt-ins. CI does
 start the product server, contact AI providers, or reset a development database. Limit Rust
 suite concurrency to four threads in CI to bound simultaneous PostgreSQL pools.
 
-The active GitHub ruleset `Quarry main CI/CD` targets `main`, requires a pull request and the
-four exact status contexts above on the current base, and has no bypass actors (verified
-2026-11-16). It also requires CodeQL, blocking error-level alerts and high-or-higher security
+The GitHub ruleset `Quarry main CI/CD` was recorded on 2026-11-16 as targeting `main`, requiring
+a pull request and the four exact status contexts above on the current base, with no bypass actors.
+These remote settings were not re-verified in the 2026-11-19 documentation audit. It also requires CodeQL, blocking error-level alerts and high-or-higher security
 alerts. Workflow files alone cannot enforce merges; retain this ruleset when changing CI.
 A successful analysis job means the scan completed; the separate code-scanning rule enforces
 the configured alert thresholds. For private repositories, GitHub Code Security must be enabled
@@ -2677,16 +2702,16 @@ enabled until the replacement is ready. This change does not publish the workflo
 
 | Area | Current condition | Consequence |
 | --- | --- | --- |
-| Identity | Password authentication, durable revocable sessions, per-user checks | No organization tenancy, recovery, MFA or persistent client login |
+| Identity | Password authentication, durable revocable sessions, expiry-bounded client session restoration, per-user checks | No organization tenancy, account recovery or MFA |
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
-| Desktop onboarding | Tauri loses the flat Axum not-found message | A new desktop user cannot reach the account-creation step |
-| Persistence | Fresh PostgreSQL schema 6 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset |
+| Persistence | Fresh PostgreSQL schema 7 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset; existing UUID document IDs are not rewritten to content addresses |
+| Document classification | Runs inside every document task by default; provisional thresholds | No labeled evaluation, calibration or latency measurement yet; no UI; an embedding failure repeats the Decisions call on retry |
 | Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
-| Logical versioning | Changed-content upload receives a new `file_id` | Normal product ingestion does not create version 2 for a revision |
+| Logical versioning | Content-addressed IDs: changed content always receives a new `file_id`; each file has exactly one version | No in-place revision history; relating a revision to its predecessor needs a separate lineage feature |
 | Document jobs | SQL inputs, attempt fencing, terminal replay and polled SSE | Uncheckpointed provider calls may repeat after restart; global writer controls remain |
-| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Embedded imports are private to their authenticated owner and survive restart; unassigned older records are preserved but hidden; no graph projection or startup reconciliation exists |
+| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Imports are private to their authenticated owner and survive restart; schema 7 requires ownership and has no app registry, graph projection or legacy catalog import |
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |
@@ -2695,11 +2720,7 @@ enabled until the replacement is ready. This change does not publish the workflo
 | SharePoint | Modal, stored URL, dormant Rust client | No completed product import flow |
 | Deployment | Pull-request CI exists; no production container, provider, signing, updater, or TLS config | Repository is not independently deployable |
 | Health | Shallow process check | Cannot determine dependency readiness |
-| Plans | Ignored and sometimes stale after implementation | Must not be treated as tracked contract |
-
-The retained `docs/architecture/*.docx` files are useful point-in-time assessments. Their file
-paths and recommendations may refer to earlier snapshots; this Markdown file is the maintainable
-current-state reference.
+| Plans | Tracked design inputs; some retain historical implementation assumptions | Check code and this architecture for current behavior; plans are not product contracts |
 
 ## 16. Architectural invariants for future work
 
@@ -2741,22 +2762,22 @@ current-state reference.
 
 | Concern | Primary source |
 | --- | --- |
-| Shared application mount/routes | [`frontend/src/main.tsx`](../frontend/src/main.tsx), [`frontend/src/App.tsx`](../frontend/src/App.tsx) |
-| Build/runtime aliases | [`frontend/vite.config.ts`](../frontend/vite.config.ts), `frontend/tsconfig.*.json` |
-| Runtime contract | [`frontend/src/contracts/quarryApi.ts`](../frontend/src/contracts/quarryApi.ts) |
-| Web transport | [`frontend/src/api/httpQuarryApi.ts`](../frontend/src/api/httpQuarryApi.ts) |
-| Desktop TypeScript transport | [`frontend/src/platform/runtime.desktop.ts`](../frontend/src/platform/runtime.desktop.ts), [`frontend/src/api/tauriQuarryApi.ts`](../frontend/src/api/tauriQuarryApi.ts) |
-| Runtime boundary enforcement | [`frontend/scripts/check-runtime-boundaries.mjs`](../frontend/scripts/check-runtime-boundaries.mjs) |
-| Tauri command registration/security | [`frontend/src-tauri/src/lib.rs`](../frontend/src-tauri/src/lib.rs), [`frontend/src-tauri/src/security.rs`](../frontend/src-tauri/src/security.rs) |
+| Shared application mount/routes | [`frontend/src/main.tsx`](frontend/src/main.tsx), [`frontend/src/App.tsx`](frontend/src/App.tsx) |
+| Build/runtime aliases | [`frontend/vite.config.ts`](frontend/vite.config.ts), `frontend/tsconfig.*.json` |
+| Runtime contract | [`frontend/src/contracts/quarryApi.ts`](frontend/src/contracts/quarryApi.ts) |
+| Web transport | [`frontend/src/api/httpQuarryApi.ts`](frontend/src/api/httpQuarryApi.ts) |
+| Desktop TypeScript transport | [`frontend/src/platform/runtime.desktop.ts`](frontend/src/platform/runtime.desktop.ts), [`frontend/src/api/tauriQuarryApi.ts`](frontend/src/api/tauriQuarryApi.ts) |
+| Runtime boundary enforcement | [`frontend/scripts/check-runtime-boundaries.mjs`](frontend/scripts/check-runtime-boundaries.mjs) |
+| Tauri command registration/security | [`frontend/src-tauri/src/lib.rs`](frontend/src-tauri/src/lib.rs), [`frontend/src-tauri/src/security.rs`](frontend/src-tauri/src/security.rs) |
 | Tauri API gateway | `frontend/src-tauri/src/quarry_api/` |
-| Tauri native files/export | [`frontend/src-tauri/src/deal_files.rs`](../frontend/src-tauri/src/deal_files.rs), [`frontend/src-tauri/src/save_file.rs`](../frontend/src-tauri/src/save_file.rs) |
-| Backend process/composition | [`backend/src/main.rs`](../backend/src/main.rs), [`backend/src/app/config.rs`](../backend/src/app/config.rs), [`backend/src/app/bootstrap.rs`](../backend/src/app/bootstrap.rs) |
-| Axum mounts/middleware/errors | [`backend/src/app/http/mod.rs`](../backend/src/app/http/mod.rs), [`backend/src/app/http/middleware.rs`](../backend/src/app/http/middleware.rs), [`backend/src/app/http/error.rs`](../backend/src/app/http/error.rs) |
+| Tauri native files/export | [`frontend/src-tauri/src/deal_files.rs`](frontend/src-tauri/src/deal_files.rs), [`frontend/src-tauri/src/save_file.rs`](frontend/src-tauri/src/save_file.rs) |
+| Backend process/composition | [`backend/src/main.rs`](backend/src/main.rs), [`backend/src/app/config.rs`](backend/src/app/config.rs), [`backend/src/app/bootstrap.rs`](backend/src/app/bootstrap.rs) |
+| Axum mounts/middleware/errors | [`backend/src/app/http/mod.rs`](backend/src/app/http/mod.rs), [`backend/src/app/http/middleware.rs`](backend/src/app/http/middleware.rs), [`backend/src/app/http/error.rs`](backend/src/app/http/error.rs) |
 | Product use cases and owned persistence | `backend/src/domains/` |
 | Concrete infrastructure | `backend/src/adapters/` |
 | Cross-domain primitives | `backend/src/shared/` |
-| Schema and migration | [`backend/src/app/migrations.rs`](../backend/src/app/migrations.rs), [`backend/tests/integration/app/migrations_tests.rs`](../backend/tests/integration/app/migrations_tests.rs) |
-| Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](../backend/tests/integration/architecture_tests.rs) |
+| Schema and migration | [`backend/src/app/migrations.rs`](backend/src/app/migrations.rs), [`backend/tests/integration/app/migrations_tests.rs`](backend/tests/integration/app/migrations_tests.rs) |
+| Dependency guard tests | [`backend/tests/integration/architecture_tests.rs`](backend/tests/integration/architecture_tests.rs) |
 
 ## 19. Glossary
 
@@ -2771,9 +2792,9 @@ current-state reference.
 | Composition root | Vite/runtime selection on the client; `bootstrap.rs` on the server |
 | Canonical store | PostgreSQL records and blobs used for recovery and product persistence |
 | Search storage | PostgreSQL document chunks, notebook search sets and template lexical postings/typed vector pairs |
-| Logical file | A `quarry_files` record that can own immutable versions; changed-content upload currently creates a new one |
+| Logical file | A content-addressed `quarry_files` record with exactly one immutable version; changed bytes create a new file |
 | Current version | The version marked current in canonical PostgreSQL |
-| Document job | Process-local ingestion task exposed through an SSE event stream |
+| Document job | Durable PostgreSQL input, fenced attempt and terminal result; an owned worker executes background work and SSE polls status |
 | Development fixture | Static UI data used for demos/fallbacks, not server authority |
 
 ### DOCX dependency security patch

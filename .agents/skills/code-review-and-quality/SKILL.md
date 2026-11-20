@@ -26,7 +26,7 @@ style preference are not the standard.
 ## Backend boundary review
 
 When backend code adds or changes validation or authorization, apply the
-[placement decision and checklist](../../../docs/backend-boundary-checks.md#placement-decision-for-every-new-or-changed-check).
+[backend boundary rules](../../../AGENTS.md#backend-development-rules).
 Treat a caller-only check delayed into a model/service/adapter, an initial access check delayed
 past protected work, or a removed transaction/revocation guard as a Required finding. Explain
 which inputs were available earlier or which state/lifecycle protection was lost.

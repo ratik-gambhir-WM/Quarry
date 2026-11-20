@@ -410,6 +410,8 @@ impl DeletionRepository {
                     ("quarry_files", "deal_id", op.deal_id.as_str()),
                     ("assistant_threads", "deal_id", op.deal_id.as_str()),
                     ("notebooks", "deal_id", op.deal_id.as_str()),
+                    ("document_input_identities", "deal_id", op.deal_id.as_str()),
+                    ("document_classifications", "deal_id", op.deal_id.as_str()),
                 ] {
                     if tx
                         .read_one_with(

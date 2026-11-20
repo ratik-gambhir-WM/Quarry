@@ -11,7 +11,10 @@ use crate::{
     domains::{
         documents::store::search_repository::EmbeddingProfile, memberships::model::Capability,
     },
-    shared::{error::RepositoryError, ids::sha256_hex},
+    shared::{
+        error::RepositoryError,
+        ids::{document_id_from_content, sha256_hex},
+    },
 };
 
 #[derive(Clone)]
@@ -179,12 +182,13 @@ impl DocumentJobRepository {
                     return Err(RepositoryError::Capacity);
                 }
                 let id = uuid::Uuid::new_v4().to_string();
-                // Unique claim selects a single logical identity even before the first file row exists.
+                // The deal-scoped content address is the logical identity; the unique key records it
+                // before the first file row exists, and identical bytes always converge on it.
                 tx.write(
                     Q::insert_into("document_input_identities")
                         .value("deal_id", &deal)
                         .value("input_hash", &hash)
-                        .value("file_id", uuid::Uuid::new_v4().to_string())
+                        .value("file_id", document_id_from_content(&deal, &hash))
                         .on_conflict_do_nothing(["deal_id", "input_hash"])
                         .build(),
                 )

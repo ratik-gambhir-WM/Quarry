@@ -19,6 +19,7 @@ import type {
   AssistantThreadPage,
   DealDocumentPdf,
   DealDocumentSummary,
+  DocumentClassification,
   DealDocumentText,
   FileChunkKeywordSearch,
   FileChunkVectorSearch,
@@ -349,6 +350,11 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
     listDealDocuments: (dealId) =>
       transport.get<DealDocumentSummary[]>(
         `/api/v1/deals/${encodeURIComponent(dealId)}/documents`,
+      ),
+    requestDocumentClassification: (dealId, fileId, expectedGeneration) =>
+      transport.post<DocumentClassification>(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/${encodeURIComponent(fileId)}/classification`,
+        { expectedGeneration },
       ),
     listDeals: () => transport.get<PersistedDeal[]>("/api/v1/deals"),
     listTemplatePreviews: (page) =>

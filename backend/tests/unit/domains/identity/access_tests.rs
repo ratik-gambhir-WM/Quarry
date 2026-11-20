@@ -31,10 +31,12 @@ async fn final_search_snapshot_excludes_foreign_deleted_historical_and_revoked_r
             ("historical-version","DEAL-OWN",false,false,"active"),
             ("historical-generation","DEAL-OWN",true,false,"old"),
         ] {
-            connection.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at,deleted_at) VALUES(?1,?2,'synthetic.docx','{}','now','now',?3)",crate::pg_params![file,deal,deleted.then_some("now")]).await?;
-            connection.execute("INSERT INTO quarry_file_versions(version_id,file_id,version_number,original_filename,mime_type,content_sha256,byte_size,is_current,created_at) VALUES(?1,?1,1,'synthetic.docx','application/octet-stream',?2,1,?3,'now')",crate::pg_params![file,"a".repeat(64),current]).await?;
-            connection.execute("INSERT INTO document_identity_manifests(version_id,derivation_version,document_id,active_generation,chunk_count,search_ready) VALUES(?1,2,?1,'active',1,0)",[file]).await?;
-            connection.execute("INSERT INTO document_chunk_identities(chunk_id,version_id,index_generation,chunk_index,chunk_sha256) VALUES(?1,?1,?2,1,?3)",crate::pg_params![file,generation,"b".repeat(64)]).await?;
+            // Content-addressed fixture IDs; chunk IDs keep the readable label.
+            let id = crate::shared::ids::sha256_hex(file.as_bytes());
+            connection.execute("INSERT INTO quarry_files(file_id,deal_id,display_name,metadata_json,created_at,updated_at,deleted_at) VALUES(?1,?2,'synthetic.docx','{}','now','now',?3)",crate::pg_params![&id,deal,deleted.then_some("now")]).await?;
+            connection.execute("INSERT INTO quarry_file_versions(version_id,file_id,version_number,original_filename,mime_type,content_sha256,byte_size,is_current,created_at) VALUES(?1,?1,1,'synthetic.docx','application/octet-stream',?2,1,?3,'now')",crate::pg_params![&id,"a".repeat(64),current]).await?;
+            connection.execute("INSERT INTO document_identity_manifests(version_id,derivation_version,document_id,active_generation,chunk_count,search_ready) VALUES(?1,2,?1,'active',1,0)",[&id]).await?;
+            connection.execute("INSERT INTO document_chunk_identities(chunk_id,version_id,index_generation,chunk_index,chunk_sha256) VALUES(?1,?2,?3,1,?4)",crate::pg_params![file,&id,generation,"b".repeat(64)]).await?;
         }
         Ok(())
      }).await.unwrap();

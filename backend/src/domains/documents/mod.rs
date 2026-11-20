@@ -1,3 +1,4 @@
+pub mod classification;
 pub mod formats;
 pub mod ingestion;
 pub mod model;

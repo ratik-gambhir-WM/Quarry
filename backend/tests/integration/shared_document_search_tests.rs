@@ -59,14 +59,15 @@ async fn lexical_channels_keep_technical_tokens_english_stems_and_safe_and_seman
         shared::ids::sha256_hex,
     };
     let db = database().await;
-    for (file, text) in [
+    let files = [
         ("cpp", "C++ memory allocator"),
         ("csharp", "C# managed runtime"),
         ("dotnet", ".NET managed runtime"),
         ("identifier", "customer_id database identifier"),
         ("phrase", "alpha beta architecture José"),
         ("separated", "alpha noisy beta"),
-    ] {
+    ];
+    for (file, text) in files {
         let (doc, mut chunks, bytes) = sample(file, "DEAL-SQL", text, 1);
         chunks[0].text = text.into();
         chunks[0].content_hash = sha256_hex(text.as_bytes());
@@ -77,7 +78,7 @@ async fn lexical_channels_keep_technical_tokens_english_stems_and_safe_and_seman
             doc,
             chunks,
             bytes,
-            None,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -98,7 +99,10 @@ async fn lexical_channels_keep_technical_tokens_english_stems_and_safe_and_seman
             .await
             .unwrap();
         assert_eq!(hits.len(), 1, "query {query}");
-        assert_eq!(hits[0].chunk.file_id, expected);
+        let text = files.iter().find(|(file, _)| *file == expected).unwrap().1;
+        let content_address =
+            crate::shared::ids::document_id_from_content("DEAL-SQL", &sha256_hex(text.as_bytes()));
+        assert_eq!(hits[0].chunk.file_id, content_address);
     }
     for query in [
         "the and",

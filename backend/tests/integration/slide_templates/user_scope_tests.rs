@@ -1,6 +1,6 @@
 use crate::{
     adapters::postgres::client::PostgresClient,
-    app::{bootstrap::assemble_api_routes, migrations},
+    app::{bootstrap::test_support::assemble_api_routes, migrations},
     domains::templates::slide_templates::*,
     integration_support, slide_template_test_support as support, AppConfig,
 };

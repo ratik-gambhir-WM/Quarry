@@ -1,5 +1,6 @@
 use crate::domains::deals::deletion::lifecycle::DealAdmission;
 use validate::validate_identifier;
+#[path = "validate.rs"]
 mod validate;
 use axum::{
     extract::{Path, State},

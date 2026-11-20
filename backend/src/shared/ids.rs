@@ -11,12 +11,26 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-pub fn document_id_from_content(scope_id: &str, content_hash: &str) -> String {
-    sha256_hex(format!("{scope_id}\0{content_hash}").as_bytes())
+/// Deal-scoped content address of an uploaded document.
+///
+/// `sha256(utf8(deal_id) || 0x00 || utf8(content_sha256))` as lowercase hex. It is the
+/// document's `file_id`, its single immutable `version_id` and its manifest `document_id`,
+/// so identical bytes in one deal always share one identity and changed bytes never do.
+/// PostgreSQL recomputes the same derivation in schema checks.
+pub fn document_id_from_content(deal_id: &str, content_sha256: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(deal_id.as_bytes());
+    digest.update([0_u8]);
+    digest.update(content_sha256.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
-pub fn file_version_id(file_id: &str, content_hash: &str) -> String {
-    sha256_hex(format!("{file_id}\0{content_hash}").as_bytes())
+/// Whether `value` has the shape of a SHA-256 content address (64 lowercase hex digits).
+pub fn is_content_address(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// New deals use canonical UUIDs; existing DEAL- identifiers remain addressable.

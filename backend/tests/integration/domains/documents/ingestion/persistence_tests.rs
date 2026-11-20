@@ -14,7 +14,7 @@ async fn failure_in_first_middle_and_final_batch_rolls_back_complete_document() 
             doc,
             chunks,
             bytes,
-            None
+            Default::default(),
         )
         .await
         .is_err());
@@ -44,7 +44,7 @@ async fn deferred_commit_failure_leaves_no_canonical_document() {
         doc,
         chunks,
         bytes,
-        None
+        Default::default(),
     )
     .await
     .is_err());
@@ -105,7 +105,7 @@ async fn invalid_vectors_and_ordinal_gaps_reject_before_canonical_writes() {
             doc,
             chunks,
             bytes,
-            None
+            Default::default(),
         )
         .await
         .is_err());
@@ -142,7 +142,7 @@ async fn readers_see_only_complete_versions_and_cancelled_batches_never_publish(
                 doc,
                 chunks,
                 bytes,
-                None,
+                Default::default(),
             )
             .await
         });
@@ -175,6 +175,7 @@ async fn readers_see_only_complete_versions_and_cancelled_batches_never_publish(
             task.await.unwrap().unwrap();
         }
         let count:i64=sqlx::query_scalar("SELECT count(*) FROM document_chunks c JOIN document_chunk_identities i USING(chunk_id) JOIN quarry_file_versions v USING(version_id) WHERE v.is_current=1").fetch_one(db.pool()).await.unwrap();
-        assert_eq!(count, if cancel { 2 } else { 260 });
+        // Changed bytes are a new content address, so the previous document stays current.
+        assert_eq!(count, if cancel { 2 } else { 262 });
     }
 }

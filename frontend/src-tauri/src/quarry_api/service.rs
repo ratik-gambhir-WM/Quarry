@@ -150,6 +150,9 @@ impl QuarryApiService {
         {
             super::revisions::json(&body)?;
         }
+        if super::classification::is_classification_path(path) {
+            super::classification::validate(path, &body)?;
+        }
         if resource_path == "/api/v1/notebooks" || resource_path.starts_with("/api/v1/notebooks/") {
             super::notebooks::validate_body(&body)?;
             if resource_path.ends_with("/search") {
