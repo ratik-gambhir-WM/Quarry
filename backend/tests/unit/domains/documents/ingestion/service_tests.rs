@@ -1,4 +1,90 @@
 use super::*;
+
+#[tokio::test]
+async fn prepared_upload_retry_waits_for_background_scheduling_before_acceptance() {
+    use tower::ServiceExt;
+    let db = crate::domains::documents::test_support::database().await;
+    let files = DocumentStore::new(db.clone());
+    let queue = super::super::repository::DocumentJobRepository {
+        db: db.clone(),
+        profile: files.profile().clone(),
+    };
+    let (id, _) = queue
+        .admit(
+            "DEAL-SQL".into(),
+            1,
+            UploadedDocument {
+                filename: "retry.pdf".into(),
+                bytes: b"prepared retry".to_vec(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    // A synchronous request prepared its checkpoint, then was cancelled before embedding.
+    // The sentinel checkpoint must only be scheduled; any parsing/decoding would fail.
+    sqlx::query("UPDATE document_jobs SET prepared_json='{}',stage='prepared' WHERE job_id=$1")
+        .bind(&id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let service = Arc::new(DocumentIngestionService::new(
+        files,
+        queue,
+        None,
+        "test".into(),
+        "unused".into(),
+        1,
+    ));
+    let busy = service.admission_semaphore.acquire().await.unwrap();
+    let actor = crate::domains::identity::model::AuthenticatedUser {
+        user: crate::domains::users::repository::UserRepository::new(db.clone())
+            .by_id(1)
+            .await
+            .unwrap()
+            .unwrap(),
+        token_hash: "synthetic".into(),
+        expires_at: 4102444800,
+    };
+    let router = super::super::route::routes(
+        Arc::clone(&service),
+        Arc::new(super::super::job_service::DocumentJobService::new(
+            Arc::clone(&service),
+        )),
+    )
+    .layer(axum::Extension(actor));
+    let body = "--retry\r\nContent-Disposition: form-data; name=\"files\"; filename=\"retry.pdf\"\r\nContent-Type: application/pdf\r\n\r\nprepared retry\r\n--retry--\r\n";
+    let response = router
+        .oneshot(
+            axum::http::Request::post("/deals/DEAL-SQL/documents/upload")
+                .header("content-type", "multipart/form-data; boundary=retry")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let mut frames = Box::pin(axum::body::to_bytes(response.into_body(), 65536));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(300), frames.as_mut())
+            .await
+            .is_err(),
+        "an unscheduled checkpoint must not complete the stream"
+    );
+    assert!(!service.queue().job(&id).await.unwrap().background);
+    drop(busy);
+    let frames = tokio::time::timeout(std::time::Duration::from_secs(5), frames)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(std::str::from_utf8(&frames)
+        .unwrap()
+        .contains("event: accepted"));
+    let claim = service.queue().claim_ready().await.unwrap().unwrap();
+    assert_eq!(claim.attempt.id, id);
+    assert_eq!(claim.prepared.as_deref(), Some("{}"));
+}
+
 fn chunk_with_token_count(token_count: u32) -> DocumentChunk {
     DocumentChunk {
         chunk_id: "chunk-id".to_string(),

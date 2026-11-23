@@ -259,9 +259,14 @@ impl QuarryHttpClient {
     }
 
     fn url(&self, path: &str) -> Result<Url, String> {
-        self.base_url
+        let url = self
+            .base_url
             .join(path)
-            .map_err(|error| format!("invalid Quarry API path: {error}"))
+            .map_err(|error| format!("invalid Quarry API path: {error}"))?;
+        if url.origin() != self.base_url.origin() {
+            return Err("Quarry API path must use the configured origin".into());
+        }
+        Ok(url)
     }
 
     async fn send_json(&self, request: reqwest::RequestBuilder) -> Result<Value, String> {

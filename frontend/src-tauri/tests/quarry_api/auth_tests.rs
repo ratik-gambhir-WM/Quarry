@@ -1,6 +1,34 @@
 use super::*;
 use crate::quarry_api::models::AuthCredentials;
 
+#[test]
+fn resolved_api_urls_cannot_change_the_configured_origin() {
+    let client = QuarryHttpClient {
+        base_url: reqwest::Url::parse("https://api.example.invalid:8443").unwrap(),
+        client: reqwest::Client::new(),
+        stream_client: reqwest::Client::new(),
+        headers: reqwest::header::HeaderMap::new(),
+        status: Arc::new(AtomicU16::new(0)),
+    };
+    assert_eq!(
+        client
+            .url("/api/v1/deals/DEAL/documents/upload")
+            .unwrap()
+            .as_str(),
+        "https://api.example.invalid:8443/api/v1/deals/DEAL/documents/upload"
+    );
+    for path in [
+        r"https:\\example.invalid/api/v1/deals/DEAL/documents/upload",
+        r"http:\example.invalid/api/v1/deals/DEAL/documents/upload",
+        "https://example.invalid/api/v1/deals",
+        "//example.invalid/api/v1/deals",
+        "http://api.example.invalid:8443/api/v1/deals",
+        "https://api.example.invalid/api/v1/deals",
+    ] {
+        assert!(client.url(path).is_err());
+    }
+}
+
 #[tokio::test]
 async fn scoped_credentials_are_validated_and_status_is_preserved_without_global_headers() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

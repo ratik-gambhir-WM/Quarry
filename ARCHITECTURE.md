@@ -1057,6 +1057,8 @@ endpoint mapping for the desktop transport and base64-encodes multipart files be
 The Rust gateway reads `QUARRY_API_BASE_URL`, defaulting to loopback port 3001. It accepts HTTPS or
 HTTP loopback only and rejects query/fragment configuration. Generic proxy paths must start with
 `/api/v1/`, contain no traversal, CR/LF, or fragment, and stay within a length limit.
+Document uploads apply this policy before multipart preparation. Every HTTP relay also rejects
+resolved URLs whose origin differs from the configured API base URL.
 
 ### 6.4 Native command inventory
 
@@ -2144,6 +2146,8 @@ parsed chunks and classification in `document_jobs.prepared_json`, releases the 
 and queues background work before emitting `accepted`. Incomplete admissions require an explicit
 same-file retry after cancellation/restart; expired admission leases are failed by maintenance.
 Retries after durable preparation reuse that checkpoint without parsing or classifying again.
+A reused checkpoint is acknowledged as accepted only after background scheduling is durable;
+waiting for admission capacity cannot acknowledge an unscheduled retry.
 
 One bootstrap-owned supervisor runs up to `QUARRY_DOCUMENT_WORKER_CONCURRENCY` (default 5, max 8)
 independent background tasks and claims only prepared documents when a slot is free. The owned

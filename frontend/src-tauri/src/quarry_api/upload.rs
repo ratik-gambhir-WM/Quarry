@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use super::{
     models::{DocumentJobEventPayload, MultipartRequest},
-    service::{build_multipart_form, validate_identifier, QuarryApiService},
+    service::{build_multipart_form, validate_api_path, validate_identifier, QuarryApiService},
 };
 
 impl QuarryApiService {
@@ -14,6 +14,7 @@ impl QuarryApiService {
         mut emit: impl FnMut(DocumentJobEventPayload) -> Result<(), String>,
     ) -> Result<Value, String> {
         validate_identifier("subscriptionId", subscription_id)?;
+        validate_api_path(&request.path)?;
         let parts: Vec<_> = request.path.split('/').collect();
         if parts.len() != 7
             || parts[1..4] != ["api", "v1", "deals"]

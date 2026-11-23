@@ -529,7 +529,7 @@ async fn status_reads_do_not_fetch_accepted_input() {
          CREATE FUNCTION reject_job_payload_read() RETURNS bytea LANGUAGE plpgsql STABLE AS $$
          BEGIN RAISE EXCEPTION 'status polling must not read accepted input'; END $$;
          CREATE VIEW document_jobs AS
-         SELECT job_id,deal_id,filename,status,sequence,result_json,stage,admission_complete,
+         SELECT job_id,deal_id,filename,status,sequence,result_json,stage,admission_complete,background,
                 reject_job_payload_read() AS input_bytes
          FROM document_jobs_storage;",
     )
@@ -545,6 +545,7 @@ async fn status_reads_do_not_fetch_accepted_input() {
     assert_eq!(status.filename, filename);
     assert_eq!(status.status, "failed");
     assert_eq!(status.sequence, 3);
+    assert!(status.background);
     let result = status.result.unwrap();
     assert!(!result.success);
     assert!(!result.sqlite_committed);

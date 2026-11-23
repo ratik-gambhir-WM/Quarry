@@ -77,7 +77,9 @@ impl DocumentJobService {
         Ok(super::jobs::AdmissionEvent {
             job_id: id.into(),
             filename: job.filename,
-            status: if job.prepared {
+            // A reused checkpoint may still be waiting for admission capacity to
+            // schedule it. Do not terminate its request-owned preparation early.
+            status: if job.prepared && job.background {
                 AdmissionStatus::Accepted
             } else if job.status == "failed" {
                 AdmissionStatus::Failed

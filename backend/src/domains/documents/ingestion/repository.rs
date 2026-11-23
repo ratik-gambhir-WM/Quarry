@@ -46,6 +46,7 @@ pub(crate) struct Job {
     pub sequence: i64,
     pub stage: String,
     pub prepared: bool,
+    pub background: bool,
     pub result: Option<ProcessedDocument>,
 }
 
@@ -356,6 +357,7 @@ impl DocumentJobRepository {
                         "result_json",
                         "stage",
                         "admission_complete",
+                        "background",
                     ])
                     .and_where(C::equal("job_id", id))
                     .build(),
@@ -368,19 +370,21 @@ impl DocumentJobRepository {
                         r.get::<_, Option<String>>("result_json")?,
                         r.get::<_, String>("stage")?,
                         r.get::<_, bool>("admission_complete")?,
+                        r.get::<_, i64>("background")? == 1,
                     ))
                 },
             )
             .await?
             .ok_or_else(|| RepositoryError::NotFound("document job not found".into()))
             .and_then(
-                |(deal, filename, status, sequence, result, stage, prepared)| {
+                |(deal, filename, status, sequence, result, stage, prepared, background)| {
                     Ok(Job {
                         deal,
                         filename,
                         status,
                         sequence,
                         prepared,
+                        background,
                         stage,
                         result: result
                             .map(|s| {

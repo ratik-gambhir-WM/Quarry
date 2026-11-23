@@ -295,7 +295,7 @@ impl QuarryApiService {
     }
 }
 
-fn validate_api_path(path: &str) -> Result<(), String> {
+pub(super) fn validate_api_path(path: &str) -> Result<(), String> {
     if !path.starts_with("/api/v1/")
         || path.contains("..")
         || path.contains(['\r', '\n', '#'])
