@@ -347,10 +347,8 @@ describe("httpQuarryApi", () => {
       .fn()
       .mockImplementation(() =>
         Promise.resolve(
-          Response.json(
-            { filename: "model.xlsx", jobId: "job-1" },
-            { status: 202 },
-          ),
+          new Response('event: accepted\ndata: {"filename":"model.xlsx","jobId":"job-1","status":"accepted"}\n\n',
+            { headers: { "content-type": "text/event-stream" } }),
         ),
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -366,7 +364,7 @@ describe("httpQuarryApi", () => {
     for (const [index, file] of files.entries()) {
       const request = fetchMock.mock.calls[index][1] as RequestInit;
       expect(fetchMock.mock.calls[index][0]).toBe(
-        "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
+        "/api/v1/deals/DEAL%20%2F%201/documents/upload",
       );
       const uploaded = (request.body as FormData).get("files");
       expect(uploaded).toBeInstanceOf(File);

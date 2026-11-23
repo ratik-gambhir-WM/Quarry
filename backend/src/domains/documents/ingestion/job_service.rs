@@ -1,6 +1,6 @@
 //! Durable document workers and database-polled SSE snapshots.
 use super::{
-    jobs::DocumentJobEvent,
+    jobs::{AdmissionStatus, DocumentJobEvent},
     repository::{Claimed, DocumentJobRepository, Job},
     service::{DocumentIngestionService, UploadedDocument},
 };
@@ -11,7 +11,7 @@ use crate::shared::{
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinSet};
 
-/// Hard ceiling for concurrently prepared background documents.
+/// Hard ceiling for concurrently processed background documents.
 pub const MAX_BACKGROUND_DOCUMENTS: usize = 8;
 const IDLE_POLL: Duration = Duration::from_millis(200);
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60);
@@ -35,8 +35,7 @@ impl DocumentJobService {
     /// Start the single background supervisor. Bootstrap calls this once and owns the
     /// handle; service clones never start or stop another pool.
     pub fn start_worker(&self, concurrency: usize, retention: Duration) -> WorkerHandle {
-        // One shared ingestion service: its Office and embedding semaphores bound every
-        // concurrently prepared document.
+        // The processing callback owns background stages; admission is request-owned.
         let ingestion = Arc::clone(&self.ingestion);
         let process: ProcessDocument = Arc::new(move |claim| {
             let ingestion = Arc::clone(&ingestion);
@@ -50,8 +49,44 @@ impl DocumentJobService {
         user_id: i64,
         file: UploadedDocument,
     ) -> ServiceResult<StartedDocumentJob> {
-        let (job_id, filename) = self.queue.admit(deal_id, user_id, file, true).await?;
+        let (job_id, filename) = self.accept_upload(deal_id, user_id, file).await?;
+        self.ingestion.prepare_admission(&job_id, true).await?;
         Ok(StartedDocumentJob { job_id, filename })
+    }
+    pub(crate) async fn accept_upload(
+        &self,
+        deal: String,
+        actor: i64,
+        file: UploadedDocument,
+    ) -> ServiceResult<(String, String)> {
+        self.queue
+            .admit(deal, actor, file, false)
+            .await
+            .map_err(Into::into)
+    }
+    pub(crate) async fn prepare_admission(&self, id: &str) -> ServiceResult<()> {
+        self.ingestion.prepare_admission(id, true).await
+    }
+    pub(crate) async fn admission_event(
+        &self,
+        id: &str,
+        actor: i64,
+    ) -> ServiceResult<super::jobs::AdmissionEvent> {
+        self.authorize_job(id, actor).await?;
+        let job = self.queue.job(id).await?;
+        Ok(super::jobs::AdmissionEvent {
+            job_id: id.into(),
+            filename: job.filename,
+            status: if job.prepared {
+                AdmissionStatus::Accepted
+            } else if job.status == "failed" {
+                AdmissionStatus::Failed
+            } else if job.stage == "classifying" {
+                AdmissionStatus::Classifying
+            } else {
+                AdmissionStatus::Parsing
+            },
+        })
     }
     pub async fn authorize_job(&self, id: &str, actor: i64) -> ServiceResult<()> {
         let job = self.queue.job(id).await?;
@@ -92,7 +127,7 @@ impl DocumentJobService {
         Ok(receiver)
     }
 }
-/// Prepares and commits exactly one claimed document.
+/// Runs background stages and commits exactly one prepared document.
 pub(crate) type ProcessDocument =
     Arc<dyn Fn(Claimed) -> Pin<Box<dyn Future<Output = ServiceResult<()>> + Send>> + Send + Sync>;
 
@@ -111,7 +146,7 @@ pub(crate) fn start_supervisor(
     WorkerHandle::spawn(move |stop| supervisor.run(stop))
 }
 
-/// Claims background jobs only while a task slot is free; each owned task prepares and
+/// Claims background jobs only while a task slot is free; each owned task embeds and
 /// commits exactly one document independently of its siblings.
 struct DocumentSupervisor {
     queue: DocumentJobRepository,
@@ -156,7 +191,7 @@ impl DocumentSupervisor {
     /// ages while waiting for a slot.
     async fn fill(&self, active: &mut JoinSet<ServiceResult<()>>, stop: &StopSignal) {
         while !stop.is_requested() && active.len() < self.limit {
-            match self.queue.claim(None).await {
+            match self.queue.claim_ready().await {
                 Ok(Some(claim)) => {
                     active.spawn((self.process)(claim));
                 }

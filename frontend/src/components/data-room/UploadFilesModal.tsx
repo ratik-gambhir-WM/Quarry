@@ -361,9 +361,9 @@ function UploadFileRow({ entry, onRemove, onToggle }: UploadFileRowProps) {
       <div className="flex h-9 w-9 shrink-0 items-center justify-center">
         {completed || skipped ? (
           <span
-            aria-label={skipped ? "Already processed" : "Processing complete"}
+            aria-label={skipped ? "Already processed" : "Upload accepted"}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-[#dff5e8] text-[#168447]"
-            title={skipped ? "Already processed" : "Processing complete"}
+            title={skipped ? "Already processed" : "Upload accepted"}
           >
             <Icon className="h-4 w-4 stroke-[2.5]" name="check" />
           </span>
@@ -396,9 +396,9 @@ function getStatusLabel(entry: UploadEntry) {
     case "uploading":
       return "Reading and uploading bytes";
     case "processing":
-      return "Processing";
+      return entry.stage === "parsing" ? "Parsing" : entry.stage === "classifying" ? "Classifying" : "Processing";
     case "completed":
-      return "Complete";
+      return "Accepted";
     case "skipped":
       return "Already processed";
     case "failed":

@@ -179,3 +179,33 @@ async fn readers_see_only_complete_versions_and_cancelled_batches_never_publish(
         assert_eq!(count, if cancel { 2 } else { 262 });
     }
 }
+
+#[test]
+fn image_recovery_serialization_stays_stable_while_owned_chunks_keep_their_vectors() {
+    use crate::domains::documents::formats::image::ImageAssembly;
+    let (mut document, chunks, bytes) = sample("image", "DEAL-SQL", "image contents", 2);
+    document.file_name = "evidence.png".into();
+    document.source_type = "png".into();
+    let mut recovery = ImageAssembly {
+        document: document.clone(),
+        chunks: chunks.clone(),
+    };
+    for chunk in &mut recovery.chunks {
+        chunk.embedding = None;
+    }
+    let expected = serde_json::to_string(&recovery).unwrap();
+    let profile = EmbeddingProfile::new("text-embedding-3-small".into(), 1536);
+    let (input, batch) = prepare_document("DEAL-SQL", 1, document, chunks, bytes, profile).unwrap();
+    assert_eq!(
+        input.image_assembly_json.as_deref(),
+        Some(expected.as_str())
+    );
+    assert_eq!(batch.rows.len(), 2);
+    assert_eq!(batch.rows[0].0.text, recovery.chunks[0].text);
+    assert_eq!(
+        batch.rows[0].0.chunk_sha256,
+        recovery.chunks[0].content_hash
+    );
+    // Vectors are retained in the canonical batch, despite being omitted from recovery JSON.
+    assert_eq!(batch.rows[0].1.as_slice(), &[0.5; 1536]);
+}

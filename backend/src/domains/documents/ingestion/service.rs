@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc, time::Instant};
 use base64::{engine::general_purpose, Engine as _};
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use crate::domains::documents::model::{Document, DocumentChunk};
 
@@ -12,7 +12,9 @@ use crate::{
     domains::documents::{
         classification::service::ClassificationService,
         formats::{
-            image::{build_image_assembly, validate_image_by_bytes, ImageAssembly},
+            image::{
+                build_image_assembly, validate_image_by_bytes, ImageAssembly, ImageAssemblyRef,
+            },
             ParsedQuarryFile, QuarryFile,
         },
         ingestion::persistence::{persist_document_and_chunks, CommitContext},
@@ -41,7 +43,22 @@ pub struct UploadedDocument {
 struct ParsedDocument {
     document: Document,
     chunks: Vec<DocumentChunk>,
-    file_bytes: Vec<u8>,
+}
+
+/// Blocking parsers retain admission capacity and deal lifetime after request cancellation.
+#[derive(Clone)]
+struct AdmissionLifetime {
+    _deal: Option<crate::domains::deals::deletion::lifecycle::DealAdmission>,
+    _permit: Arc<OwnedSemaphorePermit>,
+}
+
+/// Durable admission output. Background stages consume this without parsing or classifying.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PreparedDocument {
+    document: Document,
+    chunks: Vec<DocumentChunk>,
+    classification:
+        Option<crate::domains::documents::classification::repository::ClassificationRecord>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +106,7 @@ pub struct DocumentIngestionService {
     image_description_model: String,
     office_parse_semaphore: Arc<Semaphore>,
     embedding_request_semaphore: Arc<Semaphore>,
+    admission_semaphore: Arc<Semaphore>,
     max_concurrent_documents: usize,
     classification: Option<Arc<ClassificationService>>,
 }
@@ -114,6 +132,7 @@ impl DocumentIngestionService {
                 MAX_CONCURRENT_EMBEDDING_REQUESTS,
             )),
             max_concurrent_documents,
+            admission_semaphore: Arc::new(Semaphore::new(max_concurrent_documents)),
             classification: None,
         }
     }
@@ -183,6 +202,12 @@ impl DocumentIngestionService {
                     }
                     return Ok::<_, ServiceError>((index, completed));
                 }
+                if let Err(error) = self.prepare_admission(&id, false).await {
+                    if let Some(result) = queue.job(&id).await?.result {
+                        return Ok((index, result));
+                    }
+                    return Err(error);
+                }
                 loop {
                     if let Some(claim) = queue.claim(Some(&id)).await? {
                         if self.process_claim(claim).await.is_err() {
@@ -212,6 +237,111 @@ impl DocumentIngestionService {
             documents,
         })
     }
+    /// Request-owned preparation; cancellation leaves a fenced lease for explicit retry.
+    pub(crate) async fn prepare_admission(&self, id: &str, background: bool) -> ServiceResult<()> {
+        let permit = Arc::clone(&self.admission_semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| ServiceError::unavailable("document admission is shutting down"))?;
+        let permit = Arc::new(permit);
+        loop {
+            let job = self.jobs.job(id).await?;
+            if job.prepared {
+                self.jobs.schedule_prepared(id, background).await?;
+                return Ok(());
+            }
+            if job.status == "failed" {
+                return Err(ServiceError::unavailable("document admission failed"));
+            }
+            if let Some(claim) = self.jobs.claim_admission(id).await? {
+                let lifetime = AdmissionLifetime {
+                    _permit: Arc::clone(&permit),
+                    _deal: self.admit_deal(&claim.attempt.deal).await,
+                };
+                let attempt = claim.attempt.clone();
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(570),
+                    self.prepare_upload(claim, background, lifetime),
+                )
+                .await;
+                return match result {
+                    Ok(Ok(())) => Ok(()),
+                    _ => {
+                        self.jobs.fail(&attempt).await?;
+                        Err(ServiceError::unavailable(
+                            "document admission failed; retry the same file",
+                        ))
+                    }
+                };
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    async fn prepare_upload(
+        &self,
+        claim: super::repository::Claimed,
+        background: bool,
+        lifetime: AdmissionLifetime,
+    ) -> ServiceResult<()> {
+        let attempt = claim.attempt;
+        self.files
+            .authorize_upload(&attempt.deal, attempt.actor)
+            .await?;
+        let openai = self
+            .openai
+            .as_ref()
+            .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
+        let mut parsed = parse_document(
+            claim.file,
+            attempt.deal.clone(),
+            openai,
+            &self.image_description_model,
+            Arc::clone(&self.office_parse_semaphore),
+            claim.image,
+            Some(lifetime.clone()),
+        )
+        .await
+        .map_err(ServiceError::internal)?;
+        parsed.document.file_id = attempt.file_id.clone();
+        if infer_supported_image_mime_type(Path::new(&attempt.filename)).is_some() {
+            self.jobs
+                .checkpoint_image(
+                    &attempt,
+                    serde_json::to_string(&ImageAssemblyRef {
+                        document: &parsed.document,
+                        chunks: &parsed.chunks,
+                    })
+                    .map_err(|_| ServiceError::internal("image checkpoint encoding failed"))?,
+                )
+                .await?;
+        }
+        self.jobs.classifying(&attempt).await?;
+        let classification = match &self.classification {
+            Some(service) => Some(
+                service
+                    .classify(service.prepare(&attempt.filename, &parsed.document, &parsed.chunks))
+                    .await,
+            ),
+            None => None,
+        };
+        let prepared = PreparedDocument {
+            document: parsed.document,
+            chunks: parsed.chunks,
+            classification,
+        };
+        let encoding_lifetime = lifetime.clone();
+        let json = tokio::task::spawn_blocking(move || {
+            let _lifetime = encoding_lifetime;
+            serde_json::to_string(&prepared)
+        })
+        .await
+        .map_err(|_| ServiceError::internal("admission checkpoint encoding interrupted"))?
+        .map_err(|_| ServiceError::internal("admission checkpoint encoding failed"))?;
+        self.jobs.save_prepared(&attempt, json, background).await?;
+        Ok(())
+    }
+
     pub(crate) async fn process_claim(
         &self,
         claim: super::repository::Claimed,
@@ -220,7 +350,7 @@ impl DocumentIngestionService {
         let attempt = claim.attempt.clone();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(570),
-            self.prepare_and_commit(claim),
+            self.process_prepared_and_commit(claim),
         )
         .await;
         match result {
@@ -232,7 +362,10 @@ impl DocumentIngestionService {
             }
         }
     }
-    async fn prepare_and_commit(&self, claim: super::repository::Claimed) -> ServiceResult<()> {
+    async fn process_prepared_and_commit(
+        &self,
+        claim: super::repository::Claimed,
+    ) -> ServiceResult<()> {
         let attempt = claim.attempt;
         self.files
             .authorize_upload(&attempt.deal, attempt.actor)
@@ -249,63 +382,53 @@ impl DocumentIngestionService {
             .openai
             .as_ref()
             .ok_or_else(|| ServiceError::unavailable("OpenAI capability is not configured"))?;
-        let mut parsed = parse_document(
-            claim.file,
-            attempt.deal.clone(),
+        let json = claim
+            .prepared
+            .ok_or_else(|| ServiceError::internal("document admission checkpoint missing"))?;
+        let mut prepared: PreparedDocument =
+            tokio::task::spawn_blocking(move || serde_json::from_str(&json))
+                .await
+                .map_err(|_| ServiceError::internal("admission checkpoint decoding interrupted"))?
+                .map_err(|_| ServiceError::internal("invalid admission checkpoint"))?;
+        if prepared.document.deal_id != attempt.deal
+            || prepared.document.content_hash != attempt.hash
+        {
+            return Err(ServiceError::internal(
+                "document admission checkpoint identity mismatch",
+            ));
+        }
+        if let Some(record) = &prepared.classification {
+            let expected = crate::domains::documents::classification::policy::fingerprint(
+                &prepared.document.content_hash,
+                &record.sample.hash,
+            );
+            if record.fingerprint != expected {
+                return Err(ServiceError::unavailable(
+                    "document classification profile changed",
+                ));
+            }
+        }
+        // New background stages can be added here; admission remains request-owned.
+        self.embed_chunks(
+            &attempt.filename,
+            prepared.document.file_size_bytes,
+            &mut prepared.chunks,
             openai,
-            &self.image_description_model,
-            self.office_parse_semaphore.clone(),
-            claim.image,
         )
         .await
         .map_err(ServiceError::internal)?;
-        parsed.document.file_id = attempt.file_id.clone();
-        if infer_supported_image_mime_type(Path::new(&attempt.filename)).is_some() {
-            let assembly = ImageAssembly {
-                document: parsed.document.clone(),
-                chunks: parsed.chunks.clone(),
-            };
-            self.queue()
-                .checkpoint_image(
-                    &attempt,
-                    serde_json::to_string(&assembly)
-                        .map_err(|_| ServiceError::internal("image checkpoint encoding failed"))?,
-                )
-                .await?;
-        }
-        // Sample the parsed chunks before embedding borrows them mutably, then embed and
-        // classify concurrently. Classification always yields a record to save (completed,
-        // failed or disabled); only an embedding failure fails this attempt.
-        let prepared = self.classification.as_ref().map(|classification| {
-            (
-                classification,
-                classification.prepare(&attempt.filename, &parsed.document, &parsed.chunks),
-            )
-        });
-        let classify = async {
-            match prepared {
-                Some((classification, prepared)) => Some(classification.classify(prepared).await),
-                None => None,
-            }
-        };
-        let embedding = self.embed_chunks(
-            &attempt.filename,
-            parsed.document.file_size_bytes,
-            &mut parsed.chunks,
-            openai,
-        );
-        let (embedding, classification) = tokio::join!(embedding, classify);
-        embedding.map_err(ServiceError::internal)?;
+        let deal = attempt.deal.clone();
+        let actor = attempt.actor;
         persist_document_and_chunks(
             &self.files,
-            &attempt.deal,
-            attempt.actor,
-            parsed.document,
-            parsed.chunks,
-            parsed.file_bytes,
+            &deal,
+            actor,
+            prepared.document,
+            prepared.chunks,
+            claim.file.bytes,
             CommitContext {
-                attempt: Some(attempt.clone()),
-                classification,
+                attempt: Some(attempt),
+                classification: prepared.classification,
             },
         )
         .await
@@ -469,6 +592,7 @@ async fn parse_document(
     image_description_model: &str,
     office_parse_semaphore: Arc<Semaphore>,
     recovery: Option<ImageAssembly>,
+    lifetime: Option<AdmissionLifetime>,
 ) -> Result<ParsedDocument, String> {
     if let Some(assembly) = recovery {
         if assembly.document.deal_id != deal_id
@@ -479,26 +603,21 @@ async fn parse_document(
         return Ok(ParsedDocument {
             document: assembly.document,
             chunks: assembly.chunks,
-            file_bytes: file.bytes,
         });
     }
     let filename = file.filename.clone();
-    let file_bytes = file.bytes.clone();
     let file_size_bytes = u64::try_from(file.bytes.len())
         .map_err(|_| format!("file size for `{filename}` does not fit in u64"))?;
     let started_at = Instant::now();
     let result = async {
-        let (document, chunks) =
-            if infer_supported_image_mime_type(Path::new(&file.filename)).is_some() {
-                parse_image_document(file, &deal_id, openai, image_description_model).await?
-            } else {
-                parse_file_document(file, &deal_id, office_parse_semaphore).await?
-            };
-        Ok(ParsedDocument {
-            document,
-            chunks,
-            file_bytes,
-        })
+        let (document, chunks) = if infer_supported_image_mime_type(Path::new(&file.filename))
+            .is_some()
+        {
+            parse_image_document(file, &deal_id, openai, image_description_model, lifetime).await?
+        } else {
+            parse_file_document(file, &deal_id, office_parse_semaphore, lifetime).await?
+        };
+        Ok(ParsedDocument { document, chunks })
     }
     .await;
     match &result {
@@ -524,8 +643,9 @@ async fn parse_image_document(
     deal_id: &str,
     openai: &OpenAiClient,
     image_description_model: &str,
+    lifetime: Option<AdmissionLifetime>,
 ) -> Result<(Document, Vec<DocumentChunk>), String> {
-    let validated = validate_image_by_bytes(file.bytes, &file.filename).await?;
+    let validated = validate_image_by_bytes(file.bytes, &file.filename, lifetime).await?;
     let description = describe_image(
         &validated.bytes,
         validated.mime_type,
@@ -542,6 +662,7 @@ async fn parse_file_document(
     file: UploadedDocument,
     deal_id: &str,
     office_parse_semaphore: Arc<Semaphore>,
+    lifetime: Option<AdmissionLifetime>,
 ) -> Result<(Document, Vec<DocumentChunk>), String> {
     let requires_office_permit = matches!(
         Path::new(&file.filename)
@@ -564,6 +685,7 @@ async fn parse_file_document(
     let parser_filename = file.filename;
     let parser_deal_id = deal_id.to_owned();
     let parsed = tokio::task::spawn_blocking(move || {
+        let _lifetime = lifetime;
         let _office_permit = office_permit;
         QuarryFile::from_bytes(parser_filename, file.bytes)?.parse(&parser_deal_id)
     })

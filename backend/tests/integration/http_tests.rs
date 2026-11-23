@@ -877,7 +877,7 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
     let app = test_router().await;
     let response = app
         .oneshot(
-            Request::post("/api/deals/DEAL-LARGE/documents/process_file")
+            Request::post("/api/deals/DEAL-LARGE/documents/upload")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -888,7 +888,7 @@ async fn process_file_accepts_multipart_bodies_above_axums_default_limit() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -901,7 +901,7 @@ async fn process_file_rejects_a_competing_multipart_deal_id() {
 
     let response = app
         .oneshot(
-            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+            Request::post("/api/deals/DEAL-PATH/documents/upload")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -925,7 +925,7 @@ async fn process_file_rejects_unsupported_uploads_at_the_handler_boundary() {
 
     let response = app
         .oneshot(
-            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+            Request::post("/api/deals/DEAL-PATH/documents/upload")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -949,7 +949,7 @@ async fn process_file_accepts_image_uploads_at_the_handler_boundary() {
 
     let response = app
         .oneshot(
-            Request::post("/api/v1/deals/DEAL-PATH/documents/process_file")
+            Request::post("/api/v1/deals/DEAL-PATH/documents/upload")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -960,17 +960,14 @@ async fn process_file_accepts_image_uploads_at_the_handler_boundary() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn process_file_accepts_modern_office_extensions_on_both_api_mounts() {
     for (path, filename) in [
-        (
-            "/api/v1/deals/DEAL-PATH/documents/process_file",
-            "model.XLSX",
-        ),
-        ("/api/deals/DEAL-PATH/documents/process_file", "board.pptx"),
+        ("/api/v1/deals/DEAL-PATH/documents/upload", "model.XLSX"),
+        ("/api/deals/DEAL-PATH/documents/upload", "board.pptx"),
     ] {
         const BOUNDARY: &str = "quarry-office-upload-boundary";
         let multipart = format!(
@@ -989,7 +986,7 @@ async fn process_file_accepts_modern_office_extensions_on_both_api_mounts() {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::ACCEPTED, "{filename}");
+        assert_eq!(response.status(), StatusCode::OK, "{filename}");
     }
 }
 
@@ -1003,7 +1000,7 @@ async fn process_file_rejects_legacy_office_extensions_at_the_handler_boundary()
         let response = test_router()
             .await
             .oneshot(
-                Request::post("/api/v1/deals/DEAL-PATH/documents/process_file")
+                Request::post("/api/v1/deals/DEAL-PATH/documents/upload")
                     .header(
                         "content-type",
                         format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -1027,7 +1024,7 @@ async fn process_file_uses_authenticated_identity_instead_of_blank_legacy_user_i
 
     let response = app
         .oneshot(
-            Request::post("/api/deals/DEAL-PATH/documents/process_file")
+            Request::post("/api/deals/DEAL-PATH/documents/upload")
                 .header(
                     "content-type",
                     format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -1038,7 +1035,7 @@ async fn process_file_uses_authenticated_identity_instead_of_blank_legacy_user_i
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

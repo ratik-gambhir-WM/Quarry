@@ -1,4 +1,4 @@
-import type { QuarryApi, ProcessFileJobEvent } from "../../contracts/quarryApi";
+import type { QuarryApi, UploadProgressEvent } from "../../contracts/quarryApi";
 
 export type UploadStatus = "ready" | "queued" | "uploading" | "processing" | "completed" | "skipped" | "failed";
 export type UploadEntry = {
@@ -8,6 +8,7 @@ export type UploadEntry = {
   file: File;
   id: string;
   jobId?: string;
+  stage?: UploadProgressEvent["status"];
   selected: boolean;
   status: UploadStatus;
 };
@@ -23,7 +24,7 @@ export const canUpload = (entry: UploadEntry) =>
 
 /** One modal owns a bounded queue, including processing jobs and their subscriptions. */
 export function createUploadWorkflow(
-  api: Pick<QuarryApi, "startProcessFile" | "subscribeToProcessFileJob">,
+  api: Pick<QuarryApi, "startProcessFile">,
   dealId: string,
 ) {
   // Matches the server's default background document workers; the server still
@@ -64,54 +65,12 @@ export function createUploadWorkflow(
     change(entry.id, { status: "uploading" });
     if (!current()) return;
     try {
-      const job = await api.startProcessFile(dealId, entry.file);
-      if (!current()) return;
-      change(entry.id, { jobId: job.jobId, status: "processing" });
-      if (!current()) return;
-      let connection = 0;
-      let retryDelay = 1000;
-      let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-      let unsubscribe = () => {};
-      run.stop = () => {
-        connection++;
-        clearTimeout(reconnectTimer);
-        const stop = unsubscribe;
-        unsubscribe = () => {};
-        stop();
-      };
-      function connect() {
+      const job = await api.startProcessFile(dealId, entry.file, event => {
         if (!current()) return;
-        const attempt = ++connection;
-        const connected = () => current() && connection === attempt;
-        const reconnect = () => {
-          if (!connected()) return;
-          run.stop();
-          change(entry.id, { error: "Connection interrupted. Reconnecting…" });
-          if (!current()) return;
-          reconnectTimer = setTimeout(connect, retryDelay);
-          retryDelay = Math.min(retryDelay * 2, 10000);
-        };
-        try {
-          const stop = api.subscribeToProcessFileJob(job.jobId, {
-            onConnectionError: reconnect,
-            onEvent: (event: ProcessFileJobEvent) => {
-              if (!connected()) return;
-              retryDelay = 1000;
-              if (event.status === "completed" || event.status === "skipped") {
-                finish(entry.id, { status: event.status, documentId: event.documentId, chunkCount: event.chunkCount, error: undefined });
-              } else if (event.status === "failed") {
-                finish(entry.id, { status: "failed", error: event.error || "Document processing failed." });
-              } else change(entry.id, { status: "processing", error: undefined });
-            },
-          });
-          // Replay may terminate or disconnect before the cleanup function returns.
-          if (connected()) unsubscribe = stop;
-          else stop();
-        } catch {
-          reconnect();
-        }
-      }
-      connect();
+        change(entry.id, { jobId: event.jobId, status: "processing", stage: event.status, error: undefined });
+      });
+      if (!current()) return;
+      finish(entry.id, { jobId: job.jobId, status: "completed", stage: "accepted", error: undefined });
     } catch (error) {
       if (current()) finish(entry.id, { status: "failed", error: error instanceof Error ? error.message : String(error) });
     }

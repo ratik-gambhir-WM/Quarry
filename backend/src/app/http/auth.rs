@@ -78,6 +78,7 @@ pub(crate) async fn authenticate(
                     Capability::Read
                 } else if path.ends_with("/documents/process")
                     || path.ends_with("/documents/process_file")
+                    || path.ends_with("/documents/upload")
                 {
                     Capability::Upload
                 } else if method == axum::http::Method::POST
@@ -119,6 +120,7 @@ pub(crate) async fn authenticate(
                     .await?;
                 if !path.ends_with("/documents/process")
                     && !path.ends_with("/documents/process_file")
+                    && !path.ends_with("/documents/upload")
                 {
                     admission = Some(boundary.access.policy().lifecycle().admit(deal).await);
                 }

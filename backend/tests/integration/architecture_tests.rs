@@ -295,7 +295,8 @@ fn document_attachment_check_is_one_explicit_cross_context_query() {
         "document authorization must use the canonical membership transaction policy"
     );
     let store = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domains/documents/store/repository.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/domains/documents/store/publication_repository.rs"),
     )
     .unwrap();
     assert!(store.contains("transaction_result_async") && store.contains("require_deal"));

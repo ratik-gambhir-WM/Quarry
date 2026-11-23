@@ -331,4 +331,8 @@ pub fn parse_retry_after(value: &str, now: chrono::DateTime<chrono::Utc>) -> Opt
 
 #[cfg(test)]
 #[path = "../../../tests/unit/adapters/openai/decisions_tests.rs"]
-pub(crate) mod tests;
+mod tests;
+
+#[cfg(test)]
+#[path = "../../../tests/integration/adapters/openai/decisions_support.rs"]
+pub(crate) mod test_support;

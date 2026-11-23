@@ -159,6 +159,10 @@ mod supervisor {
                 .await
                 .unwrap();
         }
+        sqlx::query("UPDATE document_jobs SET prepared_json='{}', stage='prepared'")
+            .execute(db.pool())
+            .await
+            .unwrap();
         (db, queue)
     }
 

@@ -74,6 +74,10 @@ export type ProcessFileJobResponse = {
   jobId: string;
 };
 
+export type UploadProgressEvent = ProcessFileJobResponse & {
+  status: "parsing" | "classifying" | "accepted" | "failed";
+};
+
 export type ProcessFileJobEvent = {
   chunkCount?: number;
   documentId?: string;
@@ -465,7 +469,7 @@ export interface QuarryApi extends NotebookApi, DealMembershipApi {
   searchDocumentChunksByVector(
     search: FileChunkVectorSearch,
   ): Promise<VectorFileChunkHit[]>;
-  startProcessFile(dealId: string, file: File): Promise<ProcessFileJobResponse>;
+  startProcessFile(dealId: string, file: File, onProgress?: (event: UploadProgressEvent) => void): Promise<ProcessFileJobResponse>;
   subscribeToProcessFileJob(
     jobId: string,
     handlers: ProcessFileJobEventHandlers,

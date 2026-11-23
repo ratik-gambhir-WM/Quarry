@@ -143,3 +143,55 @@ fn untrusted_context_is_single_line_and_bounded_and_images_are_marked() {
     assert!(sample.text.contains("image description"));
     assert!(sample.provenance.contains("image_description"));
 }
+
+#[test]
+fn named_provenance_preserves_sample_v1_json_bytes_and_digests() {
+    let selected = vec![
+        SelectedExcerpt {
+            chunk_index: 7,
+            sha256: SHA.into(),
+            start_byte: 3,
+            end_byte: 17,
+        },
+        SelectedExcerpt {
+            chunk_index: 8,
+            sha256: SHA.into(),
+            start_byte: 4,
+            end_byte: 20,
+        },
+    ];
+    let plan = SamplePlan {
+        sampled: true,
+        total_tokens: 12345,
+        segments: vec![],
+    };
+    let sample = finish(context(), &plan, "unchanged evidence".into(), &selected);
+    // This is the original sample-v1 representation, including compact array entries,
+    // truncated displayed hashes, full-hash digest inputs, and lexical object key order.
+    let legacy = serde_json::json!({
+        "sampleVersion": "sample-v1", "evidenceKind": "extracted_text", "sampled": true,
+        "totalTokens": 12345, "selectedCount": 2,
+        "selected": [[7, "0123456789abcdef", 3, 17], [8, "0123456789abcdef", 4, 20]],
+        "selectedDigest": sha256_hex(format!("7:{SHA}:3:17;8:{SHA}:4:20;").as_bytes()),
+    })
+    .to_string();
+    assert_eq!(sample.provenance, legacy);
+    assert_eq!(sample.hash, sha256_hex(b"unchanged evidence"));
+    let parsed: SampleProvenance = serde_json::from_str(&legacy).unwrap();
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), legacy);
+    assert_eq!(parsed.selected[1].end_byte, 20);
+}
+
+#[test]
+fn stored_sampling_flag_keeps_legacy_partial_and_malformed_provenance_behavior() {
+    assert!(!stored_sampled(r#"{"sampled":false}"#));
+    for input in [
+        r#"{"sampled":true}"#,
+        "{}",
+        "null",
+        "{",
+        r#"{"sampled":"false"}"#,
+    ] {
+        assert!(stored_sampled(input), "{input}");
+    }
+}

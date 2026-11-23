@@ -4,7 +4,7 @@
 //! from PostgreSQL) produce byte-identical evidence: [`plan`] selects token windows from
 //! chunk metadata alone, then [`render`] cuts those windows from only the chosen texts.
 //! No raw bytes, vectors or full document copies are made.
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -21,19 +21,11 @@ const MAX_CONTEXT_BYTES: usize = 200;
 const MAX_PROVENANCE_ENTRIES: usize = 200;
 const SHRINK_ATTEMPTS: usize = 8;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
     ExtractedText,
     ImageDescription,
-}
-
-impl EvidenceKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ExtractedText => "extracted_text",
-            Self::ImageDescription => "image_description",
-        }
-    }
 }
 
 /// Weak, untrusted context. Filenames never determine a category.
@@ -83,7 +75,7 @@ impl SamplePlan {
 }
 
 /// Bounded owned evidence, ready to persist.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceSample {
     pub text: String,
     pub provenance: String,
@@ -213,13 +205,71 @@ pub fn initial_plan(context: SampleContext<'_>, meta: &[ChunkMeta<'_>]) -> Sampl
     plan(meta, budget)
 }
 
-type Selected = Vec<(i64, String, usize, usize)>;
+/// An excerpt's original chunk identity and UTF-8 byte offsets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SelectedExcerpt {
+    chunk_index: i64,
+    sha256: String,
+    start_byte: usize,
+    end_byte: usize,
+}
+
+// sample-v1 stores each excerpt as a compact four-element array. Keep this layout
+// explicit while using named fields for all sampling and digest computations.
+impl Serialize for SelectedExcerpt {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (
+            self.chunk_index,
+            self.sha256.as_str(),
+            self.start_byte,
+            self.end_byte,
+        )
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectedExcerpt {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (chunk_index, sha256, start_byte, end_byte) = Deserialize::deserialize(deserializer)?;
+        Ok(Self {
+            chunk_index,
+            sha256,
+            start_byte,
+            end_byte,
+        })
+    }
+}
+
+/// Fields stay in sample-v1's lexical key order to preserve the stored JSON bytes.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SampleProvenance {
+    evidence_kind: EvidenceKind,
+    sample_version: String,
+    sampled: bool,
+    selected: Vec<SelectedExcerpt>,
+    selected_count: usize,
+    selected_digest: String,
+    total_tokens: u64,
+}
+
+/// Recovery historically needs only this flag and tolerates incomplete provenance.
+/// Keep that compatibility independently of the full versioned serialization schema.
+pub(super) fn stored_sampled(provenance: &str) -> bool {
+    #[derive(Deserialize)]
+    struct StoredProvenance {
+        sampled: bool,
+    }
+    serde_json::from_str::<StoredProvenance>(provenance)
+        .map(|stored| stored.sampled)
+        .unwrap_or(true)
+}
 
 fn render(
     plan: &SamplePlan,
     meta: &[ChunkMeta<'_>],
     texts: &HashMap<i64, &str>,
-) -> (String, Selected) {
+) -> (String, Vec<SelectedExcerpt>) {
     let mut body = String::new();
     let mut selected = Vec::with_capacity(plan.segments.len());
     if plan.sampled {
@@ -240,7 +290,12 @@ fn render(
         body.push_str(&label(chunk, plan.sampled, meta.len()));
         body.push_str(excerpt);
         body.push_str("\n\n");
-        selected.push((chunk.index, chunk.sha256.to_string(), start, end));
+        selected.push(SelectedExcerpt {
+            chunk_index: chunk.index,
+            sha256: chunk.sha256.to_string(),
+            start_byte: start,
+            end_byte: end,
+        });
     }
     (body, selected)
 }
@@ -336,27 +391,38 @@ fn finish(
     context: SampleContext<'_>,
     plan: &SamplePlan,
     text: String,
-    selected: &Selected,
+    selected: &[SelectedExcerpt],
 ) -> EvidenceSample {
     let mut digest = Sha256::new();
-    for (index, sha, start, end) in selected {
-        digest.update(format!("{index}:{sha}:{start}:{end};").as_bytes());
+    for excerpt in selected {
+        digest.update(
+            format!(
+                "{}:{}:{}:{};",
+                excerpt.chunk_index, excerpt.sha256, excerpt.start_byte, excerpt.end_byte
+            )
+            .as_bytes(),
+        );
     }
-    let entries: Vec<_> = selected
+    let entries = selected
         .iter()
         .take(MAX_PROVENANCE_ENTRIES)
-        .map(|(index, sha, start, end)| json!([index, &sha[..sha.len().min(16)], start, end]))
+        .map(|excerpt| SelectedExcerpt {
+            chunk_index: excerpt.chunk_index,
+            sha256: excerpt.sha256[..excerpt.sha256.len().min(16)].to_string(),
+            start_byte: excerpt.start_byte,
+            end_byte: excerpt.end_byte,
+        })
         .collect();
-    let provenance = json!({
-        "sampleVersion": SAMPLE_VERSION,
-        "evidenceKind": context.evidence.as_str(),
-        "sampled": plan.sampled,
-        "totalTokens": plan.total_tokens,
-        "selectedCount": selected.len(),
-        "selected": entries,
-        "selectedDigest": format!("{:x}", digest.finalize()),
+    let provenance = serde_json::to_string(&SampleProvenance {
+        sample_version: SAMPLE_VERSION.to_string(),
+        evidence_kind: context.evidence,
+        sampled: plan.sampled,
+        total_tokens: plan.total_tokens,
+        selected_count: selected.len(),
+        selected: entries,
+        selected_digest: format!("{:x}", digest.finalize()),
     })
-    .to_string();
+    .expect("sample provenance contains only serializable strings and integers");
     EvidenceSample {
         hash: sha256_hex(text.as_bytes()),
         text,

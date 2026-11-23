@@ -2,6 +2,7 @@ use super::repository::Attempt;
 use crate::{
     domains::documents::{
         classification::repository::ClassificationRecord,
+        formats::image::ImageAssemblyRef,
         model::{Document, DocumentChunk},
         store::{
             chunk::FileChunkResult,
@@ -60,10 +61,26 @@ fn prepare_document(
 ) -> Result<(FilePersistenceInput, PreparedChunks), String> {
     ensure_document_invariants(&document, &chunks)?;
     let mut input = build_file_persistence_input(deal_id, actor_id, &document, file_bytes)?;
+    if infer_supported_image_mime_type(Path::new(&document.file_name)).is_some() {
+        // Recovery checkpoints contain the accepted description, never vectors. Move
+        // vectors aside only while encoding, then consume the original chunks below.
+        let embeddings: Vec<_> = chunks
+            .iter_mut()
+            .map(|chunk| chunk.embedding.take())
+            .collect();
+        let encoded = serde_json::to_string(&ImageAssemblyRef {
+            document: &document,
+            chunks: &chunks,
+        });
+        for (chunk, embedding) in chunks.iter_mut().zip(embeddings) {
+            chunk.embedding = embedding;
+        }
+        input.image_assembly_json = Some(encoded.map_err(|error| error.to_string())?);
+    }
     let mut rows = Vec::with_capacity(chunks.len());
-    for chunk in &mut chunks {
+    for chunk in chunks {
         let chunk_index = i64::from(chunk.sequence_number);
-        let (page_start, page_end) = page_range(chunk)?;
+        let (page_start, page_end) = page_range(&chunk)?;
         rows.push((
             FileChunkResult {
                 chunk_id: sha256_hex(
@@ -82,23 +99,23 @@ fn prepare_document(
                 version_id: input.version_id.clone(),
                 index_generation: input.version_id.clone(),
                 chunk_index,
-                text: chunk.text.clone(),
-                chunk_sha256: chunk.content_hash.clone(),
+                text: chunk.text,
+                chunk_sha256: chunk.content_hash,
                 token_count: i64::from(chunk.token_count),
                 page_start,
                 page_end,
                 char_start: usize_to_i64(chunk.start_offset, "char_start")?,
                 char_end: usize_to_i64(chunk.end_offset, "char_end")?,
-                section_path: chunk.section_title.clone().unwrap_or_default(),
+                section_path: chunk.section_title.unwrap_or_default(),
                 created_at: input.timestamp.clone(),
             },
-            chunk.embedding.take().ok_or("missing chunk embedding")?,
+            chunk.embedding.ok_or("missing chunk embedding")?,
         ));
     }
     rows.sort_by_key(|(c, _)| c.chunk_index);
     input.manifest = Some(IdentityManifest {
         derivation_version: 2,
-        document_id: document.document_id.clone(),
+        document_id: document.document_id,
         active_generation: input.version_id.clone(),
         chunks: rows
             .iter()
@@ -110,19 +127,6 @@ fn prepare_document(
             })
             .collect(),
     });
-    if infer_supported_image_mime_type(Path::new(&document.file_name)).is_some() {
-        let mut accepted = chunks;
-        for chunk in &mut accepted {
-            chunk.embedding = None;
-        }
-        input.image_assembly_json = Some(
-            serde_json::to_string(&crate::domains::documents::formats::image::ImageAssembly {
-                document,
-                chunks: accepted,
-            })
-            .map_err(|e| e.to_string())?,
-        );
-    }
     let batch = PreparedChunks::new(profile, rows).map_err(|e| e.to_string())?;
     Ok((input, batch))
 }

@@ -1,6 +1,9 @@
 use super::*;
 use crate::{
-    adapters::openai::decisions::{tests::fake_provider, DecisionsClient},
+    adapters::openai::decisions::{
+        test_support::{fake_provider, FakeDecisionsProvider, ProviderResponse},
+        DecisionsClient,
+    },
     domains::documents::{
         classification::{
             model::ResultStatus,
@@ -117,18 +120,18 @@ async fn row_count(db: &PostgresClient) -> i64 {
 async fn classification_commits_with_the_document_and_is_listed() {
     let db = database().await;
     let hash = admit(&db, "pipeline evidence").await;
-    let (endpoint, captured) = fake_provider(
+    let provider = fake_provider(
         StatusCode::OK,
         vec![],
         answers("data_engineering_integration"),
     )
     .await;
-    let classification = service(Some(&endpoint), &db, true);
+    let classification = service(Some(provider.endpoint()), &db, true);
     let record = ingest(&db, &classification, "pipeline evidence")
         .await
         .unwrap();
-    assert_eq!(record.status, RunStatus::Completed);
-    assert_eq!(captured.requests.lock().unwrap().len(), 1);
+    assert_eq!(record.outcome.status(), RunStatus::Completed);
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
 
     let listed = DocumentStore::new(db.clone())
         .list_for_deal(DEAL)
@@ -153,9 +156,7 @@ async fn classification_commits_with_the_document_and_is_listed() {
 
     // An exact replay of the same content keeps the committed classification.
     let failed = ClassificationRecord {
-        status: RunStatus::Failed,
-        result_json: None,
-        error: Some(ErrorCode::Timeout),
+        outcome: ClassificationRun::Failed(ErrorCode::Timeout),
         ..record
     };
     let (doc, chunks, bytes) = sample("pipeline evidence", DEAL, "pipeline evidence", 3);
@@ -199,19 +200,19 @@ async fn a_failed_commit_saves_no_classification() {
 async fn provider_failures_are_saved_as_failed_without_failing_the_document() {
     let db = database().await;
     admit(&db, "unavailable evidence").await;
-    let (endpoint, captured) = fake_provider(
+    let provider = fake_provider(
         StatusCode::SERVICE_UNAVAILABLE,
         vec![("retry-after", "1")],
         "unavailable".into(),
     )
     .await;
-    let classification = service(Some(&endpoint), &db, true);
+    let classification = service(Some(provider.endpoint()), &db, true);
     let record = ingest(&db, &classification, "unavailable evidence")
         .await
         .unwrap();
-    assert_eq!(captured.requests.lock().unwrap().len(), 3);
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
     assert_eq!(
-        (record.status, record.error),
+        (record.outcome.status(), record.outcome.error()),
         (RunStatus::Failed, Some(ErrorCode::UpstreamUnavailable))
     );
     let listed = DocumentStore::new(db.clone())
@@ -230,51 +231,57 @@ async fn provider_failures_are_saved_as_failed_without_failing_the_document() {
 #[tokio::test]
 async fn invalid_output_fails_immediately_and_disabled_or_empty_input_needs_no_provider() {
     let db = database().await;
-    let (endpoint, captured) = fake_provider(
+    let provider = fake_provider(
         StatusCode::OK,
         vec![],
         serde_json::json!({"answers": [{"type": "refusal", "name": "covers_sdlc"}]}).to_string(),
     )
     .await;
-    let classification = service(Some(&endpoint), &db, true);
+    let classification = service(Some(provider.endpoint()), &db, true);
     let (doc, chunks, _) = sample("invalid", DEAL, "invalid", 2);
     let record = classification
         .classify(classification.prepare("invalid.docx", &doc, &chunks))
         .await;
     assert_eq!(
-        (record.status, record.error),
+        (record.outcome.status(), record.outcome.error()),
         (RunStatus::Failed, Some(ErrorCode::InvalidResponse))
     );
-    assert_eq!(captured.requests.lock().unwrap().len(), 1);
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
 
-    let disabled = service(Some(&endpoint), &db, false);
+    let disabled = service(Some(provider.endpoint()), &db, false);
     let record = disabled
         .classify(disabled.prepare("disabled.docx", &doc, &chunks))
         .await;
-    assert_eq!((record.status, record.error), (RunStatus::Disabled, None));
+    assert_eq!(
+        (record.outcome.status(), record.outcome.error()),
+        (RunStatus::Disabled, None)
+    );
     assert!(!record.sample.text.is_empty(), "evidence is kept for later");
 
     let (doc, mut chunks, _) = sample("empty", DEAL, "empty", 1);
     chunks[0].text = "   ".into();
-    let record = classification
-        .classify(classification.prepare("empty.docx", &doc, &chunks))
-        .await;
-    assert_eq!(record.status, RunStatus::Completed);
-    assert!(record
-        .result_json
-        .unwrap()
-        .contains("insufficient_information"));
-    assert_eq!(captured.requests.lock().unwrap().len(), 1);
+    for service in [&classification, &disabled] {
+        let record = service
+            .classify(service.prepare("empty.docx", &doc, &chunks))
+            .await;
+        assert_eq!(record.outcome.status(), RunStatus::Completed);
+        assert!(record
+            .outcome
+            .result_json()
+            .unwrap()
+            .contains("insufficient_information"));
+    }
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn reclassification_is_a_synchronous_generation_compare_and_set() {
     let db = database().await;
     let hash = admit(&db, "reclassify evidence").await;
-    let (first, _) = fake_provider(StatusCode::OK, vec![], answers("sdlc")).await;
+    let first = fake_provider(StatusCode::OK, vec![], answers("sdlc")).await;
     ingest(
         &db,
-        &service(Some(&first), &db, true),
+        &service(Some(first.endpoint()), &db, true),
         "reclassify evidence",
     )
     .await
@@ -284,16 +291,15 @@ async fn reclassification_is_a_synchronous_generation_compare_and_set() {
         .await
         .unwrap();
     let file_id = document_id_from_content(DEAL, &hash);
-    let (second, captured) =
-        fake_provider(StatusCode::OK, vec![], answers("product_security")).await;
-    let classification = service(Some(&second), &db, true);
+    let second = fake_provider(StatusCode::OK, vec![], answers("product_security")).await;
+    let classification = service(Some(second.endpoint()), &db, true);
 
     assert!(matches!(
         classification.request(DEAL, &file_id, 1, 0).await,
         Err(ServiceError::Conflict(_))
     ));
     assert!(
-        captured.requests.lock().unwrap().is_empty(),
+        second.requests.lock().unwrap().is_empty(),
         "stale requests spend nothing"
     );
     let updated = classification.request(DEAL, &file_id, 1, 1).await.unwrap();
@@ -303,17 +309,17 @@ async fn reclassification_is_a_synchronous_generation_compare_and_set() {
         updated.result.as_ref().unwrap().primary_category,
         Some(Category::ProductSecurity)
     );
-    assert!(updated.result.unwrap().classified_at.is_some());
+    assert!(updated.result.as_ref().unwrap().classified_at.is_some());
     let listed = DocumentStore::new(db.clone())
         .list_for_deal(DEAL)
         .await
         .unwrap();
-    assert_eq!(listed[0].classification.generation, Some(2));
+    assert_eq!(listed[0].classification, updated);
 
     // A provider failure returns 503 and leaves the stored classification unchanged.
-    let (broken, _) = fake_provider(StatusCode::BAD_REQUEST, vec![], "bad".into()).await;
+    let broken = fake_provider(StatusCode::BAD_REQUEST, vec![], "bad".into()).await;
     assert!(matches!(
-        service(Some(&broken), &db, true)
+        service(Some(broken.endpoint()), &db, true)
             .request(DEAL, &file_id, 1, 2)
             .await,
         Err(ServiceError::Unavailable(_))
@@ -350,9 +356,9 @@ async fn documents_without_a_classification_are_resampled_from_stored_chunks() {
         .await
         .unwrap();
     assert_eq!(listed[0].classification.run_status, "not_requested");
-    let (endpoint, _) = fake_provider(StatusCode::OK, vec![], answers("sdlc")).await;
+    let provider = fake_provider(StatusCode::OK, vec![], answers("sdlc")).await;
     let file_id = document_id_from_content(DEAL, &hash);
-    let classified = service(Some(&endpoint), &db, true)
+    let classified = service(Some(provider.endpoint()), &db, true)
         .request(DEAL, &file_id, 1, 0)
         .await
         .unwrap();
@@ -378,4 +384,39 @@ async fn parent_deletion_cascades_the_classification() {
         .await
         .unwrap();
     assert_eq!(row_count(&db).await, 0);
+}
+
+#[tokio::test]
+async fn retryable_provider_errors_reuse_the_same_evidence_and_recover() {
+    let db = database().await;
+    let provider = FakeDecisionsProvider::scripted(vec![
+        ProviderResponse {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            headers: vec![("retry-after", "1")],
+            body: "unavailable".into(),
+        },
+        ProviderResponse {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            headers: vec![("retry-after", "1")],
+            body: "limited".into(),
+        },
+        ProviderResponse {
+            status: StatusCode::OK,
+            headers: vec![],
+            body: answers("sdlc"),
+        },
+    ])
+    .await;
+    let classification = service(Some(provider.endpoint()), &db, true);
+    let (doc, chunks, _) = sample("retry", DEAL, "retry evidence", 2);
+    let record = classification
+        .classify(classification.prepare("retry.docx", &doc, &chunks))
+        .await;
+    assert_eq!(record.outcome.status(), RunStatus::Completed);
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests.windows(2).all(|pair| pair[0].1 == pair[1].1));
+    }
+    provider.shutdown().await;
 }

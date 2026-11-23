@@ -33,6 +33,13 @@ pub struct ImageAssembly {
     pub chunks: Vec<DocumentChunk>,
 }
 
+/// Borrowed checkpoint encoding with the same field order and shape as ImageAssembly.
+#[derive(serde::Serialize)]
+pub(crate) struct ImageAssemblyRef<'a> {
+    pub document: &'a Document,
+    pub chunks: &'a [DocumentChunk],
+}
+
 pub(crate) struct DecodedImage {
     pub height: u32,
     pub rgb_bytes: Vec<u8>,
@@ -46,14 +53,17 @@ pub(crate) struct ValidatedImage {
 
 /// Validates bytes on the blocking pool and retains the MIME type derived from the filename.
 /// Model calls and ingestion orchestration belong to the ingestion service.
+/// `keep_alive` retains caller-owned admission through the uncancellable decode.
 pub(crate) async fn validate_image_by_bytes(
     bytes: Vec<u8>,
     file_name: &str,
+    keep_alive: impl Send + 'static,
 ) -> Result<ValidatedImage, String> {
     let mime_type = infer_supported_image_mime_type(Path::new(&file_name))
         .ok_or_else(|| format!("unsupported image file `{file_name}`"))?;
     let validation_mime_type = mime_type;
     let bytes = tokio::task::spawn_blocking(move || {
+        let _keep_alive = keep_alive;
         validate_image(&bytes, validation_mime_type)?;
         Ok::<_, String>(bytes)
     })

@@ -110,7 +110,7 @@ async fn cancelled_sync_requests_expire_release_capacity_and_retry_with_fenced_a
 }
 
 #[tokio::test]
-async fn sync_expiration_preserves_live_and_background_work_and_image_checkpoints() {
+async fn expiration_preserves_live_work_but_requires_retry_for_incomplete_admissions() {
     let db = database().await;
     let jobs = repository(db.clone());
     let mut preserved = Vec::new();
@@ -137,7 +137,16 @@ async fn sync_expiration_preserves_live_and_background_work_and_image_checkpoint
                 .await
                 .unwrap();
         }
-        preserved.push((id, if processing { "processing" } else { "queued" }));
+        preserved.push((
+            id,
+            if background || content == "promoted" {
+                "failed"
+            } else if processing {
+                "processing"
+            } else {
+                "queued"
+            },
+        ));
     }
     let (id, _) = jobs
         .admit("DEAL-SQL".into(), 1, input("image checkpoint"), false)
@@ -520,7 +529,7 @@ async fn status_reads_do_not_fetch_accepted_input() {
          CREATE FUNCTION reject_job_payload_read() RETURNS bytea LANGUAGE plpgsql STABLE AS $$
          BEGIN RAISE EXCEPTION 'status polling must not read accepted input'; END $$;
          CREATE VIEW document_jobs AS
-         SELECT job_id,deal_id,filename,status,sequence,result_json,
+         SELECT job_id,deal_id,filename,status,sequence,result_json,stage,admission_complete,
                 reject_job_payload_read() AS input_bytes
          FROM document_jobs_storage;",
     )
@@ -540,4 +549,56 @@ async fn status_reads_do_not_fetch_accepted_input() {
     assert!(!result.success);
     assert!(!result.sqlite_committed);
     assert_eq!(result.filename, filename);
+}
+
+#[tokio::test]
+async fn only_durable_admissions_reach_embedding_and_stale_admission_cannot_replace_them() {
+    let db = database().await;
+    let jobs = repository(db.clone());
+    let (id, _) = jobs
+        .admit("DEAL-SQL".into(), 1, input("prepared admission"), false)
+        .await
+        .unwrap();
+    assert!(jobs.claim_ready().await.unwrap().is_none());
+    let admission = jobs.claim(Some(&id)).await.unwrap().unwrap();
+    jobs.classifying(&admission.attempt).await.unwrap();
+    assert_eq!(jobs.job(&id).await.unwrap().stage, "classifying");
+    let (document, mut chunks, _) = sample(
+        &admission.attempt.file_id,
+        "DEAL-SQL",
+        "prepared admission",
+        1,
+    );
+    for chunk in &mut chunks {
+        chunk.embedding = None;
+    }
+    let prepared =
+        serde_json::json!({ "document": document, "chunks": chunks, "classification": null })
+            .to_string();
+    jobs.save_prepared(&admission.attempt, prepared.clone(), true)
+        .await
+        .unwrap();
+    assert!(jobs.job(&id).await.unwrap().prepared);
+    assert!(jobs
+        .save_prepared(&admission.attempt, "{}".into(), true)
+        .await
+        .is_err());
+    let embedding = jobs.claim_ready().await.unwrap().unwrap();
+    assert_eq!(embedding.prepared.as_deref(), Some(prepared.as_str()));
+    assert_ne!(embedding.attempt.token, admission.attempt.token);
+    assert!(jobs.claim_ready().await.unwrap().is_none());
+    jobs.fail(&embedding.attempt).await.unwrap();
+    let (retry, _) = jobs
+        .admit("DEAL-SQL".into(), 1, input("prepared admission"), false)
+        .await
+        .unwrap();
+    assert_eq!(retry, id);
+    assert!(jobs.job(&id).await.unwrap().prepared);
+    jobs.schedule_prepared(&id, true).await.unwrap();
+    let retry = jobs.claim_ready().await.unwrap().unwrap();
+    assert_eq!(retry.prepared.as_deref(), Some(prepared.as_str()));
+    assert!(db
+        .transaction_result_async(|tx| async move { embedding.attempt.lock_and_check(&tx).await })
+        .await
+        .is_err());
 }

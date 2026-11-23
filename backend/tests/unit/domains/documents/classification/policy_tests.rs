@@ -236,3 +236,71 @@ fn fingerprint_pins_content_evidence_and_profile() {
     assert_eq!(local.model, None);
     assert!(local.is_consistent());
 }
+
+#[test]
+fn every_policy_outcome_preserves_the_existing_json_contract() {
+    let cases = [
+        ("sdlc", 0.9, "classified", Some("sdlc"), None),
+        ("sdlc", 0.5, "needs_review", None, Some("sdlc")),
+        (UNCLASSIFIED, 0.9, "insufficient_information", None, None),
+    ];
+    for (selected, probability, status, primary, suggested) in cases {
+        let result = normalize(
+            &answers(selected, probability, 0.85, &[]),
+            None,
+            &provenance(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "status": status,
+                "primaryWorkstream": primary.map(|_| "product_engineering"),
+                "primaryCategory": primary,
+                "secondaryCategories": [],
+                "confidence": 0.85,
+                "primaryProbability": probability,
+                "suggestedPrimaryCategory": suggested,
+                "suggestedPrimaryWorkstream": suggested.map(|_| "product_engineering"),
+                "secondaryAssessmentIncomplete": false,
+                "model": "gpt-6-luna",
+                "taxonomyVersion": 1,
+                "promptVersion": "document-classification-v1",
+                "sampleVersion": "sample-v1",
+                "policyVersion": 1,
+                "inputFingerprint": "f".repeat(64),
+                "sampled": true,
+            })
+        );
+    }
+    // Both local abstention and provider refusal remain label-free and unscored.
+    let mut refused = answers("sdlc", 0.9, 0.85, &[]);
+    refused[0] = Answer::Refusal {
+        name: Some(PRIMARY_QUESTION.into()),
+    };
+    for (result, status, model) in [
+        (
+            insufficient(&provenance()),
+            "insufficient_information",
+            None,
+        ),
+        (
+            normalize(&refused, None, &provenance()).unwrap(),
+            "refused",
+            Some("gpt-6-luna"),
+        ),
+    ] {
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "status": status, "primaryWorkstream": null, "primaryCategory": null,
+                "secondaryCategories": [], "confidence": null, "primaryProbability": null,
+                "suggestedPrimaryCategory": null, "suggestedPrimaryWorkstream": null,
+                "secondaryAssessmentIncomplete": false, "model": model,
+                "taxonomyVersion": 1, "promptVersion": "document-classification-v1",
+                "sampleVersion": "sample-v1", "policyVersion": 1,
+                "inputFingerprint": "f".repeat(64), "sampled": true,
+            })
+        );
+    }
+}

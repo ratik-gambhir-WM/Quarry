@@ -16,8 +16,8 @@ use crate::{
     quarry_api::{
         cancel_query_stream, quarry_api_delete, quarry_api_delete_json, quarry_api_get,
         quarry_api_get_pdf, quarry_api_patch, quarry_api_post, quarry_api_post_multipart,
-        quarry_api_post_powerpoint, send_query_stream, subscribe_document_job,
-        subscribe_notebook_job, QuarryApiService, QuerySubscriptions,
+        quarry_api_post_powerpoint, quarry_api_upload_document, send_query_stream,
+        subscribe_document_job, subscribe_notebook_job, QuarryApiService, QuerySubscriptions,
     },
     save_file::{save_powerpoint_file, save_text_file},
 };
@@ -92,6 +92,7 @@ pub fn run() {
             quarry_api_patch,
             subscribe_notebook_job,
             quarry_api_post_multipart,
+            quarry_api_upload_document,
             quarry_api_post_powerpoint,
             save_powerpoint_file,
             save_text_file,

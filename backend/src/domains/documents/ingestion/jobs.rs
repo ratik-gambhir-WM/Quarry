@@ -1,5 +1,38 @@
 use serde::Serialize;
 
+/// Admission progress ends at durable acceptance; embedding has no user-facing stream.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AdmissionEvent {
+    pub job_id: String,
+    pub filename: String,
+    pub status: AdmissionStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AdmissionStatus {
+    Parsing,
+    Classifying,
+    Accepted,
+    Failed,
+}
+
+impl AdmissionStatus {
+    pub(crate) fn event_name(self) -> &'static str {
+        match self {
+            Self::Parsing => "parsing",
+            Self::Classifying => "classifying",
+            Self::Accepted => "accepted",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(self, Self::Accepted | Self::Failed)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentJobEvent {

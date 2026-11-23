@@ -250,42 +250,9 @@ impl QuarryApiService {
             }
             super::revisions::value(&revisions[0].value)?;
         }
-        let mut total_bytes = 0usize;
-        let mut form = Form::new();
-        for field in request.fields {
-            if field.name.trim().is_empty() || field.name.len() > 64 {
-                return Err("multipart field name is invalid".to_string());
-            }
-            form = form.text(field.name, field.value);
-        }
-        for file in request.files {
-            if file.field_name.trim().is_empty()
-                || file.filename.trim().is_empty()
-                || file.filename.starts_with(['/', '\\'])
-                || file.filename.split(['/', '\\']).any(|part| part == "..")
-                || file.filename.chars().any(char::is_control)
-            {
-                return Err("multipart file metadata is invalid".to_string());
-            }
-            let bytes = general_purpose::STANDARD
-                .decode(file.data_base64)
-                .map_err(|_| "multipart file data is not valid base64".to_string())?;
-            if bytes.is_empty() || bytes.len() > MAX_PROXY_FILE_BYTES {
-                return Err("multipart file is empty or exceeds 50 MB".to_string());
-            }
-            total_bytes = total_bytes
-                .checked_add(bytes.len())
-                .ok_or_else(|| "multipart request is too large".to_string())?;
-            if total_bytes > MAX_PROXY_TOTAL_BYTES {
-                return Err("multipart files exceed the 50 MB request limit".to_string());
-            }
-            let part = Part::bytes(bytes)
-                .file_name(file.filename)
-                .mime_str(&file.mime_type)
-                .map_err(|_| "multipart MIME type is invalid".to_string())?;
-            form = form.part(file.field_name, part);
-        }
-        self.client.post_multipart(&request.path, form).await
+        let path = request.path.clone();
+        let form = build_multipart_form(request)?;
+        self.client.post_multipart(&path, form).await
     }
 
     pub async fn document_job_events(
@@ -407,3 +374,42 @@ pub(super) fn validate_identifier(name: &str, value: &str) -> Result<(), String>
 #[cfg(test)]
 #[path = "../../tests/quarry_api/service_tests.rs"]
 mod tests;
+
+pub(super) fn build_multipart_form(request: MultipartRequest) -> Result<Form, String> {
+    let mut total_bytes = 0usize;
+    let mut form = Form::new();
+    for field in request.fields {
+        if field.name.trim().is_empty() || field.name.len() > 64 {
+            return Err("multipart field name is invalid".to_string());
+        }
+        form = form.text(field.name, field.value);
+    }
+    for file in request.files {
+        if file.field_name.trim().is_empty()
+            || file.filename.trim().is_empty()
+            || file.filename.starts_with(['/', '\\'])
+            || file.filename.split(['/', '\\']).any(|part| part == "..")
+            || file.filename.chars().any(char::is_control)
+        {
+            return Err("multipart file metadata is invalid".to_string());
+        }
+        let bytes = general_purpose::STANDARD
+            .decode(file.data_base64)
+            .map_err(|_| "multipart file data is not valid base64".to_string())?;
+        if bytes.is_empty() || bytes.len() > MAX_PROXY_FILE_BYTES {
+            return Err("multipart file is empty or exceeds 50 MB".to_string());
+        }
+        total_bytes = total_bytes
+            .checked_add(bytes.len())
+            .ok_or_else(|| "multipart request is too large".to_string())?;
+        if total_bytes > MAX_PROXY_TOTAL_BYTES {
+            return Err("multipart files exceed the 50 MB request limit".to_string());
+        }
+        let part = Part::bytes(bytes)
+            .file_name(file.filename)
+            .mime_str(&file.mime_type)
+            .map_err(|_| "multipart MIME type is invalid".to_string())?;
+        form = form.part(file.field_name, part);
+    }
+    Ok(form)
+}

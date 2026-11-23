@@ -13,9 +13,12 @@ use std::{
 use tokio::sync::Semaphore;
 
 use super::{
-    model::{ClassificationResult, DocumentClassification, ErrorCode, RunStatus, SAMPLE_VERSION},
+    model::{ClassificationResult, DocumentClassification, ErrorCode, SAMPLE_VERSION},
     policy::{self, Provenance},
-    repository::{ClassificationRecord, ClassificationRepository, CommittedVersion, StoredChunk},
+    repository::{
+        ClassificationRecord, ClassificationRepository, ClassificationRun, CommittedVersion,
+        StoredChunk,
+    },
     sample::{self, ChunkMeta, EvidenceKind, EvidenceSample, SampleContext, SampleOutcome},
 };
 use crate::{
@@ -105,22 +108,33 @@ impl ClassificationService {
         )
     }
 
-    /// Classify one document inside its worker. Always returns a record to save with the
+    /// Classify one document during upload admission. Always returns a record to save with the
     /// document: completed, failed (after bounded retries) or disabled.
     pub(crate) async fn classify(&self, prepared: PreparedEvidence) -> ClassificationRecord {
+        if !prepared.empty && !self.is_enabled() {
+            return record(prepared, ClassificationRun::Disabled);
+        }
+        let outcome = self
+            .evaluate(&prepared)
+            .await
+            .and_then(|result| encode_completed(&result))
+            .unwrap_or_else(ClassificationRun::Failed);
+        record(prepared, outcome)
+    }
+
+    /// Shared evidence evaluation; callers own disabled and failure behavior.
+    async fn evaluate(
+        &self,
+        prepared: &PreparedEvidence,
+    ) -> Result<ClassificationResult, ErrorCode> {
         let provenance = Provenance {
             fingerprint: prepared.fingerprint.clone(),
             sampled: prepared.sample.sampled,
         };
         if prepared.empty {
-            return completed(prepared, &policy::insufficient(&provenance));
-        }
-        if !self.is_enabled() {
-            return record(prepared, RunStatus::Disabled, None, None);
-        }
-        match self.decide(&prepared.sample.text, &provenance).await {
-            Ok(result) => completed(prepared, &result),
-            Err(code) => record(prepared, RunStatus::Failed, None, Some(code)),
+            Ok(policy::insufficient(&provenance))
+        } else {
+            self.decide(&prepared.sample.text, &provenance).await
         }
     }
 
@@ -218,40 +232,27 @@ impl ClassificationService {
             },
             _ => self.sample_committed(&target.version).await?,
         };
-        let provenance = Provenance {
-            fingerprint: prepared.fingerprint.clone(),
-            sampled: prepared.sample.sampled,
-        };
-        let result = if prepared.empty {
-            policy::insufficient(&provenance)
-        } else {
-            self.decide(&prepared.sample.text, &provenance)
-                .await
-                .map_err(|_| {
-                    ServiceError::unavailable("Document classification failed; retry later")
-                })?
-        };
+        let result = self
+            .evaluate(&prepared)
+            .await
+            .map_err(|_| classification_failed())?;
+        let outcome = encode_completed(&result).map_err(|_| classification_failed())?;
         let (generation, completed_at) = self
             .repository
             .apply_reclassification(
                 &target,
                 actor,
                 expected_generation,
-                completed(prepared, &result),
+                record(prepared, outcome),
             )
             .await
             .map_err(map_repository)?;
-        let mut result = result;
-        result.classified_at = completed_at
-            .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
-            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-        Ok(DocumentClassification {
-            version_id: target.version.version_id,
-            run_status: RunStatus::Completed.as_str().into(),
-            generation: Some(generation),
-            last_error_code: None,
-            result: Some(result),
-        })
+        Ok(super::view::completed(
+            target.version.version_id,
+            generation,
+            result,
+            completed_at,
+        ))
     }
 
     /// Rebuild the same `sample-v1` evidence from stored chunks: metadata first, then only
@@ -286,34 +287,24 @@ impl ClassificationService {
     }
 }
 
-fn completed(prepared: PreparedEvidence, result: &ClassificationResult) -> ClassificationRecord {
-    match serde_json::to_string(result)
+fn encode_completed(result: &ClassificationResult) -> Result<ClassificationRun, ErrorCode> {
+    let result_json = serde_json::to_string(result)
         .ok()
         .filter(|json| json.len() <= MAX_RESULT_BYTES)
-    {
-        Some(json) => record(prepared, RunStatus::Completed, Some(json), None),
-        None => record(
-            prepared,
-            RunStatus::Failed,
-            None,
-            Some(ErrorCode::InvalidResponse),
-        ),
-    }
+        .ok_or(ErrorCode::InvalidResponse)?;
+    Ok(ClassificationRun::Completed { result_json })
 }
 
-fn record(
-    prepared: PreparedEvidence,
-    status: RunStatus,
-    result_json: Option<String>,
-    error: Option<ErrorCode>,
-) -> ClassificationRecord {
+fn record(prepared: PreparedEvidence, outcome: ClassificationRun) -> ClassificationRecord {
     ClassificationRecord {
         sample: prepared.sample,
         fingerprint: prepared.fingerprint,
-        status,
-        result_json,
-        error,
+        outcome,
     }
+}
+
+fn classification_failed() -> ServiceError {
+    ServiceError::unavailable("Document classification failed; retry later")
 }
 
 fn stored_meta(chunks: &[StoredChunk]) -> Vec<ChunkMeta<'_>> {

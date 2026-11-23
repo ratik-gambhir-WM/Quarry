@@ -85,3 +85,17 @@ fn ingestion_and_stored_metadata_produce_identical_evidence() {
     assert_eq!(a.fingerprint, b.fingerprint);
     assert!(!a.empty);
 }
+
+#[test]
+fn completed_result_encoding_enforces_the_persisted_size_bound() {
+    let mut result = policy::insufficient(&Provenance {
+        fingerprint: "a".repeat(64),
+        sampled: false,
+    });
+    assert!(matches!(
+        encode_completed(&result),
+        Ok(ClassificationRun::Completed { .. })
+    ));
+    result.input_fingerprint = "a".repeat(MAX_RESULT_BYTES);
+    assert_eq!(encode_completed(&result), Err(ErrorCode::InvalidResponse));
+}

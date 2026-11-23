@@ -1,4 +1,5 @@
 use super::*;
+use crate::adapters::postgres::query::{Condition, SqlBuilder};
 use std::path::Path;
 
 use crate::{
@@ -86,7 +87,7 @@ async fn persist_file_blob(
             chunks: Vec::new(),
         },
     );
-    super::persist_file_blob(
+    super::super::publication_repository::persist_file_blob(
         postgres,
         file_persistence,
         super::super::search_repository::PreparedChunks::new(

@@ -1,60 +1,6 @@
 use super::*;
-use axum::{
-    body::Bytes,
-    http::{HeaderMap, HeaderValue, StatusCode},
-    response::IntoResponse,
-    routing::post,
-    Router,
-};
-use std::sync::{Arc, Mutex};
-
-impl DecisionsClient {
-    /// Test-only loopback endpoint; production always uses the fixed HTTPS endpoint.
-    pub(crate) fn with_endpoint(mut self, endpoint: &str) -> Self {
-        self.endpoint = reqwest::Url::parse(endpoint).unwrap();
-        self
-    }
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct Captured {
-    pub requests: Arc<Mutex<Vec<(HeaderMap, Bytes)>>>,
-}
-
-/// Serve one canned response for every request and capture what was sent.
-pub(crate) async fn fake_provider(
-    status: StatusCode,
-    headers: Vec<(&'static str, &'static str)>,
-    body: String,
-) -> (String, Captured) {
-    let captured = Captured::default();
-    let sink = captured.clone();
-    let app = Router::new().route(
-        "/v1/decisions",
-        post(move |request_headers: HeaderMap, request: Bytes| {
-            let sink = sink.clone();
-            let headers = headers.clone();
-            let body = body.clone();
-            async move {
-                sink.requests
-                    .lock()
-                    .unwrap()
-                    .push((request_headers, request));
-                let mut response = (status, body).into_response();
-                for (name, value) in headers {
-                    response
-                        .headers_mut()
-                        .insert(name, HeaderValue::from_static(value));
-                }
-                response
-            }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (format!("http://{address}/v1/decisions"), captured)
-}
+use crate::adapters::openai::decisions::test_support::fake_provider;
+use axum::http::StatusCode;
 
 fn request() -> DecisionRequest<'static> {
     DecisionRequest {
@@ -89,8 +35,8 @@ async fn sends_bearer_json_and_decodes_tagged_answers_ignoring_additive_fields()
         "future_field": true
     })
     .to_string();
-    let (endpoint, captured) = fake_provider(StatusCode::OK, vec![], body).await;
-    let response = client(&endpoint)
+    let provider = fake_provider(StatusCode::OK, vec![], body).await;
+    let response = client(provider.endpoint())
         .decide(&request(), Duration::from_secs(5))
         .await
         .unwrap();
@@ -108,7 +54,7 @@ async fn sends_bearer_json_and_decodes_tagged_answers_ignoring_additive_fields()
     );
     assert_eq!(response.answers[2], Answer::Refusal { name: None });
     assert_eq!(response.usage.unwrap().input_tokens, 42);
-    let requests = captured.requests.lock().unwrap();
+    let requests = provider.requests.lock().unwrap();
     let (headers, sent) = &requests[0];
     assert_eq!(headers["authorization"], "Bearer test-key");
     assert_eq!(headers["content-type"], "application/json");
@@ -150,8 +96,8 @@ async fn statuses_map_to_sanitized_retry_categories() {
             DecisionsError::Rejected { status: 400 },
         ),
     ] {
-        let (endpoint, _) = fake_provider(status, headers, "secret upstream detail".into()).await;
-        let error = client(&endpoint)
+        let provider = fake_provider(status, headers, "secret upstream detail".into()).await;
+        let error = client(provider.endpoint())
             .decide(&request(), Duration::from_secs(5))
             .await
             .unwrap_err();
@@ -165,18 +111,17 @@ async fn statuses_map_to_sanitized_retry_categories() {
 
 #[tokio::test]
 async fn oversized_or_malformed_bodies_are_rejected() {
-    let (endpoint, _) =
-        fake_provider(StatusCode::OK, vec![], "x".repeat(MAX_RESPONSE_BYTES + 1)).await;
+    let provider = fake_provider(StatusCode::OK, vec![], "x".repeat(MAX_RESPONSE_BYTES + 1)).await;
     assert_eq!(
-        client(&endpoint)
+        client(provider.endpoint())
             .decide(&request(), Duration::from_secs(5))
             .await
             .unwrap_err(),
         DecisionsError::ResponseTooLarge
     );
-    let (endpoint, _) = fake_provider(StatusCode::OK, vec![], "{\"answers\":7}".into()).await;
+    let provider = fake_provider(StatusCode::OK, vec![], "{\"answers\":7}".into()).await;
     assert_eq!(
-        client(&endpoint)
+        client(provider.endpoint())
             .decide(&request(), Duration::from_secs(5))
             .await
             .unwrap_err(),
@@ -186,7 +131,7 @@ async fn oversized_or_malformed_bodies_are_rejected() {
     let mut oversized = request();
     oversized.input[0].content = &huge;
     assert_eq!(
-        client(&endpoint)
+        client(provider.endpoint())
             .decide(&oversized, Duration::from_secs(5))
             .await
             .unwrap_err(),

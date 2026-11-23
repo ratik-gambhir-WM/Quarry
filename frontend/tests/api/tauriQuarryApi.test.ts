@@ -310,7 +310,7 @@ describe("createTauriQuarryApi", () => {
   });
 
   it("relays XLSX and PPTX process-file bytes without requiring a browser MIME type", async () => {
-    const postMultipart = vi
+    const uploadDocument = vi
       .fn()
       .mockResolvedValue({ filename: "model.xlsx", jobId: "job-1" });
     const api = createTauriQuarryApi({
@@ -319,7 +319,8 @@ describe("createTauriQuarryApi", () => {
       getPdf: vi.fn(),
       post: vi.fn(),
       postPowerPoint: vi.fn(),
-      postMultipart,
+      postMultipart: vi.fn(),
+      uploadDocument,
       subscribeJob: vi.fn(),
     });
 
@@ -332,7 +333,7 @@ describe("createTauriQuarryApi", () => {
       new File([new Uint8Array([4, 5, 6])], "board.pptx", { type: "" }),
     );
 
-    expect(postMultipart).toHaveBeenNthCalledWith(1, {
+    expect(uploadDocument).toHaveBeenNthCalledWith(1, {
       sessionGeneration: expect.any(Number),
       fields: [],
       files: [
@@ -343,9 +344,9 @@ describe("createTauriQuarryApi", () => {
           mimeType: "application/octet-stream",
         },
       ],
-      path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
-    });
-    expect(postMultipart).toHaveBeenNthCalledWith(2, {
+      path: "/api/v1/deals/DEAL%20%2F%201/documents/upload",
+    }, expect.any(Function));
+    expect(uploadDocument).toHaveBeenNthCalledWith(2, {
       sessionGeneration: expect.any(Number),
       fields: [],
       files: [
@@ -356,8 +357,8 @@ describe("createTauriQuarryApi", () => {
           mimeType: "application/octet-stream",
         },
       ],
-      path: "/api/v1/deals/DEAL%20%2F%201/documents/process_file",
-    });
+      path: "/api/v1/deals/DEAL%20%2F%201/documents/upload",
+    }, expect.any(Function));
   });
 
   it("sends deal metadata links through the desktop multipart relay", async () => {

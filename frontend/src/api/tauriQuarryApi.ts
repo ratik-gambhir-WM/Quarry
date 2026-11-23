@@ -1,3 +1,4 @@
+import { parseUploadProgress } from "./uploadProgress";
 import { parseTemplateResponse } from "./templateResponse";
 import { acceptDealDeletion } from "../data/dealDeletion/lifecycle";
 import {
@@ -29,6 +30,7 @@ import type {
   ProcessFileJobEvent,
   ProcessFileJobEventHandlers,
   ProcessFileJobResponse,
+  UploadProgressEvent,
   PowerPointExport,
   QuarryApi,
   RunAssistantThreadInput,
@@ -104,6 +106,7 @@ type TauriTransport = {
   ): Promise<() => void>;
   postPowerPoint(path: string, body: unknown): Promise<PowerPointExport>;
   postMultipart<T>(request: TauriMultipartRequest): Promise<T>;
+  uploadDocument?(request: TauriMultipartRequest, onData: (value: unknown) => void): Promise<ProcessFileJobResponse>;
   startQuery?(
     request: TauriQueryRequest,
     onPayload: (payload: TauriQueryPayload) => void,
@@ -503,14 +506,11 @@ export function createTauriQuarryApi(transport: TauriTransport): QuarryApi {
         "/api/v1/documents/search/vector",
         search,
       ),
-    async startProcessFile(dealId, file) {
-      return transport.postMultipart<ProcessFileJobResponse>(
-        await multipartFiles(
-          `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
-          [file],
-          [],
-        ),
-      );
+    async startProcessFile(dealId, file, onProgress?: (event: UploadProgressEvent) => void) {
+      if (!transport.uploadDocument) throw new Error("Desktop upload streaming unavailable.");
+      return transport.uploadDocument(await multipartFiles(
+        `/api/v1/deals/${encodeURIComponent(dealId)}/documents/upload`, [file], [],
+      ), value => onProgress?.(parseUploadProgress(value)));
     },
     subscribeToProcessFileJob(jobId, handlers: ProcessFileJobEventHandlers) {
       let active = true;

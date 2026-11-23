@@ -651,6 +651,8 @@ CREATE TABLE document_jobs (
     attempt_token TEXT COLLATE "C",
     lease_until BIGINT,
     image_assembly_json TEXT COLLATE "C" CHECK(image_assembly_json IS NULL OR image_assembly_json IS JSON),
+    prepared_json TEXT COLLATE "C" CHECK(prepared_json IS NULL OR prepared_json IS JSON),
+    admission_complete BOOLEAN GENERATED ALWAYS AS (prepared_json IS NOT NULL) STORED,
     result_json TEXT COLLATE "C" CHECK(result_json IS NULL OR result_json IS JSON),
     created_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,
     updated_at BIGINT NOT NULL DEFAULT floor(extract(epoch FROM clock_timestamp()))::bigint,

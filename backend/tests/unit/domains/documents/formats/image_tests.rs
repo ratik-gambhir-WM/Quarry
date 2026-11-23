@@ -5,7 +5,7 @@ use std::io::Cursor;
 #[tokio::test]
 async fn validates_a_supported_image_type_from_the_filename() {
     assert_eq!(
-        validate_image_by_bytes(png_bytes(1, 1), "screenshot.PNG")
+        validate_image_by_bytes(png_bytes(1, 1), "screenshot.PNG", ())
             .await
             .unwrap()
             .mime_type,
@@ -73,4 +73,25 @@ fn png_bytes(width: u32, height: u32) -> Vec<u8> {
         .write_to(&mut bytes, ImageOutputFormat::Png)
         .unwrap();
     bytes.into_inner()
+}
+
+#[test]
+fn borrowed_image_checkpoint_encoding_matches_the_owned_recovery_format() {
+    let assembly = build_image_assembly(
+        png_bytes(2, 1),
+        None,
+        "evidence.png".into(),
+        "DEAL",
+        "Architecture diagram",
+    )
+    .unwrap();
+    let borrowed = ImageAssemblyRef {
+        document: &assembly.document,
+        chunks: &assembly.chunks,
+    };
+    let json = serde_json::to_string(&borrowed).unwrap();
+    assert_eq!(json, serde_json::to_string(&assembly).unwrap());
+    let restored: ImageAssembly = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.chunks[0].text, "Architecture diagram");
+    assert!(restored.chunks[0].embedding.is_none());
 }

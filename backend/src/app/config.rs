@@ -22,7 +22,7 @@ const DEFAULT_CHAT_MODEL: &str = "gpt-5.5";
 const DEFAULT_DOCUMENT_CONCURRENCY: usize = 8;
 const DEFAULT_DOCUMENT_WORKER_CONCURRENCY: usize = 5;
 const MAX_DOCUMENT_WORKER_CONCURRENCY: usize = 8;
-/// Matches the default document workers so classification does not queue behind them.
+/// Bounds admission classification requests independently of background embedding.
 const DEFAULT_CLASSIFICATION_CONCURRENCY: usize = 5;
 const MAX_CLASSIFICATION_CONCURRENCY: usize = 8;
 const DEFAULT_COMPLETED_JOB_RETENTION_SECONDS: u64 = 10 * 60;
@@ -111,7 +111,7 @@ pub struct DocumentConfig {
     pub classification: DocumentClassificationConfig,
 }
 
-/// In-worker AI classification. On by default whenever OpenAI is configured.
+/// Admission AI classification. On by default whenever OpenAI is configured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DocumentClassificationConfig {
     pub enabled: bool,

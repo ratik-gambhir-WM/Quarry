@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 const SCHEMA: &str = include_str!("schema.sql");
-const VERSION: i64 = 7;
+const VERSION: i64 = 8;
 // Startup only. Runtime guards are retained separately until worker/remote cutover.
 const SCHEMA_INITIALIZATION_LOCK: i64 = 0x51756172727a;
 const INTEGRITY_VIEWS: [&str; 3] = [

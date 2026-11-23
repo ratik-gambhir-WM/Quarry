@@ -9,6 +9,7 @@ import {
 } from "../api/tauriQuarryApi";
 import type {
   PowerPointExport,
+  ProcessFileJobResponse,
   QuarryRuntime,
   SaveFileInput,
   SavePowerPointInput,
@@ -246,6 +247,27 @@ const tauriQuarryApi = createTauriQuarryApi({
     return invokeWithActivity<TResult>("quarry_api_post_multipart", {
       request: payload,
     });
+  },
+  async uploadDocument(request, onData) {
+    if (request.sessionGeneration !== sessionStore.getSnapshot().generation)
+      throw new DOMException("Session changed", "AbortError");
+    const { sessionGeneration: _generation, ...payload } = request;
+    const subscriptionId = crypto.randomUUID();
+    const unlisten = await listen<{ subscriptionId: string; data: string }>("quarry-upload-progress", ({ payload }) => {
+      if (payload.subscriptionId === subscriptionId) onData(JSON.parse(payload.data));
+    });
+    if (request.sessionGeneration !== sessionStore.getSnapshot().generation) {
+      unlisten();
+      throw new DOMException("Session changed", "AbortError");
+    }
+    const controller = new AbortController();
+    const untrack = sessionStore.track(controller);
+    controller.signal.addEventListener("abort", () => {
+      void invoke("cancel_query_stream", { subscriptionId }).catch(() => undefined);
+    }, { once: true });
+    try {
+      return await invokeWithActivity<ProcessFileJobResponse>("quarry_api_upload_document", { request: payload, subscriptionId });
+    } finally { untrack(); unlisten(); }
   },
   async startQuery(
     request: TauriQueryRequest,

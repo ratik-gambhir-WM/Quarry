@@ -80,9 +80,35 @@ pub struct Provenance {
     pub sampled: bool,
 }
 
+/// Internal outcomes carry labels only where the policy permits them. Workstreams
+/// are derived when projecting the result into the existing public JSON shape.
+enum ClassificationOutcome {
+    Classified {
+        category: Category,
+        secondaries: Vec<(Category, f64)>,
+        confidence: f64,
+        probability: f64,
+        incomplete: bool,
+    },
+    NeedsReview {
+        suggested: Category,
+        confidence: f64,
+        probability: f64,
+        incomplete: bool,
+    },
+    InsufficientInformation {
+        scores: Option<(f64, f64)>,
+    },
+    Refused,
+}
+
 /// Local abstention for empty evidence; no provider request took place.
 pub fn insufficient(provenance: &Provenance) -> ClassificationResult {
-    base(ResultStatus::InsufficientInformation, None, provenance)
+    project(
+        ClassificationOutcome::InsufficientInformation { scores: None },
+        None,
+        provenance,
+    )
 }
 
 /// Validate every named answer and apply the provisional thresholds.
@@ -100,7 +126,11 @@ pub fn normalize(
     let primary = by_name.get(PRIMARY_QUESTION).ok_or(InvalidResponse)?;
     let (selected, probability, confidence) = match primary {
         Answer::Refusal { .. } => {
-            return Ok(base(ResultStatus::Refused, Some(model), provenance));
+            return Ok(project(
+                ClassificationOutcome::Refused,
+                Some(model),
+                provenance,
+            ));
         }
         Answer::Choice {
             choice,
@@ -134,24 +164,26 @@ pub fn normalize(
         }
     }
     if selected == UNCLASSIFIED {
-        let mut result = base(
-            ResultStatus::InsufficientInformation,
+        return Ok(project(
+            ClassificationOutcome::InsufficientInformation {
+                scores: Some((confidence, probability)),
+            },
             Some(model),
             provenance,
-        );
-        result.confidence = Some(confidence);
-        result.primary_probability = Some(probability);
-        return Ok(result);
+        ));
     }
     let category = Category::from_id(selected).ok_or(InvalidResponse)?;
     if probability < MIN_PRIMARY_PROBABILITY || confidence < MIN_PRIMARY_CONFIDENCE {
-        let mut result = base(ResultStatus::NeedsReview, Some(model), provenance);
-        result.confidence = Some(confidence);
-        result.primary_probability = Some(probability);
-        result.suggested_primary_category = Some(category);
-        result.suggested_primary_workstream = Some(category.workstream());
-        result.secondary_assessment_incomplete = incomplete;
-        return Ok(result);
+        return Ok(project(
+            ClassificationOutcome::NeedsReview {
+                suggested: category,
+                confidence,
+                probability,
+                incomplete,
+            },
+            Some(model),
+            provenance,
+        ));
     }
     let mut secondaries: Vec<_> = coverage
         .into_iter()
@@ -161,21 +193,17 @@ pub fn normalize(
         .collect();
     secondaries.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.id().cmp(b.0.id())));
     secondaries.truncate(MAX_SECONDARIES);
-    let mut result = base(ResultStatus::Classified, Some(model), provenance);
-    result.primary_category = Some(category);
-    result.primary_workstream = Some(category.workstream());
-    result.confidence = Some(confidence);
-    result.primary_probability = Some(probability);
-    result.secondary_assessment_incomplete = incomplete;
-    result.secondary_categories = secondaries
-        .into_iter()
-        .map(|(category, probability)| SecondaryCategory {
-            workstream: category.workstream(),
+    Ok(project(
+        ClassificationOutcome::Classified {
             category,
+            secondaries,
+            confidence,
             probability,
-        })
-        .collect();
-    Ok(result)
+            incomplete,
+        },
+        Some(model),
+        provenance,
+    ))
 }
 
 /// Exactly the requested names, each once; unnamed or unexpected answers are invalid.
@@ -233,13 +261,20 @@ fn validate_distribution(
     selected_probability.ok_or(InvalidResponse)
 }
 
-fn base(
-    status: ResultStatus,
+fn project(
+    outcome: ClassificationOutcome,
     model: Option<String>,
     provenance: &Provenance,
 ) -> ClassificationResult {
-    ClassificationResult {
-        status,
+    let mut result = ClassificationResult {
+        status: match &outcome {
+            ClassificationOutcome::Classified { .. } => ResultStatus::Classified,
+            ClassificationOutcome::NeedsReview { .. } => ResultStatus::NeedsReview,
+            ClassificationOutcome::InsufficientInformation { .. } => {
+                ResultStatus::InsufficientInformation
+            }
+            ClassificationOutcome::Refused => ResultStatus::Refused,
+        },
         primary_workstream: None,
         primary_category: None,
         secondary_categories: Vec::new(),
@@ -256,7 +291,50 @@ fn base(
         input_fingerprint: provenance.fingerprint.clone(),
         classified_at: None,
         sampled: provenance.sampled,
+    };
+    match outcome {
+        ClassificationOutcome::Classified {
+            category,
+            secondaries,
+            confidence,
+            probability,
+            incomplete,
+        } => {
+            result.primary_category = Some(category);
+            result.primary_workstream = Some(category.workstream());
+            result.confidence = Some(confidence);
+            result.primary_probability = Some(probability);
+            result.secondary_assessment_incomplete = incomplete;
+            result.secondary_categories = secondaries
+                .into_iter()
+                .map(|(category, probability)| SecondaryCategory {
+                    workstream: category.workstream(),
+                    category,
+                    probability,
+                })
+                .collect();
+        }
+        ClassificationOutcome::NeedsReview {
+            suggested,
+            confidence,
+            probability,
+            incomplete,
+        } => {
+            result.suggested_primary_category = Some(suggested);
+            result.suggested_primary_workstream = Some(suggested.workstream());
+            result.confidence = Some(confidence);
+            result.primary_probability = Some(probability);
+            result.secondary_assessment_incomplete = incomplete;
+        }
+        ClassificationOutcome::InsufficientInformation { scores } => {
+            if let Some((confidence, probability)) = scores {
+                result.confidence = Some(confidence);
+                result.primary_probability = Some(probability);
+            }
+        }
+        ClassificationOutcome::Refused => {}
     }
+    result
 }
 
 fn unit(value: f64) -> bool {

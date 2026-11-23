@@ -190,6 +190,7 @@ async fn image_uploads_are_validated_before_the_service_requests_a_description()
         "gpt-image-test",
         Arc::new(Semaphore::new(MAX_CONCURRENT_OFFICE_PARSERS)),
         None,
+        None,
     )
     .await;
     let Err(error) = result else {
@@ -238,6 +239,7 @@ async fn parsing_keeps_docx_available_when_office_parsing_is_shut_down() {
             "unused",
             semaphore.clone(),
             None,
+            None,
         )
         .await;
         assert_eq!(
@@ -261,10 +263,11 @@ async fn parsing_keeps_docx_available_when_office_parsing_is_shut_down() {
         "unused",
         semaphore,
         None,
+        None,
     )
     .await
     .unwrap();
-    assert_eq!(result.file_bytes, bytes);
+    assert_eq!(result.document.file_size_bytes, bytes.len() as u64);
     assert_eq!(result.document.file_name, "evidence.docx");
     assert_eq!(result.document.deal_id, "DEAL-TEST");
     assert!(!result.chunks.is_empty());
@@ -284,6 +287,7 @@ async fn failed_office_parsing_releases_its_concurrency_permit() {
         "unused",
         semaphore.clone(),
         None,
+        None,
     )
     .await;
     assert!(result.is_err());
@@ -291,7 +295,7 @@ async fn failed_office_parsing_releases_its_concurrency_permit() {
 }
 
 #[tokio::test]
-async fn sql_image_retry_reuses_checkpointed_vision_text() {
+async fn upload_stream_accepts_durable_preparation_before_embedding_and_retries_reuse_it() {
     use axum::{routing::post, Json, Router};
     use serde_json::{json, Value};
     use std::{
@@ -337,23 +341,79 @@ async fn sql_image_retry_reuses_checkpointed_vision_text() {
         "text-embedding-3-small".into(),
         "test-vision".into(),
         1,
-    );
+    )
+    .with_classification(Arc::new(ClassificationService::new(
+        crate::domains::documents::classification::repository::ClassificationRepository::new(
+            db.clone(),
+        ),
+        None,
+        crate::integration_support::prompt_catalog(),
+        false,
+        5,
+    )));
     let mut image = Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(1, 1)
         .write_to(&mut image, image::ImageOutputFormat::Png)
         .unwrap();
     let bytes = image.into_inner();
-    let first = service
-        .process(
-            "DEAL-SQL",
-            1,
-            vec![UploadedDocument {
-                filename: "evidence.png".into(),
-                bytes: bytes.clone(),
-            }],
+    use tower::ServiceExt;
+    let service = Arc::new(service);
+    let actor = crate::domains::identity::model::AuthenticatedUser {
+        user: crate::domains::users::repository::UserRepository::new(db.clone())
+            .by_id(1)
+            .await
+            .unwrap()
+            .unwrap(),
+        token_hash: "synthetic".into(),
+        expires_at: 4102444800,
+    };
+    let router = super::super::route::routes(
+        Arc::clone(&service),
+        Arc::new(super::super::job_service::DocumentJobService::new(
+            Arc::clone(&service),
+        )),
+    )
+    .layer(axum::Extension(actor));
+    let mut body = b"--upload-test\r\nContent-Disposition: form-data; name=\"files\"; filename=\"evidence.png\"\r\nContent-Type: image/png\r\n\r\n".to_vec();
+    body.extend_from_slice(&bytes);
+    body.extend_from_slice(b"\r\n--upload-test--\r\n");
+    let response = router
+        .oneshot(
+            axum::http::Request::post("/deals/DEAL-SQL/documents/upload")
+                .header("content-type", "multipart/form-data; boundary=upload-test")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
         )
         .await
         .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let frames = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let frames = std::str::from_utf8(&frames).unwrap();
+    assert!(frames.contains("event: accepted"));
+    assert!(!frames.contains("embedding"));
+    assert_eq!(embeddings.load(Ordering::SeqCst), 0);
+    let canonical: i64 = sqlx::query_scalar("SELECT count(*) FROM quarry_files")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(canonical, 0);
+    let claim = service.queue().claim_ready().await.unwrap().unwrap();
+    assert!(service.process_claim(claim).await.is_err());
+    let checkpoint_before: String = sqlx::query_scalar("SELECT prepared_json FROM document_jobs")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let prepared: PreparedDocument = serde_json::from_str(&checkpoint_before).unwrap();
+    assert!(matches!(
+        prepared.classification.unwrap().outcome,
+        crate::domains::documents::classification::repository::ClassificationRun::Disabled
+    ));
+    assert!(prepared
+        .chunks
+        .iter()
+        .all(|chunk| chunk.embedding.is_none()));
     let second = service
         .process(
             "DEAL-SQL",
@@ -379,8 +439,6 @@ async fn sql_image_retry_reuses_checkpointed_vision_text() {
     stop.send(()).unwrap();
     server.await.unwrap();
     assert!(tokio::net::TcpStream::connect(address).await.is_err());
-    assert!(!first.documents[0].sqlite_committed);
-    assert!(!first.documents[0].success);
     assert!(second.documents[0].sqlite_committed);
     assert!(second.documents[0].success);
     assert!(replay.documents[0].success);
@@ -388,4 +446,76 @@ async fn sql_image_retry_reuses_checkpointed_vision_text() {
     assert_eq!(embeddings.load(Ordering::SeqCst), 2);
     let records:(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM quarry_files),(SELECT count(*) FROM deal_activity_events WHERE kind='document_uploaded')").fetch_one(db.pool()).await.unwrap();
     assert_eq!(records, (1, 1));
+    let checkpoint_after: String = sqlx::query_scalar("SELECT prepared_json FROM document_jobs")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(checkpoint_before, checkpoint_after);
+    let saved_classifications: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM document_classifications WHERE run_status='disabled'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(saved_classifications, 1);
+}
+
+#[test]
+fn cancelled_parser_keeps_capacity_and_deal_lifetime_until_blocking_work_finishes() {
+    use std::{future::Future, task::Poll};
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        // Occupy the only blocking thread so the real parser remains queued deterministically.
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (started, running) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            blocked.recv().unwrap();
+        });
+        running.await.unwrap();
+        let capacity = Arc::new(Semaphore::new(1));
+        let deal = crate::domains::deals::deletion::lifecycle::DealLifecycle::default()
+            .admit("DEAL")
+            .await;
+        let deal_lifetime = Arc::downgrade(&deal);
+        let lifetime = AdmissionLifetime {
+            _permit: Arc::new(Arc::clone(&capacity).acquire_owned().await.unwrap()),
+            _deal: Some(deal),
+        };
+        let client = OpenAiClient::new("test-key", crate::integration_support::prompt_catalog());
+        let mut parsing = Box::pin(parse_document(
+            UploadedDocument {
+                filename: "invalid.docx".into(),
+                bytes: b"not a document".to_vec(),
+            },
+            "DEAL".into(),
+            &client,
+            "unused",
+            Arc::new(Semaphore::new(1)),
+            None,
+            Some(lifetime),
+        ));
+        std::future::poll_fn(|context| {
+            assert!(parsing.as_mut().poll(context).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(parsing);
+        assert_eq!(capacity.available_permits(), 0);
+        assert!(deal_lifetime.upgrade().is_some());
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        let permit = tokio::time::timeout(std::time::Duration::from_secs(5), capacity.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(deal_lifetime.upgrade().is_none());
+        drop(permit);
+        assert_eq!(capacity.available_permits(), 1);
+    });
 }

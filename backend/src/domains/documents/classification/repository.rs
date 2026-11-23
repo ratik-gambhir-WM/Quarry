@@ -1,6 +1,7 @@
 //! Classification persistence. Rows are written only inside the canonical document
 //! transaction or by reclassifying a committed document; there are no staged rows,
 //! claims or leases. No provider work ever runs inside these transactions.
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
@@ -23,13 +24,50 @@ use crate::{
 const TABLE: &str = "document_classifications";
 
 /// One classification outcome with the evidence and pinned profile that produced it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ClassificationRecord {
     pub sample: EvidenceSample,
     pub fingerprint: String,
-    pub status: RunStatus,
-    pub result_json: Option<String>,
-    pub error: Option<ErrorCode>,
+    pub outcome: ClassificationRun,
+}
+
+/// A terminal run carries exactly the payload appropriate to its status.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum ClassificationRun {
+    Completed { result_json: String },
+    Failed(ErrorCode),
+    Disabled,
+}
+
+impl ClassificationRun {
+    pub(crate) fn status(&self) -> RunStatus {
+        match self {
+            Self::Completed { .. } => RunStatus::Completed,
+            Self::Failed(_) => RunStatus::Failed,
+            Self::Disabled => RunStatus::Disabled,
+        }
+    }
+
+    fn result_json(&self) -> Option<&str> {
+        match self {
+            Self::Completed { result_json } => Some(result_json),
+            Self::Failed(_) | Self::Disabled => None,
+        }
+    }
+
+    fn into_result_json(self) -> Option<String> {
+        match self {
+            Self::Completed { result_json } => Some(result_json),
+            Self::Failed(_) | Self::Disabled => None,
+        }
+    }
+
+    fn error(&self) -> Option<ErrorCode> {
+        match self {
+            Self::Failed(code) => Some(*code),
+            Self::Completed { .. } | Self::Disabled => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,16 +125,19 @@ pub(crate) async fn insert_with_document(
                 .value("prompt_version", PROMPT_VERSION)
                 .value("sample_version", SAMPLE_VERSION)
                 .value("policy_version", POLICY_VERSION)
-                .value("run_status", record.status.as_str())
-                .value("last_error_code", record.error.map(ErrorCode::as_str))
-                .value("result_json", record.result_json.clone())
+                .value("run_status", record.outcome.status().as_str())
+                .value(
+                    "last_error_code",
+                    record.outcome.error().map(ErrorCode::as_str),
+                )
+                .value("result_json", record.outcome.result_json())
                 .on_conflict_do_nothing(["deal_id", "input_hash"])
                 .build(),
         )
         .await?
         .rows_affected
         == 1;
-    if inserted && record.status == RunStatus::Completed {
+    if inserted && record.outcome.status() == RunStatus::Completed {
         stamp_completion(tx, deal, hash, 1).await?;
     }
     Ok(())
@@ -210,7 +251,7 @@ impl ClassificationRepository {
                     }
                     Some(current) if current == expected => {
                         let next = current + 1;
-                        let completed = record.status == RunStatus::Completed;
+                        let completed = record.outcome.status() == RunStatus::Completed;
                         tx.write(
                             Q::update(TABLE)
                                 .set("generation", next)
@@ -224,9 +265,12 @@ impl ClassificationRepository {
                                 .set("prompt_version", PROMPT_VERSION)
                                 .set("sample_version", SAMPLE_VERSION)
                                 .set("policy_version", POLICY_VERSION)
-                                .set("run_status", record.status.as_str())
-                                .set("last_error_code", record.error.map(ErrorCode::as_str))
-                                .set("result_json", record.result_json)
+                                .set("run_status", record.outcome.status().as_str())
+                                .set(
+                                    "last_error_code",
+                                    record.outcome.error().map(ErrorCode::as_str),
+                                )
+                                .set("result_json", record.outcome.into_result_json())
                                 .set("completed_at", Option::<i64>::None)
                                 .set_epoch_seconds_after("updated_at", 0)
                                 .and_where(C::equal("deal_id", &version.deal))
@@ -340,10 +384,7 @@ impl ClassificationRepository {
 
 fn map_stored(r: &Row<'_>) -> Result<StoredClassification, PostgresError> {
     let provenance: String = r.get(2)?;
-    let sampled = serde_json::from_str::<serde_json::Value>(&provenance)
-        .ok()
-        .and_then(|value| value.get("sampled").and_then(serde_json::Value::as_bool))
-        .unwrap_or(true);
+    let sampled = super::sample::stored_sampled(&provenance);
     Ok(StoredClassification {
         generation: r.get(0)?,
         sample: EvidenceSample {

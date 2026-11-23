@@ -11,3 +11,4 @@ pub(crate) mod route;
 pub(crate) mod sample;
 pub mod service;
 pub mod taxonomy;
+pub(crate) mod view;

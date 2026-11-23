@@ -123,23 +123,24 @@ describe("UploadFilesModal", () => {
   });
 
   it("retains the processing circle, completion check and close protection", async () => {
-    const unsubscribe = vi.fn();
-    startProcessFile.mockResolvedValue({ jobId: "job-1", filename: "notes.pdf" });
-    subscribeToProcessFileJob.mockReturnValue(unsubscribe);
+    let accept!: (value: { jobId: string; filename: string }) => void;
+    startProcessFile.mockImplementation((_deal, _file, progress) => {
+      progress({ jobId: "job-1", filename: "notes.pdf", status: "parsing" });
+      return new Promise(resolve => { accept = resolve; });
+    });
     const onClose = vi.fn();
     render(<UploadFilesModal dealId="deal-1" onClose={onClose} userId="user-1" />);
     const input = document.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error("expected the upload file input");
     fireEvent.change(input, { target: { files: [new File(["contents"], "notes.pdf")] } });
     fireEvent.click(screen.getByRole("button", { name: "Upload 1" }));
-    await waitFor(() => expect(subscribeToProcessFileJob).toHaveBeenCalledOnce());
+    await waitFor(() => expect(startProcessFile).toHaveBeenCalledOnce());
     expect(screen.getByLabelText("Processing")).toBeDefined();
     expect(screen.getByRole("button", { name: "Close upload files dialog" })).toHaveProperty("disabled", true);
-    const handlers = subscribeToProcessFileJob.mock.calls[0][1];
-    act(() => handlers.onEvent({ jobId: "job-1", filename: "notes.pdf", status: "completed" }));
-    expect(screen.getByLabelText("Processing complete")).toBeDefined();
-    expect(screen.getByText("Complete")).toBeDefined();
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    await act(async () => accept({ jobId: "job-1", filename: "notes.pdf" }));
+    expect(screen.getByLabelText("Upload accepted")).toBeDefined();
+    expect(screen.getByText("Accepted")).toBeDefined();
+    expect(subscribeToProcessFileJob).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalledOnce();
   });

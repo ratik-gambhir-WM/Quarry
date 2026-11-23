@@ -8,7 +8,7 @@ use std::sync::Arc;
 use super::{
     handler::{
         process_document_job_events_handler, process_documents_handler, start_process_file_handler,
-        DocumentIngestionHttpState,
+        upload_progress_handler, DocumentIngestionHttpState,
     },
     job_service::DocumentJobService,
     service::DocumentIngestionService,
@@ -23,6 +23,10 @@ pub(crate) fn routes(
     document_jobs: Arc<DocumentJobService>,
 ) -> Router {
     Router::new()
+        .route(
+            "/deals/{deal_id}/documents/upload",
+            post(upload_progress_handler).layer(DefaultBodyLimit::max(DOCUMENT_UPLOAD_BODY_BYTES)),
+        )
         .route(
             "/deals/{deal_id}/documents/process",
             post(process_documents_handler)

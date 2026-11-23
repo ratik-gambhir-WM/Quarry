@@ -1,3 +1,4 @@
+use super::jobs::AdmissionStatus;
 use validate::{normalize_required_request_value, validate_document_upload_filename};
 mod validate;
 use crate::domains::identity::model::AuthenticatedUser;
@@ -86,6 +87,63 @@ pub(super) async fn start_process_file_handler(
             filename: started.filename,
         }),
     ))
+}
+
+pub(super) async fn upload_progress_handler(
+    Extension(actor): Extension<AuthenticatedUser>,
+    State(state): State<DocumentIngestionHttpState>,
+    Path(deal_id): Path<String>,
+    multipart: Multipart,
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let deal_id = normalize_required_request_value(deal_id, "dealId")?;
+    let (_, mut files) = collect_document_upload(multipart).await?;
+    if files.len() != 1 {
+        return Err(AppError::bad_request("upload accepts exactly one file"));
+    }
+    let jobs = state.document_jobs;
+    let (id, _) = jobs
+        .accept_upload(deal_id, actor.user.id, files.remove(0))
+        .await?;
+    let prepare_jobs = Arc::clone(&jobs);
+    let prepare_id = id.clone();
+    let prepare = Box::pin(async move { prepare_jobs.prepare_admission(&prepare_id).await });
+    let events = stream::unfold(
+        (prepare, jobs, id, actor.user.id, None, false),
+        |(mut prepare, jobs, id, actor, mut last, finished)| async move {
+            if finished {
+                return None;
+            }
+            loop {
+                let done = tokio::select! {
+                    result = &mut prepare => Some(result),
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => None,
+                };
+                let mut progress = match jobs.admission_event(&id, actor).await {
+                    Ok(event) => event,
+                    Err(_) => return None,
+                };
+                if let Some(result) = done {
+                    // A durable checkpoint reconciles an uncertain commit acknowledgment.
+                    progress.status =
+                        if result.is_ok() || progress.status == AdmissionStatus::Accepted {
+                            AdmissionStatus::Accepted
+                        } else {
+                            AdmissionStatus::Failed
+                        };
+                }
+                let terminal = progress.status.is_terminal();
+                if terminal || last != Some(progress.status) {
+                    last = Some(progress.status);
+                    let event = Event::default()
+                        .event(progress.status.event_name())
+                        .json_data(progress)
+                        .expect("admission events are JSON serializable");
+                    return Some((Ok(event), (prepare, jobs, id, actor, last, terminal)));
+                }
+            }
+        },
+    );
+    Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 pub(super) async fn process_document_job_events_handler(

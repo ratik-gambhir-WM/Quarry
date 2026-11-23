@@ -149,6 +149,7 @@ async fn shared_http_role_matrix_on_versioned_and_compatibility_mounts() {
                 ("/extraction/upload", actor <= 2),
                 ("/documents/process", actor <= 3),
                 ("/documents/process_file", actor <= 3),
+                ("/documents/upload", actor <= 3),
                 ("/data-room/preview", actor == 1),
             ] {
                 let status = call(

@@ -1071,6 +1071,7 @@ HTTP loopback only and rejects query/fragment configuration. Generic proxy paths
 | `subscribe_notebook_job` | Relay authenticated notebook save-job SSE | canonical notebook/job/subscription IDs; 64 KiB events; cancellation; ten-minute maximum |
 | `quarry_api_post_multipart` | Rebuild and relay multipart | filename/path/MIME checks; 50 MB file and total cap |
 | `quarry_api_post_powerpoint` | Relay a presentation export and return bounded base64 PPTX data | exact template-export route; MIME/ZIP signature/filename/warning checks; 64 MB cap |
+| `quarry_api_upload_document` | Stream multipart admission progress from Axum | main-window origin; exact upload route, one bounded file, scoped subscription and cancellation |
 | `subscribe_document_job` | Consume Axum SSE and emit Tauri event | validated identifiers; scoped event payload |
 | `send_query_stream` | Start fixed-path query POST-SSE relay | main window/origin; bounded validated context/files; scoped events; 45 s idle and 10 minute maximum |
 | `cancel_query_stream` | Cancel one query relay | main window/origin; validated subscription ID; request-scoped sender |
@@ -1156,7 +1157,8 @@ The shared Settings form accepts email only.
 | GET | `/deals/{deal_id}/documents/{file_id}/pdf` | Return inline PDF preview | `private, no-store`; source PDF or on-demand DOCX/XLSX/PPTX/image conversion |
 | GET | `/deals/{deal_id}/documents/{file_id}/text` | Return canonical extracted text | PDF/DOCX sources |
 | POST | `/deals/{deal_id}/documents/process` | Synchronous batch ingestion | PDF/DOCX/XLSX/PPTX/PNG/JPEG/WebP/single-frame GIF; multipart `files`; identity derived from the session |
-| POST | `/deals/{deal_id}/documents/process_file` | Durably admit one processing job | Authenticated owner; same supported formats; returns 202 `{jobId, filename}` |
+| POST | `/deals/{deal_id}/documents/upload` | Stream per-file admission | HTTP 200 SSE parsing/classifying, then accepted/failed; embedding runs silently afterward |
+| POST | `/deals/{deal_id}/documents/process_file` | Legacy single-file admission | Same formats; returns 202 `{jobId, filename}` after parsed/classified checkpoint |
 | GET | `/documents/process_file/{job_id}/events` | Job SSE | processing then completed/skipped/failed; 15 s keepalive |
 | POST | `/documents/search/vector` | Exact scoped pgvector chunk search | Server derives accessible deals; authorized current/profile scope precedes cosine limits |
 | POST | `/documents/search/keyword` | GIN-indexed lexical chunk search | Server derives accessible deals; SQL lexical ranking and per-deal rank fusion |
@@ -1369,7 +1371,7 @@ styles and embedded data images; direct navigation cannot grant an SVG the API's
 
 PostgreSQL is canonical and the only template store; see [PostgreSQL storage](#91-shared-postgresql-schema-version-7).
 Templates share the product `PostgresClient` pool and selected database. `app/schema.sql` owns the
-fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 7 with
+fresh final schema; `app/migrations.rs` initializes or validates PostgreSQL schema version 8 with
 checksums and catalog fingerprints. There is no data migration or startup reset. Unknown or damaged
 layouts fail without deletion. Templates, image bytes, previews, metadata,
 classification, lexical postings and typed vector pairs are transactional. Indexed lexical term
@@ -1556,7 +1558,7 @@ and deterministic RRF; bounded final revision/set/owner and HTTP session recheck
 Quoted phrases use separate GIN-indexed title/content vectors that preserve the positions of
 hashed technical tokens alongside English words, including stemming and stop-word gaps. Synthetic
 chunk heading context is excluded from phrase positions. Unicode prefixes accept combining marks.
-The `phrases-v1` notebook pipeline is part of current schema 7. Earlier schema/checksum layouts
+The `phrases-v1` notebook pipeline is part of current schema 8. Earlier schema/checksum layouts
 require a fresh schema or explicit guarded MVP reset; startup refuses them intact and never resets them.
 There is no ANN index, semantic sidebar integration or editor-offset mapping. The existing sidebar
 metadata filter and explicit-save edit buffers remain unchanged. Pending jobs no longer assign a
@@ -1691,6 +1693,21 @@ Follow the [backend boundary rules](AGENTS.md#backend-development-rules) for eve
 Changes explain the state/lifecycle reason for a later guard and use behavioral tests to prove
 early rejection; the architecture gate alone does not establish execution order.
 
+Document classification uses typed terminal run outcomes (completed JSON, failed error code,
+or disabled) and typed policy outcomes whose workstreams are derived from categories.
+Ingestion and reclassification share evidence evaluation; ingestion persists failures while
+reclassification leaves the previous result intact on failure. The classification-owned
+`view.rs` projects both listing and reclassification metadata, including database completion
+time and tolerant omission of malformed stored results. The API JSON and schema are unchanged.
+
+`documents/store/repository.rs` retains the `DocumentStore` facade and shared strict row
+codecs. Its private `read_repository.rs` and `publication_repository.rs` siblings own current
+read queries and canonical publication/reconciliation respectively; the latter retains the
+same single transaction and lock/authorization order. Ingestion consumes owned chunk payloads
+into canonical rows and serializes image checkpoints through borrowed document/chunk views,
+keeping embeddings out of recovery JSON. Sampling uses named excerpt/provenance types while
+preserving `sample-v1` JSON bytes, compact excerpt arrays and fingerprint inputs.
+
 #### 8.2.1 Product domain registry
 
 The domain tree reserves ownership for capabilities that are not implemented yet. A comment-only,
@@ -1704,7 +1721,7 @@ service, model, table, or product capability.
 | `companies` | Implemented authenticated-owner company directory; roles are owned by deal assignments |
 | `data_rooms` | Partial/implemented local-source browsing and preview |
 | `documents::{ingestion, viewing, search}` | Implemented document write, canonical read/preview, and PostgreSQL search capabilities |
-| `documents::classification` | AI classification inside each document task (sampling, bounded Decisions calls, atomic save with the document), read projection and synchronous reclassification; on by default with OpenAI |
+| `documents::classification` | Upload-admission classification (sampling, bounded Decisions calls, durable checkpoint, atomic publication with the document), read projection and synchronous reclassification; on by default with OpenAI |
 | `summaries` | Implemented OpenAI-backed file summary endpoints when configured |
 | `research` | Implemented WM AI transport workflows when configured; broader product research remains conceptual |
 | `system` | Public shallow health and static capabilities; development diagnostics/demo routes removed |
@@ -1844,7 +1861,7 @@ Use a fresh PostgreSQL database; leave old SQLite data and retired graph stores 
 Load matching clients, sign up again and recreate data. No status conversion or automatic downgrade is provided. See
 [fresh storage and recovery](#91-shared-postgresql-schema-version-7).
 
-### 9.1 Shared PostgreSQL schema version 7
+### 9.1 Shared PostgreSQL schema version 8
 
 The pinned pgvector 0.4.2 Rust adapter uses SQLx 0.8.6 and an explicitly provisioned
 `quarry_extensions.vector` 0.8.6 server extension. Types/operators are qualified and vectors are
@@ -1892,7 +1909,7 @@ schema currently contains:
 | `template_lexical_terms` | Indexed Unicode 6.1 field frequencies | Compatible weighted BM25/prefix retrieval |
 | `document_embedding_profiles` | Immutable provider/model/dimension/metric/preparation identity | SQL ingestion and profile-scoped retrieval |
 | `document_chunks` | Complete text, vector(D), spans and generated GIN lexical channel | Atomic SQL publication and exact cosine retrieval |
-| `document_jobs` | Bounded immutable inputs, attempts, leases, sequence, image checkpoint and terminal result | Durable worker, exact replay and polled SSE |
+| `document_jobs` | Bounded immutable inputs, attempts, leases, sequence, image and prepared-admission checkpoints, terminal result | Durable worker, exact replay and polled SSE |
 | `document_input_identities` | Unique scoped content-hash claim and winning logical file | Concurrent upload identity convergence |
 | `quarry_schema_version` | Source checksum and catalog fingerprint | Schema version 3 validation |
 
@@ -1925,7 +1942,8 @@ Key invariants include:
 - blobs cascade from versions; files/versions cascade through their children
 - archiving a deal retains its file records
 
-PostgreSQL schema version 7 adds the content-address checks and the optional
+PostgreSQL schema version 8 adds the immutable `document_jobs.prepared_json` admission checkpoint and generated `admission_complete` metadata for payload-free polling.
+It retains schema 7's content-address checks and the optional
 `document_classifications` table (keyed by the admitted `(deal_id, input_hash)` identity, cascading
 from `document_input_identities`, written only with its document) to schema 6, which includes the former marker-18 layout, bounded content revisions,
 durable deal lifecycle guards, complete document/notebook search artifacts and template
@@ -1938,10 +1956,10 @@ field frequencies. Corpus count and token totals are computed in the search snap
 shared lexical statistics row or write trigger. Template insertion order uses an explicit generated `catalog_sequence`.
 `quarry_schema_version` records the schema version, source checksum and live catalog fingerprint.
 
-Startup creates an empty selected schema or validates schema 7, checksum/catalog, owned indexes,
+Startup creates an empty selected schema or validates schema 8, checksum/catalog, owned indexes,
 extension readiness, ownership, complete document/notebook search sets and template pair integrity.
 The schema renders two vector dimension families: the shared document/notebook dimension and the
-independent template dimension. Schema 4, 5 and 6 databases are refused; select a fresh database or run the
+independent template dimension. Schema 4, 5, 6 and 7 databases are refused; select a fresh database or run the
 explicit reset. Unknown layouts fail without
 deletion. The explicit `reset_postgres --confirm-reset` utility implements the user-authorized MVP
 rebuild: it refuses unrelated objects and active writers, then drops/recreates recognized product
@@ -2020,10 +2038,10 @@ selection, upload activity and terminal job result. Readiness constraints reject
 at commit; readers see the old complete version until the new complete set commits. The final
 database-clock attempt fence, current membership and lifecycle guards reject stale workers.
 
-Accepted immutable input and image descriptions are separate durable checkpoints, not uploaded
-documents. Matching retries reuse the winning identity and accepted text. Terminal SQL status
+Accepted immutable input, image descriptions, and parsed/classified admission output are separate
+durable checkpoints, not canonical documents. Matching retries reuse the winning identity and accepted text. Terminal SQL status
 reconciles uncertain acknowledgments and survives restarts without repeating committed provider
-work. Explicit async retries promote queued or processing synchronous jobs to background recovery
+work. Explicit async retries promote prepared synchronous jobs to background recovery
 without replacing a live attempt's token or lease; processing work is reclaimed only after expiry.
 Status polling reads metadata/results without loading accepted input bytes or image checkpoints.
 The historical `sqliteCommitted` field means this complete PostgreSQL commit. Inspect the
@@ -2110,18 +2128,34 @@ submitting links or files entered in the optional metadata step.
 ### 10.2 Document ingestion
 
 Authenticated multipart handlers validate names, types and body bounds before admission. The
-job repository retains immutable input/hash and a unique winning file claim. The synchronous
-route owns its active futures; the 202 route leaves admitted background work recoverable.
+job repository retains immutable input/hash and a unique winning file claim. The upload UI posts
+one file to `/api/v1/deals/{deal_id}/documents/upload`; HTTP 200 carries SSE `parsing`,
+`classifying`, then terminal `accepted` or `failed` events for that document. The UI retains its
+existing layout, styling, spinner and completion animation, and finishes on admission acceptance.
+It does not subscribe to embedding progress. `accepted` means the parsed chunks and classification
+outcome are durable; it does not mean the file is searchable or canonical publication has finished.
+
+Request-owned admission parses/describes and classifies outside SQL locks, with a shared bound
+of `QUARRY_DOCUMENT_CONCURRENCY` and the existing Office/Decisions bounds. Blocking parsers retain admission capacity and the deal
+lifetime guard after request cancellation. Accepted image text
+is checkpointed independently. Classification yields completed, failed or disabled enrichment;
+provider classification failures do not reject admission. A fenced transaction saves immutable
+parsed chunks and classification in `document_jobs.prepared_json`, releases the admission lease,
+and queues background work before emitting `accepted`. Incomplete admissions require an explicit
+same-file retry after cancellation/restart; expired admission leases are failed by maintenance.
+Retries after durable preparation reuse that checkpoint without parsing or classifying again.
+
 One bootstrap-owned supervisor runs up to `QUARRY_DOCUMENT_WORKER_CONCURRENCY` (default 5, max 8)
-independent background document tasks, claiming only when a slot is free; the synchronous batch
-route keeps its separate `QUARRY_DOCUMENT_CONCURRENCY` bound. Each task parses/describes/embeds
-outside SQL locks and checkpoints accepted image text before embedding. After parsing, the task
-samples bounded evidence and runs embedding and OpenAI Decisions classification concurrently;
-classification always yields a completed, failed or disabled record and never fails the document.
-CPU-heavy persistence preparation runs on the blocking pool. One short retained SQL
-transaction authorizes current deal/file/attempt state and publishes the entire aggregate plus the
-classification and activity/result, so a `completed` SSE event means both are saved. SSE sends durable processing/completed/skipped/failed snapshots and checks access.
-See [document storage](#93-atomic-document-publication-and-durable-recovery) for database-clock leases, retention and partial failure.
+independent background tasks and claims only prepared documents when a slot is free. The owned
+processing callback remains extensible; currently it embeds prepared chunks and publishes them.
+CPU-heavy checkpoint decoding and persistence preparation run on the blocking pool. One retained
+SQL transaction authorizes current deal/file/attempt state and publishes the whole document,
+classification, activity and terminal result. Background recovery reuses prepared input after lease
+expiry. Embedding failure remains an internal failed job with explicit same-file retry.
+The synchronous batch route prepares admission then waits for embedding/publication, preserving
+its complete-result contract. The legacy `process_file` route returns 202 after preparation;
+its existing job SSE endpoint retains processing/completed/skipped/failed snapshots for compatibility.
+See [document storage](#93-atomic-document-publication-and-durable-recovery) for leases and retention.
 
 ### 10.3 Stored preview
 
@@ -2394,7 +2428,7 @@ All fields are required if any one is present:
 
 ### 11.6 Configuration caveats
 
-- No graph store is contacted. Startup validates PostgreSQL schema 7, pgvector, document vector
+- No graph store is contacted. Startup validates PostgreSQL schema 8, pgvector, document vector
   profiles, notebook and template pair integrity, and indexes.
 - Non-empty OpenAI model overrides activate the OpenAI capability group and therefore require
   `OPENAI_API_KEY`; partial configuration fails startup validation. When enabled, OpenAI receives
@@ -2705,13 +2739,13 @@ enabled until the replacement is ready. This change does not publish the workflo
 | Identity | Password authentication, durable revocable sessions, expiry-bounded client session restoration, per-user checks | No organization tenancy, account recovery or MFA |
 | Tenancy | Authenticated deal roles and canonical scoped document authorization | Organization tenancy remains absent |
 | User secrets | Private Argon2id hashes and token digests; no per-user provider key | Client bearer sessions are cached in local storage until expiry/logout; AI uses server credentials |
-| Persistence | Fresh PostgreSQL schema 7 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset; existing UUID document IDs are not rewritten to content addresses |
-| Document classification | Runs inside every document task by default; provisional thresholds | No labeled evaluation, calibration or latency measurement yet; no UI; an embedding failure repeats the Decisions call on retry |
+| Persistence | Fresh PostgreSQL schema 8 with an explicit guarded MVP reset | No populated-data import/backfill or automatic reset; existing UUID document IDs are not rewritten to content addresses |
+| Document classification | Runs during upload admission by default; embedding retries reuse the saved outcome; provisional thresholds | No labeled evaluation, calibration or latency measurement yet; incomplete admissions may repeat provider work before a checkpoint exists |
 | Search | Atomic document SQL storage with exact cosine and native GIN ranking | Large-corpus relevance/load and BM25 alternative comparisons remain unmeasured; hybrid stays opt-in |
 | Reindex tooling | One-time scope tool removed after local cutover; exact-byte retry remains | Another legacy store requires offline maintenance; no general rebuild from canonical PostgreSQL data |
 | Logical versioning | Content-addressed IDs: changed content always receives a new `file_id`; each file has exactly one version | No in-place revision history; relating a revision to its predecessor needs a separate lineage feature |
 | Document jobs | SQL inputs, attempt fencing, terminal replay and polled SSE | Uncheckpointed provider calls may repeat after restart; global writer controls remain |
-| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Imports are private to their authenticated owner and survive restart; schema 7 requires ownership and has no app registry, graph projection or legacy catalog import |
+| Template catalog | The embedded engine uses the shared durable product PostgreSQL database | Imports are private to their authenticated owner and survive restart; schema 8 requires ownership and has no app registry, graph projection or legacy catalog import |
 | Assistant chat | PostgreSQL transcript with authenticated ownership; no stale-stream recovery, provider quotas, moderation, or attachment reuse | Not safe for public production exposure; a process crash can leave a pending row and uploaded bytes are not reusable |
 | Upload limits | Some routes validate 50 MB after Axum's 2 MB default | Effective contract differs by route |
 | Error schema | App errors normalized; extractor/Tauri errors differ | Clients cannot rely on one envelope |

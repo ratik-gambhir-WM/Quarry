@@ -151,6 +151,31 @@ pub async fn subscribe_document_job(
 }
 
 #[tauri::command]
+pub async fn quarry_api_upload_document(
+    subscriptions: State<'_, Arc<QuerySubscriptions>>,
+    window: WebviewWindow,
+    service: State<'_, QuarryApiService>,
+    auth: Option<super::models::AuthCredentials>,
+    request: MultipartRequest,
+    subscription_id: String,
+) -> AppResult<Value> {
+    verify_main_window_origin(&window)?;
+    let service = service.for_request(auth).map_err(api_error)?;
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    subscriptions
+        .register(subscription_id.clone(), cancel_tx)
+        .map_err(api_error)?;
+    let result = tokio::select! {
+        _ = cancel_rx => Err(api_error("document upload stopped; retry the same file".into())),
+        result = service.upload_document(request, &subscription_id, |payload| {
+            window.emit("quarry-upload-progress", payload).map_err(|error| error.to_string())
+        }) => result.map_err(|error| service.api_error(error)),
+    };
+    subscriptions.remove(&subscription_id);
+    result
+}
+
+#[tauri::command]
 pub async fn send_query_stream(
     window: WebviewWindow,
     service: State<'_, QuarryApiService>,

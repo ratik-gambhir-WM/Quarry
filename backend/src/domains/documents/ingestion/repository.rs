@@ -37,15 +37,46 @@ pub(crate) struct Claimed {
     pub attempt: Attempt,
     pub file: UploadedDocument,
     pub image: Option<crate::domains::documents::formats::image::ImageAssembly>,
+    pub prepared: Option<String>,
 }
 pub(crate) struct Job {
     pub deal: String,
     pub filename: String,
     pub status: String,
     pub sequence: i64,
+    pub stage: String,
+    pub prepared: bool,
     pub result: Option<ProcessedDocument>,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClaimPhase {
+    Admission,
+    Embedding,
+    Any,
+}
 impl DocumentJobRepository {
+    pub async fn schedule_prepared(
+        &self,
+        id: &str,
+        background: bool,
+    ) -> Result<(), RepositoryError> {
+        if !background {
+            return Ok(());
+        }
+        self.db
+            .write_async(
+                Q::update("document_jobs")
+                    .set("background", background)
+                    .set("stage", "prepared")
+                    .and_where(C::equal("job_id", id))
+                    .and_where(C::equal("status", "queued"))
+                    .and_where(C::is_not_null("prepared_json"))
+                    .build(),
+            )
+            .await?;
+        Ok(())
+    }
     pub async fn prune(&self, seconds: u32) -> Result<(), RepositoryError> {
         self.db
             .transaction_result_async(|tx| async move {
@@ -224,10 +255,23 @@ impl DocumentJobRepository {
             .await
     }
     pub async fn claim(&self, id: Option<&str>) -> Result<Option<Claimed>, RepositoryError> {
+        self.claim_inner(id, ClaimPhase::Any).await
+    }
+    pub async fn claim_admission(&self, id: &str) -> Result<Option<Claimed>, RepositoryError> {
+        self.claim_inner(Some(id), ClaimPhase::Admission).await
+    }
+    pub async fn claim_ready(&self) -> Result<Option<Claimed>, RepositoryError> {
+        self.claim_inner(None, ClaimPhase::Embedding).await
+    }
+    async fn claim_inner(
+        &self,
+        id: Option<&str>,
+        phase: ClaimPhase,
+    ) -> Result<Option<Claimed>, RepositoryError> {
         self.db
             .transaction_result_async(|tx| async move {
                 let mut jobs = tx
-                    .lock_with(due_job(id), |r| {
+                    .lock_with(due_job_for(id, phase), |r| {
                         Ok((
                             r.get::<_, String>("job_id")?,
                             r.get::<_, String>("deal_id")?,
@@ -238,11 +282,22 @@ impl DocumentJobRepository {
                             r.get::<_, String>("profile_id")?,
                             r.get::<_, Vec<u8>>("input_bytes")?,
                             r.get::<_, Option<String>>("image_assembly_json")?,
+                            r.get::<_, Option<String>>("prepared_json")?,
                         ))
                     })
                     .await?;
-                let Some((id, deal, actor, filename, file_id, hash, profile_id, bytes, image)) =
-                    jobs.pop()
+                let Some((
+                    id,
+                    deal,
+                    actor,
+                    filename,
+                    file_id,
+                    hash,
+                    profile_id,
+                    bytes,
+                    image,
+                    prepared,
+                )) = jobs.pop()
                 else {
                     return Ok(None);
                 };
@@ -250,7 +305,14 @@ impl DocumentJobRepository {
                 tx.write(
                     Q::update("document_jobs")
                         .set("status", "processing")
-                        .set("stage", "preparing")
+                        .set(
+                            "stage",
+                            if phase == ClaimPhase::Embedding {
+                                "embedding"
+                            } else {
+                                "parsing"
+                            },
+                        )
                         .set("attempt_token", &token)
                         .set_epoch_seconds_after("lease_until", 600)
                         .set_epoch_seconds_after("updated_at", 0)
@@ -271,6 +333,7 @@ impl DocumentJobRepository {
                         profile_id,
                     },
                     file: UploadedDocument { filename, bytes },
+                    prepared,
                     image: image
                         .map(|s| {
                             serde_json::from_str(&s)
@@ -285,7 +348,15 @@ impl DocumentJobRepository {
         self.db
             .read_one_with_async(
                 Q::select("document_jobs")
-                    .columns(["deal_id", "filename", "status", "sequence", "result_json"])
+                    .columns([
+                        "deal_id",
+                        "filename",
+                        "status",
+                        "sequence",
+                        "result_json",
+                        "stage",
+                        "admission_complete",
+                    ])
                     .and_where(C::equal("job_id", id))
                     .build(),
                 |r| {
@@ -295,26 +366,100 @@ impl DocumentJobRepository {
                         r.get::<_, String>("status")?,
                         r.get::<_, i64>("sequence")?,
                         r.get::<_, Option<String>>("result_json")?,
+                        r.get::<_, String>("stage")?,
+                        r.get::<_, bool>("admission_complete")?,
                     ))
                 },
             )
             .await?
             .ok_or_else(|| RepositoryError::NotFound("document job not found".into()))
-            .and_then(|(deal, filename, status, sequence, result)| {
-                Ok(Job {
-                    deal,
-                    filename,
-                    status,
-                    sequence,
-                    result: result
-                        .map(|s| {
-                            serde_json::from_str(&s).map_err(|_| {
-                                RepositoryError::invalid("invalid document job result")
+            .and_then(
+                |(deal, filename, status, sequence, result, stage, prepared)| {
+                    Ok(Job {
+                        deal,
+                        filename,
+                        status,
+                        sequence,
+                        prepared,
+                        stage,
+                        result: result
+                            .map(|s| {
+                                serde_json::from_str(&s).map_err(|_| {
+                                    RepositoryError::invalid("invalid document job result")
+                                })
                             })
-                        })
-                        .transpose()?,
-                })
+                            .transpose()?,
+                    })
+                },
+            )
+    }
+    pub async fn classifying(&self, attempt: &Attempt) -> Result<(), RepositoryError> {
+        self.db
+            .transaction_result_async(|tx| async move {
+                attempt.lock_and_check(&tx).await?;
+                attempt
+                    .update("stage", "classifying".into())
+                    .apply(&tx)
+                    .await
             })
+            .await
+    }
+
+    /// Persist immutable admission output and release the lease for the background pool.
+    pub async fn save_prepared(
+        &self,
+        attempt: &Attempt,
+        json: String,
+        background: bool,
+    ) -> Result<(), RepositoryError> {
+        self.db
+            .transaction_result_async(|tx| async move {
+                crate::domains::deals::coordination::lock_authority(
+                    &tx,
+                    &attempt.deal,
+                    RowLock::Share,
+                )
+                .await?;
+                crate::domains::memberships::require_deal(
+                    &tx,
+                    &attempt.deal,
+                    attempt.actor,
+                    Capability::Upload,
+                )
+                .await?;
+                attempt.lock_and_check(&tx).await?;
+                let existing = tx
+                    .read_one_with(
+                        Q::select("document_jobs")
+                            .columns(["prepared_json"])
+                            .and_where(C::equal("job_id", &attempt.id))
+                            .build(),
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .await?
+                    .flatten();
+                if existing.as_ref().is_some_and(|saved| saved != &json) {
+                    return Err(RepositoryError::Conflict(
+                        "prepared document checkpoint is immutable".into(),
+                    ));
+                }
+                tx.write(
+                    Q::update("document_jobs")
+                        .set("prepared_json", json)
+                        .set("stage", "prepared")
+                        .set("status", "queued")
+                        .set("background", background)
+                        .set("attempt_token", Option::<String>::None)
+                        .set("lease_until", Option::<i64>::None)
+                        .increment("sequence")
+                        .set_epoch_seconds_after("updated_at", 0)
+                        .and_where(C::equal("job_id", &attempt.id))
+                        .build(),
+                )
+                .await?;
+                Ok(())
+            })
+            .await
     }
     pub async fn checkpoint_image(
         &self,
@@ -379,7 +524,7 @@ fn failed_result(filename: String) -> ProcessedDocument {
 }
 fn abandoned_sync() -> C {
     C::all([
-        C::equal("background", 0),
+        C::any([C::equal("background", 0), C::is_null("prepared_json")]),
         C::any([
             C::all([C::equal("status", "processing"), C::expired("lease_until")]),
             C::all([
@@ -502,13 +647,18 @@ fn terminal(
         .build()
 }
 
-pub(crate) fn due_job(id: Option<&str>) -> Result<SqlQuery, PostgresError> {
+fn due_job_for(id: Option<&str>, phase: ClaimPhase) -> Result<SqlQuery, PostgresError> {
     let scope = match id {
         Some(id) => C::equal("job_id", id),
         None => C::equal("background", 1),
     };
-    Q::select("document_jobs")
-        .and_where(scope)
+    let mut query = Q::select("document_jobs").and_where(scope);
+    query = match phase {
+        ClaimPhase::Admission => query.and_where(C::is_null("prepared_json")),
+        ClaimPhase::Embedding => query.and_where(C::is_not_null("prepared_json")),
+        ClaimPhase::Any => query,
+    };
+    query
         .and_where(C::any([
             C::equal("status", "queued"),
             C::all([C::equal("status", "processing"), C::expired("lease_until")]),

@@ -12,7 +12,7 @@ import type {
   ProcessDocumentsResponse,
   ProcessFileJobEvent,
   ProcessFileJobEventHandlers,
-  ProcessFileJobResponse,
+  UploadProgressEvent,
   QuarryApi,
   VectorFileChunkHit,
 } from "../../contracts/quarryApi";
@@ -132,21 +132,12 @@ function processDocuments(dealId: string, files: File[]) {
   );
 }
 
-async function startProcessFile(dealId: string, file: File) {
+async function startProcessFile(dealId: string, file: File, onProgress?: (event: UploadProgressEvent) => void) {
   const generation = sessionStore.getSnapshot().generation;
-  const bytes = await file.arrayBuffer();
+  const { uploadDocument } = await import("./upload");
   if (generation !== sessionStore.getSnapshot().generation)
     throw new DOMException("Session changed", "AbortError");
-  const byteFile = new File([bytes], file.name, {
-    lastModified: file.lastModified,
-    type: file.type,
-  });
-  const form = new FormData();
-  form.append("files", byteFile, file.name);
-  return postForm<ProcessFileJobResponse>(
-    `/api/v1/deals/${encodeURIComponent(dealId)}/documents/process_file`,
-    form,
-  );
+  return uploadDocument(dealId, file, onProgress);
 }
 
 function subscribeToProcessFileJob(
